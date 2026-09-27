@@ -5,7 +5,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from .state import (
-    Action, ActionKind, Direction, EMPTY, GameState, MoveMode, MoveResult,
+    Action, ActionKind, Direction, GameState, MoveMode, MoveResult,
     Structure, Terrain, TickResult, _as_int, compute_stats,
 )
 
@@ -107,11 +107,9 @@ class CoreEngine:
         if owner[source] != player_id:
             return invalid("NOT_OWNER")
         count = int(army[source])
-        if count < 2:
-            return invalid("INSUFFICIENT_ARMY")
         if state.layout.terrain.ravel()[target] == Terrain.MOUNTAIN:
             return invalid("MOUNTAIN")
-        moved = count - 1 if action.mode == MoveMode.ALL_BUT_ONE else count // 2
+        moved = max(0, count - 1) if action.mode == MoveMode.ALL_BUT_ONE else count // 2
         defender = int(owner[target])
         defense = int(army[target])
         if defender == player_id and defense + moved > _MAX_ARMY:
@@ -121,7 +119,7 @@ class CoreEngine:
         eliminated = None
         if defender == player_id:
             army[target] += moved
-        elif defender == EMPTY or moved > defense:
+        elif moved > defense:
             owner[target] = player_id
             army[target] = moved - defense
             captured = True

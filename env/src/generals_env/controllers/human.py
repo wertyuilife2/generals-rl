@@ -156,9 +156,6 @@ class HumanController:
             self.clear_queue()
             self.message = "Path blocked; queued path cleared."
             return Action.wait()
-        if obs.army.ravel()[source] < 2:
-            self.message = "Waiting for reinforcements."
-            return Action.wait()
         self._pending = action
         return action
 
@@ -166,9 +163,6 @@ class HumanController:
         if result.player_id != self.player_id or self._pending is None or result.action != self._pending:
             return
         self._pending = None
-        if not result.valid and str(result.reason).upper().endswith("INSUFFICIENT_ARMY"):
-            self.message = "Waiting for reinforcements."
-            return
         if self.queue and self.queue[0] == result.action:
             self.queue.popleft()
         if result.valid and result.target_owned:

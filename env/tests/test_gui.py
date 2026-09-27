@@ -93,6 +93,40 @@ class DesktopTests(unittest.TestCase):
         self.app.human_buttons[0].invoke()  # general
         self.assertEqual(self.app.human.selected, source)
 
+    def test_zero_army_mouse_and_keyboard_orders_finish_and_advance_selection(self):
+        for control in ("mouse", "keyboard"):
+            for half in (False, True):
+                with self.subTest(control=control, half=half):
+                    self.app.restart()
+                    source, target = self.path()
+                    state = self.app.runner.engine.state
+                    state.owner.flat[target], state.army.flat[target] = 0, 7
+                    self.app._refresh()
+                    before = state.army.copy()
+                    self.click(source)
+                    if half:
+                        self.app.half_button.invoke()
+                    if control == "mouse":
+                        self.click(target)
+                    else:
+                        self.app.board.focus_force()
+                        self.root.update()
+                        self.app.board.event_generate("<KeyPress>", keysym="d" if target > source else "a")
+                        self.root.update_idletasks()
+                    self.assertEqual(len(self.app.human.queue), 1)
+                    self.assertEqual(self.app.human.cursor, target)
+                    self.assertEqual(self.app.human.anchor, source)
+                    self.assertEqual(self.app.board.itemcget(self.app.board._arrows[0], "state"), "normal")
+                    self.app.single_step()
+                    move = self.app.runner.last_result.moves[0]
+                    self.assertTrue(move.valid)
+                    self.assertEqual(move.moved, 0)
+                    np.testing.assert_array_equal(state.army, before)
+                    self.assertFalse(self.app.human.queue)
+                    self.assertEqual((self.app.human.selected, self.app.human.anchor,
+                                      self.app.human.cursor), (target, target, target))
+                    self.assertEqual(self.app.board.itemcget(self.app.board._arrows[0], "state"), "hidden")
+
     def test_hit_testing_and_stable_items_survive_pan_zoom(self):
         board = self.app.board
         ids = board.find_all()

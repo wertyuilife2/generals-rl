@@ -89,15 +89,15 @@ def snapshot(state: GameState, player_id: int | None = None, mode: str = "local"
 
 
 def legal_action_mask(obs: Observation):
-    """Return [N, direction, mode] and WAIT; losing attacks remain legal."""
+    """Return [N, direction, mode] and WAIT; zero-army and losing moves are legal."""
     mask = np.zeros((obs.size, 4, 2), dtype=bool)
     pid = obs.player_id
     if pid < 0 or not obs.alive[pid] or obs.terminated:
         return mask, False
-    movable = np.flatnonzero((obs.owner == pid) & (obs.army >= 2))
+    sources = np.flatnonzero(obs.owner == pid)
     terrain = obs.terrain.ravel()
     h, w = obs.height, obs.width
-    for source in movable:
+    for source in sources:
         y, x = divmod(int(source), w)
         for direction, (dy, dx) in enumerate(((-1, 0), (0, 1), (1, 0), (0, -1))):
             ny, nx = y + dy, x + dx

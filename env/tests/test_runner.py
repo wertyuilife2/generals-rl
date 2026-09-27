@@ -126,6 +126,23 @@ class RecordingTests(unittest.TestCase):
                 runner.run()
             self.assertEqual(state_digest(replay(path)), state_digest(state))
 
+    def test_zero_army_action_is_recorded_and_replayed(self):
+        state = duel()
+        state.army[0, 0] = 1
+        state.owner[0, 1], state.army[0, 1] = 0, 7
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'zero.jsonl'
+            with TraceWriter(path, state) as writer:
+                runner = Runner(state, [Scripted(Action.move(0, Direction.RIGHT)), Scripted()],
+                                max_ticks=1, recorder=writer)
+                runner.run()
+            move = runner.last_result.moves[0]
+            self.assertTrue(move.valid)
+            self.assertEqual(move.moved, 0)
+            row = json.loads(path.read_text().splitlines()[1])
+            self.assertEqual(row['actions'][0], [1, 0, 1, 0])
+            self.assertEqual(state_digest(replay(path)), state_digest(state))
+
     def test_existing_recording_not_overwritten(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'match.jsonl'

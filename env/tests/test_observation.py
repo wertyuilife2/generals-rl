@@ -146,7 +146,10 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(mask.shape, (25, 4, 2))
         self.assertFalse(mask[12, Direction.UP].any())
         self.assertTrue(mask[12, Direction.RIGHT].all())  # Cannot win, but legal.
-        self.assertFalse(mask[0].any())  # One soldier cannot move.
+        self.assertTrue(mask[0, Direction.RIGHT].all())  # Zero-army transfer is legal.
+        self.assertTrue(mask[0, Direction.DOWN].all())
+        self.assertFalse(mask[0, Direction.UP].any())
+        self.assertFalse(mask[0, Direction.LEFT].any())
         for source in range(state.layout.size):
             for direction in Direction:
                 for mode in MoveMode:

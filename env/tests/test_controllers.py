@@ -161,13 +161,67 @@ class HumanControllerTests(unittest.TestCase):
         self.assertEqual(self.human.queue[1].mode, MoveMode.ALL_BUT_ONE)
         self.assertFalse(self.human.half)
 
-    def test_waits_for_reinforcements_without_discarding_intent(self):
-        self.state.army[0, 0] = 1
-        self.human.enqueue(Direction.RIGHT, self.obs)
-        self.assertEqual(self.human.act(observe(self.state, 0)), Action.wait())
-        self.assertEqual(len(self.human.queue), 1)
-        self.state.army[0, 0] = 2
-        self.assertEqual(self.human.act(observe(self.state, 0)), self.human.queue[0])
+    def test_zero_army_order_executes_and_next_order_runs_on_next_tick(self):
+        for count in (0, 1):
+            for mode in MoveMode:
+                with self.subTest(count=count, mode=mode):
+                    state = board(army=count)
+                    state.owner[0, 1], state.army[0, 1] = 0, 7
+                    human = HumanController()
+                    obs = observe(state, 0)
+                    human.select(0, obs)
+                    if mode == MoveMode.HALF:
+                        human.toggle_half()
+                    human.enqueue(Direction.RIGHT, obs)
+                    human.enqueue(Direction.RIGHT, obs)
+                    engine = CoreEngine(state, debug=True)
+                    engine.begin_tick()
+                    action = human.act(observe(state, 0))
+                    self.assertEqual(action, Action.move(0, Direction.RIGHT, mode))
+                    move = engine.apply_action(0, action)
+                    human.on_result(move)
+                    engine.apply_action(1, Action.wait())
+                    engine.finish_tick()
+                    self.assertTrue(move.valid)
+                    self.assertEqual(move.moved, 0)
+                    self.assertEqual((state.army[0, 0], state.army[0, 1]), (count, 7))
+                    self.assertEqual((human.selected, human.anchor, human.cursor), (1, 1, 2))
+                    self.assertEqual(list(human.queue), [Action.move(1, Direction.RIGHT)])
+                    engine.begin_tick()
+                    move = engine.apply_action(0, human.act(observe(state, 0)))
+                    human.on_result(move)
+                    engine.apply_action(1, Action.wait())
+                    engine.finish_tick()
+                    self.assertEqual(move.moved, 6)
+                    self.assertEqual(state.owner[0, 2], 0)
+                    self.assertEqual(state.army[0, 2], 6)
+                    self.assertFalse(human.queue)
+
+    def test_zero_army_attack_is_consumed_instead_of_waiting(self):
+        state = board(army=1)
+        obs = observe(state, 0)
+        human = HumanController()
+        human.select(0, obs)
+        human.enqueue(Direction.RIGHT, obs)
+        human.enqueue(Direction.RIGHT, obs)
+        engine = CoreEngine(state, debug=True)
+        engine.begin_tick()
+        move = engine.apply_action(0, human.act(observe(state, 0)))
+        human.on_result(move)
+        engine.apply_action(1, Action.wait())
+        engine.finish_tick()
+        self.assertTrue(move.valid)
+        self.assertEqual(move.moved, 0)
+        self.assertFalse(move.target_owned)
+        self.assertEqual(state.owner[0, 1], EMPTY)
+        self.assertFalse(human.queue)
+        self.assertEqual((human.selected, human.anchor, human.cursor), (0, 0, 0))
+        engine.begin_tick()  # Growth must not revive a consumed order.
+        self.assertEqual(human.act(observe(state, 0)), Action.wait())
+        engine.apply_action(0, Action.wait())
+        engine.apply_action(1, Action.wait())
+        engine.finish_tick()
+        self.assertEqual(state.owner[0, 1], EMPTY)
 
     def test_failed_attack_consumes_action_and_clears_downstream(self):
         self.human.enqueue(Direction.RIGHT, self.obs)
@@ -239,7 +293,7 @@ class HumanControllerTests(unittest.TestCase):
                 human = HumanController()
                 human.select(1, observe(state, 0))
                 human.enqueue(Direction.RIGHT, observe(state, 0))
-                self.assertEqual(human.act(observe(state, 0)), Action.wait())
+                self.assertEqual(human.act(observe(state, 0)), Action.move(1, Direction.RIGHT))
                 # A later player captures the selected outpost in this tick.
                 state.owner[0, 1], state.army[0, 1] = 1, 2
                 getattr(human, command)(observe(state, 0))

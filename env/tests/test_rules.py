@@ -87,6 +87,41 @@ class MovementTests(unittest.TestCase):
         self.assertFalse(result.moves[0].captured)
         self.assertTrue(result.moves[0].target_owned)
 
+    def test_zero_army_moves_are_valid_and_preserve_the_board(self):
+        targets = ((EMPTY, 0), (0, 0), (0, 7), (1, 0), (1, 7), (NEUTRAL, 0), (NEUTRAL, 40))
+        for count in (0, 1):
+            for mode in MoveMode:
+                for owner, defense in targets:
+                    with self.subTest(count=count, mode=mode, owner=owner, defense=defense):
+                        state = make_state()
+                        state.army.flat[0] = count
+                        state.owner.flat[1], state.army.flat[1] = owner, defense
+                        if owner == NEUTRAL:
+                            state.structure.flat[1] = Structure.CITY
+                        before = state.copy()
+                        result = CoreEngine(state, debug=True).step([
+                            Action.move(0, Direction.RIGHT, mode), Action.wait()])
+                        move = result.moves[0]
+                        self.assertTrue(move.valid)
+                        self.assertEqual((move.source, move.target, move.moved), (0, 1, 0))
+                        self.assertFalse(move.captured)
+                        self.assertIsNone(move.eliminated)
+                        self.assertEqual(move.target_owned, owner == 0)
+                        self.assertEqual(len(result.moves), 2)
+                        for name in ("owner", "army", "structure", "alive", "general_pos"):
+                            np.testing.assert_array_equal(getattr(state, name), getattr(before, name))
+
+    def test_zero_army_move_cannot_capture_an_undefended_general(self):
+        state = make_state(1, 2, generals=[0, 1])
+        state.army.flat[1] = 0
+        result = CoreEngine(state, debug=True).step([Action.move(0, Direction.RIGHT), Action.wait()])
+        self.assertTrue(result.moves[0].valid)
+        self.assertEqual(result.moves[0].moved, 0)
+        self.assertFalse(result.terminated)
+        np.testing.assert_array_equal(state.alive, [True, True])
+        self.assertEqual(state.owner.flat[1], 1)
+        self.assertEqual(state.structure.flat[1], Structure.GENERAL)
+
     def test_stronger_equal_and_weaker_attacks(self):
         for attackers, defense, remaining, captured in ((9, 5, 4, True), (5, 5, 0, False), (3, 5, 2, False)):
             with self.subTest(attackers=attackers):
@@ -122,7 +157,6 @@ class MovementTests(unittest.TestCase):
             (Action.move(0, Direction.UP), "OUT_OF_BOUNDS"),
             (Action.move(3, Direction.RIGHT), "OUT_OF_BOUNDS"),
             (Action.move(11, Direction.LEFT), "NOT_OWNER"),
-            (Action.move(0, Direction.RIGHT), "INSUFFICIENT_ARMY"),
         )
         for action, reason in cases:
             with self.subTest(reason=reason, action=action):
