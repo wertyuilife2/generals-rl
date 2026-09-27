@@ -13,32 +13,67 @@ def adjacent(cell: int, width: int, height: int):
     if x: yield cell - 1
 
 
-def _connect(terrain, source, target):
-    """0–1 BFS: carve the fewest mountains along a connecting route."""
+def _ensure_connected(terrain: np.ndarray, source: int) -> None:
+    """Connect all passable cells in-place with O(H*W) time and scratch space.
+
+    A single multi-source 0–1 BFS minimizes mountain cost from the original
+    source component. Shared parent chains are carved at most once; this does
+    not promise the globally minimum number of removed mountains.
+    """
     h, w = terrain.shape
-    flat = terrain.ravel()
-    dist = [flat.size + 1] * flat.size
-    parent = [-1] * flat.size
-    dist[source] = 0
-    q = deque([source])
-    while q:
-        cell = q.popleft()
+    # Binary PLAIN=0 / MOUNTAIN=1 costs; Python scalars keep BFS loops cheap.
+    cells = terrain.ravel().tolist()
+    size = len(cells)
+    connected = [False] * size
+    connected[source] = True
+    component = [source]
+    queue = deque([source])
+    while queue:
+        cell = queue.popleft()
         for nxt in adjacent(cell, w, h):
-            cost = int(flat[nxt] == Terrain.MOUNTAIN)
-            if dist[cell] + cost < dist[nxt]:
-                dist[nxt] = dist[cell] + cost
+            if not cells[nxt] and not connected[nxt]:
+                connected[nxt] = True
+                component.append(nxt)
+                queue.append(nxt)
+    if len(component) == cells.count(0):
+        return
+
+    distance = [size + 1] * size
+    parent = [-1] * size
+    settled = [False] * size
+    for cell in component:
+        distance[cell] = 0
+    queue = deque(component)
+    while queue:
+        cell = queue.popleft()
+        if settled[cell]:
+            continue
+        settled[cell] = True
+        for nxt in adjacent(cell, w, h):
+            cost = cells[nxt]
+            candidate = distance[cell] + cost
+            if candidate < distance[nxt]:
+                distance[nxt] = candidate
                 parent[nxt] = cell
-                (q.append if cost else q.appendleft)(nxt)
-    cell = target
-    while cell != source:
-        flat[cell] = Terrain.PLAIN
-        cell = parent[cell]
-        if cell < 0:
-            raise RuntimeError("cannot connect map")
+                (queue.append if cost else queue.appendleft)(nxt)
+
+    carved = []
+    for target, cost in enumerate(cells):
+        if cost:
+            continue  # Only original passable cells need to be connected.
+        cell = target
+        while not connected[cell]:
+            connected[cell] = True
+            if cells[cell]:
+                carved.append(cell)
+            cell = parent[cell]
+            if cell < 0:
+                raise RuntimeError("cannot connect map")
+    terrain.ravel()[carved] = Terrain.PLAIN
 
 
 def generate_map(config: MapConfig, seed: int = 42) -> GameState:
-    """Create tick-zero state. Map RNG is independent of all player RNGs."""
+    """Create a fully connected tick-zero map with an independent seeded RNG."""
     rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(1)[0])
     h, w, p = config.height, config.width, config.players
     n = h * w
@@ -73,8 +108,7 @@ def generate_map(config: MapConfig, seed: int = 42) -> GameState:
             break
     if len(positions) != p:
         raise ValueError("cannot place all generals")
-    for target in positions[1:]:
-        _connect(terrain, positions[0], target)
+    _ensure_connected(terrain, positions[0])
     for pid, cell in enumerate(positions):
         structure.ravel()[cell] = Structure.GENERAL
         owner.ravel()[cell] = pid

@@ -1,0 +1,140 @@
+{
+  "python": "3.12.14",
+  "numpy": "2.5.2",
+  "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.39",
+  "processor": "x86_64",
+  "baseline_ref": "b3823a3307990c05adfc505893019133e5d82707",
+  "samples_per_config": 64,
+  "first_seed": 0,
+  "warmup_maps_per_method": 3,
+  "timing_scope": "complete generation, including state validation; no GUI or AI",
+  "results": [
+    {
+      "config": {
+        "width": 15,
+        "height": 15,
+        "players": 2,
+        "mountain_density": 0.2,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.17384858801960945,
+        "p95_ms": 0.1816722098737955,
+        "min_ms": 0.12156693264842033,
+        "max_ms": 0.18898071721196175
+      },
+      "baseline": {
+        "median_ms": 0.8119700942188501,
+        "p95_ms": 0.8282980648800731,
+        "min_ms": 0.8020210079848766,
+        "max_ms": 0.845280010253191
+      }
+    },
+    {
+      "config": {
+        "width": 15,
+        "height": 15,
+        "players": 2,
+        "mountain_density": 0.4,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.16449298709630966,
+        "p95_ms": 0.17306969966739416,
+        "min_ms": 0.15405798330903053,
+        "max_ms": 0.1749470829963684
+      },
+      "baseline": {
+        "median_ms": 0.8121361024677753,
+        "p95_ms": 0.8207652484998107,
+        "min_ms": 0.8029649034142494,
+        "max_ms": 0.8346512913703918
+      }
+    },
+    {
+      "config": {
+        "width": 25,
+        "height": 25,
+        "players": 4,
+        "mountain_density": 0.2,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.36806962452828884,
+        "p95_ms": 0.3782195504754782,
+        "min_ms": 0.2113431692123413,
+        "max_ms": 0.38774870336055756
+      },
+      "baseline": {
+        "median_ms": 6.298979511484504,
+        "p95_ms": 6.327820918522775,
+        "min_ms": 6.267469841986895,
+        "max_ms": 6.343746092170477
+      }
+    },
+    {
+      "config": {
+        "width": 25,
+        "height": 25,
+        "players": 4,
+        "mountain_density": 0.4,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.33720163628458977,
+        "p95_ms": 0.3627610160037875,
+        "min_ms": 0.30316784977912903,
+        "max_ms": 0.37316884845495224
+      },
+      "baseline": {
+        "median_ms": 6.320267450064421,
+        "p95_ms": 6.355293397791684,
+        "min_ms": 6.286703050136566,
+        "max_ms": 6.4278519712388515
+      }
+    },
+    {
+      "config": {
+        "width": 35,
+        "height": 35,
+        "players": 8,
+        "mountain_density": 0.2,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.6797024980187416,
+        "p95_ms": 0.7444594055414199,
+        "min_ms": 0.3569209948182106,
+        "max_ms": 0.7963967509567738
+      },
+      "baseline": {
+        "median_ms": 28.875882737338543,
+        "p95_ms": 29.003817168995738,
+        "min_ms": 28.658869210630655,
+        "max_ms": 29.14927201345563
+      }
+    },
+    {
+      "config": {
+        "width": 35,
+        "height": 35,
+        "players": 8,
+        "mountain_density": 0.4,
+        "city_density": 0.1
+      },
+      "current": {
+        "median_ms": 0.6032499950379133,
+        "p95_ms": 0.7367356680333611,
+        "min_ms": 0.5244729109108448,
+        "max_ms": 0.8843890391290188
+      },
+      "baseline": {
+        "median_ms": 28.788954950869083,
+        "p95_ms": 28.939553210511804,
+        "min_ms": 28.575926087796688,
+        "max_ms": 29.191551730036736
+      }
+    }
+  ],
+  "cpu_model": "Intel(R) Core(TM) i7-14700KF"
+}

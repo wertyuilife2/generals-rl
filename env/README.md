@@ -48,6 +48,8 @@ python -m generals_env watch --players 8 --size 35 --seed 7 --speed 10
 
 Windows 和 Linux 使用同一份源码。鼠标滚轮事件按 Tk 窗口系统适配。Linux 必须有可用的图形显示会话；纯 SSH／无显示环境使用 `simulate`。本次 Linux/X11 已验证，Windows 和跨系统 DPI 仍需实机验收。
 
+生成地图保证所有非山脉格（含空地、城市和主城）四邻接连通。修复只移除山脉，实际山脉密度可能略低于设置值；城市数量和出生点位置保留。修复使用一次连通检查、必要时一次多源 0–1 BFS 和共享路径回溯，时间与辅助空间均为地图格数的线性量级。同一版本的种子可复现，但升级生成器后同种子的地形可能变化。
+
 ## 无界面模拟
 
 ```console
@@ -135,6 +137,10 @@ LOCAL 策略只能把观测／已知地形交给路径工具，不能使用真�
 python -m unittest discover -s env/tests -v
 python env/benchmarks/benchmark_cpu.py --size 25 --players 4 --ticks 2000
 python env/benchmarks/benchmark_cpu.py --size 35 --players 8 --ticks 2000 --memory
+python env/benchmarks/benchmark_mapgen.py --samples 64
+python env/benchmarks/benchmark_mapgen.py --samples 64 --baseline-ref b3823a3
 ```
 
 以上从仓库根目录执行。GUI 测试在没有显示服务时跳过，并明确报告。`--memory` 使用标准库 tracemalloc 测量 Python 分配的峰值，会降低性能，不能与关闭追踪的吞吐直接比较。详见仓库 `doc/implementation_report.md`。
+
+地图专项基准使用连续种子，输出完整生成耗时的中位数和 P95；`--baseline-ref` 可选，用指定可信 Git 提交的 `mapgen.py` 与当前版本比较，其余环境代码保持一致，要求生成器 API 兼容。[全图连通修复和性能记录](../doc/map_connectivity_update.md)提供实测结果。
