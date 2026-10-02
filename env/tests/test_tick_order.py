@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from generals_env.engine import CoreEngine
-from generals_env.state import Action, Direction, EMPTY, GameState, MapLayout, Structure
+from generals.core.engine import CoreEngine
+from generals.core.state import Action, Direction, EMPTY, GameState, MapLayout, Structure
 
 
 def fixture():

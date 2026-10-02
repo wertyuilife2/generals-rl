@@ -5,11 +5,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-from generals_env.pathfinding import (
+from generals.core.pathfinding import (
     DistanceCache, all_pairs_distances, neighbors, prepare_map,
     shortest_path, single_source_distances,
 )
-from generals_env.state import MapLayout, Terrain, UNKNOWN
+from generals.core.state import MapLayout, Terrain, UNKNOWN
 
 
 class PathfindingTests(unittest.TestCase):
@@ -50,7 +50,7 @@ class PathfindingTests(unittest.TestCase):
     def test_cache_lru_capacity_clear_and_topology_changes(self):
         terrain = np.zeros((2, 3), dtype=np.uint8)
         cache = DistanceCache(capacity=2)
-        with patch("generals_env.pathfinding.single_source_distances", wraps=single_source_distances) as search:
+        with patch("generals.core.pathfinding.single_source_distances", wraps=single_source_distances) as search:
             original = cache.distances(terrain, 0)
             cache.distances(terrain, 1)
             self.assertIs(cache.distances(terrain.copy(), 0), original)

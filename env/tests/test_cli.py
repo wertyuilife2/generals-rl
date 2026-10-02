@@ -9,11 +9,11 @@ import unittest
 
 class CLITests(unittest.TestCase):
     def command(self, *args):
-        return subprocess.run([sys.executable, '-m', 'generals_env', *args],
+        return subprocess.run([sys.executable, '-m', 'generals', *args],
                               capture_output=True, text=True, timeout=30)
 
     def test_import_and_headless_without_tk_torch(self):
-        code = "import sys; import generals_env; import generals_env.cli; assert 'tkinter' not in sys.modules; assert 'torch' not in sys.modules; assert 'generals_rl' not in sys.modules"
+        code = "import sys; import generals; import generals.cli; assert 'tkinter' not in sys.modules; assert 'torch' not in sys.modules; assert 'generals_rl' not in sys.modules"
         result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         result = self.command('simulate', '--players', '2', '--max-ticks', '20', '--size', '15')

@@ -5,12 +5,22 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "generals-env"
 version = "0.1.0"
-description = "A minimal deterministic CPU Generals game with Tk GUI and headless simulation"
+description = "Generals environment with CPU/CUDA vector simulation and Tk desktop play"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.24"]
 
 [project.scripts]
-generals-env = "generals_env.cli:main"
+generals-env = "generals.cli:main"
+generals = "generals.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["generals", "generals.*"]
+
+[project.optional-dependencies]
+gpu = ["torch>=2.13"]
+
+[tool.setuptools.package-data]
+"generals.backends.cpu" = ["step.cpp"]
+"generals.benchmarks" = ["native.cpp"]
+"generals.backends.gpu" = ["kernel.cu", "host.cpp"]

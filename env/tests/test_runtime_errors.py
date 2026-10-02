@@ -9,11 +9,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-from generals_env.recording import (
+from generals.core.recording import (
     RULES_VERSION, TraceWriter, replay, state_digest, state_from_dict, state_to_dict,
 )
-from generals_env.runner import Runner
-from generals_env.state import Action, GameState, MapLayout, Structure
+from generals.runtime.runner import Runner
+from generals.core.state import Action, GameState, MapLayout, Structure
 
 
 def initial_state():
@@ -55,7 +55,7 @@ class RunnerErrorTests(unittest.TestCase):
                 controllers = [WaitController(), WaitController()]
                 recorder = FailingRecorder()
                 runner = Runner(state, controllers, max_ticks=limit, recorder=recorder)
-                with patch("generals_env.runner.perf_counter", side_effect=[10.0, 12.0]):
+                with patch("generals.runtime.runner.perf_counter", side_effect=[10.0, 12.0]):
                     with self.assertRaisesRegex(OSError, "simulated full disk"):
                         runner.tick()
                 self.assertTrue(runner.stopped)
@@ -77,7 +77,7 @@ class RunnerErrorTests(unittest.TestCase):
         state = initial_state()
         state.tick = 5
         runner = Runner(state, [WaitController(), WaitController()], max_ticks=7)
-        with patch("generals_env.runner.perf_counter", side_effect=[10.0, 10.5, 20.0, 20.5]):
+        with patch("generals.runtime.runner.perf_counter", side_effect=[10.0, 10.5, 20.0, 20.5]):
             summary = runner.run()
         self.assertEqual(summary["ticks"], 7)
         self.assertEqual(summary["advanced_ticks"], 2)

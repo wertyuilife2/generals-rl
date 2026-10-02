@@ -4,9 +4,9 @@ import unittest
 
 import numpy as np
 
-from generals_env.config import MapConfig, RunConfig
-from generals_env.engine import CoreEngine
-from generals_env.state import (
+from generals.core.config import MapConfig, RunConfig
+from generals.core.engine import CoreEngine
+from generals.core.state import (
     Action, ActionKind, Direction, EMPTY, GameState, MapLayout, MoveMode,
     NEUTRAL, Structure, Terrain, compute_stats,
 )

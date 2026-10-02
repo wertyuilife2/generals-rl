@@ -6,13 +6,13 @@ from unittest.mock import patch
 
 import numpy as np
 
-from generals_env.controllers import (
+from generals.controllers import (
     AggressiveAI, DefensiveAI, ExpansionAI, HumanController, RandomAI,
     make_controllers,
 )
-from generals_env.engine import CoreEngine
-from generals_env.observation import observe
-from generals_env.state import (
+from generals.core.engine import CoreEngine
+from generals.core.observation import observe
+from generals.core.state import (
     Action, ActionKind, Direction, EMPTY, GameState, MapLayout, MoveMode,
     MoveResult, Structure, Terrain, UNKNOWN, UNKNOWN_OWNER,
 )
@@ -49,7 +49,7 @@ class ControllerTests(unittest.TestCase):
         for ai_type in AI_TYPES[:3]:
             with self.subTest(ai=ai_type.__name__):
                 controller = ai_type(seed=7)
-                with patch("generals_env.controllers.base.shortest_path", return_value=None) as search:
+                with patch("generals.controllers.base.shortest_path", return_value=None) as search:
                     controller.act(observe(state, 0, "full"))
                     self.assertLessEqual(search.call_count, controller.max_path_attempts)
 

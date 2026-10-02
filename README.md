@@ -1,32 +1,29 @@
-# Generals CPU 原型
+# Generals 游戏环境
 
-可独立游玩的 Python/NumPy 游戏环境，包含 Tk 桌面 GUI、四种基础 AI、局部视野和无界面高速模拟。游戏环境在 `env/`，后续强化学习代码在 `rl/`；环境不依赖 RL、PyTorch 或 CUDA。
+2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，后续强化学习代码独立放在 `rl/`。
 
-## 安装与启动
+从仓库根目录，在已有 `generals-rl` conda 环境中安装和启动：
 
-在已有 `generals-rl` conda 环境中，从仓库根目录运行：
-
-```console
+```bash
 conda run -n generals-rl python -m pip install -e ./env --no-deps --no-build-isolation
-conda run -n generals-rl python -m generals_env play --players 4 --seed 42
+conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-需要安装 NumPy、Tk 和可用的桌面显示服务。Windows 和 Linux 使用同一个 Python 模块入口；本次已在 Linux/X11 上实际验证，Windows 尚未实机验证。没有图形显示的终端可直接运行：
+基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面。CPU 批量后端使用 Linux C++/OpenMP，GPU 使用可选的 PyTorch/CUDA。
 
-```console
-conda run -n generals-rl python -m generals_env simulate --players 4 --size 25 --games 10 --max-ticks 20000 --seed 42
+没有图形桌面时可运行 AI 模拟：
+
+```bash
+conda run -n generals-rl python -m generals simulate --players 4 --games 10 --max-ticks 20000 --seed 42
 ```
 
-- [环境使用说明与接口](env/README.md)
-- [完整设计方案](doc/cpu_prototype_design.md)
-- [实现和验证记录](doc/implementation_report.md)
-- [RL 目录边界](rl/README.md)
+统一文档：[环境开发与使用说明](doc/README.md)，包含：
 
-## 开发检查
+- [安装、不安装运行与 GUI 操作](doc/README.md#quickstart)
+- [游戏规则与地图生成](doc/README.md#rules)
+- [代码架构](doc/README.md#architecture)和 [CPU/GPU API](doc/README.md#api)
+- [逐 tick benchmark 与 profiling](doc/README.md#benchmark)
+- [当前实现的性能验证](doc/README.md#results)
+- [测试与历史存档](doc/README.md#verification)
 
-```console
-conda run -n generals-rl python -m unittest discover -s env/tests -v
-conda run -n generals-rl python env/benchmarks/benchmark_cpu.py --size 25 --players 4 --ticks 2000
-```
-
-GUI 测试需要可用桌面；没有显示服务时对应测试明确跳过。设置正确的显示环境后重新执行即可覆盖真实窗口交互。
+后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。

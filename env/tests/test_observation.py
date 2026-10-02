@@ -5,9 +5,9 @@ import unittest
 
 import numpy as np
 
-from generals_env.engine import CoreEngine
-from generals_env.observation import observe, snapshot, visibility_mask, legal_action_mask
-from generals_env.state import (
+from generals.core.engine import CoreEngine
+from generals.core.observation import observe, snapshot, visibility_mask, legal_action_mask
+from generals.core.state import (
     Action, Direction, EMPTY, GameState, MapLayout, MoveMode, Structure,
     Terrain, UNKNOWN, UNKNOWN_OWNER,
 )

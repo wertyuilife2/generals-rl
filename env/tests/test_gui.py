@@ -7,13 +7,13 @@ import numpy as np
 
 try:
     import tkinter as tk
-    from generals_env.gui import App
-    from generals_env.gui.app import RealtimeClock
-    from generals_env.gui.input import wheel_steps
+    from generals.gui import App
+    from generals.gui.app import RealtimeClock
+    from generals.gui.input import wheel_steps
 except ImportError as error:
     raise unittest.SkipTest(f"Tk unavailable: {error}")
 
-from generals_env.config import MapConfig
+from generals.core.config import MapConfig
 
 
 class GuiUtilityTests(unittest.TestCase):
@@ -193,7 +193,7 @@ class DesktopTests(unittest.TestCase):
                 pass
 
         self.app.runner.controllers[1] = BrokenController()
-        with patch("generals_env.gui.app.messagebox.showerror") as report:
+        with patch("generals.gui.app.messagebox.showerror") as report:
             self.app.single_step()
         report.assert_called_once()
         self.assertEqual(self.app.session, "FINISHED")
@@ -214,7 +214,7 @@ class DesktopTests(unittest.TestCase):
         attacker = source + (1 if x < state.layout.width - 1 else -1)
         state.owner.flat[attacker] = 1
         state.army.flat[attacker] = 20
-        from generals_env.state import Action, Direction
+        from generals.core.state import Action, Direction
         direction = Direction.LEFT if attacker > source else Direction.RIGHT
 
         class AttackController:

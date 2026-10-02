@@ -3,11 +3,15 @@ from pathlib import Path
 import tempfile
 import unittest
 import numpy as np
-from generals_env import (Action, CoreEngine, Direction, GameState, MapConfig,
-                          MapLayout, Structure, generate_map, observe)
-from generals_env.controllers import make_controllers
-from generals_env.recording import TraceWriter, replay, state_digest
-from generals_env.runner import Runner, ControllerError
+from generals import Action, Direction, MapConfig
+from generals.protocol import Structure
+from generals.core.engine import CoreEngine
+from generals.core.state import GameState, MapLayout
+from generals.core.mapgen import generate_map
+from generals.core.observation import observe
+from generals.controllers import make_controllers
+from generals.core.recording import TraceWriter, replay, state_digest
+from generals.runtime.runner import Runner, ControllerError
 
 
 class Scripted:

@@ -5,9 +5,9 @@ import unittest
 
 import numpy as np
 
-from generals_env.config import MapConfig
-from generals_env.mapgen import _ensure_connected, generate_map
-from generals_env.state import EMPTY, NEUTRAL, Structure, Terrain
+from generals.core.config import MapConfig
+from generals.core.mapgen import _ensure_connected, generate_map
+from generals.core.state import EMPTY, NEUTRAL, Structure, Terrain
 
 
 def reachable_cells(terrain, source):
