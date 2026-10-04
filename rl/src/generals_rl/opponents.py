@@ -106,17 +106,19 @@ class SelfPlayOpponent:
             mask = action_space.mask(batch, seats)
             for snapshot_id in self.assignment_ids[active, pid].unique().tolist():
                 lanes = active & (self.assignment_ids[:, pid] == snapshot_id)
+                rows = torch.where(lanes)[0]
                 snapshot = self._snapshots[snapshot_id]
-                values = {"policy": self.histories[pid].frames[lanes].flatten(1),
-                          "single_obs": current[lanes], "action_mask": mask[lanes]}
-                observations = TensorDict(values, batch_size=[int(lanes.sum())], device=batch.device)
+                values = {"policy": self.histories[pid].frames.index_select(0, rows).flatten(1),
+                          "single_obs": current.index_select(0, rows),
+                          "action_mask": mask.index_select(0, rows)}
+                observations = TensorDict(values, batch_size=[rows.numel()], device=batch.device)
                 if self.deterministic:
                     actions = snapshot.model.act_inference(observations).reshape(-1)
                 else:
                     probabilities = snapshot.model.action_probabilities(observations, is_teacher=False)
                     actions = torch.multinomial(probabilities, 1, generator=self.generator).squeeze(1)
                 actions = action_space.validate(actions, values["action_mask"])
-                joint[lanes, pid] = actions
+                joint[:, pid].index_copy_(0, rows, actions)
         return joint
 
     def snapshot_counts(self):
