@@ -155,7 +155,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                     writer.add_scalar("Resource/gpu_reserved_bytes", torch.cuda.memory_reserved(task.device), kwargs["it"])
                 if evaluator is not None:
                     writer.add_scalar("Eval/queued_jobs", len(evaluator.pending), kwargs["it"])
-            stop_reason = controller.stop_reason(elapsed, evaluation_healthy=(evaluator is not None and not evaluator.describe()["failed"]))
+            stop_reason = ("requested_stop" if (output / "STOP").is_file() else
+                           controller.stop_reason(elapsed, evaluation_healthy=(evaluator is not None and not evaluator.describe()["failed"])))
             if stop_reason is not None:
                 raise TrainingStopped(stop_reason)
             if steps_per_env is not None:

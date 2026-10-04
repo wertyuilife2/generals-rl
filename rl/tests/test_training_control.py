@@ -33,21 +33,28 @@ class TrainingControlTests(unittest.TestCase):
         self.assertIsNone(controller.stop_reason(20))
         self.assertEqual(controller.stop_reason(100, evaluation_healthy=False), "max_seconds")
 
-    def test_timed_stop_saves_a_complete_update_and_does_not_require_the_full_tick_budget(self):
-        config = small_training_config()
-        config["evaluation"] = {"enabled": False}
-        config["training_control"] = {"max_seconds": 1e-9, "keep_checkpoints": 2}
+    def test_time_or_file_stop_saves_a_complete_update_and_does_not_require_the_full_tick_budget(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "run"
-            summary = train(config, output, steps_per_env=40)
-            checkpoint = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
-            self.assertEqual(summary["stop_reason"], "max_seconds")
-            self.assertEqual(summary["steps_per_environment"], 4)
-            self.assertEqual(summary["iterations"], 1)
-            self.assertEqual(checkpoint["iter"], 0)
-            for key in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
-                self.assertEqual({int(state["step"]) for state in checkpoint[key]["state"].values()}, {4})
-            self.assertEqual(json.loads((output / "summary.json").read_text()), summary)
+            for reason in ("max_seconds", "requested_stop"):
+                with self.subTest(reason=reason):
+                    config = small_training_config()
+                    config["evaluation"] = {"enabled": False}
+                    config["training_control"] = {"keep_checkpoints": 2}
+                    output = Path(directory) / reason
+                    if reason == "max_seconds":
+                        config["training_control"]["max_seconds"] = 1e-9
+                    else:
+                        output.mkdir()
+                        (output / "STOP").touch()
+                    summary = train(config, output, steps_per_env=40)
+                    checkpoint = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
+                    self.assertEqual(summary["stop_reason"], reason)
+                    self.assertEqual(summary["steps_per_environment"], 4)
+                    self.assertEqual(summary["iterations"], 1)
+                    self.assertEqual(checkpoint["iter"], 0)
+                    for key in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+                        self.assertEqual({int(state["step"]) for state in checkpoint[key]["state"].values()}, {4})
+                    self.assertEqual(json.loads((output / "summary.json").read_text()), summary)
 
     def test_runner_checkpoints_have_a_fixed_total_count(self):
         config = small_training_config()
