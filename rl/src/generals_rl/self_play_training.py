@@ -89,6 +89,8 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     }
     if task.config.productive_actions:
         signature["mdp"]["productive_actions"] = True
+    if hasattr(task.observation_encoder, "semantics"):
+        signature["encoder_semantics"] = task.observation_encoder.semantics
     resume_pool = None
     provenance = dict(initial_source) if initial_source is not None else {"kind": "random_initial_policy"}
     if resume:

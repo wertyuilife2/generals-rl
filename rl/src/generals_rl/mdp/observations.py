@@ -51,6 +51,14 @@ class LocalObservationEncoder:
         return torch.cat((maps, public, clock, seat), -1)
 
 
+def make_observation_encoder(config):
+    """Use one configured feature layout for learner, opponents and evaluation."""
+    if config.combat_features:
+        from .combat import CombatObservationEncoder
+        return CombatObservationEncoder(config.max_episode_steps)
+    return LocalObservationEncoder(config.max_episode_steps)
+
+
 class ObservationHistory:
     def __init__(self, length: int):
         if length < 1:

@@ -28,8 +28,8 @@ from generals.core.state import Action, MoveResult
 from rsl_rl.modules import ActorCriticMoECTS
 from rsl_rl.utils import resolve_callable
 
-from .mdp import (ActionMetrics, GameBatch, LocalObservationEncoder,
-                  ObservationHistory, make_action_space)
+from .mdp import (ActionMetrics, GameBatch, ObservationHistory,
+                  make_action_space, make_observation_encoder)
 from .config import seed_everything, task_config
 
 
@@ -163,7 +163,7 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     action_metrics = ActionMetrics(count, device)
     action_totals = {name: torch.zeros(count, device=device) for name in ActionMetrics.names}
     # The rollout limit does not change the model's trained clock normalization.
-    encoder = LocalObservationEncoder(training_task.max_episode_steps)
+    encoder = make_observation_encoder(training_task)
     history = ObservationHistory(training_task.history_length)
     controllers = []
     for spec in specs:
@@ -297,7 +297,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
             with VecEnv.from_states(states, device="cpu", threads=cpu_threads) as example_env:
                 batch = GameBatch.from_backend(example_env, device)
                 pids = torch.tensor([spec.learner_seat for spec in specs], device=device)
-                encoder = LocalObservationEncoder(training_task.max_episode_steps)
+                encoder = make_observation_encoder(training_task)
                 history = ObservationHistory(training_task.history_length)
                 history.reset(encoder.encode(batch, pids))
                 obs = _local_inputs(batch, pids, encoder, history,
@@ -322,6 +322,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "decision_timing": "joint_pre_growth_then_absolute_seat_order",
         "training_opponent": training_task.opponent,
         "productive_actions": training_task.productive_actions,
+        "combat_features": training_task.combat_features,
         "seed": seed, "maps_per_ai": maps_per_ai, "scheduled_games": len(schedule),
         "completed_games": len(games), "batch_size": batch_size, "device": str(device),
         "cpu_threads": cpu_threads, "max_ticks": max_ticks,

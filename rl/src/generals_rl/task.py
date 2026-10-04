@@ -5,8 +5,8 @@ import torch
 
 from generals import MapConfig, make_env
 
-from .mdp import (ActionMetrics, GameBatch, LocalObservationEncoder,
-                  ObservationHistory, RewardConfig, ShapedReward, make_action_space)
+from .mdp import (ActionMetrics, GameBatch, ObservationHistory, RewardConfig,
+                  ShapedReward, make_action_space, make_observation_encoder)
 from .opponents import make_opponent
 
 
@@ -28,6 +28,7 @@ class TaskConfig:
     mountain_density: float = 0.1
     city_density: float = 0.05
     productive_actions: bool = False
+    combat_features: bool = False
     map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
 
@@ -43,6 +44,10 @@ class TaskConfig:
             raise ValueError("learner seat is out of range")
         if not isinstance(self.productive_actions, bool):
             raise TypeError("productive_actions must be boolean")
+        if not isinstance(self.combat_features, bool):
+            raise TypeError("combat_features must be boolean")
+        if self.combat_features and (self.players, self.width, self.height) != (2, 9, 9):
+            raise ValueError("combat features require two players on a 9x9 map")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
             raise ValueError("map_pool_size must be a nonnegative integer")
 
@@ -92,7 +97,7 @@ class GeneralsTask:
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
         self.action_metrics = ActionMetrics(config.num_envs, self.device)
-        self.observation_encoder = observation_encoder or LocalObservationEncoder(config.max_episode_steps)
+        self.observation_encoder = observation_encoder or make_observation_encoder(config)
         self.reward_model = reward_model or ShapedReward(config.reward)
         self.opponent = opponent or make_opponent(config.opponent, history_length=config.history_length,
                                                   seed=config.seed)

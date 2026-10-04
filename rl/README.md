@@ -59,7 +59,7 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 | 模块 | 职责 |
 | --- | --- |
 | `mdp/state.py` | CPU/GPU 共用张量状态视图 |
-| `mdp/observations.py` | 局部/特权观测、每局历史 |
+| `mdp/observations.py`、`mdp/combat.py` | 局部/特权观测、每局历史与可选战斗特征 |
 | `mdp/actions.py` | 动作编码、合法 mask |
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
@@ -79,6 +79,24 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 模式全部留一/一半。mask 与原引擎一致，允许零兵移动；终局仅允许 WAIT。
 `task.productive_actions=true` 可过滤预计在下一次增长后仍为零兵的移动，
 训练、历史对手和评估共用该 mask；每次更新与整套评估记录等待、零兵、立即折返和实际移动兵力指标。
+
+`task.combat_features=true` 在 9×9、1v1 中用两张战斗特征替换重复的相对身份平面，维度保持 985。
+特征分别是可见敌军四邻域中下一次增长后最大留一攻击兵力，以及自身守军/一次增援与威胁的差值。
+隐藏兵力在计算前清零；这些特征表示潜在动作，不是对联合动作的预测。训练、历史对手和评估共用 encoder 工厂。
+旧权重应先迁移并以新 optimizer/历史池 warm start，禁止直接 resume：
+
+```bash
+.venv/bin/python rl/tools/migrate_combat_observations.py \
+  --checkpoint outputs/moe_cts/iterations/v3/train/evaluations/best.pt \
+  --config outputs/moe_cts/iterations/v3/train/run_config.json \
+  --output outputs/moe_cts/iterations/v4/migrated
+.venv/bin/python -m generals_rl.train --config rl/configs/v4.json \
+  --warm-start outputs/moe_cts/iterations/v4/migrated/checkpoint.pt \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v4/train
+```
+
+迁移将旧身份输入权重折叠到等价 self/enemy 平面，新特征列初始化为零，旧函数在浮点舍入范围内保留。
+其余 MDP 设定及模型布局必须兼容；最终候选选择和训练记录见训练日志。
 
 逐 tick reward：`0.05*Δterritory + 0.2*Δcities + 0.001*Δarmy + win - loss - 0.001`。
 自然结束和时限截断分开处理；截断保留 reset 前的下一状态供 value bootstrap。
