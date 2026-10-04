@@ -27,7 +27,8 @@ from generals.core.observation import observe
 from generals.core.state import Action, MoveResult
 from rsl_rl.modules import ActorCriticMoECTS
 
-from .mdp import EncodedActionSpace, GameBatch, LocalObservationEncoder, ObservationHistory
+from .mdp import (ActionMetrics, GameBatch, LocalObservationEncoder,
+                  ObservationHistory, make_action_space)
 from .config import seed_everything, task_config
 
 
@@ -90,7 +91,7 @@ def aggregate_games(games):
     losses = sum(game["outcome"] == "loss" for game in games)
     draws = sum(game["outcome"] == "draw" for game in games)
     count, decisive = len(games), wins + losses
-    return {
+    result = {
         "games": count, "wins": wins, "losses": losses, "draws": draws,
         "win_rate": wins / count if count else None,
         "decisive_win_rate": wins / decisive if decisive else None,
@@ -99,6 +100,13 @@ def aggregate_games(games):
         "decisive_win_rate_wilson95": wilson_interval(wins, decisive),
         "mean_ticks": sum(game["ticks"] for game in games) / count if count else None,
     }
+    if games and all("action_metrics" in game for game in games):
+        ticks = sum(game["ticks"] for game in games)
+        result["action_metrics"] = {
+            name: sum(game["action_metrics"][name] * game["ticks"] for game in games) / ticks
+            for name in ActionMetrics.names
+        }
+    return result
 
 
 def _local_inputs(batch, player_ids, encoder, history, action_space):
@@ -149,7 +157,9 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
               "opponent_seconds": 0.0, "simulator_seconds": 0.0}
     count = len(specs)
     player_ids = torch.tensor([spec.learner_seat for spec in specs], dtype=torch.long, device=device)
-    action_space = EncodedActionSpace(training_task.width, training_task.height)
+    action_space = make_action_space(training_task)
+    action_metrics = ActionMetrics(count, device)
+    action_totals = {name: torch.zeros(count, device=device) for name in ActionMetrics.names}
     # The rollout limit does not change the model's trained clock normalization.
     encoder = LocalObservationEncoder(training_task.max_episode_steps)
     history = ObservationHistory(training_task.history_length)
@@ -202,6 +212,10 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                 tick_start = perf_counter()
                 result = env.step(joint)
                 env.check_errors()
+                learner_moves = torch.as_tensor(result.moves, device=device)[
+                    torch.arange(count, device=device), player_ids]
+                for name, values in action_metrics.update(learner_moves).items():
+                    action_totals[name] += values * active_tensor
                 timing["simulator_seconds"] += perf_counter() - tick_start
                 tick_start = perf_counter()
                 if recorder is not None:
@@ -232,6 +246,8 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                             "ticks": int(env.state["tick"][lane]),
                             "learner_invalid_actions": int(invalid[lane, seat]),
                             "opponent_invalid_actions": int(invalid[lane, 1 - seat]),
+                            "action_metrics": {name: float(value[lane]) / decisions[lane]
+                                               for name, value in action_totals.items()},
                             "learner_final_stats": dict(zip(("army", "territory", "cities"), map(int, env.stats[lane, seat]))),
                             "opponent_final_stats": dict(zip(("army", "territory", "cities"), map(int, env.stats[lane, 1 - seat]))),
                         }
@@ -283,7 +299,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                 history = ObservationHistory(training_task.history_length)
                 history.reset(encoder.encode(batch, pids))
                 obs = _local_inputs(batch, pids, encoder, history,
-                                    EncodedActionSpace(training_task.width, training_task.height))
+                                    make_action_space(training_task))
                 policy = _load_student(checkpoint, config, obs, device)
         completed, timing = battle_batch(specs, states, policy, training_task,
                                         max_ticks=max_ticks, device=device,
@@ -303,6 +319,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "policy": "student_local", "opponent_implementation": "generals.controllers.make_controllers",
         "decision_timing": "joint_pre_growth_then_absolute_seat_order",
         "training_opponent": training_task.opponent,
+        "productive_actions": training_task.productive_actions,
         "seed": seed, "maps_per_ai": maps_per_ai, "scheduled_games": len(schedule),
         "completed_games": len(games), "batch_size": batch_size, "device": str(device),
         "cpu_threads": cpu_threads, "max_ticks": max_ticks,

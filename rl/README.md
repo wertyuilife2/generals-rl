@@ -40,7 +40,7 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 ```
 
 默认值由 `TaskConfig`、`runner_config`、`SelfPlayConfig` 和 `TrainingEvalConfig` 定义。
-三个 JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--config` 修改。
+JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--config` 修改。
 训练输出目录必须是新目录，`--iterations` 与 `--steps-per-env` 二选一。
 
 训练记录保存在 TensorBoard，结束时生成 `summary.json`；`run_config.json` 保存本次完整配置。
@@ -75,6 +75,8 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 
 动作共 649 个：`WAIT=0`；`MOVE=1+source*8+direction*2+mode`，方向上/右/下/左，
 模式全部留一/一半。mask 与原引擎一致，允许零兵移动；终局仅允许 WAIT。
+`task.productive_actions=true` 可过滤预计在下一次增长后仍为零兵的移动，
+训练、历史对手和评估共用该 mask；每次更新与整套评估记录等待、零兵、立即折返和实际移动兵力指标。
 
 逐 tick reward：`0.05*Δterritory + 0.2*Δcities + 0.001*Δarmy + win - loss - 0.001`。
 自然结束和时限截断分开处理；截断保留 reset 前的下一状态供 value bootstrap。
@@ -122,6 +124,9 @@ Vendor 回归对照旧缓存流程，验证 Normal/Categorical 的损失、参�
 ## 训练版本迭代
 
 `codex_dev` 上的 v1/v2/… 配置、结果与曲线记录在 [训练日志](../doc/rl_train_log.md)。
+`--warm-start PATH` 只加载完整 checkpoint 或快照中的模型权重，从新 optimizer、迭代 0 和新历史池开始；
+配置使用本次 JSON 覆盖默认值。`--resume` 则继承原运行配置并恢复 optimizer 和历史池，二者互斥。
+可用 `matmul_precision=high` 启用本轮 float32 矩阵乘法加速，默认精度沿用进程设置。
 `training_control` 可设置时限、评估平台停止和完整 checkpoint 保留数量；开启早停时，采样预算为上限，实际步数和停止原因写入摘要。
 `evaluation.keep_snapshots` 限制已完成评估的权重数量，另保留按四 AI 最低胜率优先挑选的 `evaluations/best.pt`。
 TensorBoard 包含四 AI 与最低胜率、吞吐、显存、进程峰值内存及评估队列长度。

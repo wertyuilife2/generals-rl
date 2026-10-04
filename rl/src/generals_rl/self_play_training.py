@@ -49,13 +49,15 @@ class SelfPlaySession:
         if (iteration + 1) % self.config.snapshot_interval == 0:
             return self.publish(iteration, source={"kind": "learner_update"})
 
-def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_iteration=-1):
+def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_iteration=-1,
+                      initial_source=None):
     """Bind a pool after policy loading, before the first game tick.
 
     The original policy constructor is used only for feature shapes; snapshot
     inference receives local policy/single_obs/action_mask and never critic.
     Resume copies the old pool and excludes snapshots newer than the selected
     learner checkpoint. Environment and opponent RNG streams start afresh.
+    A weights-only warm start supplies initial_source without restoring a pool.
     """
     if task.config.opponent != "self_play":
         return None
@@ -85,8 +87,10 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         "encoder": f"{type(task.observation_encoder).__module__}.{type(task.observation_encoder).__qualname__}",
         "action_space": f"{type(task.action_space).__module__}.{type(task.action_space).__qualname__}",
     }
+    if task.config.productive_actions:
+        signature["mdp"]["productive_actions"] = True
     resume_pool = None
-    provenance = {"kind": "random_initial_policy"}
+    provenance = dict(initial_source) if initial_source is not None else {"kind": "random_initial_policy"}
     if resume:
         checkpoint = Path(resume).resolve()
         provenance = {"kind": "learner_checkpoint", "path": str(checkpoint),

@@ -1,8 +1,10 @@
 """Train the vendored MoE CTS baseline with historical self-play opponents."""
 import argparse
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
+from hashlib import sha256
 import json
 import math
 import os
@@ -21,8 +23,27 @@ from .training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from .training_control import TrainingControlConfig, TrainingController, TrainingStopped, prune_checkpoints
 
 
-def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None):
+@contextmanager
+def _matmul_precision(precision):
+    """Change this process's precision only for an explicitly configured run."""
+    if precision is None:
+        yield
+        return
+    previous = torch.get_float32_matmul_precision()
+    try:
+        torch.set_float32_matmul_precision(precision)
+        yield
+    finally:
+        torch.set_float32_matmul_precision(previous)
+
+
+def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
     started = perf_counter()
+    if resume is not None and warm_start is not None:
+        raise ValueError("resume and warm_start are mutually exclusive")
+    precision = config.get("matmul_precision")
+    if precision is not None and precision not in ("highest", "high", "medium"):
+        raise ValueError("matmul_precision must be highest, high, medium or null")
     if (iterations is None) == (steps_per_env is None):
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
@@ -57,7 +78,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     collection_seconds = update_seconds = 0.0
     last_losses = None
     stop_reason = None
-    with GeneralsTask(settings) as task:
+    warm_source = None
+    with _matmul_precision(precision), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output), str(task.device))
         if resume:
@@ -65,8 +87,17 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             # Restore the adaptive scheduler scalar and continue after the saved index.
             runner.alg.learning_rate = runner.alg.optimizer.param_groups[0]["lr"]
             runner.current_learning_iteration += 1
+        elif warm_start is not None:
+            checkpoint = Path(warm_start).resolve()
+            saved = torch.load(checkpoint, weights_only=False, map_location="cpu")
+            # Preserve fresh optimizer states, configured LRs and iteration zero.
+            runner.alg.policy.load_state_dict(saved["model_state_dict"], strict=True)
+            del saved
+            warm_source = {"kind": "warm_start_weights", "path": str(checkpoint),
+                           "sha256": sha256(checkpoint.read_bytes()).hexdigest()}
         self_play = prepare_self_play(task, runner, config, output, resume=resume,
-                                      initial_iteration=runner.current_learning_iteration - 1)
+                                      initial_iteration=runner.current_learning_iteration - 1,
+                                      initial_source=warm_source)
         evaluator = (PeriodicEvaluator(evaluation_settings, config, output, runner.logger.writer,
                                        on_complete=controller.on_evaluation)
                      if self_play is not None and evaluation_settings.enabled else None)
@@ -171,6 +202,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                 "stop_reason": stop_reason or "budget",
                 "evaluation": evaluator.describe() if evaluator is not None else None,
             }
+            if warm_source is not None:
+                summary["warm_start"] = warm_source
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,
@@ -201,7 +234,9 @@ def main(argv=None):
     budget.add_argument("--iterations", type=int)
     budget.add_argument("--steps-per-env", type=int, help="exact vector ticks per lane")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--resume", type=Path, help="restore policy, both optimizers and the available historical pool")
+    initialization = parser.add_mutually_exclusive_group()
+    initialization.add_argument("--resume", type=Path, help="restore policy, both optimizers and the available historical pool")
+    initialization.add_argument("--warm-start", type=Path, help="load model weights into a fresh run with new optimizers and pool")
     args = parser.parse_args(argv)
     if args.resume:
         config = json.loads(args.resume.with_name("run_config.json").read_text())
@@ -222,7 +257,8 @@ def main(argv=None):
     iterations = None if args.steps_per_env is not None else (args.iterations if args.iterations is not None else 1000)
     destination = args.output or Path("outputs/moe_cts") / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     train(config, destination, iterations=iterations, steps_per_env=args.steps_per_env,
-          resume=str(args.resume) if args.resume else None)
+          resume=str(args.resume) if args.resume else None,
+          warm_start=str(args.warm_start) if args.warm_start else None)
     return 0
 
 

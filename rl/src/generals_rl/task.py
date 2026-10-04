@@ -5,8 +5,8 @@ import torch
 
 from generals import MapConfig, make_env
 
-from .mdp import (EncodedActionSpace, GameBatch, LocalObservationEncoder,
-                  ObservationHistory, RewardConfig, ShapedReward)
+from .mdp import (ActionMetrics, GameBatch, LocalObservationEncoder,
+                  ObservationHistory, RewardConfig, ShapedReward, make_action_space)
 from .opponents import make_opponent
 
 
@@ -27,6 +27,7 @@ class TaskConfig:
     opponent: str = "random"
     mountain_density: float = 0.1
     city_density: float = 0.05
+    productive_actions: bool = False
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
@@ -39,6 +40,8 @@ class TaskConfig:
             raise ValueError("GPU simulation requires a CUDA task device")
         if not 0 <= self.learner_seat < self.players:
             raise ValueError("learner seat is out of range")
+        if not isinstance(self.productive_actions, bool):
+            raise TypeError("productive_actions must be boolean")
 
 
 @dataclass(frozen=True)
@@ -75,7 +78,8 @@ class GeneralsTask:
             raise ValueError("injected backend dimensions do not match TaskConfig")
         if self.backend.unwrapped.auto_reset:
             raise ValueError("task requires simulator auto_reset=False")
-        self.action_space = action_space or EncodedActionSpace(config.width, config.height)
+        self.action_space = action_space or make_action_space(config)
+        self.action_metrics = ActionMetrics(config.num_envs, self.device)
         self.observation_encoder = observation_encoder or LocalObservationEncoder(config.max_episode_steps)
         self.reward_model = reward_model or ShapedReward(config.reward)
         self.opponent = opponent or make_opponent(config.opponent, history_length=config.history_length,
@@ -130,6 +134,7 @@ class GeneralsTask:
             self.player_ids[mask] = (self.player_ids[mask] + 1) % self.config.players
         self.episode_length_buf[mask] = 0
         self.episode_return[mask] = 0
+        self.action_metrics.reset(mask)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids), mask)
         self._notify_opponent("on_reset", mask)
         self.observations = self._observations()
@@ -156,6 +161,8 @@ class GeneralsTask:
         self.backend.check_errors()
         batch = self.batch()
         raw_done = torch.as_tensor(result.done, device=self.device).clone()
+        action_metrics = self.action_metrics.update(
+            torch.as_tensor(result.moves, device=self.device)[rows, self.player_ids])
         alive = batch.state["alive"][rows, self.player_ids]
         terminated = raw_done[:, 0] | ~alive
         truncated = raw_done[:, 1] & ~terminated
@@ -169,6 +176,7 @@ class GeneralsTask:
         self._notify_opponent("on_step")
         terminal_obs = self._observations()
         metrics = {f"Reward/{key}": value.detach() for key, value in reward.terms.items()}
+        metrics.update({f"Action/{key}": value for key, value in action_metrics.items()})
         metrics.update({"Episode/return": self.episode_return[done].clone(),
                         "Episode/length": self.episode_length_buf[done].float().clone(),
                         "Episode/win": (batch.state["winner"][done] == self.player_ids[done]).float(),
