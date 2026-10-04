@@ -153,7 +153,7 @@ class OnPolicyRunnerCTS:
             )
 
             # Save model
-            if it % self.cfg["save_interval"] == 0:
+            if self.logger.log_dir is not None and not self.logger.disable_logs and it % self.cfg["save_interval"] == 0:
                 self.save(os.path.join(self.logger.log_dir, f"model_{it}.pt"), it=it, last_model=False)  # type: ignore
 
         # Save the final model after training
@@ -377,20 +377,28 @@ class OnPolicyRunnerCTS:
                 self.policy_cfg["critic_obs_normalization"] = self.cfg["empirical_normalization"]
 
         # Initialize the policy
-        # actor_critic_class = resolve_callable(self.policy_cfg.pop("class_name"))
-        actor_critic_class = eval(self.policy_cfg.pop("class_name")) # temporally use eval to avoid import bugs
+        actor_critic_class = resolve_callable(self.policy_cfg.pop("class_name"))
         actor_critic: ActorCriticMoECTS = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
         ).to(self.device)
 
         # Initialize the storage
+        categorical = actor_critic.action_distribution == "categorical"
         storage = RolloutStorageCTS(
-            "rl", self.env.num_envs, max(int(self.env.num_envs*self.alg_cfg["teacher_env_ratio"]), 1), self.cfg["num_steps_per_env"], obs, [self.env.num_actions], self.device
+            "rl",
+            self.env.num_envs,
+            MoECTS.teacher_environment_count(self.env.num_envs, self.alg_cfg["teacher_env_ratio"]),
+            self.cfg["num_steps_per_env"],
+            obs,
+            [1] if categorical else [self.env.num_actions],
+            self.device,
+            distribution_shape=[self.env.num_actions],
+            action_dtype=torch.long if categorical else torch.float32,
+            store_action_std=not categorical,
         )
 
         # Initialize the algorithm
-        # alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
-        alg_class = eval(self.alg_cfg.pop("class_name")) # temporally use eval to avoid import bugs
+        alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
         alg: MoECTS = alg_class(
             actor_critic, storage, self.env.num_envs, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )

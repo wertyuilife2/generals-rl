@@ -1,0 +1,14 @@
+{
+  "task": {
+    "backend": "gpu",
+    "device": "cuda:0",
+    "num_envs": 16384,
+    "max_episode_steps": 1024
+  },
+  "runner": {
+    "algorithm": {
+      "num_mini_batches": 64,
+      "gamma": 0.995
+    }
+  }
+}

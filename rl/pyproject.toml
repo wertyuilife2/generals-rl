@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "generals-rl"
+version = "0.1.0"
+description = "Modular Generals MDP and vendored MoE CTS baseline"
+requires-python = ">=3.11"
+dependencies = ["generals-env", "rsl-rl-lib==3.3.0", "torch>=2.6", "tensordict>=0.7", "tensorboard", "PyYAML"]
+
+[project.optional-dependencies]
+video = ["Pillow>=10"]
+
+[project.scripts]
+generals-train = "generals_rl.train:main"
+generals-evaluate = "generals_rl.evaluate_builtin:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["generals_rl*"]

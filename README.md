@@ -27,3 +27,5 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 - [测试与历史存档](doc/README.md#verification)
 
 后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
+
+强化学习 baseline 已在 `rl/` 实现：直接复制指定版本的 rsl_rl，以最小补丁支持离散 MoE CTS，解耦 MDP 的观测、动作、奖励与对手，并提供后续 MCTS 的整 tick 分支模拟接口。安装、训练、补丁说明和测试见 [RL 使用说明](rl/README.md)。
