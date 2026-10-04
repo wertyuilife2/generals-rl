@@ -81,12 +81,12 @@ TensorBoard：`outputs/moe_cts/iterations/v1/train/`；完整训练摘要 `train
 
 完整摘要 `outputs/moe_cts/iterations/v2/train/summary.json`；另一组种子评估 `diagnostic/best_at_1799/fresh_evaluation.json`。
 
-## v3：student-only PPO 与回合换图（准备中）
+## v3：student-only PPO 与回合换图（训练中）
 
-配置 `rl/configs/v3.json`；尚未启动长训练。v2 已结束。v3 将从 v2 选模最佳权重 warm start，保留新 optimizer 和新历史池。
+配置 `rl/configs/v3.json`；v2 已结束，v3 启动长训练。v3 将从 v2 选模最佳权重 warm start，保留新 optimizer 和新历史池。
 
 - 原版 `rsl_rl.algorithms.PPO.update` 保持未修改；全局部 student lane、单 Adam、privileged critic，取消 teacher latent 蒸馏。学生 actor encoder 获得 PPO 任务梯度；critic 中学生 latent 仍 detach，仅去掉该分支不会用于反传的 encoder 计算图。
-- provisional 配置 16,384 环境 × 32 tick、4 epoch、64 minibatch、fixed LR=1e-4、gamma=0.995、episode=1024、TF32 high；productive mask、原 obs/reward 保持。GPU 空闲后比较相同 524,288 样本的 16k×32 和 32k×16 布局，再确定长训练配置。
+- 配置 16,384 环境 × 32 tick、4 epoch、64 minibatch、fixed LR=1e-4、gamma=0.995、episode=1024、TF32 high；productive mask、原 obs/reward 保持。通过独占 GPU 短测后选择 16k×32，保留较长 GAE rollout。
 - 地图池 65,536；每个回合结束独立随机抽新地图，正在进行的其他对局不受影响；地图生成、采样不消耗 learner RNG。训练 seed=20261007；历史池 8、快照每 50 更新、每 100 更新同选模集评估、训练至少 1 小时/最多 2 小时，资源保留上限不变。
 - 不缓存 PPO fixed schedule 未使用的旧动作分布，16k×32 理论额外省 1.268 GiB。默认 CTS 保持原缓存和两阶段行为。单优化器 runner/storage 是最小 vendor 适配；PPO 算法文件未改。
 - CPU 核心 70 项（CUDA 1 项在 CPU 回归中跳过）、录像 1 项、vendor 22 项通过；原版 PPO 与适配器在四种 normalizer 开关下 loss/参数/梯度/完整 Adam/RNG 精确一致。去除 value 编码器图的 CPU 短测未显示显著提速。
@@ -94,4 +94,14 @@ TensorBoard：`outputs/moe_cts/iterations/v1/train/`；完整训练摘要 `train
 
 额外运行优化：历史对手每组一次 `where`，复用行索引，保留逐组动作验证。CPU Golden 的 8 条轨迹、200 边界、1264 次策略调用及 8 项非法动作合同精确一致，核心 69 通过/1 CUDA 跳过。生产源码冻结于 `outputs/moe_cts/iterations/v3/source/`，代码 commit `dd0b300`；前置 PPO/map 功能 commit `ccb88e5`、安全停止功能 `63e4c0f`。可通过创建 run 目录中的 `STOP` 文件在完整更新后正常保存并结束。
 
-独占 GPU 吞吐结果、最终布局、训练结果、曲线和最佳模型 demo 待完成后补充。
+独占 GPU 短测使用相同 warm-start 权重、8 个相同权重的历史对手组、524,288 样本/更新、4 epoch×64 minibatch；每组 20 更新，以最后 10 更新累计采样/更新时间比较，未开启评估：
+
+| 算法/布局 | 采样+更新 transitions/s | 采样秒/更新 | 学习秒/更新 | allocated 峰值 |
+| --- | ---: | ---: | ---: | ---: |
+| CTS 16,384×32 | 200,025 | 0.860 | 1.761 | 16.10 GiB |
+| student PPO 16,384×32 | 170,665 | 0.812 | 2.260 | 14.48 GiB |
+| student PPO 32,768×16 | 177,063 | 0.696 | 2.265 | 16.91 GiB |
+
+全局部 student 获得 PPO encoder 梯度的计算量高于 CTS 当前 student 子集蒸馏更新；PPO 速度并没有优势。32k×16 仅快 3.7%，占用更多显存并缩短 rollout，本轮采用 **16,384×32**。短测全部 loss/参数有限，不能代表长期胜率。记录在 `outputs/moe_cts/iterations/v3/bench/comparison.json`。
+
+TensorBoard：`outputs/moe_cts/iterations/v3/train/`。训练结果、曲线和最佳模型 demo 待完成后补充。
