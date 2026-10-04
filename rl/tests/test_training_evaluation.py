@@ -15,6 +15,7 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 from torch.utils.tensorboard import SummaryWriter
 
 from generals.controllers import AI_KINDS
+from generals_rl.evaluate_builtin import evaluate_builtin
 from generals_rl.train import train
 from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from rl_test_utils import assert_nested_equal, small_training_config
@@ -111,6 +112,59 @@ class TrainingEvaluationTests(unittest.TestCase):
             self.assertEqual([p["iteration"] for p in points], [1, 3, 5])
             events = EventAccumulator(str(output)).Reload()
             self.assertEqual([p.step for p in events.Scalars("Eval/overall/win_rate")], [1, 3, 5])
+
+    def test_retention_keeps_recent_weights_best_and_all_reports(self):
+        config = small_config()
+        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1)
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory) / "run"
+            summary = train(config, output, iterations=6)
+            evaluations = output / "evaluations"
+            jobs = json.loads((evaluations / "index.json").read_text())["jobs"]
+            self.assertEqual([Path(job["checkpoint"]).exists() for job in jobs], [False, False, True])
+            self.assertTrue(all(Path(job["report"]).is_file() for job in jobs))
+            best = summary["evaluation"]["best_completed"]
+            self.assertEqual(sha256((evaluations / "best.pt").read_bytes()).hexdigest(), best["checkpoint_sha256"])
+            self.assertEqual(json.loads((evaluations / "run_config.json").read_text()), config)
+            best_report = json.loads((evaluations / "best_report.json").read_text())
+            self.assertEqual(best_report["checkpoint_sha256"], best["checkpoint_sha256"])
+            deployed = evaluate_builtin(evaluations / "best.pt", maps_per_ai=1, batch_size=8, max_ticks=3)
+            self.assertEqual(deployed["completed_games"], 8)
+            self.assertEqual(deployed["checkpoint_sha256"], best["checkpoint_sha256"])
+            events = EventAccumulator(str(output)).Reload()
+            self.assertEqual([point.step for point in events.Scalars("Eval/worst_ai/win_rate")], [1, 3, 5])
+
+    def test_best_prioritizes_worst_ai_then_aggressive_and_retention_does_not_delete_pending(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, keep_snapshots=1), {}, directory, None)
+            queued_checkpoint = evaluator.directory / "queued.pt"
+            queued_checkpoint.write_bytes(b"still needed by worker")
+            evaluator.jobs.append({"status": "queued", "checkpoint": str(queued_checkpoint)})
+            # Higher overall/ aggressive scores cannot compensate for a weaker
+            # worst opponent. Exact ties use aggressive, then overall.
+            cases = ((0.4, 0.4, 0.8, 1), (0.5, 0.5, 0.6, 2),
+                     (0.45, 0.7, 0.9, 2), (0.5, 0.55, 0.55, 4), (0.5, 0.55, 0.7, 5))
+            for index, (worst, aggressive, overall, expected_best) in enumerate(cases, 1):
+                checkpoint = evaluator.directory / f"candidate_{index}.pt"
+                checkpoint.write_bytes(f"weights {index}".encode())
+                report_path = evaluator.directory / f"report_{index}.json"
+                report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
+                          "scheduled_games": 8, "completed_games": 8, "policy": "student_local",
+                          "device": "cpu", "stochastic": False, "overall": {"win_rate": overall},
+                          "by_ai": {kind: {"games": 2, "win_rate": aggressive if kind == "aggressive" else worst}
+                                    for kind in AI_KINDS}}
+                report_path.write_text(json.dumps(report))
+                job = {"status": "running", "snapshot_id": index, "iteration": index,
+                       "publication_index": index, "steps_per_environment": index * 4,
+                       "environment_steps": index * 16, "checkpoint": str(checkpoint),
+                       "checkpoint_sha256": report["checkpoint_sha256"],
+                       "report": str(report_path), "worker_seconds": 0.1}
+                evaluator.jobs.append(job)
+                evaluator._complete(job)
+                self.assertEqual(evaluator.best_completed["snapshot_id"], expected_best)
+                self.assertEqual((evaluator.directory / "best.pt").read_bytes(), f"weights {expected_best}".encode())
+                self.assertTrue(queued_checkpoint.exists())
+            self.assertEqual(len(list(evaluator.directory.glob("candidate_*.pt"))), 1)
 
     def test_seed_is_not_counted_and_worker_failure_is_visible_without_a_false_win_rate(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):

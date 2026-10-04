@@ -27,6 +27,7 @@ class TrainingEvalConfig:
     max_ticks: int = 2000
     seed: int = 1000042
     cpu_threads: int = 1
+    keep_snapshots: int | None = None
 
     def __post_init__(self):
         if not isinstance(self.enabled, bool):
@@ -36,6 +37,9 @@ class TrainingEvalConfig:
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
                 raise ValueError(f"evaluation.{name} must be an integer >= {minimum}")
+        if self.keep_snapshots is not None and (not isinstance(self.keep_snapshots, int)
+                or isinstance(self.keep_snapshots, bool) or self.keep_snapshots < 1):
+            raise ValueError("evaluation.keep_snapshots must be a positive integer or null")
 
 
 def _write_json(path, value):
@@ -53,7 +57,7 @@ class PeriodicEvaluator:
     they do not discard learner progress or fabricate zero-win measurements.
     """
 
-    def __init__(self, settings, run_config, output_dir, writer):
+    def __init__(self, settings, run_config, output_dir, writer, *, on_complete=None):
         self.settings = settings
         self.run_config = run_config
         self.directory = Path(output_dir).resolve() / "evaluations"
@@ -62,7 +66,10 @@ class PeriodicEvaluator:
         self.pending = deque()
         self.running = None
         self.latest_completed = None
+        self.best_completed = None
+        self.on_complete = on_complete
         self.directory.mkdir(parents=True, exist_ok=True)
+        _write_json(self.directory / "run_config.json", run_config)
         self._save_index()
 
     def on_snapshot(self, snapshot, pool_directory, *, publication_index,
@@ -158,6 +165,15 @@ class PeriodicEvaluator:
         point = {key: job[key] for key in
                  ("snapshot_id", "iteration", "publication_index", "steps_per_environment",
                   "environment_steps", "checkpoint_sha256", "report", "worker_seconds")}
+        score = (min(report["by_ai"][kind]["win_rate"] for kind in AI_KINDS),
+                 report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
+        point["selection_score"] = list(score)
+        if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):
+            temporary = self.directory / "best.pt.tmp"
+            shutil.copyfile(job["checkpoint"], temporary)
+            temporary.replace(self.directory / "best.pt")
+            _write_json(self.directory / "best_report.json", report)
+            self.best_completed = dict(point, checkpoint=str(self.directory / "best.pt"))
         if self.writer is not None:
             for name, metrics in {**report["by_ai"], "overall": report["overall"]}.items():
                 for key in ("win_rate", "decisive_win_rate", "draw_rate", "wins", "losses", "draws", "mean_ticks"):
@@ -166,9 +182,15 @@ class PeriodicEvaluator:
             self.writer.add_scalar("Eval/environment_steps", job["environment_steps"], job["iteration"])
             self.writer.add_scalar("Eval/snapshot_id", job["snapshot_id"], job["iteration"])
             self.writer.add_scalar("Eval/worker_seconds", job["worker_seconds"], job["iteration"])
+            self.writer.add_scalar("Eval/worst_ai/win_rate", score[0], job["iteration"])
+            self.writer.add_scalar("Eval/best_worst_ai/win_rate", self.best_completed["selection_score"][0], job["iteration"])
             self.writer.flush()
         job["status"] = "completed"
+        job["selection_score"] = list(score)
         self.latest_completed = point
+        if self.on_complete is not None:
+            self.on_complete(point)
+        self._prune_snapshots()
         self._save_index()
         rates = " ".join(f"{kind}={report['by_ai'][kind]['win_rate']:.1%}" for kind in AI_KINDS)
         print(f"[eval] snapshot={job['snapshot_id']} iteration={job['iteration']} {rates} "
@@ -183,14 +205,22 @@ class PeriodicEvaluator:
         print(f"[eval] FAILED snapshot={job['snapshot_id']}: {job['error']}; "
               f"log={job['worker_log']}", flush=True)
 
+    def _prune_snapshots(self):
+        if self.settings.keep_snapshots is None:
+            return
+        completed = [job for job in self.jobs if job["status"] == "completed"]
+        for job in completed[:-self.settings.keep_snapshots]:
+            Path(job["checkpoint"]).unlink(missing_ok=True)
+            job["checkpoint_retained"] = False
+
     def _save_index(self):
-        _write_json(self.directory / "index.json", {"jobs": self.jobs})
+        _write_json(self.directory / "index.json", {"jobs": self.jobs, "best": self.best_completed})
 
     def describe(self):
         return {"scheduled": len(self.jobs),
                 **{status: sum(j["status"] == status for j in self.jobs)
                    for status in ("queued", "running", "completed", "failed", "cancelled")},
-                "latest_completed": self.latest_completed}
+                "latest_completed": self.latest_completed, "best_completed": self.best_completed}
 
     def finish(self):
         """Drain every scheduled evaluation before the final training summary."""

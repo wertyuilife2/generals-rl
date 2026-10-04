@@ -118,3 +118,17 @@ CPU 默认 4 minibatch，GPU 配置 64；两阶段复用同一批采样数据及
 真实两阶段更新、精确采样预算、固定赛程评估与子进程 RNG 隔离。
 Vendor 回归对照旧缓存流程，验证 Normal/Categorical 的损失、参数、两个 Adam 状态和 RNG 一致。
 基线支持单设备训练。
+
+## 训练版本迭代
+
+`codex_dev` 上的 v1/v2/… 配置、结果与曲线记录在 [训练日志](../doc/rl_train_log.md)。
+`training_control` 可设置时限、评估平台停止和完整 checkpoint 保留数量；开启早停时，采样预算为上限，实际步数和停止原因写入摘要。
+`evaluation.keep_snapshots` 限制已完成评估的权重数量，另保留按四 AI 最低胜率优先挑选的 `evaluations/best.pt`。
+TensorBoard 包含四 AI 与最低胜率、吞吐、显存、进程峰值内存及评估队列长度。
+
+```bash
+.venv/bin/python rl/tools/analyze_iteration.py outputs/moe_cts/iterations/v1/train \
+  --output outputs/moe_cts/iterations/v1/analysis --demo --render
+```
+
+分析工具保存曲线、摘要及每 AI 一败一胜的录像（若存在），录像通过独立 Core 逐 tick 重放核验。

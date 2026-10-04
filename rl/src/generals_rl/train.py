@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import resource
 from time import perf_counter
 
 import torch
@@ -17,6 +18,7 @@ from .cts import GeneralsCTSVecEnv, runner_config
 from .self_play_training import SelfPlayConfig, prepare_self_play
 from .task import GeneralsTask, TaskConfig
 from .training_evaluation import PeriodicEvaluator, TrainingEvalConfig
+from .training_control import TrainingControlConfig, TrainingController, TrainingStopped, prune_checkpoints
 
 
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None):
@@ -26,6 +28,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
+    control_settings = TrainingControlConfig(**config.get("training_control", {}))
+    controller = TrainingController(control_settings)
     if settings.opponent == "self_play":
         SelfPlayConfig(**config.get("self_play", {}))
         if evaluation_settings.enabled and settings.players != 2:
@@ -52,6 +56,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     completed_updates = 0
     collection_seconds = update_seconds = 0.0
     last_losses = None
+    stop_reason = None
     with GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output), str(task.device))
@@ -62,7 +67,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             runner.current_learning_iteration += 1
         self_play = prepare_self_play(task, runner, config, output, resume=resume,
                                       initial_iteration=runner.current_learning_iteration - 1)
-        evaluator = (PeriodicEvaluator(evaluation_settings, config, output, runner.logger.writer)
+        evaluator = (PeriodicEvaluator(evaluation_settings, config, output, runner.logger.writer,
+                                       on_complete=controller.on_evaluation)
                      if self_play is not None and evaluation_settings.enabled else None)
         original_save = runner.save
         final_iteration = runner.current_learning_iteration + iterations - 1
@@ -74,7 +80,9 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                 return
             if last_model:
                 path = str(output / "checkpoint.pt")
-            return original_save(path, it=it, last_model=last_model, infos=infos)
+            result = original_save(path, it=it, last_model=last_model, infos=infos)
+            prune_checkpoints(output, control_settings.keep_checkpoints)
+            return result
 
         runner.save = save_checkpoint
         if steps_per_env is not None and steps_per_env < rollout_steps:
@@ -85,7 +93,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
         original_log = runner.logger.log
 
         def on_update(**kwargs):
-            nonlocal sampled_ticks, completed_updates, collection_seconds, update_seconds, last_losses
+            nonlocal sampled_ticks, completed_updates, collection_seconds, update_seconds, last_losses, stop_reason
             sampled_ticks += runner.cfg["num_steps_per_env"]
             completed_updates += 1
             collection_seconds += kwargs["collect_time"]
@@ -104,6 +112,21 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                         steps_per_environment=sampled_ticks,
                         environment_steps=sampled_ticks * task.num_envs,
                     )
+            elapsed = perf_counter() - started
+            if runner.logger.writer is not None:
+                writer = runner.logger.writer
+                writer.add_scalar("Perf/environment_steps", sampled_ticks * task.num_envs, kwargs["it"])
+                writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
+                writer.add_scalar("Perf/wall_fps", sampled_ticks * task.num_envs / elapsed, kwargs["it"])
+                writer.add_scalar("Resource/peak_process_rss_bytes", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024, kwargs["it"])
+                if task.device.type == "cuda":
+                    writer.add_scalar("Resource/gpu_allocated_bytes", torch.cuda.memory_allocated(task.device), kwargs["it"])
+                    writer.add_scalar("Resource/gpu_reserved_bytes", torch.cuda.memory_reserved(task.device), kwargs["it"])
+                if evaluator is not None:
+                    writer.add_scalar("Eval/queued_jobs", len(evaluator.pending), kwargs["it"])
+            stop_reason = controller.stop_reason(elapsed, evaluation_healthy=(evaluator is not None and not evaluator.describe()["failed"]))
+            if stop_reason is not None:
+                raise TrainingStopped(stop_reason)
             if steps_per_env is not None:
                 remaining = steps_per_env - sampled_ticks
                 if 0 < remaining < runner.cfg["num_steps_per_env"]:
@@ -113,8 +136,11 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
 
         runner.logger.log = on_update
         try:
-            runner.learn(iterations)
-            if steps_per_env is not None and sampled_ticks != steps_per_env:
+            try:
+                runner.learn(iterations)
+            except TrainingStopped:
+                runner.save(str(output / "checkpoint.pt"), it=runner.current_learning_iteration, last_model=True)
+            if steps_per_env is not None and stop_reason is None and sampled_ticks != steps_per_env:
                 raise RuntimeError(f"sampled {sampled_ticks} ticks instead of {steps_per_env}")
             if not all(bool(torch.isfinite(p).all()) for p in runner.alg.policy.parameters()):
                 raise FloatingPointError("non-finite policy parameters")
@@ -142,6 +168,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                 "teacher_envs": runner.alg.teacher_num_envs,
                 "student_envs": runner.alg.student_num_envs,
                 "last_losses": last_losses, "resume": resume,
+                "stop_reason": stop_reason or "budget",
                 "evaluation": evaluator.describe() if evaluator is not None else None,
             }
             if self_play is not None:

@@ -6,4 +6,8 @@ dist/
 .venv/
 .pytest_cache/
 outputs/
-doc/
+doc/*
+!doc/rl_train_log.md
+!doc/rl_train_figures/
+doc/rl_train_figures/*
+!doc/rl_train_figures/*.png
