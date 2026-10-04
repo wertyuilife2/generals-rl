@@ -145,7 +145,7 @@ def demos(checkpoint, report, output, *, render=False):
     states = [generate_map(map_config, spec.map_seed) for spec in specs]
     # Obtain feature shapes through the task composition, including future MDP changes.
     with GeneralsTask(replace(task, backend="cpu", device="cpu", num_envs=1,
-                              threads=1, opponent="wait")) as example:
+                              threads=1, opponent="wait", map_pool_size=0)) as example:
         observations = TensorDict(example.get_observations(), batch_size=[1], device="cpu")
         policy = _load_student(checkpoint, config, observations, "cpu")
     names = {spec.game_id: f"{spec.opponent}_{game['outcome']}" for spec, game in zip(specs, chosen)}

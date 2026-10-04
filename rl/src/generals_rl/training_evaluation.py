@@ -179,6 +179,8 @@ class PeriodicEvaluator:
                 for key in ("win_rate", "decisive_win_rate", "draw_rate", "wins", "losses", "draws", "mean_ticks"):
                     if metrics[key] is not None:
                         self.writer.add_scalar(f"Eval/{name}/{key}", metrics[key], job["iteration"])
+                for key, value in metrics.get("action_metrics", {}).items():
+                    self.writer.add_scalar(f"Eval/{name}/action/{key}", value, job["iteration"])
             self.writer.add_scalar("Eval/environment_steps", job["environment_steps"], job["iteration"])
             self.writer.add_scalar("Eval/snapshot_id", job["snapshot_id"], job["iteration"])
             self.writer.add_scalar("Eval/worker_seconds", job["worker_seconds"], job["iteration"])

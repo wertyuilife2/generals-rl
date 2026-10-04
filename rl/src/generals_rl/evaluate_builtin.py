@@ -26,6 +26,7 @@ from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.state import Action, MoveResult
 from rsl_rl.modules import ActorCriticMoECTS
+from rsl_rl.utils import resolve_callable
 
 from .mdp import (ActionMetrics, GameBatch, LocalObservationEncoder,
                   ObservationHistory, make_action_space)
@@ -121,15 +122,16 @@ def _local_inputs(batch, player_ids, encoder, history, action_space):
 def _load_student(checkpoint, config, example_obs, device):
     policy_config = deepcopy(config["runner"]["policy"])
     class_name = policy_config.pop("class_name")
-    if class_name not in ("ActorCriticMoECTS", "rsl_rl.modules.ActorCriticMoECTS"):
-        raise ValueError("built-in evaluation currently requires ActorCriticMoECTS")
+    policy_class = resolve_callable(class_name)
+    if not isinstance(policy_class, type) or not issubclass(policy_class, ActorCriticMoECTS):
+        raise ValueError("built-in evaluation requires an ActorCriticMoECTS-compatible policy")
     if policy_config.get("action_distribution") != "categorical":
         raise ValueError("Generals built-in evaluation requires categorical encoded actions")
     # Construction only inspects feature dimensions. Use an all-zero placeholder
     # for the critic shape; no true privileged map is needed to load the student.
     shape_obs = example_obs.clone()
     shape_obs["critic"] = torch.zeros_like(example_obs["single_obs"])
-    policy = ActorCriticMoECTS(
+    policy = policy_class(
         shape_obs, deepcopy(config["runner"]["obs_groups"]),
         example_obs["action_mask"].shape[-1], **policy_config,
     ).to(device)

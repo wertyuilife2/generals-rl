@@ -81,6 +81,10 @@ class TrainingEvaluationTests(unittest.TestCase):
                 self.assertEqual(logged[0].step, 9)
                 metrics = report["overall"] if kind == "overall" else report["by_ai"][kind]
                 self.assertAlmostEqual(logged[0].value, metrics["win_rate"])
+                for key, value in metrics["action_metrics"].items():
+                    action = events.Scalars(f"Eval/{kind}/action/{key}")
+                    self.assertEqual(action[0].step, 9)
+                    self.assertAlmostEqual(action[0].value, value, places=5)
             jobs = json.loads((output / "evaluations/index.json").read_text())["jobs"]
             self.assertEqual([job["status"] for job in jobs], ["completed"])
             # The independent process must not consume learner RNG, update its

@@ -169,7 +169,8 @@ class OnPolicyRunnerCTS:
         saved_dict = {
             "model_state_dict": self.alg.policy.state_dict(),
             "optimizer_state_dict": self.alg.optimizer.state_dict(),
-            "optimizer_stu_enc_state_dict": self.alg.optimizer_stu_enc.state_dict(),
+            "optimizer_stu_enc_state_dict": (self.alg.optimizer_stu_enc.state_dict()
+                                             if self.alg.optimizer_stu_enc is not None else None),
             "iter": self.current_learning_iteration,
             "infos": infos,
         }
@@ -269,7 +270,8 @@ class OnPolicyRunnerCTS:
             # Algorithm optimizer
             self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
             # Student encoder optimizer
-            self.alg.optimizer_stu_enc.load_state_dict(loaded_dict["optimizer_stu_enc_state_dict"])
+            if self.alg.optimizer_stu_enc is not None:
+                self.alg.optimizer_stu_enc.load_state_dict(loaded_dict["optimizer_stu_enc_state_dict"])
             # RND optimizer if used
             if self.alg_cfg["rnd_cfg"]:
                 self.alg.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
@@ -382,12 +384,16 @@ class OnPolicyRunnerCTS:
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
         ).to(self.device)
 
+        alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
+
         # Initialize the storage
         categorical = actor_critic.action_distribution == "categorical"
         storage = RolloutStorageCTS(
             "rl",
             self.env.num_envs,
-            MoECTS.teacher_environment_count(self.env.num_envs, self.alg_cfg["teacher_env_ratio"]),
+            getattr(alg_class, "teacher_environment_count", MoECTS.teacher_environment_count)(
+                self.env.num_envs, self.alg_cfg["teacher_env_ratio"]
+            ),
             self.cfg["num_steps_per_env"],
             obs,
             [1] if categorical else [self.env.num_actions],
@@ -395,10 +401,10 @@ class OnPolicyRunnerCTS:
             distribution_shape=[self.env.num_actions],
             action_dtype=torch.long if categorical else torch.float32,
             store_action_std=not categorical,
+            store_action_mean=getattr(alg_class, "requires_old_distribution", True),
         )
 
         # Initialize the algorithm
-        alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
         alg: MoECTS = alg_class(
             actor_critic, storage, self.env.num_envs, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )

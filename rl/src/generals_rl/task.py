@@ -28,6 +28,7 @@ class TaskConfig:
     mountain_density: float = 0.1
     city_density: float = 0.05
     productive_actions: bool = False
+    map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
@@ -42,6 +43,8 @@ class TaskConfig:
             raise ValueError("learner seat is out of range")
         if not isinstance(self.productive_actions, bool):
             raise TypeError("productive_actions must be boolean")
+        if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
+            raise ValueError("map_pool_size must be a nonnegative integer")
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,15 @@ class GeneralsTask:
             raise ValueError("injected backend dimensions do not match TaskConfig")
         if self.backend.unwrapped.auto_reset:
             raise ValueError("task requires simulator auto_reset=False")
+        self.map_sampler = None
+        if config.map_pool_size:
+            from .map_sampling import MapSampler
+            self.map_sampler = MapSampler(
+                self.backend, MapConfig(config.width, config.height, config.players,
+                                        config.mountain_density, config.city_density),
+                config.map_pool_size, seed=config.seed)
+            # Choose the first maps before any history/opponent/episode state.
+            self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
         self.action_metrics = ActionMetrics(config.num_envs, self.device)
         self.observation_encoder = observation_encoder or LocalObservationEncoder(config.max_episode_steps)
@@ -129,7 +141,11 @@ class GeneralsTask:
     def reset(self, mask=None, *, rotate=False):
         if mask is None:
             mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-        self.backend.reset(self._backend_mask(mask))
+        backend_mask = self._backend_mask(mask)
+        if self.map_sampler is None:
+            self.backend.reset(backend_mask)
+        else:
+            self.map_sampler.reset(backend_mask)
         if rotate and self.config.rotate_seats:
             self.player_ids[mask] = (self.player_ids[mask] + 1) % self.config.players
         self.episode_length_buf[mask] = 0
@@ -197,6 +213,7 @@ class GeneralsTask:
 
     def close(self):
         self.backend.close()
+        self.map_sampler = None
 
     def __enter__(self):
         return self

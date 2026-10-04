@@ -64,6 +64,8 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
 | `cts.py` | RSL VecEnv/TensorDict 适配与算法配置 |
+| `student_ppo.py` | 可选的全学生 PPO；复用原版 PPO 更新，学生获得任务梯度 |
+| `map_sampling.py` | 回合重置时从独立随机地图池抽图 |
 | `opponents.py`、`self_play.py` | 冻结历史 student、采样及局内对手生命周期 |
 | `self_play_training.py` | CTS 模型工厂和快照发布 |
 | `evaluate_builtin.py`、`training_evaluation.py` | 完整赛程对战与训练期间的评估调度 |
@@ -89,6 +91,13 @@ CPU 默认 episode 时限 512 tick；GPU 配置为 1024 tick，gamma 从 0.99 �
 MoE CTS 默认 teacher/student lane 比例 0.75/0.25，32 tick rollout、4 epoch。
 先做 PPO，再做 student latent distillation 和 expert load balance；网络沿用 vendor 的 dense MoE。
 CPU 默认 4 minibatch，GPU 配置 64；两阶段复用同一批采样数据及索引计划。
+`rl/configs/v3.json` 使用 student-only PPO：所有 lane 由局部 student 采样，
+一个 Adam 更新 student/actor/critic，privileged critic 保留；取消 latent 蒸馏。
+该适配支持 fixed LR，且不保存未使用的旧动作概率，16k×32 额外节省约 1.27 GiB。
+
+`task.map_pool_size=65536` 可启用地图重采样；各回合结束时换图，正在进行的对局保持原地图。
+生成和采样使用由 task.seed 分流的独立 RNG；0 为关闭。
+模块集中适配 native backend 的初始状态缓存，重置保留底层指针。
 
 后续 MCTS 可复用 MDP 组件和分支模拟器，策略先验可通过 `action_probabilities()` 获取。
 当前尚未实现 MCTS 的 selection/backup 或搜索目标训练；局部视野搜索还需要自行定义 belief。
