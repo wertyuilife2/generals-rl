@@ -30,6 +30,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 .venv/bin/python -m generals_rl.train --config rl/configs/gpu.json \
   --steps-per-env 1000000 --output outputs/moe_cts/gpu_run
 
+# v9：随机初始化的轻量 CNN，纯历史模型 self-play；每轮最多 3 小时
+.venv/bin/python -m generals_rl.train --config rl/configs/v9.json --replace-policy \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v9/train
+
 # 在新目录续训：模型、两个 optimizer 和可用历史池恢复，对局和 RNG 重新开始
 .venv/bin/python -m generals_rl.train --resume outputs/moe_cts/baseline/checkpoint.pt \
   --iterations 1000 --output outputs/moe_cts/resumed
@@ -83,7 +87,7 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 `task.combat_features=true` 在 9×9、1v1 中用两张战斗特征替换重复的相对身份平面，维度保持 985。
 特征分别是可见敌军四邻域中下一次增长后最大留一攻击兵力，以及自身守军/一次增援与威胁的差值。
 隐藏兵力在计算前清零；这些特征表示潜在动作，不是对联合动作的预测。训练、历史对手和评估共用 encoder 工厂。
-旧权重应先迁移并以新 optimizer/历史池 warm start，禁止直接 resume：
+以下迁移命令用于复现 v4 的历史实验。v9 起的方案比较从随机初始化训练，无需迁移：
 
 ```bash
 .venv/bin/python rl/tools/migrate_combat_observations.py \
@@ -104,10 +108,9 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 `--king-threat-distance` 选项：原 seat-P1 权重折叠到 seat-P0 和 bias，新距离列为零。
 只恢复权重，新建 optimizer 和历史池；浮点舍入（尤其 TF32）可能造成微小差异。
 
-v8 可选 `generals_rl.spatial_ppo.LightSpatialPPOPolicy`：actor 使用四帧局部地图、最新公共特征和动作 mask，
+v8/v9 使用 `generals_rl.spatial_ppo.LightSpatialPPOPolicy`：actor 使用四帧局部地图、最新公共特征和动作 mask，
 两层16通道卷积输出原649动作；critic 使用独立卷积网络处理特权观测。其结构与 dense 权重不兼容，
-可先用 `rl/tools/distill_spatial.py --light-cnn` 从冻结 student 和历史池进行流式 KL/value 初始化，
-再从新 optimizer 和新 CNN 历史池开始 PPO。蒸馏不使用 baseline overlay，固定 probe 包含在训练数据中。
+v9 直接随机初始化。下面的蒸馏命令仅用于复现 v8 的历史实验；新的方案比较禁止蒸馏、warm start 和旧模型初始化。
 
 ```bash
 .venv/bin/python rl/tools/distill_spatial.py --light-cnn --device cuda:0 \
@@ -135,12 +138,9 @@ v5及后续配置使用 `potential_gamma=.995`：将统计差分替换为
 候选淘汰后，正在进行的对局继续持有旧模型；不同座位各自维护历史，对手采样使用独立 RNG。
 独立 MDP 调试可用 random/wait 对手。
 
-`baseline_league` 可在最多2%的固定环境中混入原版 aggressive，默认关闭；其余使用历史 self-play。
-例如 `{"baseline_envs":128,"seed":19000043,"native_candidates":true}` 用于16,384环境。
-原AI保持每局记忆、随机数和结果反馈；只有候选打分可选用等价C++加速（需要g++），不修改评估AI。
-`batched_observations=true` 可批量构造原版local Observation，只从GPU读取选中的环境行；
-默认关闭。观测类型、整数公共统计、不可变数组和原AI决策/反馈接口保持一致。
-TensorBoard `League/` 分别记录两类对手的胜率、决策数及host开销；训练内胜率不代替独立评估。
+训练对手只使用历史 student；原版 baseline AI 仅用于独立评估和录像。
+v6–v8 的混合对手训练实现已移除，旧 `baseline_league` 配置会明确报错。
+复现这些历史版本时使用对应 Git commit 或该版本已冻结的 `source/`，勿直接运行旧配置。
 
 MoE CTS 默认 teacher/student lane 比例 0.75/0.25，32 tick rollout、4 epoch。
 先做 PPO，再做 student latent distillation 和 expert load balance；网络沿用 vendor 的 dense MoE。
@@ -187,6 +187,8 @@ Vendor 回归对照旧缓存流程，验证 Normal/Categorical 的损失、参�
 ## 训练版本迭代
 
 `codex_dev` 上的 v1/v2/… 配置、结果与曲线记录在 [训练日志](../doc/rl_train_log.md)。
+v9 起每个方案均从随机权重、新 optimizer、新历史池训练，不传 `--warm-start` 或 `--resume`；
+所有版本使用相同训练种子和选模赛程作开发对比，最终候选另用未使用的随机种子复核。
 `--warm-start PATH` 只加载完整 checkpoint 或快照中的模型权重，从新 optimizer、迭代 0 和新历史池开始；
 配置使用本次 JSON 覆盖默认值。`--resume` 则继承原运行配置并恢复 optimizer 和历史池，二者互斥。
 可用 `matmul_precision=high` 启用本轮 float32 矩阵乘法加速，默认精度沿用进程设置。

@@ -83,7 +83,6 @@ def plot(scalars, evaluations, output):
             x, y = zip(*sorted(diagnostic))
             axes[0, 0].plot(x, np.asarray(y) * 100, "--o", color=f"C{index}", markersize=3,
                            label=f"{kind} (reused diagnostic)")
-    axes[0, 0].axhline(80, color="black", linestyle="--", linewidth=1)
     axes[0, 0].set(title="Student vs built-in AIs", ylabel="Wins / all games (%)", ylim=(0, 100))
     if axes[0, 0].get_legend_handles_labels()[0]:
         axes[0, 0].legend(fontsize=7, ncol=2)

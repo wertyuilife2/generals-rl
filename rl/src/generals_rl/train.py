@@ -16,7 +16,6 @@ import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
 
 from .config import merge_config, seed_everything, task_config
-from .baseline_league import BaselineLeagueConfig, BaselineLeagueOpponent, make_league_opponent
 from .cts import GeneralsCTSVecEnv, runner_config
 from .self_play_training import SelfPlayConfig, prepare_self_play
 from .task import GeneralsTask, TaskConfig
@@ -40,6 +39,9 @@ def _matmul_precision(precision):
 
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
     started = perf_counter()
+    if "baseline_league" in config:
+        raise ValueError("baseline_league training has been removed; use pure historical self-play. "
+                         "Replay legacy v6-v8 experiments with their frozen source.")
     if resume is not None and warm_start is not None:
         raise ValueError("resume and warm_start are mutually exclusive")
     precision = config.get("matmul_precision")
@@ -49,8 +51,6 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
-    league_settings = BaselineLeagueConfig(**config.get("baseline_league", {}))
-    league_settings.validate_task(settings)
     potential_gamma = settings.reward.potential_gamma
     if potential_gamma is not None:
         algorithm_gamma = config["runner"]["algorithm"].get("gamma")
@@ -97,8 +97,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     last_losses = None
     stop_reason = None
     warm_source = None
-    opponent = make_league_opponent(settings, league_settings)
-    with _matmul_precision(precision), GeneralsTask(settings, opponent=opponent) as task:
+    with _matmul_precision(precision), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output), str(task.device))
         if resume:
@@ -165,9 +164,6 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             elapsed = perf_counter() - started
             if runner.logger.writer is not None:
                 writer = runner.logger.writer
-                if isinstance(task.opponent, BaselineLeagueOpponent):
-                    for name, value in task.opponent.take_log_metrics().items():
-                        writer.add_scalar(name, value, kwargs["it"])
                 writer.add_scalar("Perf/environment_steps", sampled_ticks * task.num_envs, kwargs["it"])
                 writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_fps", sampled_ticks * task.num_envs / elapsed, kwargs["it"])
@@ -227,8 +223,6 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             }
             if warm_source is not None:
                 summary["warm_start"] = warm_source
-            if isinstance(task.opponent, BaselineLeagueOpponent):
-                summary["baseline_league"] = task.opponent.describe()
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,

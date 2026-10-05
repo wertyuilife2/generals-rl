@@ -1,7 +1,5 @@
 """Opt-in light CNN contracts; reuse the existing bounded distillation/PPO CLI."""
 from contextlib import redirect_stdout
-from copy import deepcopy
-from hashlib import sha256
 import io
 import json
 from pathlib import Path
@@ -13,14 +11,17 @@ from unittest.mock import patch
 
 import torch
 from tensordict import TensorDict
+from rsl_rl.runners import OnPolicyRunnerCTS
 from rsl_rl.utils import resolve_callable
 
 from generals_rl.cts import runner_config
 from generals_rl.config import task_config
 from generals_rl.evaluate_builtin import evaluate_builtin
+from generals_rl.opponents import SelfPlayOpponent
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.spatial_ppo import LightSpatialPPOPolicy, SpatialPPOPolicy, policy_config
 from generals_rl.task import GeneralsTask
+from generals_rl.train import train
 from test_spatial_ppo import GROUPS, ROOT, cli_config, observations
 from test_spatial_distillation import tool
 from rl_test_utils import assert_nested_equal
@@ -136,99 +137,65 @@ class LightSpatialPPOTests(unittest.TestCase):
             evaluation=evaluate_builtin(root/'resume/checkpoint.pt',maps_per_ai=1,max_ticks=3,batch_size=8,cpu_threads=1)
             self.assertEqual(evaluation['completed_games'],8)
 
-    def test_king_distance_local_labels_and_formal_batched_league_survive_distill(self):
-        cfg=cli_config()
-        cfg['task'].update(num_envs=100,king_threat_distance=True)
-        cfg['runner']=runner_config(hidden_dim=16,expert_num=2,rollout_steps=2,mini_batches=2)
-        cfg['runner']['policy'].update(class_name='generals_rl.student_ppo.StudentPPOPolicy',
-                                      value_potential_offset=True,latent_dim=8)
-        cfg['runner']['algorithm'].update(class_name='generals_rl.student_ppo.StudentPPO',teacher_env_ratio=0,
-                                         gamma=.995,load_balance_coef=0,schedule='fixed',desired_kl=None)
-        cfg['self_play'].update(pool_size=8,snapshot_interval=50,stochastic=True,seed=917,sampling='uniform')
-        cfg['evaluation']={'enabled':False}
-        cfg['baseline_league']={'baseline_envs':1,'seed':918,'native_candidates':True,'batched_observations':True}
-        semantics='combat_p2_985_v1_king_threat_distance_v1'
+    def test_cold_self_play_seeds_exact_random_policy_without_baseline_training(self):
+        cfg = cli_config()
+        cfg['task']['king_threat_distance'] = True
+        cfg['runner'] = runner_config(rollout_steps=2, mini_batches=2)
+        cfg['runner']['policy'] = policy_config(value_potential_offset=True, light_cnn=True)
+        cfg['runner']['algorithm'].update(
+            class_name='generals_rl.student_ppo.StudentPPO', teacher_env_ratio=0,
+            gamma=.995, load_balance_coef=0, schedule='fixed', desired_kl=None)
+        cfg['self_play'].update(pool_size=3, stochastic=True, seed=917, sampling='uniform')
+        cfg['evaluation'] = {'enabled': False}
+        initial = {}
+
+        def capture_runner(env, *args, **kwargs):
+            self.assertIs(type(env.task.opponent), SelfPlayOpponent)
+            self.assertIsNone(env.task.opponent.pool)
+            runner = OnPolicyRunnerCTS(env, *args, **kwargs)
+            self.assertIs(type(runner.alg.policy), LightSpatialPPOPolicy)
+            self.assertEqual(runner.alg.optimizer.state, {})
+            initial.update({name: value.detach().clone()
+                            for name, value in runner.alg.policy.state_dict().items()})
+            return runner
+
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            root=Path(directory); source=root/'source'; source.mkdir()
-            with GeneralsTask(task_config(cfg['task'])) as task:
-                obs=TensorDict(task.get_observations(),[100])
-                self.assertEqual(task.observation_encoder.semantics,semantics)
-                teacher=tool.teacher_factory(cfg,obs)().eval().requires_grad_(False)
-                original=teacher.action_probabilities
-                def local_only(inputs,**kwargs):
-                    self.assertEqual(set(inputs.keys()),{'policy','single_obs','action_mask'})
-                    self.assertFalse(kwargs['is_teacher'])
-                    return original(inputs,**kwargs)
-                with patch.object(teacher,'action_probabilities',side_effect=local_only):
-                    labels,values=tool.teacher_labels(teacher,obs)
-                teacher.value_potential_offset=False
-                torch.testing.assert_close(values,teacher.evaluate(obs)-obs['critic_potential'])
-                teacher.value_potential_offset=True
-                runner=SimpleNamespace(alg=SimpleNamespace(policy=teacher),cfg={'obs_groups':cfg['runner']['obs_groups']},
-                                       env=SimpleNamespace(get_observations=lambda:obs))
-                prepare_self_play(task,runner,cfg,source)
-                torch.save({'model_state_dict':teacher.state_dict(),'optimizer_state_dict':{'sentinel':True}},source/'checkpoint.pt')
-            (source/'run_config.json').write_text(json.dumps(cfg))
-            immutable={p.relative_to(source).as_posix():sha256(p.read_bytes()).hexdigest()
-                       for p in source.rglob('*') if p.is_file()}
-            def run(arguments):
-                result=subprocess.run([sys.executable,*map(str,arguments)],cwd=ROOT,capture_output=True,text=True,timeout=120)
-                self.assertEqual(result.returncode,0,result.stdout+result.stderr)
-            initial=root/'light'
-            run([ROOT/'rl/tools/distill_spatial.py','--checkpoint',source/'checkpoint.pt','--output',initial,
-                 '--light-cnn','--device','cpu','--num-envs','4','--batch-size','2','--ticks','4',
-                 '--max-teacher-models','1','--time-budget','30','--no-tensorboard'])
-            generated=json.loads((initial/'run_config.json').read_text())
-            report=json.loads((initial/'distillation_report.json').read_text())
-            self.assertEqual(generated['task'],cfg['task'])
-            self.assertEqual(generated['self_play'],cfg['self_play'])
-            self.assertEqual(generated['baseline_league'],cfg['baseline_league'])
-            self.assertEqual(generated['runner']['algorithm'],cfg['runner']['algorithm'])
-            self.assertEqual((report['ticks'],report['samples'],report['Adam_steps']),(4,16,8))
-            self.assertEqual(report['observation_semantics'],semantics)
-            self.assertEqual(report['actor_inputs'],['policy','single_obs','action_mask'])
-            self.assertTrue(report['value_potential_offset'])
-            self.assertEqual(report['limits']['saved_datasets'],0)
-            self.assertEqual({p.relative_to(source).as_posix():sha256(p.read_bytes()).hexdigest()
-                              for p in source.rglob('*') if p.is_file()},immutable)
-            initial_state=torch.load(initial/'checkpoint.pt',weights_only=True,map_location='cpu')
-            self.assertEqual(set(initial_state),{'model_state_dict','migration'})
-            light_class='generals_rl.spatial_ppo.LightSpatialPPOPolicy'
-            initial_pool=json.loads((initial/'history_pool/manifest.json').read_text())
-            self.assertEqual(initial_pool['policy_spec']['policy_class'],light_class)
-            self.assertEqual(initial_pool['policy_spec']['encoder_semantics'],semantics)
-            source_pool=json.loads((source/'history_pool/manifest.json').read_text())
-            self.assertNotEqual(initial_pool['policy_spec_sha256'],source_pool['policy_spec_sha256'])
-            for key,replacement in (('policy_class',source_pool['policy_spec']['policy_class']),
-                                    ('encoder_semantics','combat_p2_985_v1')):
-                incompatible=deepcopy(initial_pool['policy_spec']); incompatible[key]=replacement
-                with self.subTest(key=key), self.assertRaisesRegex(ValueError,'policy_spec'):
-                    tool.ReadOnlyTeacherPool(initial/'history_pool',factory=lambda:None,
-                                             signature=incompatible,device='cpu',max_models=1,scratch=root)
-            run(['-m','generals_rl.train','--config',initial/'run_config.json','--replace-policy',
-                 '--warm-start',initial/'checkpoint.pt','--iterations','1','--no-eval','--output',root/'ppo'])
-            saved=torch.load(root/'ppo/checkpoint.pt',weights_only=True,map_location='cpu')
-            self.assertEqual(saved['iter'],0)
-            self.assertEqual({int(v['step']) for v in saved['optimizer_state_dict']['state'].values()},{8})
-            self.assertIsNone(saved['optimizer_stu_enc_state_dict'])
-            seed=torch.load(root/'ppo/history_pool/snapshot_00000000.pt',weights_only=True,map_location='cpu')
-            assert_nested_equal(self,seed['model_state_dict'],initial_state['model_state_dict'])
-            ppo_pool=json.loads((root/'ppo/history_pool/manifest.json').read_text())
-            self.assertEqual(ppo_pool['policy_spec_sha256'],initial_pool['policy_spec_sha256'])
-            summary=json.loads((root/'ppo/summary.json').read_text())
-            self.assertTrue(summary['baseline_league']['batched_observations_active'])
-            self.assertEqual(summary['baseline_league']['config'],cfg['baseline_league'])
-            self.assertEqual(summary['baseline_league']['native_fallback_calls'],0)
-            run(['-m','generals_rl.train','--resume',root/'ppo/checkpoint.pt','--iterations','1',
-                 '--no-eval','--output',root/'resume'])
-            resumed=torch.load(root/'resume/checkpoint.pt',weights_only=True,map_location='cpu')
-            self.assertEqual(resumed['iter'],1)
-            self.assertEqual({int(v['step']) for v in resumed['optimizer_state_dict']['state'].values()},{16})
-            resumed_pool=json.loads((root/'resume/history_pool/manifest.json').read_text())
-            self.assertEqual(resumed_pool['policy_spec_sha256'],initial_pool['policy_spec_sha256'])
-            self.assertIsNotNone(resumed_pool['resume_source'])
-            evaluation=evaluate_builtin(root/'resume/checkpoint.pt',maps_per_ai=1,max_ticks=3,batch_size=8,cpu_threads=1)
-            self.assertEqual(evaluation['completed_games'],8)
+            root = Path(directory)
+            # Evaluation keeps the original controllers, but collecting training
+            # rollouts must never construct one, even with threat observations.
+            with patch('generals_rl.train.OnPolicyRunnerCTS', side_effect=capture_runner), \
+                    patch('generals.controllers.make_controllers', side_effect=AssertionError('baseline training')), \
+                    patch('generals_rl.evaluate_builtin.make_controllers', side_effect=AssertionError('baseline training')):
+                summary = train(cfg, root / 'cold', iterations=2)
+            seed = torch.load(root / 'cold/history_pool/snapshot_00000000.pt',
+                              weights_only=True, map_location='cpu')
+            assert_nested_equal(self, seed['model_state_dict'], initial)
+            self.assertEqual(seed['source'], {'kind': 'random_initial_policy'})
+            manifest = json.loads((root / 'cold/history_pool/manifest.json').read_text())
+            self.assertEqual(manifest['policy_spec']['encoder_semantics'],
+                             'combat_p2_985_v1_king_threat_distance_v1')
+            self.assertIsNone(manifest['resume_source'])
+            self.assertEqual(summary['self_play']['pool_ids'], [0, 1, 2])
+            self.assertGreaterEqual(summary['self_play']['episode_assignments'], 4)
+            self.assertEqual((summary['teacher_envs'], summary['student_envs']), (0, 4))
+            self.assertIsNone(summary['resume'])
+            self.assertNotIn('warm_start', summary)
+            self.assertNotIn('baseline_league', summary)
+            saved = torch.load(root / 'cold/checkpoint.pt', weights_only=True, map_location='cpu')
+            self.assertEqual({int(v['step']) for v in saved['optimizer_state_dict']['state'].values()}, {16})
+            self.assertTrue(any(not torch.equal(initial[name], saved['model_state_dict'][name])
+                                for name in initial))
+            evaluation = evaluate_builtin(root / 'cold/checkpoint.pt', maps_per_ai=1,
+                                          max_ticks=3, batch_size=8, cpu_threads=1)
+            self.assertEqual(evaluation['completed_games'], 8)
+
+    def test_legacy_baseline_config_rejected_before_any_training_side_effect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'run'
+            for league in ({}, {'baseline_envs': 0}, {'baseline_envs': 128}):
+                with self.subTest(league=league), self.assertRaisesRegex(ValueError, 'frozen source'):
+                    train({'baseline_league': league}, output, iterations=1)
+                self.assertFalse(output.exists())
 
 
 if __name__=='__main__':
