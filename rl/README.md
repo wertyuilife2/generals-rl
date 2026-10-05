@@ -104,6 +104,25 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 `--king-threat-distance` 选项：原 seat-P1 权重折叠到 seat-P0 和 bias，新距离列为零。
 只恢复权重，新建 optimizer 和历史池；浮点舍入（尤其 TF32）可能造成微小差异。
 
+v8 可选 `generals_rl.spatial_ppo.LightSpatialPPOPolicy`：actor 使用四帧局部地图、最新公共特征和动作 mask，
+两层16通道卷积输出原649动作；critic 使用独立卷积网络处理特权观测。其结构与 dense 权重不兼容，
+可先用 `rl/tools/distill_spatial.py --light-cnn` 从冻结 student 和历史池进行流式 KL/value 初始化，
+再从新 optimizer 和新 CNN 历史池开始 PPO。蒸馏不使用 baseline overlay，固定 probe 包含在训练数据中。
+
+```bash
+.venv/bin/python rl/tools/distill_spatial.py --light-cnn --device cuda:0 \
+  --checkpoint outputs/moe_cts/iterations/v8/distill_source/checkpoint.pt \
+  --config outputs/moe_cts/iterations/v8/distill_source/run_config.json \
+  --teacher-pool outputs/moe_cts/iterations/v8/distill_source/history_pool \
+  --output outputs/moe_cts/iterations/v8/distillation
+.venv/bin/python -m generals_rl.train --config rl/configs/v8.json --replace-policy \
+  --warm-start outputs/moe_cts/iterations/v8/distillation/checkpoint.pt \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v8/train
+```
+
+`--replace-policy` 用完整配置替换 policy 子树，避免递归合并遗留 dense 专属参数。
+蒸馏只保存两个 CNN 权重文件、不保存观测数据集；正式训练仍按配置限制历史池、评估和 checkpoint 数量。
+
 逐 tick reward：`0.05*Δterritory + 0.2*Δcities + 0.001*Δarmy + win - loss - 0.001`。
 自然结束和时限截断分开处理；截断保留 reset 前的下一状态供 value bootstrap。
 CPU 默认 episode 时限 512 tick；GPU 配置为 1024 tick，gamma 从 0.99 覆盖为 0.995。

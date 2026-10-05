@@ -62,8 +62,9 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     if value_offset:
         from rsl_rl.utils import resolve_callable
         from .student_ppo import StudentPPOPolicy
+        policy_type = resolve_callable(config["runner"]["policy"]["class_name"])
         if (not settings.critic_potential or potential_gamma is None
-                or resolve_callable(config["runner"]["policy"]["class_name"]) is not StudentPPOPolicy):
+                or not isinstance(policy_type, type) or not issubclass(policy_type, StudentPPOPolicy)):
             raise ValueError("value_potential_offset requires StudentPPOPolicy, task.critic_potential and potential reward")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
@@ -248,6 +249,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="JSON overrides for task, runner, self_play and evaluation")
+    parser.add_argument("--replace-policy", action="store_true",
+                        help="replace runner.policy with the complete JSON subtree; preserve other recursive overrides")
     parser.add_argument("--backend", choices=("cpu", "gpu"))
     parser.add_argument("--device")
     parser.add_argument("--num-envs", type=int)
@@ -269,7 +272,15 @@ def main(argv=None):
                   "self_play": asdict(SelfPlayConfig()), "evaluation": asdict(TrainingEvalConfig()),
                   "torch_threads": 1}
     if args.config:
-        config = merge_config(config, json.loads(args.config.read_text()))
+        overrides = json.loads(args.config.read_text())
+        config = merge_config(config, overrides)
+        if args.replace_policy:
+            policy = overrides.get("runner", {}).get("policy")
+            if not isinstance(policy, dict) or "class_name" not in policy:
+                parser.error("--replace-policy requires --config with a complete runner.policy and class_name")
+            config["runner"]["policy"] = deepcopy(policy)
+    elif args.replace_policy:
+        parser.error("--replace-policy requires --config")
     for field in ("num_envs", "opponent", "seed", "backend", "device"):
         value = getattr(args, field)
         if value is not None:
