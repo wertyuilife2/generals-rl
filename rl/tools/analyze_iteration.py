@@ -70,18 +70,18 @@ def plot(scalars, evaluations, output):
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 9), layout="constrained")
-    for kind in KINDS:
+    for index, kind in enumerate(KINDS):
         points = [(e["iteration"], 100 * e["data"]["by_ai"][kind]["win_rate"])
                   for e in evaluations if e["iteration"] is not None]
         if not points:
             points = [(step, 100 * value) for step, value in scalars.get(f"Eval/{kind}/win_rate", [])]
         if points:
             x, y = zip(*sorted(points))
-            axes[0, 0].plot(x, y, label=kind)
+            axes[0, 0].plot(x, y, color=f"C{index}", label=kind)
         diagnostic = scalars.get(f"DiagnosticReuse/{kind}/win_rate", [])
         if diagnostic:
             x, y = zip(*sorted(diagnostic))
-            axes[0, 0].plot(x, np.asarray(y) * 100, "--o", markersize=3,
+            axes[0, 0].plot(x, np.asarray(y) * 100, "--o", color=f"C{index}", markersize=3,
                            label=f"{kind} (reused diagnostic)")
     axes[0, 0].axhline(80, color="black", linestyle="--", linewidth=1)
     axes[0, 0].set(title="Student vs built-in AIs", ylabel="Wins / all games (%)", ylim=(0, 100))
