@@ -19,3 +19,6 @@ generals-evaluate = "generals_rl.evaluate_builtin:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["generals_rl*"]
+
+[tool.setuptools.package-data]
+generals_rl = ["candidates.cpp"]

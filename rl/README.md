@@ -106,6 +106,11 @@ CPU 默认 episode 时限 512 tick；GPU 配置为 1024 tick，gamma 从 0.99 �
 候选淘汰后，正在进行的对局继续持有旧模型；不同座位各自维护历史，对手采样使用独立 RNG。
 独立 MDP 调试可用 random/wait 对手。
 
+`baseline_league` 可在最多2%的固定环境中混入原版 aggressive，默认关闭；其余使用历史 self-play。
+例如 `{"baseline_envs":128,"seed":19000043,"native_candidates":true}` 用于16,384环境。
+原AI保持每局记忆、随机数和结果反馈；只有候选打分可选用等价C++加速（需要g++），不修改评估AI。
+TensorBoard `League/` 分别记录两类对手的胜率、决策数及host开销；训练内胜率不代替独立评估。
+
 MoE CTS 默认 teacher/student lane 比例 0.75/0.25，32 tick rollout、4 epoch。
 先做 PPO，再做 student latent distillation 和 expert load balance；网络沿用 vendor 的 dense MoE。
 CPU 默认 4 minibatch，GPU 配置 64；两阶段复用同一批采样数据及索引计划。

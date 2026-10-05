@@ -186,6 +186,9 @@ class GeneralsTask:
         result = self.backend.step(submitted)
         # Check simulator overflow/numerical errors before using its outputs.
         self.backend.check_errors()
+        result_hook = getattr(self.opponent, "on_result", None)
+        if result_hook is not None:
+            result_hook(result, submitted, self.batch(), self.player_ids)
         batch = self.batch()
         raw_done = torch.as_tensor(result.done, device=self.device).clone()
         action_metrics = self.action_metrics.update(
