@@ -1,0 +1,69 @@
+{
+  "run_id": "v7",
+  "matmul_precision": "high",
+  "task": {
+    "width": 9,
+    "height": 9,
+    "players": 2,
+    "backend": "gpu",
+    "device": "cuda:0",
+    "num_envs": 16384,
+    "max_episode_steps": 1024,
+    "seed": 20261011,
+    "productive_actions": true,
+    "map_pool_size": 65536,
+    "combat_features": true,
+    "reward": {
+      "potential_gamma": 0.995
+    },
+    "critic_potential": true,
+    "king_threat_distance": true
+  },
+  "runner": {
+    "num_steps_per_env": 32,
+    "save_interval": 2000,
+    "algorithm": {
+      "num_mini_batches": 64,
+      "gamma": 0.995,
+      "schedule": "fixed",
+      "learning_rate": 0.0001,
+      "desired_kl": null,
+      "class_name": "generals_rl.student_ppo.StudentPPO",
+      "teacher_env_ratio": 0,
+      "load_balance_coef": 0,
+      "student_encoder_learning_rate": 0.0001
+    },
+    "policy": {
+      "class_name": "generals_rl.student_ppo.StudentPPOPolicy",
+      "value_potential_offset": true
+    }
+  },
+  "self_play": {
+    "pool_size": 8,
+    "snapshot_interval": 50,
+    "seed": 120261011
+  },
+  "evaluation": {
+    "enabled": true,
+    "every_n_snapshots": 2,
+    "maps_per_ai": 100,
+    "batch_size": 128,
+    "max_ticks": 2000,
+    "seed": 271828,
+    "cpu_threads": 1,
+    "keep_snapshots": 3
+  },
+  "training_control": {
+    "max_seconds": 7200,
+    "min_seconds": 3600,
+    "plateau_evaluations": 8,
+    "min_improvement": 0.02,
+    "keep_checkpoints": 3
+  },
+  "baseline_league": {
+    "baseline_envs": 128,
+    "seed": 19000044,
+    "native_candidates": true,
+    "batched_observations": true
+  }
+}

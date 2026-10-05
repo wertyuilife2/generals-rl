@@ -14,6 +14,7 @@ class BaselineLeagueConfig:
     baseline_envs: int = 0
     seed: int = 19000042
     native_candidates: bool = False
+    batched_observations: bool = False
 
     def __post_init__(self):
         if (isinstance(self.baseline_envs, bool) or not isinstance(self.baseline_envs, int)
@@ -23,6 +24,8 @@ class BaselineLeagueConfig:
             raise ValueError("baseline_league.seed must be a nonnegative integer")
         if not isinstance(self.native_candidates, bool):
             raise TypeError("baseline_league.native_candidates must be boolean")
+        if not isinstance(self.batched_observations, bool):
+            raise TypeError("baseline_league.batched_observations must be boolean")
 
     def validate_task(self, task):
         if not self.baseline_envs:
@@ -55,7 +58,12 @@ class BaselineLeagueOpponent:
         self.historical, self.settings, self.num_envs = historical, settings, num_envs
         lanes = np.random.default_rng(settings.seed).choice(
             num_envs, settings.baseline_envs, replace=False).tolist()
-        self.bridge = OriginalBaselineBridge(sorted(lanes), kind="aggressive", seed=settings.seed)
+        if settings.batched_observations:
+            from .batched_local_observation import BatchedObservationBridge
+            self.bridge = BatchedObservationBridge(sorted(lanes), kind="aggressive", seed=settings.seed,
+                                                   batched_observations=True)
+        else:
+            self.bridge = OriginalBaselineBridge(sorted(lanes), kind="aggressive", seed=settings.seed)
         self.native = None
         if settings.native_candidates:
             # Optional dependency is imported/compiled only when explicitly on.
@@ -132,7 +140,8 @@ class BaselineLeagueOpponent:
         ticks = self.joint_ticks - self._logged_ticks
         self._logged_ticks = self.joint_ticks
         result = {"League/baseline_envs": self.settings.baseline_envs,
-                  "League/baseline_fraction": self.settings.baseline_envs / self.num_envs}
+                  "League/baseline_fraction": self.settings.baseline_envs / self.num_envs,
+                  "League/batched_observations_active": int(getattr(self.bridge, "batched_observations", False))}
         for index, (source, count) in enumerate((
                 ("aggressive", self.settings.baseline_envs),
                 ("historical", self.num_envs - self.settings.baseline_envs))):
@@ -153,6 +162,8 @@ class BaselineLeagueOpponent:
     def describe(self):
         rows = self.totals.detach().cpu().tolist()
         return {"config": asdict(self.settings), "fixed_lanes": list(self.bridge.lanes),
+                "bridge_class": type(self.bridge).__name__,
+                "batched_observations_active": bool(getattr(self.bridge, "batched_observations", False)),
                 "decision_timing": "joint_pre_growth_then_absolute_seat_order",
                 "baseline_implementation": "original generals.controllers.make_controllers aggressive",
                 "all_historical_inference_retained": True,

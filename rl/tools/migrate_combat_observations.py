@@ -11,8 +11,11 @@ def main(argv=None):
     parser.add_argument("--checkpoint", type=Path, required=True, help="original training checkpoint or frozen snapshot")
     parser.add_argument("--config", type=Path, help="source config; defaults to run_config.json beside the checkpoint")
     parser.add_argument("--output", type=Path, required=True, help="new directory for checkpoint.pt and run_config.json")
+    parser.add_argument("--king-threat-distance", action="store_true",
+                        help="fold seat-P1 into P0+bias; retain current local/combat map planes")
     args = parser.parse_args(argv)
-    report = migrate_checkpoint(args.checkpoint, args.output, config_path=args.config)
+    report = migrate_checkpoint(args.checkpoint, args.output, config_path=args.config,
+                                king_threat_distance=args.king_threat_distance)
     print(json.dumps(report, indent=2))
     return 0
 

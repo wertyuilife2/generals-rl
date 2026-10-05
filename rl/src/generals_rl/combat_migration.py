@@ -44,15 +44,9 @@ def _positive_int(value, name):
     return value
 
 
-def fold_identity_input_weights(state_dict, policy_config, obs_groups, *,
-                                history_length=4, players=2, width=9, height=9):
-    """Clone state and fold each frame's W10/W11 into W5/W6, then zero W10/W11.
-
-    In the original P2 encoder, identity planes 10/11 exactly equal self/enemy
-    planes 5/6. The new combat planes therefore have zero initial influence,
-    preserving the old function up to floating-point summation order. All other
-    tensors and the actor/critic latent prefixes are preserved exactly.
-    """
+def _dense_input_specs(state_dict, policy_config, obs_groups, *,
+                       history_length=4, players=2, width=9, height=9):
+    """Shared verified dense first-layer layout; never transform source tensors."""
     dimensions = tuple(_positive_int(value, name) for value, name in
                        ((players, "players"), (width, "width"), (height, "height")))
     if dimensions != (2, 9, 9):
@@ -91,6 +85,15 @@ def fold_identity_input_weights(state_dict, policy_config, obs_groups, *,
                 not weight.is_floating_point() or weight.layout != torch.strided):
             raise ValueError(f"unsupported input shape for {key}: expected width {expected}")
         specs[key] = (frames, prefix)
+    return specs, latent_dim
+
+
+def fold_identity_input_weights(state_dict, policy_config, obs_groups, *,
+                                history_length=4, players=2, width=9, height=9):
+    """Fold duplicate identity planes W10/W11 into W5/W6, then zero W10/W11."""
+    specs, latent_dim = _dense_input_specs(
+        state_dict, policy_config, obs_groups, history_length=history_length,
+        players=players, width=width, height=height)
     result = OrderedDict((key, value.detach().clone()) for key, value in state_dict.items())
     if hasattr(state_dict, "_metadata"):
         result._metadata = deepcopy(state_dict._metadata)
@@ -139,7 +142,7 @@ def _validate_policy_state(weights, policy_config, history_length):
         raise ValueError("checkpoint weights overflow the configured policy dtype")
 
 
-def migrate_checkpoint(checkpoint, output_dir, *, config_path=None):
+def migrate_checkpoint(checkpoint, output_dir, *, config_path=None, king_threat_distance=False):
     """Write a new weights-only checkpoint and matching fresh-run configuration.
 
     Source training checkpoints and frozen snapshots are accepted. Neither
@@ -152,14 +155,28 @@ def migrate_checkpoint(checkpoint, output_dir, *, config_path=None):
         raise FileExistsError(f"migration output already exists: {output}; choose a new directory")
     config = json.loads(config_path.read_text())
     task, runner = config["task"], config["runner"]
-    if task.get("combat_features", False) is not False or config.get("observation_semantics") is not None:
+    if king_threat_distance and task.get("king_threat_distance", False) is not False:
+        raise ValueError("source already uses king threat distance")
+    base_semantics = COMBAT_SEMANTICS if task.get("combat_features", False) else "local_p2_985_v1"
+    if king_threat_distance and config.get("observation_semantics") not in (None, base_semantics):
+        raise ValueError("unsupported source observation semantics for king threat migration")
+    if not king_threat_distance and (task.get("combat_features", False) is not False or config.get("observation_semantics") is not None):
         raise ValueError("source must use the original identity observations; already-versioned input cannot be migrated")
     saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
     if not isinstance(saved, dict) or "model_state_dict" not in saved:
         raise ValueError("checkpoint must contain model_state_dict")
     if "migration" in saved:
-        raise ValueError("checkpoint has already been migrated")
-    weights, report = fold_identity_input_weights(
+        if not king_threat_distance:
+            raise ValueError("checkpoint has already been migrated")
+        migration = saved["migration"]
+        if not isinstance(migration, dict) or migration.get("observation_semantics") != base_semantics:
+            raise ValueError("checkpoint migration observation semantics must match source base observations")
+    if king_threat_distance:
+        from .king_threat_migration import fold_king_threat_input_weights
+        fold = fold_king_threat_input_weights
+    else:
+        fold = fold_identity_input_weights
+    weights, report = fold(
         saved["model_state_dict"], runner["policy"], runner["obs_groups"],
         history_length=task.get("history_length", 4), players=task.get("players", 2),
         width=task.get("width", 9), height=task.get("height", 9))
@@ -169,8 +186,14 @@ def migrate_checkpoint(checkpoint, output_dir, *, config_path=None):
                          "run_config": str(config_path),
                          "run_config_sha256": sha256(config_path.read_bytes()).hexdigest()}
     migrated_config = deepcopy(config)
-    migrated_config["task"]["combat_features"] = True
-    migrated_config["observation_semantics"] = COMBAT_SEMANTICS
+    if king_threat_distance:
+        migrated_config["task"]["king_threat_distance"] = True
+        from .config import task_config
+        from .mdp.observations import make_observation_encoder
+        report["observation_semantics"] = make_observation_encoder(task_config(migrated_config["task"])).semantics
+    else:
+        migrated_config["task"]["combat_features"] = True
+    migrated_config["observation_semantics"] = report["observation_semantics"]
     migrated_config["runner"]["policy"].setdefault("class_name", "ActorCriticMoECTS")
     # RSL resolves simple names only within rsl_rl; the student adapter lives here.
     if migrated_config["runner"]["policy"].get("class_name") == "StudentPPOPolicy":

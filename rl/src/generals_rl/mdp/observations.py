@@ -55,8 +55,48 @@ def make_observation_encoder(config):
     """Use one configured feature layout for learner, opponents and evaluation."""
     if config.combat_features:
         from .combat import CombatObservationEncoder
-        return CombatObservationEncoder(config.max_episode_steps)
-    return LocalObservationEncoder(config.max_episode_steps)
+        encoder = CombatObservationEncoder(config.max_episode_steps)
+    else:
+        encoder = LocalObservationEncoder(config.max_episode_steps)
+    return KingThreatDistanceEncoder(encoder) if config.king_threat_distance else encoder
+
+
+class KingThreatDistanceEncoder:
+    """Replace redundant seat-P1 with nearest observable mobile enemy / 16.
+
+    Count public next-tick growth, not hypothetical actions. This is geometric
+    potential only: ignores walls, routes, joint moves and absolute seat order.
+    Missing/dead/ambiguous own general and no mobile enemy use distance=1.
+    """
+    def __init__(self, base):
+        self.base = base
+        self.channels = base.channels
+        self.semantics = getattr(base, "semantics", "local_p2_985_v1") + "_king_threat_distance_v1"
+
+    def visibility(self, batch, player_ids):
+        return self.base.visibility(batch, player_ids)
+
+    def encode(self, batch, player_ids, privileged=False):
+        if (batch.players, batch.width, batch.height) != (2, 9, 9):
+            raise ValueError("king threat distance requires two players on a 9x9 map")
+        result = self.base.encode(batch, player_ids, privileged=privileged)
+        planes = result[:, :972].reshape(batch.num_envs, 12, 81)
+        visible, own, enemy = (planes[:, index].bool() for index in (0, 5, 6))
+        own_general = planes[:, 4].bool() & own
+        king = own_general.long().argmax(1)
+        valid = own_general.sum(1).eq(1) & batch.state["alive"].gather(1, player_ids[:, None]).squeeze(1)
+        # Mask raw hidden army before comparisons, and avoid int64 addition.
+        army = torch.where(visible, batch.state["army"], 0)
+        tick = batch.state["tick"][:, None] + 1
+        grows = ((tick % 2 == 0) & (planes[:, 3].bool() | planes[:, 4].bool())) | (tick % 50 == 0)
+        mobile = enemy & ((army > 1) | ((army == 1) & grows))
+        mobile &= batch.state["alive"].gather(1, (1 - player_ids)[:, None])
+        cells = torch.arange(81, device=batch.device)
+        distance = ((cells[None] // 9 - king[:, None] // 9).abs()
+                    + (cells[None] % 9 - king[:, None] % 9).abs()).float() / 16
+        nearest = distance.masked_fill(~mobile, 1).amin(1)
+        result[:, -1] = torch.where(valid, nearest, 1)
+        return result
 
 
 class ObservationHistory:

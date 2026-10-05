@@ -98,9 +98,19 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 迁移将旧身份输入权重折叠到等价 self/enemy 平面，新特征列初始化为零，旧函数在浮点舍入范围内保留。
 其余 MDP 设定及模型布局必须兼容；最终候选选择和训练记录见训练日志。
 
+`task.king_threat_distance=true` 用可见可移动敌军到己方主将的最近 Manhattan 距离 /16
+替换冗余的 seat-P1 标量，仍保留 seat-P0，单帧维度985。没有可见威胁时取1；
+它不考虑墙和行军路径，也不强制防守动作。开启前使用同一迁移工具的
+`--king-threat-distance` 选项：原 seat-P1 权重折叠到 seat-P0 和 bias，新距离列为零。
+只恢复权重，新建 optimizer 和历史池；浮点舍入（尤其 TF32）可能造成微小差异。
+
 逐 tick reward：`0.05*Δterritory + 0.2*Δcities + 0.001*Δarmy + win - loss - 0.001`。
 自然结束和时限截断分开处理；截断保留 reset 前的下一状态供 value bootstrap。
 CPU 默认 episode 时限 512 tick；GPU 配置为 1024 tick，gamma 从 0.99 覆盖为 0.995。
+v5及后续配置使用 `potential_gamma=.995`：将统计差分替换为
+`gamma*Phi(next)-Phi(before)`，自然终止令下一潜能归零，超时保留潜能并bootstrap。
+`critic_potential` 与 `value_potential_offset` 配套启用，让critic输出基础value减Phi；
+训练gamma必须与reward匹配。
 
 训练默认 self-play，每局开始均匀抽取一个冻结历史 student，整局不换模型。
 候选淘汰后，正在进行的对局继续持有旧模型；不同座位各自维护历史，对手采样使用独立 RNG。
@@ -109,6 +119,8 @@ CPU 默认 episode 时限 512 tick；GPU 配置为 1024 tick，gamma 从 0.99 �
 `baseline_league` 可在最多2%的固定环境中混入原版 aggressive，默认关闭；其余使用历史 self-play。
 例如 `{"baseline_envs":128,"seed":19000043,"native_candidates":true}` 用于16,384环境。
 原AI保持每局记忆、随机数和结果反馈；只有候选打分可选用等价C++加速（需要g++），不修改评估AI。
+`batched_observations=true` 可批量构造原版local Observation，只从GPU读取选中的环境行；
+默认关闭。观测类型、整数公共统计、不可变数组和原AI决策/反馈接口保持一致。
 TensorBoard `League/` 分别记录两类对手的胜率、决策数及host开销；训练内胜率不代替独立评估。
 
 MoE CTS 默认 teacher/student lane 比例 0.75/0.25，32 tick rollout、4 epoch。

@@ -29,6 +29,7 @@ class TaskConfig:
     city_density: float = 0.05
     productive_actions: bool = False
     combat_features: bool = False
+    king_threat_distance: bool = False
     critic_potential: bool = False
     map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
@@ -51,6 +52,10 @@ class TaskConfig:
             raise TypeError("critic_potential must be boolean")
         if self.combat_features and (self.players, self.width, self.height) != (2, 9, 9):
             raise ValueError("combat features require two players on a 9x9 map")
+        if not isinstance(self.king_threat_distance, bool):
+            raise TypeError("king_threat_distance must be boolean")
+        if self.king_threat_distance and (self.players, self.width, self.height) != (2, 9, 9):
+            raise ValueError("king threat distance requires two players on a 9x9 map")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
             raise ValueError("map_pool_size must be a nonnegative integer")
 
