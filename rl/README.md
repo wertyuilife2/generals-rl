@@ -38,6 +38,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 .venv/bin/python -m generals_rl.train --config rl/configs/v10.json --replace-policy \
   --steps-per-env 1000000 --output outputs/moe_cts/iterations/v10/train
 
+# v11：回到两层普通卷积；局部己将相对坐标，省去不参与 PPO 的单帧存储
+.venv/bin/python -m generals_rl.train --config rl/configs/v11.json --replace-policy \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v11/train
+
 # 在新目录续训：模型、两个 optimizer 和可用历史池恢复，对局和 RNG 重新开始
 .venv/bin/python -m generals_rl.train --resume outputs/moe_cts/baseline/checkpoint.pt \
   --iterations 1000 --output outputs/moe_cts/resumed
@@ -116,6 +120,11 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 v8/v9 使用 `generals_rl.spatial_ppo.LightSpatialPPOPolicy`：actor 使用四帧局部地图、最新公共特征和动作 mask，
 两层16通道卷积输出原649动作；critic 使用独立卷积网络处理特权观测。其结构与 dense 权重不兼容，
 v9 直接随机初始化。下面的蒸馏命令仅用于复现 v8 的历史实验；新的方案比较禁止蒸馏、warm start 和旧模型初始化。
+
+v11 在 actor 首卷积前增加两张己将相对 dx/dy 平面（坐标差除以8），由最新局部观测的
+己方所有权与将军标记推导，不读取隐藏敌将位置；critic、MDP 与 rollout 维度不变。
+`own_king_geometry` 默认关闭；v11 另以 `runner.storage_obs_keys` 去掉 CNN 不读取的
+`single_obs` 存储，实时观测保持完整，PPO/GAE 与默认完整存储逐项精确一致。
 
 ```bash
 .venv/bin/python rl/tools/distill_spatial.py --light-cnn --device cuda:0 \

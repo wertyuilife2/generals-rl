@@ -150,21 +150,58 @@ class SpatialPPOPolicy(StudentPPOPolicy):
         return value if potential is None else value - potential.detach()
 
 
+class OwnKingRelativeGeometry(nn.Module):
+    """Append relative coordinates of the latest locally observed own general."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("row", torch.arange(MAP_SIZE, dtype=torch.float32)[:, None]
+                             .expand(MAP_SIZE, MAP_SIZE), persistent=False)
+        self.register_buffer("column", torch.arange(MAP_SIZE, dtype=torch.float32)[None, :]
+                             .expand(MAP_SIZE, MAP_SIZE), persistent=False)
+
+    def forward(self, maps):
+        if maps.ndim != 4 or maps.shape[1:] != (HISTORY * MAP_PLANES, MAP_SIZE, MAP_SIZE):
+            raise ValueError("own-king geometry expects [B,48,9,9] history maps")
+        if not maps.is_floating_point():
+            raise TypeError("own-king geometry expects floating-point map features")
+        current = maps[:, -MAP_PLANES:]
+        own_king = (current[:, 4].bool() & current[:, 5].bool()).flatten(1)
+        valid = own_king.sum(1).eq(1)
+        king = own_king.long().argmax(1)
+        dx = (self.column.to(dtype=maps.dtype) - (king % MAP_SIZE)[:, None, None]) / (MAP_SIZE - 1)
+        dy = (self.row.to(dtype=maps.dtype) - (king // MAP_SIZE)[:, None, None]) / (MAP_SIZE - 1)
+        geometry = torch.where(valid[:, None, None, None], torch.stack((dx, dy), 1), 0)
+        return torch.cat((maps, geometry), 1)
+
+
 class LightSpatialPPOPolicy(SpatialPPOPolicy):
     """Two standard convolutions with optional dilation in the second layer."""
     semantics = "light_spatial_p2_hist4_current_public13_standard2_v1"
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16,
-                 spatial_dilation=1, **kwargs):
+                 spatial_dilation=1, own_king_geometry=False, **kwargs):
         if "residual_blocks" in kwargs:
             raise ValueError("light spatial policy uses two standard convolutions, no residual_blocks option")
         if not isinstance(spatial_dilation, int) or isinstance(spatial_dilation, bool) or spatial_dilation < 1:
             raise ValueError("spatial_dilation must be a positive integer")
+        if not isinstance(own_king_geometry, bool):
+            raise TypeError("own_king_geometry must be boolean")
         self.spatial_dilation = spatial_dilation
+        self.own_king_geometry = own_king_geometry
         if spatial_dilation != 1:
             self.semantics = f"light_spatial_p2_hist4_current_public13_standard2_dilation{spatial_dilation}_v1"
         super().__init__(obs, obs_groups, num_actions, spatial_channels=spatial_channels,
                          residual_blocks=1, **kwargs)
+        if own_king_geometry:
+            # Construct the baseline first to preserve its independent critic's
+            # seeded initialization. Only this new actor input layer is replaced.
+            first, *layers = self.actor.trunk.children()
+            replacement = nn.Conv2d(first.in_channels + 2, first.out_channels, first.kernel_size,
+                                    stride=first.stride, padding=first.padding,
+                                    device=first.weight.device, dtype=first.weight.dtype)
+            self.actor.trunk = nn.Sequential(OwnKingRelativeGeometry(), replacement, *layers)
+            self.semantics += "_own_king_relative_xy_v1"
 
     def trunk_factory(self, inputs, channels, _residual_blocks):
         return nn.Sequential(nn.Conv2d(inputs, channels, 3, padding=1), nn.ELU(),

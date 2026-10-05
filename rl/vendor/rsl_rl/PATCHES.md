@@ -12,7 +12,7 @@
 | `modules/actor_critic_moe_cts.py` | 增加 masked Categorical、离散动作 ID、log-prob/entropy 和无采样的动作先验；Normal 默认行为保留。Categorical 的 `action_std` 仅返回 `[N,1]` 的全 1 logger 占位值。 |
 | `algorithms/moe_cts.py` | 增加 Categorical KL；可靠地分配非空 teacher/student 环境组；使用 reset 前终局下一状态处理 timeout bootstrap；删除全 epoch batch 缓存，两个训练阶段复用固定随机索引。 |
 | `storage/rollout_storage_cts.py` | 分离动作与分布形状/dtype，保留 bool mask；按 env-major 索引逐批读取 rollout；支持有效时间前缀。新增默认开启的 `store_action_std` / `store_action_mean`；关闭时对应 `sigma` / `mu` 为 `None`，不分配、写入或取样缓存。Categorical 关闭标准差，StudentPPO 另关闭旧动作分布均值。 |
-| `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。 |
+| `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。可选 `storage_obs_keys` 仅筛选 rollout 存储键，默认完整保存；构造策略和实时 obs 保持完整。 |
 
 默认 MoE-CTS 的 PPO/GAE、两个 optimizer、student PPO encoder 停止梯度、latent MSE、expert load balance 和网络结构沿用上游。
 Categorical KL 不使用标准差；logger 的 `Policy/mean_noise_std` 为兼容常数，不能用于分析离散探索。
@@ -39,3 +39,7 @@ StudentPPO 设置 `requires_old_distribution=False`，runner 据此关闭 `mu` �
 git show 38c6cad:rl/vendor/rsl_rl/rsl_rl/algorithms/moe_cts.py
 git diff 38c6cad -- rl/vendor/rsl_rl
 ```
+
+轻量 CNN 不读取 `single_obs`，v11 仅存 `policy/critic/action_mask`，16384×32 时额外节省 1.924 GiB；
+对照默认完整存储，rollout、GAE、原版 PPO loss、权重、Adam 和 RNG 逐项精确一致。
+PPO.update 与 GAE 实现未修改；默认 MoE CTS 仍保存完整观测。

@@ -386,7 +386,17 @@ class OnPolicyRunnerCTS:
 
         alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
 
-        # Initialize the storage
+        # Initialize the storage; policy construction and live observations stay complete.
+        storage_obs = obs
+        storage_obs_keys = self.cfg.get("storage_obs_keys")
+        if storage_obs_keys is not None:
+            if (not isinstance(storage_obs_keys, (list, tuple)) or not storage_obs_keys
+                    or any(not isinstance(key, str) for key in storage_obs_keys)):
+                raise ValueError("storage_obs_keys must be a nonempty list/tuple of observation names or None")
+            if (len(set(storage_obs_keys)) != len(storage_obs_keys)
+                    or any(key not in obs for key in storage_obs_keys)):
+                raise ValueError("storage_obs_keys must contain unique existing observation names")
+            storage_obs = obs.select(*storage_obs_keys)
         categorical = actor_critic.action_distribution == "categorical"
         storage = RolloutStorageCTS(
             "rl",
@@ -395,7 +405,7 @@ class OnPolicyRunnerCTS:
                 self.env.num_envs, self.alg_cfg["teacher_env_ratio"]
             ),
             self.cfg["num_steps_per_env"],
-            obs,
+            storage_obs,
             [1] if categorical else [self.env.num_actions],
             self.device,
             distribution_shape=[self.env.num_actions],
