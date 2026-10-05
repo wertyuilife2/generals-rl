@@ -53,6 +53,15 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
         algorithm_gamma = config["runner"]["algorithm"].get("gamma")
         if isinstance(algorithm_gamma, bool) or algorithm_gamma != potential_gamma:
             raise ValueError("reward potential_gamma requires an explicit matching runner.algorithm.gamma")
+    value_offset = config["runner"]["policy"].get("value_potential_offset", False)
+    if not isinstance(value_offset, bool):
+        raise TypeError("value_potential_offset must be boolean")
+    if value_offset:
+        from rsl_rl.utils import resolve_callable
+        from .student_ppo import StudentPPOPolicy
+        if (not settings.critic_potential or potential_gamma is None
+                or resolve_callable(config["runner"]["policy"]["class_name"]) is not StudentPPOPolicy):
+            raise ValueError("value_potential_offset requires StudentPPOPolicy, task.critic_potential and potential reward")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)

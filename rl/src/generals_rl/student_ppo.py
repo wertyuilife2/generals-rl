@@ -12,8 +12,11 @@ from rsl_rl.modules import ActorCriticMoECTS
 
 
 class StudentPPOPolicy(ActorCriticMoECTS):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, value_potential_offset=False, **kwargs):
+        if not isinstance(value_potential_offset, bool):
+            raise TypeError("value_potential_offset must be boolean")
         super().__init__(*args, **kwargs)
+        self.value_potential_offset = value_potential_offset
         if self.action_distribution != "categorical":
             raise ValueError("StudentPPOPolicy currently requires categorical actions")
         self.teacher_encoder.requires_grad_(False)
@@ -34,13 +37,19 @@ class StudentPPOPolicy(ActorCriticMoECTS):
         # Avoid zero-batch SimNorm/Conv1d forwards; no value is needed there.
         if obs.batch_size[0] == 0:
             return obs["single_obs"].new_empty((0, 1))
+        potential = None
+        if self.value_potential_offset:
+            potential = obs.get("critic_potential")
+            if potential is None or potential.shape != (obs.batch_size[0], 1):
+                raise ValueError("value_potential_offset requires obs['critic_potential'] with shape [N, 1]")
         critic_obs = self.critic_obs_normalizer(self.get_critic_obs(obs))
         # Upstream critic input is cat(latent.detach(), critic_obs). Its encoder
         # graph is unused; keep critic gradients and recompute the current latent.
         with torch.no_grad():
             latent, _ = self.student_moe_encoder(
                 self.actor_obs_normalizer(self.get_actor_obs(obs)))
-        return self.critic(torch.cat((latent.detach(), critic_obs), dim=-1))
+        value = self.critic(torch.cat((latent.detach(), critic_obs), dim=-1))
+        return value if potential is None else value - potential.detach()
 
 
 class StudentPPO(PPO):

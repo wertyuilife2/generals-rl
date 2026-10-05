@@ -37,6 +37,13 @@ class ShapedReward:
     def __init__(self, config=None):
         self.config = RewardConfig() if config is None else config
 
+    def potential(self, metrics):
+        """Current learner-state Phi, independent of value networks."""
+        metrics = metrics.float()
+        cfg = self.config
+        return (cfg.territory * metrics[:, 1:2] + cfg.cities * metrics[:, 2:3]
+                + cfg.army * metrics[:, 0:1])
+
     def evaluate(self, before_metrics, after_metrics, terminated, truncated,
                  winner, learner_alive, player_ids):
         cfg = self.config

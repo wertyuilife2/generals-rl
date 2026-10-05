@@ -29,6 +29,7 @@ class TaskConfig:
     city_density: float = 0.05
     productive_actions: bool = False
     combat_features: bool = False
+    critic_potential: bool = False
     map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
 
@@ -46,6 +47,8 @@ class TaskConfig:
             raise TypeError("productive_actions must be boolean")
         if not isinstance(self.combat_features, bool):
             raise TypeError("combat_features must be boolean")
+        if not isinstance(self.critic_potential, bool):
+            raise TypeError("critic_potential must be boolean")
         if self.combat_features and (self.players, self.width, self.height) != (2, 9, 9):
             raise ValueError("combat features require two players on a 9x9 map")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
@@ -121,12 +124,15 @@ class GeneralsTask:
 
     def _observations(self):
         batch = self.batch()
-        return {
+        observations = {
             "policy": self.history.flattened(),
             "single_obs": self.observation_encoder.encode(batch, self.player_ids),
             "critic": self.observation_encoder.encode(batch, self.player_ids, privileged=True),
             "action_mask": self.action_space.mask(batch, self.player_ids),
         }
+        if self.config.critic_potential:
+            observations["critic_potential"] = self.reward_model.potential(batch.learner_stats(self.player_ids))
+        return observations
 
     def get_observations(self):
         return self.observations

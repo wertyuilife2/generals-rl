@@ -15,7 +15,8 @@
     "combat_features": true,
     "reward": {
       "potential_gamma": 0.995
-    }
+    },
+    "critic_potential": true
   },
   "runner": {
     "num_steps_per_env": 32,
@@ -32,7 +33,8 @@
       "student_encoder_learning_rate": 0.0001
     },
     "policy": {
-      "class_name": "generals_rl.student_ppo.StudentPPOPolicy"
+      "class_name": "generals_rl.student_ppo.StudentPPOPolicy",
+      "value_potential_offset": true
     }
   },
   "self_play": {
