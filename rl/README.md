@@ -46,6 +46,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 .venv/bin/python -m generals_rl.train --config rl/configs/v12.json --replace-policy \
   --steps-per-env 1000000 --output outputs/moe_cts/iterations/v12/train
 
+# v13：回到16384环境；历史对手用argmax，learner仍随机采样，保持从零
+.venv/bin/python -m generals_rl.train --config rl/configs/v13.json --replace-policy \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v13/train
+
 # 在新目录续训：模型、两个 optimizer 和可用历史池恢复，对局和 RNG 重新开始
 .venv/bin/python -m generals_rl.train --resume outputs/moe_cts/baseline/checkpoint.pt \
   --iterations 1000 --output outputs/moe_cts/resumed
