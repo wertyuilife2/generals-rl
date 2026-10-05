@@ -78,10 +78,15 @@ def plot(scalars, evaluations, output):
         if points:
             x, y = zip(*sorted(points))
             axes[0, 0].plot(x, y, label=kind)
+        diagnostic = scalars.get(f"DiagnosticReuse/{kind}/win_rate", [])
+        if diagnostic:
+            x, y = zip(*sorted(diagnostic))
+            axes[0, 0].plot(x, np.asarray(y) * 100, "--o", markersize=3,
+                           label=f"{kind} (reused diagnostic)")
     axes[0, 0].axhline(80, color="black", linestyle="--", linewidth=1)
     axes[0, 0].set(title="Student vs built-in AIs", ylabel="Wins / all games (%)", ylim=(0, 100))
     if axes[0, 0].get_legend_handles_labels()[0]:
-        axes[0, 0].legend()
+        axes[0, 0].legend(fontsize=7, ncol=2)
     panels = [((0, 1), "Loss", ["Loss/value", "Loss/surrogate"]),
               ((0, 2), "Entropy", ["Loss/entropy"]),
               ((1, 0), "Training throughput", ["Perf/total_fps"]),
