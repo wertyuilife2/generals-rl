@@ -48,6 +48,11 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
+    potential_gamma = settings.reward.potential_gamma
+    if potential_gamma is not None:
+        algorithm_gamma = config["runner"]["algorithm"].get("gamma")
+        if isinstance(algorithm_gamma, bool) or algorithm_gamma != potential_gamma:
+            raise ValueError("reward potential_gamma requires an explicit matching runner.algorithm.gamma")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
