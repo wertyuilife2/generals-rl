@@ -198,12 +198,13 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     evaluations, scalars = read_run(directory)
     best = max(evaluations, key=lambda entry: score(entry["data"])) if evaluations else None
-    checkpoint = args.checkpoint.resolve() if args.checkpoint else (checkpoint_for(directory, best) if best else None)
+    best_checkpoint = checkpoint_for(directory, best) if best else None
     summary = {"run": str(directory), "evaluations": len(evaluations),
                "selection_criterion": ["worst_ai_win_rate", "aggressive_win_rate", "overall_win_rate"],
                "best": ({key: value for key, value in best.items() if key != "data"} |
                         {"by_ai": best["data"]["by_ai"], "overall": best["data"]["overall"],
-                         "checkpoint": str(checkpoint) if checkpoint else None}) if best else None,
+                         "checkpoint": str(best_checkpoint) if best_checkpoint else None,
+                         "checkpoint_sha256": best["data"].get("checkpoint_sha256")}) if best else None,
                "latest": evaluations[-1]["data"]["by_ai"] if evaluations else None,
                "scalar_summary": {tag: {"count": len(values), "last": values[-1][1],
                                          "last_100_mean": float(np.mean([value for _, value in values[-100:]]))}
@@ -212,16 +213,23 @@ def main(argv=None):
         summary["training"] = read_json(directory / "summary.json")
     plot(scalars, evaluations, output)
     if args.demo or args.render:
-        if checkpoint is None:
+        demo_checkpoint = args.checkpoint.resolve() if args.checkpoint else best_checkpoint
+        if demo_checkpoint is None:
             raise ValueError("selected weights are no longer retained; provide --checkpoint and --report")
         if args.report is None and best is None:
             raise ValueError("no evaluation report found; provide --report for demo replay")
+        demo_report_path = args.report.resolve() if args.report else Path(best["report"]).resolve()
         report = read_json(args.report) if args.report else best["data"]
-        summary["demos"] = demos(checkpoint, report, output, render=args.render)
+        summary["demos"] = demos(demo_checkpoint, report, output, render=args.render)
+        summary["demo_selection"] = {
+            "checkpoint": str(demo_checkpoint),
+            "checkpoint_sha256": report["checkpoint_sha256"],
+            "report": str(demo_report_path), "seed": report["seed"],
+        }
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps({"curves": str(output / "curves.png"),
                       "summary": str(output / "summary.json"),
-                      "best_checkpoint": str(checkpoint) if checkpoint else None}, indent=2))
+                      "best_checkpoint": str(best_checkpoint) if best_checkpoint else None}, indent=2))
     return 0
 
 
