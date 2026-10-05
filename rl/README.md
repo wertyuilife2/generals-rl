@@ -34,6 +34,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 .venv/bin/python -m generals_rl.train --config rl/configs/v9.json --replace-policy \
   --steps-per-env 1000000 --output outputs/moe_cts/iterations/v9/train
 
+# v10：相同从零自对弈方案，第二层卷积 dilation=3，直接感受野扩至 9×9
+.venv/bin/python -m generals_rl.train --config rl/configs/v10.json --replace-policy \
+  --steps-per-env 1000000 --output outputs/moe_cts/iterations/v10/train
+
 # 在新目录续训：模型、两个 optimizer 和可用历史池恢复，对局和 RNG 重新开始
 .venv/bin/python -m generals_rl.train --resume outputs/moe_cts/baseline/checkpoint.pt \
   --iterations 1000 --output outputs/moe_cts/resumed
@@ -52,6 +56,7 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 
 - 周期训练 checkpoint：`save_interval=2000`；最终模型统一为 `checkpoint.pt`，包含两个 optimizer。
 - 历史对手池：每 50 次更新发布权重快照，结束时补充最终模型；最多保留初始模型和最近 7 个候选。
+  已分配到对局的旧模型保持引用至该局结束，不因从池中淘汰而中途更换对手。
 - 定期评估默认开启：每发布 10 个周期 learner 快照评估一次，初始随机模型不计入周期。
 - 每次评估默认每 AI 50 张独立地图、每图交换两座位，共 400 局，时限 2000 tick。
 - 评估使用局部 student 的 argmax，完成整个固定赛程；超时单列为 draw，并计入总胜率分母。

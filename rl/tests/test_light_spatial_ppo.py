@@ -85,6 +85,32 @@ class LightSpatialPPOTests(unittest.TestCase):
         default_cls=resolve_callable(defaults.pop('class_name'))
         self.assertIs(type(default_cls(obs,GROUPS,649,**defaults)),SpatialPPOPolicy)
 
+    def test_dilated_trunk_contiguous_receptive_field_and_configuration(self):
+        obs = observations(count=1)
+        for invalid in (0, -1, True, False, 3.0, '3', None):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'positive integer'):
+                LightSpatialPPOPolicy(obs, GROUPS, 649, spatial_dilation=invalid)
+        for dilation in (1, 3):
+            policy = LightSpatialPPOPolicy(obs, GROUPS, 649, spatial_dilation=dilation)
+            self.assertEqual(policy.semantics == LightSpatialPPOPolicy.semantics, dilation == 1)
+            for name, trunk in (('actor', policy.actor.trunk), ('critic', policy.critic.trunk)):
+                # Measure direct trunk support: the actor's mean context itself
+                # has global gradients and would conceal a local RF regression.
+                with torch.no_grad():
+                    for layer in trunk:
+                        if isinstance(layer, torch.nn.Conv2d):
+                            layer.weight.fill_(1)
+                            layer.bias.zero_()
+                for y, x in ((4, 4), (0, 0)):
+                    with self.subTest(dilation=dilation, trunk=name, query=(y, x)):
+                        image = torch.zeros(1, trunk[0].in_channels, 9, 9, requires_grad=True)
+                        gradient = torch.autograd.grad(trunk(image)[0, 0, y, x], image)[0][0, 0]
+                        expected = torch.zeros(9, 9, dtype=torch.bool)
+                        radius = 1 + dilation
+                        expected[max(0, y-radius):min(9, y+radius+1),
+                                 max(0, x-radius):min(9, x+radius+1)] = True
+                        torch.testing.assert_close(gradient.ne(0), expected, rtol=0, atol=0)
+
     def test_real_distill_cli_fresh_ppo_resume_evaluator_and_pool_factory(self):
         cfg=cli_config()
         cfg['runner']=runner_config(hidden_dim=16,expert_num=2,rollout_steps=2,mini_batches=2)

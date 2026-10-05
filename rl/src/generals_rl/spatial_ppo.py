@@ -151,19 +151,25 @@ class SpatialPPOPolicy(StudentPPOPolicy):
 
 
 class LightSpatialPPOPolicy(SpatialPPOPolicy):
-    """Opt-in two-standard-convolution trunk; all observation/action APIs match."""
+    """Two standard convolutions with optional dilation in the second layer."""
     semantics = "light_spatial_p2_hist4_current_public13_standard2_v1"
 
-    def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16, **kwargs):
+    def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16,
+                 spatial_dilation=1, **kwargs):
         if "residual_blocks" in kwargs:
             raise ValueError("light spatial policy uses two standard convolutions, no residual_blocks option")
+        if not isinstance(spatial_dilation, int) or isinstance(spatial_dilation, bool) or spatial_dilation < 1:
+            raise ValueError("spatial_dilation must be a positive integer")
+        self.spatial_dilation = spatial_dilation
+        if spatial_dilation != 1:
+            self.semantics = f"light_spatial_p2_hist4_current_public13_standard2_dilation{spatial_dilation}_v1"
         super().__init__(obs, obs_groups, num_actions, spatial_channels=spatial_channels,
                          residual_blocks=1, **kwargs)
 
-    @staticmethod
-    def trunk_factory(inputs, channels, _residual_blocks):
+    def trunk_factory(self, inputs, channels, _residual_blocks):
         return nn.Sequential(nn.Conv2d(inputs, channels, 3, padding=1), nn.ELU(),
-                             nn.Conv2d(channels, channels, 3, padding=1), nn.ELU())
+                             nn.Conv2d(channels, channels, 3, padding=self.spatial_dilation,
+                                       dilation=self.spatial_dilation), nn.ELU())
 
 
 def policy_config(*, value_potential_offset=False, light_cnn=False):
