@@ -23,6 +23,8 @@
 
 v19对照已完成1847更新、968359936转移、121.95分钟正式训练，并正常排空18次采样selector评测；停止为人工曲线平台判断后的`requested_stop`，不是自动patience12触发。最终best1199采样selector为93.75/97.5/99.25/99.5%，复用开发seed1001042为90.5/97/99.5/99.5%（400局/AI）。该开发集此前使用过，未作为heldout；最终八局录像、独立Core trace核验、失败分析、PPO/资源趋势及全部18点曲线已记录在训练日志。高baseline成绩不结束完整任务，也不构成可变地图泛化或世界级强度的证明。
 
-v20 critic-only冻结源commit61fea90已通过CPU合同及全规模GPU五更新门禁：16384×32、E4/B64、2621440转移，compute120348/s，allocated12.951GiB，参数与loss有限。短门禁只执行了初始对手，不是成熟pool的长期效率或胜率结果；正式fresh训练已启动（session74897，冻结源61fea90、输出v20/train、预算1–3h），尚无正式胜率。v21持久事实条件（d55a835）和v22组合条件（af92831）均已提交、从Git blob冻结并通过fresh CPU门禁，实际执行非初始历史模型；它们的全规模GPU门禁和正式训练仍按前序完成后顺序推进。
+v20 critic-only正式训练完成2034更新、1066401792转移、153.510分钟，人工平台STOP后正常exit0并排空20次采样selector。最终best1399 selector93.75/95.75/99.5/99.75%，复用开发集93/96.25/99.5/99.5%；与v19最佳模型新执行1600局采样cross-play胜率54.375%（800配对图CI52..56.75%）。相同最佳selector aggressive仍均93.75%，开发改善CI跨零；wall吞吐下降12.51%，因此未证实critic-only的稳定样本/计算效率收益。完整曲线、969tick八录像、信息观察与单训练seed/不同预算限制已记录训练日志。
 
-成熟上游ResNetV2/ViT、可变地图布局/geometry/action head、microbatch与混合精度、训练中GPU评测/真实trace、可选gamma/tick课程模块正在做后续阶段准备和运行门禁。准备或微基准通过不计正式训练版本；尚无容量、gamma、tick衰减、H8的正式胜率结论。当前继续v20正式训练，随后完成v21→v22消融，再逐项执行两种成熟网络的1M/10M/100M、gamma/rollout/lambda、tick0..1000课程，最后H4/H8；完整目标保持未完成。
+v21持久事实条件（d55a835）与v22组合（af92831）均已从Git blob冻结并通过fresh CPU门禁。v21额外全规模GPU五更新已实际exit0，执行训练后历史snapshot1..4，峰值allocated14.614GiB；短门禁pub1仅为执行覆盖，正式pub50和随机fresh初始化保持。v21正式训练待本轮终局报告commit后启动；v22全GPU与正式训练继续按顺序等待。
+
+成熟上游ResNetV2/ViT、可变地图布局/geometry/action head、microbatch与混合精度、训练中GPU评测/真实trace、可选gamma/tick课程模块正在做后续阶段准备和运行门禁。准备或微基准通过不计正式训练版本；尚无容量、gamma、tick衰减、H8的正式胜率结论。当前推进v21→v22正式消融，再逐项执行两种成熟网络的1M/10M/100M、gamma/rollout/lambda、tick0..1000课程，最后H4/H8；完整目标保持未完成。
