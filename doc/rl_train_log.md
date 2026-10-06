@@ -1051,7 +1051,9 @@ TensorBoard：`outputs/moe_cts/iterations/v19/train/`（InitialEval step−1与�
 
 验证：18 个 CPU tests 通过，包括禁用信息扩展时原模型/输出/梯度/RNG逐位一致、critic-only actor 初始化/动作概率/RNG逐位一致、新 critic 初始 value 在浮点舍入误差内一致、history/public 新权重梯度非零、actor 隐私，以及真实 self-play PPO 三次更新和 timeout bootstrap；categorical mask/WAIT-MOVE factorization 与轻量网络回归通过。未新增 vendor 补丁。上述 CPU 合同不作为训练提升证据；正式运行使用下述冻结源。
 
-补充实际 smoke：v20 commit `61fea9053e9925b13dea590bb7ebc4a16a8e8c73` 的110个运行文件直接从Git blob冻结，排除所有尚未提交的记忆/架构/评测工作区改动。该冻结源跑N16/T8/episode8的五次fresh CPU更新，共640转移、80 timeout，teacher0；两次采样eval均成功，实际episode对手已执行训练后历史模型。独立CPU重新构造与自己的初始snapshot0全部张量逐位一致，actor10697/critic12209；actor初始张量和全局RNG与Light对照逐位一致，新增critic输入权重为零。证据 `outputs/moe_cts/iterations/v20/cpu_contract.json`。v19正常退出后，同一冻结源通过全规模GPU门禁：N16384/T32、E4/B64，五次完整更新、2621440转移，collection5.632秒/update16.150秒，compute120348/s，wall31.351秒（含启动，wall83616/s）；allocated12.951GiB、reserved13.703GiB，loss有限、teacher0、exit0。记录 `outputs/moe_cts/iterations/v20/smoke_gpu/summary.json`。这五次rollout仍仅执行初始随机对手，末尾发布的训练快照尚未被下一rollout使用，不能外推成熟pool吞吐或胜率。正式1–3h训练随后已从同一冻结源fresh启动，session74897、PID3066147，输出与TensorBoard为 `outputs/moe_cts/iterations/v20/train/`；CLI无resume/warm-start，不从GPU门禁权重续训。当前尚无正式胜率结果。实际seed snapshot0与独立fresh CPU构造全部张量逐位一致，actor初始化与Light对照一致、新critic输入列为零、独立Adam空状态；110个运行文件hash与所有import均来自冻结源。formal manifest的resume_source=null、初始source=random_initial_policy，证据 `v20/formal_initialization_contract.json`。
+补充实际 smoke：v20 commit `61fea9053e9925b13dea590bb7ebc4a16a8e8c73` 的110个运行文件直接从Git blob冻结，排除所有尚未提交的记忆/架构/评测工作区改动。该冻结源跑N16/T8/episode8的五次fresh CPU更新，共640转移、80 timeout，teacher0；两次采样eval均成功，实际episode对手已执行训练后历史模型。独立CPU重新构造与自己的初始snapshot0全部张量逐位一致，actor10697/critic12209；actor初始张量和全局RNG与Light对照逐位一致，新增critic输入权重为零。证据 `outputs/moe_cts/iterations/v20/cpu_contract.json`。v19正常退出后，同一冻结源通过全规模GPU门禁：N16384/T32、E4/B64，五次完整更新、2621440转移，collection5.632秒/update16.150秒，compute120348/s，wall31.351秒（含启动，wall83616/s）；allocated12.951GiB、reserved13.703GiB，loss有限、teacher0、exit0。记录 `outputs/moe_cts/iterations/v20/smoke_gpu/summary.json`。这五次rollout仍仅执行初始随机对手，末尾发布的训练快照尚未被下一rollout使用，不能外推成熟pool吞吐或胜率。正式1–3h训练随后已从同一冻结源fresh启动，session74897、PID3066147，输出与TensorBoard为 `outputs/moe_cts/iterations/v20/train/`；CLI无resume/warm-start，不从GPU门禁权重续训。当前仍训练，没有最终成绩。实际seed snapshot0与独立fresh CPU构造全部张量逐位一致，actor初始化与Light对照一致、新critic输入列为零、独立Adam空状态；110个运行文件hash与所有import均来自冻结源。formal manifest的resume_source=null、初始source=random_initial_policy，证据 `v20/formal_initialization_contract.json`。
+
+本轮实际随机初始模型已独立采样1600局，四项0.25/4.25/1.25/3.75%，与v19的全部1600局逐项完全相同，确认部署actor起点一致；不是直接复用旧报告。已记录InitialEval step−1。早期99/199两次selector分别为36/66.25/86.25/84.25%与83.25/93.75/99/99.75%，曲线仍上升，继续达到最低1h后判断趋势；这两点不能证明critic信息输入提升或损害最终能力。
 
 ## v21：仅给 actor 增加持久事实记忆（实现与 CPU 准备）
 
@@ -1074,3 +1076,11 @@ v21已独立提交为 `d55a835908556f28e3f7ab0fc1730598c30849e0`，111个运行�
 补齐 v19/v20/v21/v22 的 memory × critic-information 2×2。相对 v21，仅开启 `critic_actor_information`，critic group 引用已存的 policy/knowledge；actor仍是 H4＋11个非堆叠知识通道，critic为 S＋H4＋K。无需复制一份历史或知识 rollout，也无需增加 vendor 补丁。actor12281、critic13793、合计26074参数，新增critic输入权重零初始化；正式配置其余训练、历史池、采样评估与资源保留设置均与v19一致。
 
 配置 `rl/configs/v22.json`，已提交为 **`af9283171681f4d89a0d6754e88251179082cffa`**，111个运行文件从该commit的Git blob冻结，排除尚未提交的架构、GPU评测与课程改动。冻结源完成fresh CPU门禁：N8/T4/episode8、E1/B2、五更新共160转移；20个联合tick核验双座privacy/reset及learner与opponent独立知识，两次采样eval各8局、全部成功。自己的初始化snapshot0与fresh learner逐位一致、新Adam空状态、新critic历史/知识列初始为零且更新后学到非零权重；实际执行历史模型1/2/3。knowledge storage实际[4,8,891]，全部111个文件hash与import路径通过，证据 `outputs/moe_cts/iterations/v22/cpu_contract.json`。既有工作区候选smoke只属准备，冻结源验证也不计正式训练或胜率成绩。正式顺序仍是v19→v20→v21→v22；全规模GPU门禁及1–3h训练未开始，待前序完成。此处不预先声称组合方案胜率更高。
+
+## 后续阶段基础模块准备（非正式训练版本）
+
+成熟上游ResNetV2/ViT、可变观测布局/地块head和可选物理微批次已提交e8b79c5，设计与原始来源见[架构设计](rl_architecture_design.md)。候选整合CPU80 tests/117 subtests通过；严格FP32及BF16的两个1M真实GPU微基准已完成，high/TF32下FP32失败与关闭后的通过都保留。孤立微基准不含完整NT/成熟历史池，10M/100M与正式容量学习曲线仍待前序消融结束后执行。
+
+训练中GPU评估候选通过32局随机ResNet1M的实际BF16采样，按记录动作的四个真实败局共528tick在CPU/native/Core精确重放，生成四MP4；四类胜局缺失明确报告。deadline覆盖复制/hash/cache到worker结束，受剩余墙钟预算限制，超时回收worker；trace保留当前best加最近K个完成评测。默认CPU异步采样路径保持，满池100M峰值仍待真实门禁。
+
+可选课程默认关闭：tick penalty按TB迭代0..1000线性1→0，资源PBRS和终局系数不动；gamma课程要求显式final/end_iteration，并在每个rollout之前同步PPO与PBRS gamma。真实CPU训练/resume验证同rollout采样、GAE、更新设置一致，10项课程测试通过；关闭课程的三次实际更新与此前Git版model/Adam/RNG逐bit一致。课程尚未进入任何正式配置，严格保持先固定gamma比较、再课程/rollout/lambda、再tick衰减、最后H8的阶段顺序；正在运行的v20只使用61fea90冻结源，不受这些候选改动影响。

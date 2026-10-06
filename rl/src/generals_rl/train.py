@@ -17,6 +17,7 @@ from rsl_rl.runners import OnPolicyRunnerCTS
 
 from .config import merge_config, seed_everything, task_config
 from .cts import GeneralsCTSVecEnv, runner_config
+from .curriculum import CurriculumConfig, RolloutCurriculum
 from .self_play_training import SelfPlayConfig, prepare_self_play
 from .task import GeneralsTask, TaskConfig
 from .training_evaluation import PeriodicEvaluator, TrainingEvalConfig
@@ -51,6 +52,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
+    curriculum_settings = CurriculumConfig(**config.get("curriculum", {}))
     potential_gamma = settings.reward.potential_gamma
     if potential_gamma is not None:
         algorithm_gamma = config["runner"]["algorithm"].get("gamma")
@@ -113,6 +115,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             del saved
             warm_source = {"kind": "warm_start_weights", "path": str(checkpoint),
                            "sha256": sha256(checkpoint.read_bytes()).hexdigest()}
+        curriculum = RolloutCurriculum(curriculum_settings, runner.alg, task.reward_model)
+        curriculum_metrics = curriculum.apply(runner.current_learning_iteration)
         self_play = prepare_self_play(task, runner, config, output, resume=resume,
                                       initial_iteration=runner.current_learning_iteration - 1,
                                       initial_source=warm_source)
@@ -143,6 +147,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
 
         def on_update(**kwargs):
             nonlocal sampled_ticks, completed_updates, collection_seconds, update_seconds, last_losses, stop_reason
+            nonlocal curriculum_metrics
             sampled_ticks += runner.cfg["num_steps_per_env"]
             completed_updates += 1
             collection_seconds += kwargs["collect_time"]
@@ -158,17 +163,24 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             if evaluator is not None:
                 evaluator.poll()
                 if snapshot is not None:
+                    evaluation_budget = {}
+                    if evaluation_settings.synchronous and control_settings.max_seconds is not None:
+                        evaluation_budget["remaining_seconds"] = max(
+                            0.0, control_settings.max_seconds - (perf_counter() - started))
                     evaluator.on_snapshot(
                         snapshot, self_play.pool.directory,
                         publication_index=(kwargs["it"] + 1) // self_play.config.snapshot_interval,
                         steps_per_environment=sampled_ticks,
                         environment_steps=sampled_ticks * task.num_envs,
+                        **evaluation_budget,
                     )
             elapsed = perf_counter() - started
             if runner.logger.writer is not None:
                 writer = runner.logger.writer
                 for name, value in update_metrics.items():
                     writer.add_scalar(f"PPO/{name}", value, kwargs["it"])
+                for name, value in curriculum_metrics.items():
+                    writer.add_scalar(f"Curriculum/{name}", value, kwargs["it"])
                 writer.add_scalar("Perf/environment_steps", sampled_ticks * task.num_envs, kwargs["it"])
                 writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_fps", sampled_ticks * task.num_envs / elapsed, kwargs["it"])
@@ -188,6 +200,10 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
                     # Storage retains its allocation; only this prefix is active.
                     runner.cfg["num_steps_per_env"] = remaining
                     runner.alg.storage.num_transitions_per_env = remaining
+            if kwargs["it"] < final_iteration:
+                # This rollout's returns/update already used one fixed setting.
+                # Advance only before collecting the next rollout.
+                curriculum_metrics = curriculum.apply(kwargs["it"] + 1)
 
         runner.logger.log = on_update
         try:

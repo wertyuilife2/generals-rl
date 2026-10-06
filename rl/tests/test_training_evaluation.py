@@ -5,17 +5,19 @@ from hashlib import sha256
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 
 import torch
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch.utils.tensorboard import SummaryWriter
 
 from generals.controllers import AI_KINDS
-from generals_rl.evaluate_builtin import evaluate_builtin
+from generals_rl.evaluate_builtin import _inference_metadata, evaluate_builtin
 from generals_rl.train import train
 from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from rl_test_utils import assert_nested_equal, small_training_config
@@ -30,14 +32,34 @@ def small_config():
 
 
 class TrainingEvaluationTests(unittest.TestCase):
+    def test_precision_metadata_distinguishes_cuda_autocast_from_cpu_parameters(self):
+        policy = torch.nn.Linear(2, 1)
+        policy.amp_bfloat16 = True
+        self.assertEqual(_inference_metadata(policy, "cpu"),
+                         {"parameter_dtype": "float32", "inference_dtype": "float32"})
+        # Device strings inspect the contract without creating a CUDA context.
+        self.assertEqual(_inference_metadata(policy, "cuda:0"),
+                         {"parameter_dtype": "float32", "inference_dtype": "bfloat16"})
+        policy.amp_bfloat16 = False
+        self.assertEqual(_inference_metadata(policy, "cuda:0"),
+                         {"parameter_dtype": "float32", "inference_dtype": "float32"})
+
     def test_default_is_enabled_every_ten_learned_snapshots_and_validates_early(self):
         settings = TrainingEvalConfig()
         self.assertTrue(settings.enabled)
         self.assertTrue(settings.stochastic)
         self.assertEqual(settings.every_n_snapshots, 10)
         self.assertEqual(settings.maps_per_ai, 50)
+        self.assertEqual(settings.device, "cpu")
+        self.assertFalse(settings.synchronous)
+        self.assertIsNone(settings.worker_timeout_seconds)
+        self.assertTrue(TrainingEvalConfig(device="cuda:0").synchronous)
+        self.assertEqual(TrainingEvalConfig(device="cuda").worker_timeout_seconds, 1800)
+        self.assertEqual(TrainingEvalConfig(device="cuda", timeout_seconds=15).worker_timeout_seconds, 15)
         cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
-                 {"batch_size": 0}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0})
+                 {"batch_size": 0}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0},
+                 {"device": None}, {"device": "invalid"}, {"device": "mps"},
+                 {"timeout_seconds": 0}, {"timeout_seconds": True}, {"timeout_seconds": float("inf")})
         with tempfile.TemporaryDirectory() as directory:
             for values in cases:
                 config = small_config()
@@ -68,6 +90,9 @@ class TrainingEvaluationTests(unittest.TestCase):
             report = json.loads(Path(point["report"]).read_text())
             self.assertEqual(report["training_opponent"], "self_play")
             self.assertEqual(report["device"], "cpu")
+            self.assertEqual(report["parameter_dtype"], "float32")
+            self.assertEqual(report["inference_dtype"], "float32")
+            self.assertIn(report["matmul_precision"], ("highest", "high", "medium"))
             self.assertEqual(report["policy"], "student_local")
             self.assertEqual(report["completed_games"], 8)
             self.assertTrue(report["stochastic"])
@@ -121,6 +146,113 @@ class TrainingEvaluationTests(unittest.TestCase):
             events = EventAccumulator(str(output)).Reload()
             self.assertEqual([p.step for p in events.Scalars("Eval/overall/win_rate")], [1, 3, 5])
 
+    def test_synchronous_path_completes_at_update_boundary_and_preserves_learner(self):
+        """Exercise real workers on CPU; CUDA device routing is tested separately."""
+        config = small_config()
+        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1)
+        observed = []
+        original_on_snapshot = PeriodicEvaluator.on_snapshot
+
+        def on_snapshot(evaluator, *args, **kwargs):
+            scheduled = original_on_snapshot(evaluator, *args, **kwargs)
+            if scheduled:
+                observed.append(evaluator.jobs[-1]["iteration"])
+                self.assertEqual(evaluator.jobs[-1]["status"], "completed")
+                self.assertIsNone(evaluator.running)
+                self.assertFalse(evaluator.pending)
+            return scheduled
+
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory) / "sync"
+            with patch.object(TrainingEvalConfig, "synchronous", new_callable=PropertyMock, return_value=True), \
+                    patch.object(PeriodicEvaluator, "on_snapshot", on_snapshot):
+                summary = train(config, output, iterations=6)
+            learner_rng = torch.get_rng_state().clone()
+            self.assertEqual(observed, [1, 3, 5])
+            self.assertEqual(summary["evaluation"]["completed"], 3)
+            points = json.loads((output / "evaluations/index.json").read_text())["jobs"]
+            self.assertTrue(all(point["synchronous"] for point in points))
+            self.assertEqual(sum(Path(point["checkpoint"]).exists() for point in points), 1)
+            events = EventAccumulator(str(output)).Reload()
+            self.assertEqual([point.step for point in events.Scalars("Eval/overall/win_rate")], [1, 3, 5])
+            wall_times = events.Scalars("Perf/wall_seconds")
+            self.assertGreaterEqual(wall_times[-1].value, sum(point["worker_seconds"] for point in points))
+            disabled = Path(directory) / "disabled"
+            config["evaluation"]["enabled"] = False
+            train(config, disabled, iterations=6)
+            torch.testing.assert_close(torch.get_rng_state(), learner_rng, rtol=0, atol=0)
+            actual = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
+            expected = torch.load(disabled / "checkpoint.pt", weights_only=False, map_location="cpu")
+            for key in ("model_state_dict", "optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+                assert_nested_equal(self, actual[key], expected[key])
+
+    def test_cuda_worker_inherits_devices_and_releases_only_unused_cache(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0"), {}, directory, None)
+            job = {"checkpoint": "snapshot.pt", "report": "report.json",
+                   "worker_log": str(evaluator.directory / "worker.log"), "status": "queued"}
+            evaluator.jobs.append(job)
+            evaluator.pending.append(job)
+            process = SimpleNamespace(pid=123, poll=lambda: None)
+            with patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "test-device", "PYTHONPATH": "frozen-source"}), \
+                    patch("generals_rl.training_evaluation.subprocess.Popen", return_value=process) as popen, \
+                    patch("generals_rl.training_evaluation.torch.cuda.is_initialized", return_value=True), \
+                    patch("generals_rl.training_evaluation.torch.cuda.synchronize") as synchronize, \
+                    patch("generals_rl.training_evaluation.torch.cuda.empty_cache") as empty_cache:
+                evaluator.poll()
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("--device") + 1], "cuda:0")
+            self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "test-device")
+            self.assertEqual(popen.call_args.kwargs["env"]["PYTHONPATH"], "frozen-source")
+            synchronize.assert_called_once_with()
+            empty_cache.assert_called_once_with()
+            # This is a fake routing worker; no CUDA context or process exists.
+            evaluator.running = None
+
+    def test_timeout_and_exception_cleanup_reap_workers_and_bound_failed_weights(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            pool = root / "pool"
+            pool.mkdir()
+            checkpoint = pool / "snapshot.pt"
+            checkpoint.write_bytes(b"test immutable weights")
+            snapshot = lambda sid: SimpleNamespace(snapshot_id=sid, metadata={
+                "iteration": sid, "filename": checkpoint.name,
+                "sha256": sha256(checkpoint.read_bytes()).hexdigest(), "seed": False})
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(every_n_snapshots=1, keep_snapshots=1,
+                                                             timeout_seconds=0.02), {}, root / "run", None)
+            real_popen = subprocess.Popen
+            workers = []
+
+            def sleeping_worker(*args, **kwargs):
+                process = real_popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
+                workers.append(process)
+                return process
+
+            kwargs = {"steps_per_environment": 4, "environment_steps": 16}
+            try:
+                with patch("generals_rl.training_evaluation.subprocess.Popen", side_effect=sleeping_worker):
+                    evaluator.on_snapshot(snapshot(1), pool, publication_index=1, **kwargs)
+                    evaluator.finish()
+                    self.assertEqual(evaluator.jobs[0]["status"], "failed")
+                    self.assertIn("TimeoutError", evaluator.jobs[0]["error"])
+                    self.assertIsNotNone(workers[0].poll())
+                    self.assertIsNone(evaluator.latest_completed)
+                    self.assertFalse((evaluator.directory / "best.pt").exists())
+                    evaluator.settings = TrainingEvalConfig(every_n_snapshots=1, keep_snapshots=1)
+                    evaluator.on_snapshot(snapshot(2), pool, publication_index=2, **kwargs)
+                    evaluator.on_snapshot(snapshot(3), pool, publication_index=3, **kwargs)
+                    evaluator.close()
+                self.assertTrue(all(process.poll() is not None for process in workers))
+                self.assertFalse(evaluator.pending)
+                self.assertIsNone(evaluator.running)
+                self.assertEqual([job["status"] for job in evaluator.jobs], ["failed", "cancelled", "cancelled"])
+                self.assertEqual(sum(Path(job["checkpoint"]).exists() for job in evaluator.jobs), 1)
+                index = json.loads((evaluator.directory / "index.json").read_text())
+                self.assertEqual([job["status"] for job in index["jobs"]], ["failed", "cancelled", "cancelled"])
+            finally:
+                evaluator.close()
+
     def test_retention_keeps_recent_weights_best_and_all_reports(self):
         config = small_config()
         config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1)
@@ -173,6 +305,54 @@ class TrainingEvaluationTests(unittest.TestCase):
                 self.assertEqual((evaluator.directory / "best.pt").read_bytes(), f"weights {expected_best}".encode())
                 self.assertTrue(queued_checkpoint.exists())
             self.assertEqual(len(list(evaluator.directory.glob("candidate_*.pt"))), 1)
+
+    def test_trace_retention_preserves_best_and_recent_finished_without_deleting_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(keep_snapshots=1), {}, directory, None)
+            for index, status in enumerate(("completed", "failed", "cancelled", "completed", "queued"), 1):
+                target = evaluator.directory / f"snapshot_{index:08d}"
+                target.mkdir()
+                (target / "snapshot.pt").write_bytes(f"weights {index}".encode())
+                trace = target / "demo_traces"
+                trace.mkdir()
+                (trace / "loss.jsonl").write_text(f"actions {index}\n")
+                (target / "report.json").write_text(f"metrics {index}\n")
+                (target / "worker.log").write_text(f"log {index}\n")
+                evaluator.jobs.append({"status": status, "checkpoint": str(target / "snapshot.pt"),
+                                       "report": str(target / "report.json")})
+            best = evaluator.jobs[0]
+            evaluator.best_completed = {"report": best["report"]}
+            (evaluator.directory / "best.pt").write_bytes(b"protected best weights")
+            best_report = {"selected_game_traces": {"cases": [{"path": str(
+                Path(best["report"]).parent / "demo_traces/loss.jsonl")} ]}}
+            (evaluator.directory / "best_report.json").write_text(json.dumps(best_report))
+            evaluator._prune_snapshots()
+            evaluator._save_index()
+            self.assertEqual([Path(job["checkpoint"]).exists() for job in evaluator.jobs],
+                             [False, False, False, True, True])
+            self.assertEqual([(Path(job["report"]).parent / "demo_traces").exists()
+                              for job in evaluator.jobs], [True, False, False, True, True])
+            self.assertEqual([job.get("trace_retained") for job in evaluator.jobs],
+                             [True, False, False, True, None])
+            self.assertTrue(Path(best_report["selected_game_traces"]["cases"][0]["path"]).exists())
+            self.assertEqual((evaluator.directory / "best.pt").read_bytes(), b"protected best weights")
+            for index, job in enumerate(evaluator.jobs, 1):
+                self.assertEqual(Path(job["report"]).read_text(), f"metrics {index}\n")
+                self.assertEqual((Path(job["report"]).parent / "worker.log").read_text(), f"log {index}\n")
+            self.assertFalse(json.loads((evaluator.directory / "index.json").read_text())["jobs"][1]["trace_retained"])
+            # Once a newer best replaces it, the old best's traces can expire.
+            evaluator.best_completed = {"report": evaluator.jobs[3]["report"]}
+            evaluator._prune_snapshots()
+            self.assertFalse((Path(best["report"]).parent / "demo_traces").exists())
+            self.assertFalse(best["trace_retained"])
+            # Historical CPU jobs without traces keep their index shape.
+            cpu = evaluator.directory / "cpu"
+            cpu.mkdir()
+            (cpu / "snapshot.pt").write_bytes(b"cpu weights")
+            evaluator.jobs.append({"status": "completed", "checkpoint": str(cpu / "snapshot.pt"),
+                                   "report": str(cpu / "report.json")})
+            evaluator._prune_snapshots()
+            self.assertNotIn("trace_retained", evaluator.jobs[-1])
 
     def test_seed_is_not_counted_and_worker_failure_is_visible_without_a_false_win_rate(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):

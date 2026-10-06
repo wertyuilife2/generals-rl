@@ -1,4 +1,4 @@
-"""Evaluate immutable learner snapshots in isolated CPU subprocesses.
+"""Evaluate immutable learner snapshots in isolated subprocesses.
 
 Scheduling and reporting live outside the vendored runner, policy pool and MDP.
 The evaluator reuses the complete, paired built-in-controller match protocol.
@@ -8,12 +8,15 @@ from collections import deque
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import math
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from time import perf_counter
+
+import torch
 
 from generals.controllers import AI_KINDS
 
@@ -29,12 +32,27 @@ class TrainingEvalConfig:
     seed: int = 1000042
     cpu_threads: int = 1
     keep_snapshots: int | None = None
+    device: str = "cpu"
+    timeout_seconds: float | None = None
 
     def __post_init__(self):
         if not isinstance(self.enabled, bool):
             raise TypeError("evaluation.enabled must be boolean")
         if not isinstance(self.stochastic, bool):
             raise TypeError("evaluation.stochastic must be boolean")
+        if not isinstance(self.device, str):
+            raise TypeError("evaluation.device must be a CPU or CUDA device string")
+        try:
+            device = torch.device(self.device)
+        except (RuntimeError, ValueError) as exc:
+            raise ValueError("evaluation.device must be a CPU or CUDA device string") from exc
+        if device.type not in ("cpu", "cuda"):
+            raise ValueError("evaluation.device must be a CPU or CUDA device string")
+        object.__setattr__(self, "device", str(device))
+        if self.timeout_seconds is not None and (isinstance(self.timeout_seconds, bool)
+                or not isinstance(self.timeout_seconds, (int, float))
+                or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
+            raise ValueError("evaluation.timeout_seconds must be positive and finite or null")
         for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "seed"):
             minimum = 0 if name == "seed" else 1
             value = getattr(self, name)
@@ -44,6 +62,17 @@ class TrainingEvalConfig:
                 or isinstance(self.keep_snapshots, bool) or self.keep_snapshots < 1):
             raise ValueError("evaluation.keep_snapshots must be a positive integer or null")
 
+    @property
+    def synchronous(self):
+        """A CUDA worker shares the learner's device only while it is paused."""
+        return torch.device(self.device).type == "cuda"
+
+    @property
+    def worker_timeout_seconds(self):
+        if self.timeout_seconds is not None:
+            return self.timeout_seconds
+        return 1800.0 if self.synchronous else None
+
 
 def _write_json(path, value):
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -51,8 +80,17 @@ def _write_json(path, value):
     temporary.replace(path)
 
 
+def _stop_worker(process):
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 class PeriodicEvaluator:
-    """One CPU worker at a time; all due snapshots are queued without dropping.
+    """One worker at a time; CPU evaluation queues and CUDA evaluation blocks.
 
     An evaluation owns an exact copy of its snapshot before pool eviction can
     delete it. Neither policy inference nor RNG operations run in the training
@@ -76,49 +114,81 @@ class PeriodicEvaluator:
         self._save_index()
 
     def on_snapshot(self, snapshot, pool_directory, *, publication_index,
-                    steps_per_environment, environment_steps):
+                    steps_per_environment, environment_steps, remaining_seconds=None):
         """Count periodic learned snapshots; the initial random seed is excluded.
 
         The publication ordinal is derived from the absolute learner iteration,
         so resuming does not shift the ten-snapshot cadence.
         """
+        entered = perf_counter()
         if (not self.settings.enabled or publication_index < 1 or snapshot.metadata["seed"]
                 or publication_index % self.settings.every_n_snapshots):
             return False
         if any(j["publication_index"] == publication_index for j in self.jobs):
             return False
+        timeout = self.settings.worker_timeout_seconds
+        deadline_reason = "evaluation_timeout"
+        if self.settings.synchronous and remaining_seconds is not None:
+            if (isinstance(remaining_seconds, bool) or not isinstance(remaining_seconds, (int, float))
+                    or not math.isfinite(remaining_seconds)):
+                raise ValueError("remaining_seconds must be finite or null")
+            available = max(0.0, remaining_seconds - 10.0)
+            if available <= timeout:
+                timeout = available
+                deadline_reason = "wall_budget"
+        deadline = entered + timeout if self.settings.synchronous else None
         target = self.directory / f"snapshot_{snapshot.snapshot_id:08d}"
-        target.mkdir()
         checkpoint = target / "snapshot.pt"
-        shutil.copyfile(Path(pool_directory) / snapshot.metadata["filename"], checkpoint)
-        digest = sha256(checkpoint.read_bytes()).hexdigest()
-        if digest != snapshot.metadata["sha256"]:
-            raise RuntimeError("evaluation snapshot differs from the published pool snapshot")
-        _write_json(target / "run_config.json", self.run_config)
         job = {
             "snapshot_id": snapshot.snapshot_id,
             "iteration": snapshot.metadata["iteration"],
             "publication_index": publication_index,
             "steps_per_environment": steps_per_environment,
             "environment_steps": environment_steps,
-            "checkpoint": str(checkpoint), "checkpoint_sha256": digest,
+            "checkpoint": str(checkpoint), "checkpoint_sha256": snapshot.metadata["sha256"],
             "report": str(target / "report.json"),
             "worker_log": str(target / "worker.log"),
             "stochastic": self.settings.stochastic,
+            "device": self.settings.device,
+            "synchronous": self.settings.synchronous,
+            "timeout_seconds": timeout, "deadline": deadline, "deadline_reason": deadline_reason,
             "status": "queued",
         }
+        if deadline is not None and perf_counter() >= deadline:
+            self.jobs.append(job)
+            self._cancel(job, deadline_reason)
+            return False
+        target.mkdir()
+        shutil.copyfile(Path(pool_directory) / snapshot.metadata["filename"], checkpoint)
+        if sha256(checkpoint.read_bytes()).hexdigest() != job["checkpoint_sha256"]:
+            raise RuntimeError("evaluation snapshot differs from the published pool snapshot")
+        _write_json(target / "run_config.json", self.run_config)
         self.jobs.append(job)
         self.pending.append(job)
         self._save_index()
         print(f"[eval] queued snapshot={job['snapshot_id']} iteration={job['iteration']} "
               f"games={8 * self.settings.maps_per_ai}", flush=True)
         self.poll()
+        if self.settings.synchronous:
+            # Called by train.on_update after a complete PPO update. Wait before
+            # the learner can collect another rollout or publish another job.
+            self.finish()
         return True
 
     def poll(self):
         if self.running is not None:
             job, process, started = self.running
             returncode = process.poll()
+            timeout = job.get("timeout_seconds", self.settings.worker_timeout_seconds)
+            deadline = job.get("deadline")
+            expired = ((deadline is not None and perf_counter() >= deadline)
+                       or (deadline is None and timeout is not None and perf_counter() - started >= timeout))
+            if returncode is None and expired:
+                _stop_worker(process)
+                self.running = None
+                job["worker_seconds"] = perf_counter() - started
+                job["returncode"] = process.returncode
+                self._fail(job, TimeoutError(f"evaluation worker exceeded {timeout:g} seconds"))
             if returncode is not None:
                 self.running = None
                 job["worker_seconds"] = perf_counter() - started
@@ -132,14 +202,29 @@ class PeriodicEvaluator:
         while self.running is None and self.pending:
             job = self.pending.popleft()
             settings = self.settings
+            if job.get("deadline") is not None and perf_counter() >= job["deadline"]:
+                self._cancel(job, job["deadline_reason"])
+                continue
             command = [sys.executable, "-u", "-m", "generals_rl.evaluate_builtin",
                        job["checkpoint"], "--maps-per-ai", str(settings.maps_per_ai),
                        "--batch-size", str(settings.batch_size), "--max-ticks", str(settings.max_ticks),
                        "--seed", str(settings.seed), "--cpu-threads", str(settings.cpu_threads),
-                       "--device", "cpu", "--output", job["report"]]
+                       "--device", settings.device, "--output", job["report"]]
             command.append("--stochastic" if settings.stochastic else "--greedy")
+            if torch.device(settings.device).type == "cuda":
+                command.extend(["--trace-directory", str(Path(job["report"]).parent / "demo_traces")])
             environment = os.environ.copy()
-            environment.update(CUDA_VISIBLE_DEVICES="", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
+            environment.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
+            if torch.device(settings.device).type == "cpu":
+                environment["CUDA_VISIBLE_DEVICES"] = ""
+            elif torch.cuda.is_initialized():
+                # Release only unused allocator blocks. Live learner, optimizer
+                # and historical opponent tensors remain on their devices.
+                torch.cuda.synchronize()
+                torch.cuda.empty_cache()
+            if job.get("deadline") is not None and perf_counter() >= job["deadline"]:
+                self._cancel(job, job["deadline_reason"])
+                continue
             try:
                 with Path(job["worker_log"]).open("w") as stream:
                     process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
@@ -159,11 +244,33 @@ class PeriodicEvaluator:
                 or report["scheduled_games"] != expected
                 or set(report["by_ai"]) != set(AI_KINDS)
                 or report["policy"] != "student_local"
-                or report["device"] != "cpu" or report["stochastic"] != self.settings.stochastic):
+                or report["device"] != self.settings.device or report["stochastic"] != self.settings.stochastic):
             raise RuntimeError("evaluation report does not match the requested snapshot/protocol")
         for kind in AI_KINDS:
             if report["by_ai"][kind]["games"] != 2 * self.settings.maps_per_ai:
                 raise RuntimeError(f"evaluation did not finish all scheduled {kind} games")
+        if torch.device(self.settings.device).type == "cuda":
+            traces = report["selected_game_traces"]
+            if traces["protocol"] != "recorded_joint_actions_core_v1":
+                raise RuntimeError("evaluation did not record the requested action trace protocol")
+            games = {game["game_id"]: game for game in report["games"]}
+            expected_pairs = {(kind, outcome) for kind in AI_KINDS for outcome in ("loss", "win")}
+            covered = []
+            for trace in traces["cases"]:
+                pair = trace["opponent"], trace["outcome"]
+                game = games[trace["game_id"]]
+                if (pair != (game["opponent"], game["outcome"])
+                        or trace["checkpoint_sha256"] != job["checkpoint_sha256"]
+                        or sha256(Path(trace["path"]).read_bytes()).hexdigest() != trace["sha256"]):
+                    raise RuntimeError("evaluation action trace differs from its report/checkpoint")
+                covered.append(pair)
+            for missing in traces["missing"]:
+                pair = missing["opponent"], missing["outcome"]
+                if any((game["opponent"], game["outcome"]) == pair for game in games.values()):
+                    raise RuntimeError("evaluation omitted an available win/loss trace")
+                covered.append(pair)
+            if len(covered) != 8 or set(covered) != expected_pairs:
+                raise RuntimeError("evaluation did not account for all eight demo outcomes")
         report["training_evaluation"] = {key: job[key] for key in
             ("snapshot_id", "iteration", "publication_index", "steps_per_environment", "environment_steps")}
         _write_json(Path(job["report"]), report)
@@ -174,6 +281,9 @@ class PeriodicEvaluator:
                  report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
         point["selection_score"] = list(score)
         point["stochastic"] = report["stochastic"]
+        for key in ("device", "matmul_precision", "parameter_dtype", "inference_dtype"):
+            if key in report:
+                point[key] = job[key] = report[key]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):
             temporary = self.directory / "best.pt.tmp"
             shutil.copyfile(job["checkpoint"], temporary)
@@ -207,6 +317,7 @@ class PeriodicEvaluator:
 
     def _fail(self, job, exc):
         job.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+        self._prune_snapshots()
         self._save_index()
         if self.writer is not None:
             self.writer.add_scalar("Eval/failed_jobs", self.describe()["failed"], job["iteration"])
@@ -214,13 +325,36 @@ class PeriodicEvaluator:
         print(f"[eval] FAILED snapshot={job['snapshot_id']}: {job['error']}; "
               f"log={job['worker_log']}", flush=True)
 
+    def _cancel(self, job, reason):
+        job.update(status="cancelled", reason=reason,
+                   checkpoint_retained=Path(job["checkpoint"]).exists())
+        self._prune_snapshots()
+        self._save_index()
+        if self.writer is not None:
+            self.writer.add_scalar("Eval/cancelled_jobs", self.describe()["cancelled"], job["iteration"])
+            self.writer.flush()
+        print(f"[eval] cancelled snapshot={job['snapshot_id']} reason={reason}", flush=True)
+
     def _prune_snapshots(self):
         if self.settings.keep_snapshots is None:
             return
-        completed = [job for job in self.jobs if job["status"] == "completed"]
-        for job in completed[:-self.settings.keep_snapshots]:
+        finished = [job for job in self.jobs if job["status"] in ("completed", "failed", "cancelled")]
+        for job in finished[:-self.settings.keep_snapshots]:
             Path(job["checkpoint"]).unlink(missing_ok=True)
             job["checkpoint_retained"] = False
+        recent_reports = {job.get("report") for job in finished[-self.settings.keep_snapshots:]}
+        best_report = self.best_completed["report"] if self.best_completed else None
+        for job in finished:
+            if not job.get("report"):
+                continue
+            traces = Path(job["report"]).parent / "demo_traces"
+            if traces.is_dir():
+                # best_report.json keeps paths into the original report's
+                # directory, even after its snapshot weights are pruned.
+                retained = job["report"] == best_report or job["report"] in recent_reports
+                if not retained:
+                    shutil.rmtree(traces)
+                job["trace_retained"] = retained
 
     def _save_index(self):
         _write_json(self.directory / "index.json", {"jobs": self.jobs, "best": self.best_completed})
@@ -237,7 +371,9 @@ class PeriodicEvaluator:
         while self.running is not None or self.pending:
             if self.running is not None:
                 try:
-                    self.running[1].wait(timeout=1)
+                    deadline = self.running[0].get("deadline")
+                    timeout = 1.0 if deadline is None else min(1.0, max(0.0, deadline - perf_counter()))
+                    self.running[1].wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
                     pass
             self.poll()
@@ -246,16 +382,11 @@ class PeriodicEvaluator:
         """Reap workers on a training exception; retain cancelled requests."""
         if self.running is not None:
             job, process, _ = self.running
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+            _stop_worker(process)
             self.running = None
             job["status"] = "cancelled"
-            self._save_index()
         while self.pending:
             job = self.pending.popleft()
             job["status"] = "cancelled"
-            self._save_index()
+        self._prune_snapshots()
+        self._save_index()

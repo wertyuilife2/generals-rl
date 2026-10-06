@@ -94,6 +94,10 @@ TensorBoard 的 `PPO/` 下记录 approximate/exact KL、clip fraction、entropy�
   独立评估可用 `--sampling-seed` 固定地图并更换动作种子；`--greedy` 或 `evaluation.stochastic=false` 显式选择greedy诊断。
   TensorBoard `Eval/stochastic=1` 标识采样评估，历史greedy结果保留原模式标签。
 - CPU 评估子进程持有快照副本，结果写入 `evaluations/index.json`、各快照的 `report.json` 和 TensorBoard `Eval/`。
+- 大网络可显式设 `evaluation.device="cuda:0"`，在一次PPO更新结束后暂停训练并同步评估；
+  `evaluation.timeout_seconds` 控制超时，同时受训练剩余墙钟预算约束。worker退出并回收后再收集下一轮。
+  GPU评估默认保存每AI首个真实胜/负的联合动作trace，缺失类别明确报告；录像按记录动作在CPU/Core重放，
+  不重新推理模型。设置 `evaluation.keep_snapshots` 后，trace随当前best及最近K个完成评测有界保留。
 - 可用 `--no-eval` 关闭定期评估。TensorBoard 启动：`tensorboard --logdir outputs/moe_cts`。
 
 ## MDP 与模块边界
@@ -102,11 +106,14 @@ TensorBoard 的 `PPO/` 下记录 approximate/exact KL、clip fraction、entropy�
 | --- | --- |
 | `mdp/state.py` | CPU/GPU 共用张量状态视图 |
 | `mdp/observations.py`、`mdp/combat.py` | 局部/特权观测、每局历史与可选战斗特征 |
+| `mdp/knowledge.py`、`mdp/layout.py` | 各玩家合法观测的持久知识、地图/历史/动作维度契约 |
 | `mdp/actions.py` | 动作编码、合法 mask |
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
 | `cts.py` | RSL VecEnv/TensorDict 适配与算法配置 |
 | `student_ppo.py`、`ppo_monitor.py` | 全学生 PPO、categorical 自适应 LR、默认开启的更新监控；学生获得任务梯度 |
+| `information_ppo.py`、`backbones.py`、`map_ppo.py` | 信息输入消融、上游成熟网络、可变地图的policy/value head |
+| `curriculum.py` | rollout边界的可选gamma课程与tick penalty衰减 |
 | `map_sampling.py` | 回合重置时从独立随机地图池抽图 |
 | `opponents.py`、`self_play.py` | 冻结历史 student、采样及局内对手生命周期 |
 | `self_play_training.py` | CTS 模型工厂和快照发布 |
@@ -179,6 +186,17 @@ v5及后续配置使用 `potential_gamma=.995`：将统计差分替换为
 `gamma*Phi(next)-Phi(before)`，自然终止令下一潜能归零，超时保留潜能并bootstrap。
 `critic_potential` 与 `value_potential_offset` 配套启用，让critic输出基础value减Phi；
 训练gamma必须与reward匹配。
+
+当前信息消融配置为 `v19`–`v22`：actor持久知识与critic读取actor历史/知识形成2×2。
+`task.persistent_knowledge=true` 时知识按玩家/episode隔离，只更新合法视野，owner/city表示最后观测值并附年龄；
+知识单独存储，不按history重复堆叠。成熟ResNet/ViT的三档与动态地图合约见
+[架构设计](../doc/rl_architecture_design.md)，接受新地图形状不等于已验证行为泛化。
+
+课程默认关闭。设顶层 `curriculum.tick_decay=true`，在TensorBoard迭代0..1000将原tick penalty乘以1→0，
+资源PBRS和终局奖励系数保持原值。gamma课程显式设置 `curriculum.gamma_final` 和
+`curriculum.gamma_end_iteration`；初始值取PPO配置，课程同步修改PPO与PBRS gamma。
+同一rollout的采样、GAE和PPO更新保持一个设置，随后推进下一轮；`Curriculum/`记录实际值，resume按绝对迭代恢复。
+这些开关是后续实验准备，不自动加入历史或正在运行的版本。
 
 训练默认 self-play，每局开始均匀抽取一个冻结历史 student，整局不换模型。
 候选淘汰后，正在进行的对局继续持有旧模型；不同座位各自维护历史，对手采样使用独立 RNG。

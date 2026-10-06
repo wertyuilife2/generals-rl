@@ -9,6 +9,7 @@ from dataclasses import replace
 from hashlib import sha256
 import json
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
@@ -116,7 +117,7 @@ def plot(scalars, evaluations, output):
 
 
 def demos(checkpoint, report, output, *, render=False):
-    """Reuse evaluation's policy loader, map seeds, battle loop and recording sink."""
+    """Prefer actual recorded actions; legacy CPU reports reuse policy inference."""
     import torch
     from tensordict import TensorDict
     from generals import MapConfig
@@ -124,47 +125,75 @@ def demos(checkpoint, report, output, *, render=False):
     from generals_rl.config import seed_everything, task_config
     from generals_rl.evaluate_builtin import GameSpec, _load_student, battle_batch
     from generals_rl.task import GeneralsTask
-    from recordings import MatchRecorder
+    from recordings import MatchRecorder, replay_evaluation_trace
 
     stochastic = report.get("stochastic", False)
     if stochastic and report.get("sampling_protocol") != "per_game_numpy_uniform_cdf_v1":
         raise ValueError("sampled demo replay requires per-game sampling metadata")
     if sha256(checkpoint.read_bytes()).hexdigest() != report["checkpoint_sha256"]:
         raise ValueError("demo report and checkpoint differ; provide the matching --report")
-    config = read_json(checkpoint.with_name("run_config.json"))
-    task = task_config(config["task"])
-    seed_everything(report["seed"])
-    torch.set_num_threads(1)
     chosen = []
-    for kind in KINDS:
-        for outcome in ("loss", "win"):
-            candidates = sorted([game for game in report["games"]
-                                 if game["opponent"] == kind and game["outcome"] == outcome],
-                                key=lambda game: (game["ticks"], game["game_id"]))
-            if candidates:
-                chosen.append(candidates[len(candidates) // 2])
-    if not chosen:
-        return {"cases": [], "reason": "evaluation contains only draws"}
-    specs = [GameSpec(**{key: game[key] for key in GameSpec.__dataclass_fields__}) for game in chosen]
-    map_config = MapConfig(task.width, task.height, 2, task.mountain_density, task.city_density)
-    states = [generate_map(map_config, spec.map_seed) for spec in specs]
-    # Obtain feature shapes through the task composition, including future MDP changes.
-    with GeneralsTask(replace(task, backend="cpu", device="cpu", num_envs=1,
-                              threads=1, opponent="wait", map_pool_size=0)) as example:
-        observations = TensorDict(example.get_observations(), batch_size=[1], device="cpu")
-        policy = _load_student(checkpoint, config, observations, "cpu")
-    names = {spec.game_id: f"{spec.opponent}_{game['outcome']}" for spec, game in zip(specs, chosen)}
-    with MatchRecorder(output / "recordings", names=names,
-                       metadata={"checkpoint_sha256": report["checkpoint_sha256"],
-                                 "evaluation_seed": report["seed"], "stochastic": stochastic,
-                                 "sampling_seed": report.get("sampling_seed"),
-                                 "sampling_protocol": report.get("sampling_protocol")}) as recorder:
-        completed, timing = battle_batch(specs, states, policy, task,
-                                          max_ticks=report["max_ticks"], device="cpu",
-                                          stochastic=stochastic,
-                                          sampling_seed=report["sampling_seed"] if stochastic else 1000042,
-                                          cpu_threads=1, recorder=recorder)
-        cases = recorder.finish()
+    trace_info = report.get("selected_game_traces")
+    selection = "one median-duration loss then win per AI when available"
+    extra = {}
+    if trace_info is not None:
+        if trace_info["protocol"] != "recorded_joint_actions_core_v1":
+            raise ValueError("unsupported evaluated action trace protocol")
+        pairs = {(trace["opponent"], trace["outcome"]): trace for trace in trace_info["cases"]}
+        if len(pairs) != len(trace_info["cases"]) or len(pairs) > 8:
+            raise ValueError("evaluated action traces must contain at most one win/loss per AI")
+        games = {game["game_id"]: game for game in report["games"]}
+        cases = []
+        started = perf_counter()
+        for kind in KINDS:
+            for outcome in ("loss", "win"):
+                if (kind, outcome) not in pairs:
+                    continue
+                trace = pairs[kind, outcome]
+                match = games[trace["game_id"]]
+                cases.append(replay_evaluation_trace(trace, match, output / "recordings",
+                              metadata={"checkpoint_sha256": report["checkpoint_sha256"]}))
+                chosen.append(match)
+        completed = [case["match"] for case in cases]
+        timing = {"recorded_action_replay_seconds": perf_counter() - started}
+        selection = trace_info["selection"]
+        extra = {"replay_mode": "recorded_joint_actions", "missing": trace_info["missing"]}
+    else:
+        if torch.device(report.get("device", "cpu")).type != "cpu":
+            raise ValueError("GPU evaluated demos require recorded actions; policy reinference cannot guarantee exact replay")
+        config = read_json(checkpoint.with_name("run_config.json"))
+        task = task_config(config["task"])
+        seed_everything(report["seed"])
+        torch.set_num_threads(1)
+        for kind in KINDS:
+            for outcome in ("loss", "win"):
+                candidates = sorted([game for game in report["games"]
+                                     if game["opponent"] == kind and game["outcome"] == outcome],
+                                    key=lambda game: (game["ticks"], game["game_id"]))
+                if candidates:
+                    chosen.append(candidates[len(candidates) // 2])
+        if not chosen:
+            return {"cases": [], "reason": "evaluation contains only draws"}
+        specs = [GameSpec(**{key: game[key] for key in GameSpec.__dataclass_fields__}) for game in chosen]
+        map_config = MapConfig(task.width, task.height, 2, task.mountain_density, task.city_density)
+        states = [generate_map(map_config, spec.map_seed) for spec in specs]
+        # Obtain feature shapes through the task composition, including future MDP changes.
+        with GeneralsTask(replace(task, backend="cpu", device="cpu", num_envs=1,
+                                  threads=1, opponent="wait", map_pool_size=0)) as example:
+            observations = TensorDict(example.get_observations(), batch_size=[1], device="cpu")
+            policy = _load_student(checkpoint, config, observations, "cpu")
+        names = {spec.game_id: f"{spec.opponent}_{game['outcome']}" for spec, game in zip(specs, chosen)}
+        with MatchRecorder(output / "recordings", names=names,
+                           metadata={"checkpoint_sha256": report["checkpoint_sha256"],
+                                     "evaluation_seed": report["seed"], "stochastic": stochastic,
+                                     "sampling_seed": report.get("sampling_seed"),
+                                     "sampling_protocol": report.get("sampling_protocol")}) as recorder:
+            completed, timing = battle_batch(specs, states, policy, task,
+                                              max_ticks=report["max_ticks"], device="cpu",
+                                              stochastic=stochastic,
+                                              sampling_seed=report["sampling_seed"] if stochastic else 1000042,
+                                              cpu_threads=1, recorder=recorder)
+            cases = recorder.finish()
     for case, expected, actual in zip(cases, chosen, completed, strict=True):
         if actual != expected:
             raise RuntimeError("demo did not reproduce the complete evaluated game")
@@ -183,7 +212,7 @@ def demos(checkpoint, report, output, *, render=False):
             from render_recording import render_recording
             case["video"] = render_recording(case["frames"], output / "videos" / f"{case['name']}.mp4")
     return {"cases": cases, "timing": timing,
-            "selection": "one median-duration loss then win per AI when available",
+            "selection": selection, **extra,
             "examples_are_not_an_unbiased_win_rate_estimate": True}
 
 

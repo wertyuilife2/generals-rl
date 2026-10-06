@@ -24,6 +24,7 @@ from generals import MapConfig, VecEnv
 from generals.controllers import AI_KINDS, make_controllers
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
+from generals.core.recording import RULES_VERSION, state_digest, state_to_dict
 from generals.core.state import Action, MoveResult
 from rsl_rl.modules import ActorCriticMoECTS
 from rsl_rl.utils import resolve_callable
@@ -42,6 +43,90 @@ class GameSpec:
     map_seed: int
     controller_seed: int
     learner_seat: int
+
+
+class SelectedGameTraces:
+    """Keep one actual win/loss per AI, buffering only the current match batch.
+
+    No full post-tick states or policy inputs are retained. Core-format traces
+    contain the initial state, actual joint actions and native state digests.
+    Selection is by game_id, not completion speed or a subsequent policy replay.
+    """
+
+    protocol = "recorded_joint_actions_core_v1"
+
+    def __init__(self, directory, *, max_ticks, opponents, metadata):
+        self.directory = Path(directory).resolve()
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.max_ticks = max_ticks
+        self.opponents = tuple(opponents)
+        self.metadata = dict(metadata)
+        self.selected = {}
+        self.candidates = {}
+
+    def needs_batch(self, specs):
+        return any((spec.opponent, outcome) not in self.selected
+                   for spec in specs for outcome in ("win", "loss"))
+
+    def on_start(self, specs, states):
+        self.candidates = {}
+        for spec, state in zip(specs, states, strict=True):
+            if all((spec.opponent, outcome) in self.selected for outcome in ("win", "loss")):
+                continue
+            self.candidates[spec.game_id] = {
+                "spec": spec, "initial_state": state_to_dict(state),
+                "initial_digest": state_digest(state), "ticks": 0,
+                "actions": np.empty((self.max_ticks, 2, 4), dtype=np.int64),
+                "digests": np.empty((self.max_ticks, 32), dtype=np.uint8),
+            }
+
+    def on_tick(self, spec, actions, state, moves, done):
+        entry = self.candidates.get(spec.game_id)
+        if entry is None:
+            return
+        index = entry["ticks"]
+        if state.tick != index + 1 or index >= self.max_ticks:
+            raise RuntimeError("selected trace skipped or repeated a tick")
+        entry["actions"][index] = [[int(a.kind), a.source, int(a.direction), int(a.mode)] for a in actions]
+        entry["digests"][index] = np.frombuffer(bytes.fromhex(state_digest(state)), dtype=np.uint8)
+        entry["ticks"] += 1
+
+    def finish_batch(self, games):
+        for game in sorted(games, key=lambda game: game["game_id"]):
+            key = game["opponent"], game["outcome"]
+            if key[1] not in ("win", "loss") or key in self.selected:
+                continue
+            entry = self.candidates[game["game_id"]]
+            if entry["ticks"] != game["ticks"]:
+                raise RuntimeError("selected trace does not cover the evaluated game")
+            path = self.directory / f"{key[0]}_{key[1]}.trace.jsonl"
+            metadata = {**self.metadata, "game": asdict(entry["spec"]), "match": game,
+                        "trace_protocol": self.protocol,
+                        "decision_timing": "joint_pre_growth_then_absolute_seat_order",
+                        "spectator_full_state_is_not_policy_input": True}
+            with path.open("x", encoding="utf-8") as stream:
+                def write(row):
+                    stream.write(json.dumps(row, separators=(",", ":")) + "\n")
+                write({"type": "header", "rules_version": RULES_VERSION,
+                       "state": entry["initial_state"], "digest": entry["initial_digest"],
+                       "metadata": metadata})
+                for index in range(entry["ticks"]):
+                    write({"type": "tick", "tick": index + 1,
+                           "actions": entry["actions"][index].tolist(),
+                           "digest": entry["digests"][index].tobytes().hex()})
+            self.selected[key] = {
+                "game_id": game["game_id"], "opponent": key[0], "outcome": key[1],
+                "learner_seat": game["learner_seat"], "ticks": game["ticks"],
+                "path": str(path), "sha256": sha256(path.read_bytes()).hexdigest(),
+                "checkpoint_sha256": self.metadata["checkpoint_sha256"], "protocol": self.protocol,
+            }
+        self.candidates.clear()
+
+    def describe(self):
+        keys = [(kind, outcome) for kind in self.opponents for outcome in ("loss", "win")]
+        return {"protocol": self.protocol, "selection": "first_game_id_win_and_loss_per_ai",
+                "cases": [self.selected[key] for key in keys if key in self.selected],
+                "missing": [{"opponent": key[0], "outcome": key[1]} for key in keys if key not in self.selected]}
 
 
 def make_schedule(*, maps_per_ai=50, seed=1000042, opponents=AI_KINDS):
@@ -149,10 +234,23 @@ def _load_student(checkpoint, config, example_obs, device):
         shape_obs, deepcopy(config["runner"]["obs_groups"]),
         example_obs["action_mask"].shape[-1], **policy_config,
     ).to(device)
-    saved = torch.load(checkpoint, weights_only=False, map_location=device)
+    # Do not allocate a second full checkpoint on the GPU during loading.
+    saved = torch.load(checkpoint, weights_only=False, map_location="cpu")
     policy.load_state_dict(saved["model_state_dict"])
     policy.eval()
     return policy
+
+
+def _inference_metadata(policy, device):
+    """Separate stored parameters from the CUDA forward's autocast precision.
+
+    MapPPO returns float32 logits/probabilities after its mixed-precision forward.
+    ``inference_dtype`` describes that forward, not every operation or output.
+    """
+    parameter_dtype = str(next(policy.parameters()).dtype).removeprefix("torch.")
+    autocast_bfloat16 = getattr(policy, "amp_bfloat16", False) and torch.device(device).type == "cuda"
+    return {"parameter_dtype": parameter_dtype,
+            "inference_dtype": "bfloat16" if autocast_bfloat16 else parameter_dtype}
 
 
 def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
@@ -308,7 +406,7 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
 
 def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_KINDS,
                      batch_size=128, max_ticks=2000, device="cpu", stochastic=True,
-                     sampling_seed=None, cpu_threads=1, output=None):
+                     sampling_seed=None, cpu_threads=1, output=None, trace_directory=None):
     """Evaluate every scheduled game, paired by map and balanced by learner seat."""
     if batch_size < 1 or max_ticks < 1:
         raise ValueError("batch size and maximum ticks must be positive")
@@ -317,6 +415,9 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
     started = perf_counter()
     checkpoint = Path(checkpoint).resolve()
     config = json.loads(checkpoint.with_name("run_config.json").read_text())
+    device = torch.device(device)
+    if device.type == "cuda":
+        torch.set_float32_matmul_precision(config.get("matmul_precision") or "highest")
     training_task = task_config(config["task"])
     if training_task.players != 2:
         raise ValueError("1v1 evaluation requires a checkpoint trained with players=2")
@@ -329,6 +430,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
             for index, spec in {spec.map_index: spec for spec in schedule}.items()}
     games, timings = [], []
     policy = None
+    traces = None
     for start in range(0, len(schedule), batch_size):
         specs = schedule[start:start + batch_size]
         states = [maps[spec.map_index].copy() for spec in specs]
@@ -345,10 +447,22 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                 obs = _local_inputs(batch, pids, encoder, history,
                                     make_action_space(training_task), knowledge)
                 policy = _load_student(checkpoint, config, obs, device)
+            if trace_directory is not None:
+                traces = SelectedGameTraces(trace_directory, max_ticks=max_ticks, opponents=opponents,
+                    metadata={"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
+                              "evaluation_seed": seed, "sampling_seed": sampling_seed if stochastic else None,
+                              "sampling_protocol": "per_game_numpy_uniform_cdf_v1" if stochastic else None,
+                              "stochastic": stochastic, "device": str(device),
+                              "matmul_precision": torch.get_float32_matmul_precision(),
+                              **_inference_metadata(policy, device), "batch_size": batch_size,
+                              "max_ticks": max_ticks})
         completed, timing = battle_batch(specs, states, policy, training_task,
                                         max_ticks=max_ticks, device=device,
                                         stochastic=stochastic, sampling_seed=sampling_seed,
-                                        cpu_threads=cpu_threads)
+                                        cpu_threads=cpu_threads,
+                                        recorder=traces if traces is not None and traces.needs_batch(specs) else None)
+        if traces is not None:
+            traces.finish_batch(completed)
         games.extend(completed)
         timings.append(timing)
         print(f"Built-in evaluation: {len(games)}/{len(schedule)} games completed", flush=True)
@@ -369,6 +483,8 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "persistent_knowledge": training_task.persistent_knowledge,
         "seed": seed, "maps_per_ai": maps_per_ai, "scheduled_games": len(schedule),
         "completed_games": len(games), "batch_size": batch_size, "device": str(device),
+        "matmul_precision": torch.get_float32_matmul_precision(),
+        **_inference_metadata(policy, device),
         "cpu_threads": cpu_threads, "max_ticks": max_ticks,
         "clock_normalization_ticks": training_task.max_episode_steps,
         "stochastic": stochastic, "map_config": asdict(map_config),
@@ -383,6 +499,8 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
             for seat in (0, 1)} for kind in opponents},
         "timing": totals, "games": games,
     }
+    if traces is not None:
+        report["selected_game_traces"] = traces.describe()
     if output is not None:
         destination = Path(output)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -406,13 +524,15 @@ def main(argv=None):
     parser.set_defaults(stochastic=True)
     parser.add_argument("--sampling-seed", type=int, help="action sampling seed; defaults to --seed")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--trace-directory", type=Path,
+                        help="retain only the first evaluated win/loss action trace per opponent")
     args = parser.parse_args(argv)
     output = args.output or args.checkpoint.with_name("builtin_evaluation.json")
     report = evaluate_builtin(args.checkpoint, maps_per_ai=args.maps_per_ai, seed=args.seed,
                               opponents=args.opponents, batch_size=args.batch_size,
                               max_ticks=args.max_ticks, device=args.device,
                               stochastic=args.stochastic, sampling_seed=args.sampling_seed,
-                              cpu_threads=args.cpu_threads, output=output)
+                              cpu_threads=args.cpu_threads, output=output, trace_directory=args.trace_directory)
     print(json.dumps({key: value for key, value in report.items() if key != "games"}, indent=2))
     return 0
 
