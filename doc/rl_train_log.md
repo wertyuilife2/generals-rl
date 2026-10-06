@@ -846,6 +846,7 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 | 899 | 83.5% | 96.75% | 99% | 98.25% |
 | 999 | 81.25% | 96% | 99.5% | 98.75% |
 | 1099 | 88.25% | 96.75% | 99.25% | 98.25% |
+| 1199 | 84.75% | 95.5% | 99.5% | 99% |
 
 ![v17中期：实际选模点及新初始/99/499开发诊断，训练仍在运行](rl_train_figures/v17.png)
 
@@ -860,3 +861,5 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 对这四个败局仅取末3个decision帧，共12帧，复用记录构造纯GameBatch，调用冻结原official local encoder一次（12×985），无NN/H4/Core/新赛程/weights/GPU；12/12风险公式吻合。Def509将军42+growth1、潜在友援0、risk17，margin26；实际ALL搬42留1。Def510将军1、潜在友援42、risk42，margin仍+1，但seat0先捕将，本方支援被跳过。Rand95将军2+growth1、友援0、risk3、margin0，HALF外调后实际仅2守兵。Agg231/Exp220的margin为−10/−2、risk17/4、距离1。当前margin是包含最大潜在友援的pre-action战力比较，不保证派兵后或实际座次顺序安全；这不是网络因果或代码bug证明。实际当前特征和来源SHA在 `outputs/rl_iteration_audit/pure_scratch_phase/v17_mid499_king_features.{json,md}`，尚未采用任何新设计。
 
 晚期1099/Snapshot22的1600局全部completed/exit0，四率 **88.25/96.75/99.25/98.25%**、draw均0，raw SHA `b9a4f67713b1664d0ce18376d1ad0e17edcede95b204c51f3650f336b3489596`。此时仍为live选模候选，人工模型3/4，尚未执行该模型新开发800或新heldout；最后名额保留给全部评估关闭后的最终最佳。此前54.76分钟的只读停止检查仅记录当时证据，不作为后来停止授权；实际训练已超过一小时，但新峰使平台判断重新开始。连续无提升计数仍5、参考v11。
+
+晚期只读配对 `v17_late_selector_comparison.{json,md}`：五份现成selector报告各1600局的有序身份相同，root独立核对599→1099和v11/499→1099翻转计数。599→1099 Agg非胜→胜38、胜→非胜23，败局62→47（P0 34→27、P1 28→20）；Expansion9/9持平，Def0/3和Random3/6各净少3胜。Agg同旧败→新胜38局WAIT15.63→40.71%、反向8.17→5.21%、时长190.76→92.50tick；旧胜→新败23局WAIT29.21→14.26%、反向2.35→10.18%、时长99.87→256.17；剩余同败24局反向也上升，不能说行为统一改善或作NN因果解释。v11 selector499→1099 flips45/26、10/12、3/3、11/5，Agg净多19胜；但1099有1100updates/576,716,800样本，对比v11/499的500updates/262,144,000，不能当作等预算参数化收益。全部tick加权by_ai/座次动作聚合与原报告一致；夺将后终局stats未用于临死经济推断。1199新四率84.75/95.5/99.5/99，best仍1099，最终结果与counter待训练/全部worker关闭后结算。
