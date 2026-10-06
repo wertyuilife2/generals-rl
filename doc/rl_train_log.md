@@ -966,3 +966,12 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 为支持之后从真实采样报告挑选输赢局录像，每局用独立NumPy RNG产生uniform，再在masked categorical概率上做逆CDF采样，单局随机流不受batch组成、其他局提前结束或模型构造影响。录像工具使用同一seed/协议重放，并核对完整逐局结果和原生Core trace。历史greedy及前述旧批次采样协议报告保留原标签，不能混作同一评估曲线；冻结实验源码未修改。
 
 相关unittest共33项（32通过，1项GPU测试跳过），录像/分析pytest3项通过。新测试验证默认采样确实产生非greedy动作、不消耗全局Torch/NumPy RNG、mask合法、换序/挑选局可完整复现；真实checkpoint以batch5评估32局后，挑选输赢局以不同batch录像，完整match及原生Core重放一致。长期训练继续暂停，本次仅切换评估协议，不计作新训练版本。
+
+
+## v19：新采样协议下重跑 v17 结构对照（准备）
+
+2026-10-07 按用户新实验要求恢复迭代。先建立对照：actor/critic 结构、H4、MDP、奖励 gamma=.995/lambda=.95、N16384×T32、E4/B64、历史池8/pub50与 v17 相同；采用用户随后要求默认开启的 categorical adaptive LR（desired_kl=.02）、PPO 更新监控和可复现 sampled eval。旧 v17 是 fixedLR+greedy，不能作为新消融唯一的因果对照。v19 不引入事实记忆、不加 critic 历史输入、不扩容、不衰减奖励。
+
+配置 `rl/configs/v19.json`，正式预算1..3h，平台 patience12 次评估/minimum1h、maximum3h；每100迭代四AI各200张地图双座，每轮1600局 sampled。所有正式 run 从零初始化，不 warm-start/resume；checkpoint3、pool8、eval3+best。完整后续范围与验收记录于 `doc/rl_experiment_plan.md`。当前处于 smoke/启动准备，未测得正式结果。
+
+门禁：CPU smoke 3 更新/192 transitions/48 timeout，3 次 sampled eval 全部完成、failed0；全规模 GPU smoke 5 更新/2,621,440 transitions，吞吐 140777/s，Torch peak allocated 12.610 GiB、reserved 13.582 GiB，loss/参数有限，teacher0。初次 GPU smoke 在第一 tick 前因 `.venv` 未找到 nvcc 退出；显式使用 backend 支持的 GENERALS_NVCC 指向现有 conda compiler 后通过，无 env/vendor 源码变更。短 smoke 不是正式胜率/吞吐结论；第五更新末发布的训练模型没有被后续 rollout 使用，不把发布当作已执行历史模型的证据。
