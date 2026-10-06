@@ -1,9 +1,8 @@
 # RL 训练迭代日志
 
-当前目标：随机种子的 9×9、1v1 地图，部署 student 对 aggressive 胜率超过 90%、expansion 超过 95%、defensive 与 random 达到 100%；每个方案从零开始，训练只使用历史模型自对弈。达到目标或连续 20 个训练版本无有效提升后停止。在 `codex_dev` 分支依次管理训练方案；main 保留 baseline commit `0189d55`。
+当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v18首轮在约54min时意外SIGTERM中断（exec143、PID消失、无终局summary），不作版本结果结算。相同网络/MDP配置的retry1已以独立后台进程重新从零启动，冻结源码6b94c13；原评测与8段中期demo单独保留。训练仍只使用历史NN；参考仍v17、连续无提升计数0，完整目标未达到。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
-
+**当前状态：v19 对照训练正在运行（PID2961698，冻结源码 commit898c838），保留 v17 的轻量网络与 MDP，采用当前 categorical adaptive LR、PPO 监控和 sampled eval。v20 critic-only 已完成 CPU 合同验证，尚未正式训练；记忆和成熟网络为后续实现准备，尚无正式胜率结论。** 旧 v9–v18 的阈值与版本停止规则属于此前阶段，以下历史结果及 greedy 标签原样保留。v1–v8 使用过续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零纯自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -975,3 +974,17 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 配置 `rl/configs/v19.json`，正式预算1..3h，平台 patience12 次评估/minimum1h、maximum3h；每100迭代四AI各200张地图双座，每轮1600局 sampled。所有正式 run 从零初始化，不 warm-start/resume；checkpoint3、pool8、eval3+best。完整后续范围与验收记录于 `doc/rl_experiment_plan.md`。当前处于 smoke/启动准备，未测得正式结果。
 
 门禁：CPU smoke 3 更新/192 transitions/48 timeout，3 次 sampled eval 全部完成、failed0；全规模 GPU smoke 5 更新/2,621,440 transitions，吞吐 140777/s，Torch peak allocated 12.610 GiB、reserved 13.582 GiB，loss/参数有限，teacher0。初次 GPU smoke 在第一 tick 前因 `.venv` 未找到 nvcc 退出；显式使用 backend 支持的 GENERALS_NVCC 指向现有 conda compiler 后通过，无 env/vendor 源码变更。短 smoke 不是正式胜率/吞吐结论；第五更新末发布的训练模型没有被后续 rollout 使用，不把发布当作已执行历史模型的证据。
+
+正式 v19 已从 commit `898c838b6e1d2f02b21305cf2a49392b8a1ba522` 启动，109 runtime 文件冻结于 `outputs/moe_cts/iterations/v19/source/`，train/eval/env/vendor import 路径合同通过；训练 PID2961698。TensorBoard：`outputs/moe_cts/iterations/v19/train/`。独立读取原 v17 与本轮 seed snapshot0 核对：22 个随机初始化张量逐位相同，snapshot 文件 SHA256 同为 `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655`；只读核对未把旧权重加载到本轮，初始 source.kind=random_initial_policy，manifest resume_source=null。
+
+第一点 update99 完成1600局 sampled，aggressive/expansion/defensive/random=59%/77%/93.75%/96.25%，worker131.83秒、failed0。这是早期 selector 结果，不是最终成绩或独立开发集；目前仍训练。另行评测本轮实际随机初始模型以记录起点。
+
+## v20：仅让 critic 读取 actor 的 H4 信息（实现与验证）
+
+动机：同一完整棋盘下，actor 的短期可见信息不同，其未来行为和回报可以不同。检验 history-state critic 是否改善估值与自对弈学习；本轮不增加持久记忆、不扩大 actor、不改变资源 PBRS、gamma、lambda、rollout 或历史池。
+
+实现：新增 `InformationSpatialPPOPolicy`，在完整 v17 随机构造完成后，critic 首层附加 actor 的 48 个 H4 地图通道，context 附加 actor 当前的 13 个公共特征。新增输入权重为零，原权重保留；构造使用局部 RNG fork，使 actor 初始化和全局随机流与对照一致。这不是加载旧 checkpoint：每次仍新建随机 policy、新 Adam、新 pool。critic 复用已存储的 `policy` 输入，不另复制 rollout history。actor/critic 参数独立；actor 不读取特权 state。
+
+配置 `rl/configs/v20.json` 相对 v19 只增加 critic 信息输入及其类/group 声明，run_id=v20；knowledge_channels=0。其余 N16384×T32、E4/B64（524288 新样本、8192/logical minibatch、256 Adam/update）、gamma=.995/lambda=.95、H4、episode1024、pool8/pub50、sampled eval 每100更新1600局、adaptive KL=.02、最少1h/最多3h均保持。该适配器也提供未开启的 memory 扩展，为下一步 2×2 使用，当前训练不会创建或存储 memory。
+
+验证：18 个 CPU tests 通过，包括禁用信息扩展时原模型/输出/梯度/RNG逐位一致、critic-only actor 初始化/动作概率/RNG逐位一致、新 critic 初始 value 在浮点舍入误差内一致、history/public 新权重梯度非零、actor 隐私，以及真实 self-play PPO 三次更新和 timeout bootstrap；categorical mask/WAIT-MOVE factorization 与轻量网络回归通过。未新增 vendor 补丁。正式训练及 GPU 门禁待 v19 完成后执行，不能把上述 CPU 通过当作训练提升。

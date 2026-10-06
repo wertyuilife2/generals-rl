@@ -36,22 +36,27 @@ class SpatialActor(nn.Module):
         super().__init__()
         self.trunk = trunk_factory(HISTORY * MAP_PLANES, channels, blocks)
         self.own_king_context = False
+        self.knowledge_channels = 0
         self.context = nn.Sequential(nn.Linear(channels + PUBLIC_DIM, channels), nn.ELU())
         self.cell_head = nn.Conv2d(channels, 8, 1)
         self.wait_head = nn.Sequential(nn.Linear(2 * channels, channels), nn.ELU(), nn.Linear(channels, 1))
 
-    def forward(self, history):
+    def forward(self, history, knowledge=None):
         frames = history.reshape(history.shape[0], HISTORY, FRAME_DIM)
         # History is oldest -> newest. Only the newest 13 public features enter
         # context; old public scalars and the redundant single_obs are ignored.
         maps = frames[..., :FRAME_DIM - PUBLIC_DIM].reshape(-1, HISTORY * MAP_PLANES, MAP_SIZE, MAP_SIZE)
+        if self.knowledge_channels:
+            if knowledge is None or knowledge.shape != (history.shape[0], self.knowledge_channels * MAP_SIZE * MAP_SIZE):
+                raise ValueError("actor requires the configured non-stacked knowledge planes")
+            maps = torch.cat((maps, knowledge.reshape(-1, self.knowledge_channels, MAP_SIZE, MAP_SIZE)), 1)
         spatial = self.trunk(maps)
         pooled = spatial.mean(dim=(-2, -1))
         context_features = (pooled,)
         if self.own_king_context:
             # Latest local markers only; neither the privileged critic nor an
             # old general location can supply this global actor context.
-            current = maps[:, -MAP_PLANES:]
+            current = maps[:, (HISTORY - 1) * MAP_PLANES:HISTORY * MAP_PLANES]
             marker = (current[:, 4].bool() & current[:, 5].bool()).flatten(1)
             position = marker.long().argmax(1)
             king = spatial.flatten(2).gather(
@@ -139,8 +144,12 @@ class SpatialPPOPolicy(StudentPPOPolicy):
     def action_probabilities(self, obs, is_teacher=False):
         if is_teacher:
             raise ValueError("spatial student policy has no teacher inference branch")
-        logits = self.actor(obs["policy"])
-        mask = obs.get("action_mask")
+        logits = (self.actor(obs["policy"], obs.get("knowledge"))
+                  if getattr(self.actor, "knowledge_channels", 0) else self.actor(obs["policy"]))
+        return self._probabilities_from_logits(logits, obs.get("action_mask"))
+
+    def _probabilities_from_logits(self, logits, mask):
+        """One action boundary shared by legacy CNNs and dynamic-map heads."""
         if mask is None:
             raise ValueError("categorical policies require action_mask")
         mask = mask.to(device=logits.device, dtype=torch.bool)
@@ -189,17 +198,18 @@ class OwnKingRelativeGeometry(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.knowledge_channels = 0
         self.register_buffer("row", torch.arange(MAP_SIZE, dtype=torch.float32)[:, None]
                              .expand(MAP_SIZE, MAP_SIZE), persistent=False)
         self.register_buffer("column", torch.arange(MAP_SIZE, dtype=torch.float32)[None, :]
                              .expand(MAP_SIZE, MAP_SIZE), persistent=False)
 
     def forward(self, maps):
-        if maps.ndim != 4 or maps.shape[1:] != (HISTORY * MAP_PLANES, MAP_SIZE, MAP_SIZE):
-            raise ValueError("own-king geometry expects [B,48,9,9] history maps")
+        if maps.ndim != 4 or maps.shape[1:] != (HISTORY * MAP_PLANES + self.knowledge_channels, MAP_SIZE, MAP_SIZE):
+            raise ValueError("own-king geometry expects history maps plus configured knowledge planes")
         if not maps.is_floating_point():
             raise TypeError("own-king geometry expects floating-point map features")
-        current = maps[:, -MAP_PLANES:]
+        current = maps[:, (HISTORY - 1) * MAP_PLANES:HISTORY * MAP_PLANES]
         own_king = (current[:, 4].bool() & current[:, 5].bool()).flatten(1)
         valid = own_king.sum(1).eq(1)
         king = own_king.long().argmax(1)
