@@ -98,7 +98,9 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 
 动作共 649 个：`WAIT=0`；`MOVE=1+source*8+direction*2+mode`，方向上/右/下/左，
 模式全部留一/一半。mask 与原引擎一致，允许零兵移动；终局仅允许 WAIT。
-`task.productive_actions=true` 可过滤预计在下一次增长后仍为零兵的移动，
+`task.productive_actions=true` 过滤预计在下一次增长后仍为零兵的移动；
+若本方来源增长后恰好有 2 兵，ALL 与 HALF 都只移动 1 兵，保留 ALL、屏蔽重复 HALF。
+增长后有 3 兵时仍保留两种模式，649 编码不变。
 训练、历史对手和评估共用该 mask；每次更新与整套评估记录等待、零兵、立即折返和实际移动兵力指标。
 
 `task.combat_features=true` 在 9×9、1v1 中用两张战斗特征替换重复的相对身份平面，维度保持 985。

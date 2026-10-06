@@ -11,6 +11,8 @@ class EncodedActionSpace:
         self.width, self.height = width, height
         self.size = 1 + width * height * 8
         self.productive_actions = productive_actions
+        if productive_actions:
+            self.semantics = "productive_half_post_growth_two_canonical_all_v1"
         self._tables = {}
 
     def destinations(self, device):
@@ -41,10 +43,17 @@ class EncodedActionSpace:
             owned = owned & productive
         moves = (owned[:, :, None] & in_bounds[None] &
                  (state["terrain"][:, targets] != 1) & active[:, None, None])
-        moves = moves[..., None].expand(-1, -1, -1, 2).reshape(batch.num_envs, -1)
+        moves = moves[..., None].expand(-1, -1, -1, 2).clone()
+        if self.productive_actions:
+            # Own source=2 after public growth: HALF and ALL move the same army.
+            equivalent = (((state["army"] == 2) & ~grows) |
+                          ((state["army"] == 1) & grows))
+            moves[..., 1] &= ~equivalent[..., None]
+        moves = moves.reshape(batch.num_envs, -1)
         # A terminal or eliminated player's observation still needs a valid
         # distribution. WAIT is its absorbing action. The default matches core;
-        # the productive variant removes only publicly predictable zero moves.
+        # the productive variant removes predictable zero moves and equivalent
+        # HALF aliases, with ALL as their canonical representative.
         return torch.cat((torch.ones_like(active[:, None]), moves), -1)
 
     def validate(self, actions: torch.Tensor, mask: torch.Tensor):

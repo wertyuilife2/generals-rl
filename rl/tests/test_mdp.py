@@ -98,28 +98,111 @@ class MDPComponentTests(unittest.TestCase):
 
     def test_productive_mask_matches_independent_core_after_growth(self):
         actions = EncodedActionSpace(5, 5, productive_actions=True)
-        states = []
-        for tick in (0, 1, 48, 49, 50):
-            for army in (0, 1, 2, 3):
-                state = example_state()
-                state.tick = tick
-                state.owner[0, 1], state.structure[0, 1] = 0, Structure.CITY
-                for source in (0, 1, 12):  # ordinary land, city, general
-                    state.army.flat[source] = army
-                states.append(state)
+        states, seats = [], []
+        for pid in (0, 1):
+            for tick in (0, 1, 48, 49, 50):
+                for army in (0, 1, 2, 3):
+                    state = example_state()
+                    state.layout = MapLayout(np.zeros((5, 5), dtype=np.uint8))
+                    if pid:
+                        state.owner = np.where(state.owner >= 0, 1-state.owner, state.owner).astype(np.int16)
+                        state.general_pos = state.general_pos[::-1].copy()
+                    state.tick = tick
+                    state.owner[0, 1], state.structure[0, 1] = pid, Structure.CITY
+                    for source in (0, 1, 12):  # ordinary land, city, general
+                        state.army.flat[source] = army
+                    states.append(state)
+                    seats.append(pid)
         masks = actions.mask(GameBatch.from_backend(self.backend(states), "cpu"),
-                             torch.zeros(len(states), dtype=torch.long))
-        for lane, state in enumerate(states):
-            legal, _ = legal_action_mask(observe(state, 0))
+                             torch.tensor(seats))
+        for lane, (state, pid) in enumerate(zip(states, seats)):
+            legal, _ = legal_action_mask(observe(state, pid))
+            grown = CoreEngine(state.copy())
+            grown.begin_tick()  # Independent engine oracle, not a copied growth predicate.
             self.assertTrue(masks[lane, 0])
             for source, direction, mode in np.argwhere(legal):
                 action = Action.move(int(source), Direction(int(direction)), MoveMode(int(mode)))
-                engine = CoreEngine(state.copy())
-                move = engine.step([action, Action.wait()]).moves[0]
-                with self.subTest(tick=state.tick, source=source, mode=mode,
-                                  army=int(state.army.flat[source])):
-                    self.assertEqual(bool(masks[lane, action.encode()]), move.valid and move.moved > 0)
+                joint = [Action.wait(), Action.wait()]
+                joint[pid] = action
+                move = CoreEngine(state.copy()).step(joint).moves[pid]
+                alias = mode == MoveMode.HALF and grown.state.army.flat[source] == 2
+                with self.subTest(pid=pid, tick=state.tick, source=source, direction=direction,
+                                  mode=mode, army=int(state.army.flat[source])):
+                    self.assertEqual(bool(masks[lane, action.encode()]),
+                                     move.valid and move.moved > 0 and not alias)
             self.assertFalse(bool((masks[lane, 1:] & ~torch.from_numpy(legal.reshape(-1))).any()))
+
+    def test_productive_alias_mask_privacy_and_int64_limit(self):
+        states, seats = [], []
+        for pid in (0, 1):
+            for state in (example_state(), hidden_world_variant(example_state())):
+                state.army.flat[12] = 2
+                if pid:
+                    state.owner = np.where(state.owner >= 0, 1-state.owner, state.owner).astype(np.int16)
+                    state.general_pos = state.general_pos[::-1].copy()
+                states.append(state)
+                seats.append(pid)
+        batch = GameBatch.from_backend(self.backend(states), "cpu")
+        actions = EncodedActionSpace(5, 5, productive_actions=True)
+        masks = actions.mask(batch, torch.tensor(seats))
+        torch.testing.assert_close(masks[0], masks[1], rtol=0, atol=0)
+        torch.testing.assert_close(masks[2], masks[3], rtol=0, atol=0)
+        all_id = Action.move(12, Direction.RIGHT).encode()
+        half_id = Action.move(12, Direction.RIGHT, MoveMode.HALF).encode()
+        self.assertTrue(bool(masks[:, all_id].all()))  # HALF mutation cannot alias ALL.
+        self.assertFalse(bool(masks[:, half_id].any()))
+        self.assertTrue(bool(masks[:, 0].all()))
+        actions.validate(torch.full((4,), all_id), masks)
+        with self.assertRaisesRegex(ValueError, "masked"):
+            actions.validate(torch.full((4,), half_id), masks)
+        # Mask-only arithmetic limit: no backend statistics/growth on a max army.
+        state = {key: value.clone() for key, value in batch.state.items()}
+        state["army"][:, 12] = torch.iinfo(torch.int64).max
+        state["tick"][:] = torch.tensor([0, 1, 48, 49])
+        maximum = actions.mask(GameBatch(state, batch.stats, 5, 5), torch.tensor(seats))
+        self.assertTrue(bool(maximum[:, [all_id, half_id]].all()))
+        state["terminated"][:] = True
+        absorbing = actions.mask(GameBatch(state, batch.stats, 5, 5), torch.tensor(seats))
+        self.assertTrue(bool(absorbing[:, 0].all()))
+        self.assertEqual(absorbing.sum().item(), 4)
+        state["terminated"][:] = False
+        state["alive"].scatter_(1, torch.tensor(seats)[:, None], False)
+        dead = actions.mask(GameBatch(state, batch.stats, 5, 5), torch.tensor(seats))
+        torch.testing.assert_close(dead, absorbing, rtol=0, atol=0)
+
+    def test_native_alias_modes_match_core_with_ordered_source_attacks(self):
+        from generals.core.batch import pack_states
+
+        states, joint_actions, expected = [], [], []
+        for pid in (0, 1):
+            for direction in Direction:
+                for attacker in (3, 4):  # weaken to zero or capture the general.
+                    state = example_state()
+                    state.layout = MapLayout(np.zeros((5, 5), dtype=np.uint8))
+                    if pid:
+                        state.owner = np.where(state.owner >= 0, 1-state.owner, state.owner).astype(np.int16)
+                        state.general_pos = state.general_pos[::-1].copy()
+                    state.army.flat[12] = 2
+                    state.owner.flat[7], state.army.flat[7] = 1-pid, attacker
+                    for mode in MoveMode:
+                        joint = [Action.wait(), Action.wait()]
+                        joint[pid] = Action.move(12, direction, mode)
+                        joint[1-pid] = Action.move(7, Direction.DOWN)
+                        engine = CoreEngine(state.copy())
+                        engine.step(joint)
+                        states.append(state.copy())
+                        joint_actions.append([action.encode() for action in joint])
+                        expected.append(engine.state)
+        native = self.backend(states)
+        native.step(np.asarray(joint_actions, dtype=np.int64))
+        arrays, _, _ = pack_states(expected)
+        self.assertFalse(native.errors.any())
+        for name, value in native.state.items():
+            np.testing.assert_array_equal(value, arrays[name])
+        for start in range(0, len(states), 2):
+            for value in (*native.state.values(), native.stats, native.last_moves,
+                          native.counters, native.errors, native.done):
+                np.testing.assert_array_equal(value[start], value[start+1])
 
     def test_local_observation_hides_terrain_and_opponent_positions(self):
         first = example_state()

@@ -1,0 +1,111 @@
+{
+  "task": {
+    "width": 9,
+    "height": 9,
+    "players": 2,
+    "num_envs": 16384,
+    "backend": "gpu",
+    "device": "cuda:0",
+    "max_episode_steps": 1024,
+    "history_length": 4,
+    "seed": 20261013,
+    "threads": 1,
+    "learner_seat": 0,
+    "rotate_seats": true,
+    "opponent": "self_play",
+    "mountain_density": 0.1,
+    "city_density": 0.05,
+    "productive_actions": true,
+    "combat_features": true,
+    "king_threat_distance": true,
+    "critic_potential": false,
+    "map_pool_size": 65536,
+    "reward": {
+      "territory": 0.05,
+      "cities": 0.2,
+      "army": 0.001,
+      "win": 1.0,
+      "loss": -1.0,
+      "tick": -0.001,
+      "potential_gamma": 0.995
+    }
+  },
+  "runner": {
+    "num_steps_per_env": 32,
+    "save_interval": 2000,
+    "logger": "tensorboard",
+    "obs_groups": {
+      "policy": [
+        "policy"
+      ],
+      "critic": [
+        "critic"
+      ]
+    },
+    "robogauge": {
+      "enabled": false
+    },
+    "policy": {
+      "class_name": "generals_rl.spatial_ppo.LightSpatialPPOPolicy",
+      "action_distribution": "categorical",
+      "spatial_channels": 16,
+      "history_length": 4,
+      "players": 2,
+      "map_width": 9,
+      "map_height": 9,
+      "map_planes": 12,
+      "public_dim": 13,
+      "actor_obs_normalization": false,
+      "critic_obs_normalization": false,
+      "value_potential_offset": false,
+      "own_king_geometry": true
+    },
+    "algorithm": {
+      "class_name": "generals_rl.student_ppo.StudentPPO",
+      "teacher_env_ratio": 0,
+      "num_learning_epochs": 4,
+      "num_mini_batches": 64,
+      "learning_rate": 0.0001,
+      "student_encoder_learning_rate": 0.0001,
+      "schedule": "fixed",
+      "desired_kl": null,
+      "gamma": 0.995,
+      "lam": 0.95,
+      "entropy_coef": 0.01,
+      "load_balance_coef": 0,
+      "rnd_cfg": null
+    },
+    "storage_obs_keys": [
+      "policy",
+      "critic",
+      "action_mask"
+    ]
+  },
+  "self_play": {
+    "pool_size": 8,
+    "snapshot_interval": 50,
+    "stochastic": true,
+    "seed": 120261013,
+    "sampling": "uniform"
+  },
+  "evaluation": {
+    "enabled": true,
+    "every_n_snapshots": 2,
+    "maps_per_ai": 200,
+    "batch_size": 128,
+    "max_ticks": 2000,
+    "seed": 271828,
+    "cpu_threads": 1,
+    "keep_snapshots": 3
+  },
+  "torch_threads": 1,
+  "run_id": "v14",
+  "matmul_precision": "high",
+  "training_control": {
+    "max_seconds": 10800,
+    "min_seconds": 3600,
+    "plateau_evaluations": 12,
+    "min_improvement": 0.02,
+    "keep_checkpoints": 3
+  }
+}
