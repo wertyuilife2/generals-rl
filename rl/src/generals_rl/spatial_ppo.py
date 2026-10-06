@@ -85,7 +85,8 @@ class SpatialPPOPolicy(StudentPPOPolicy):
                  residual_blocks=4, history_length=4, players=2, map_width=9,
                  map_height=9, map_planes=12, public_dim=13,
                  action_distribution="categorical", actor_obs_normalization=False,
-                 critic_obs_normalization=False, value_potential_offset=False, **kwargs):
+                 critic_obs_normalization=False, value_potential_offset=False,
+                 wait_move_factorization=False, **kwargs):
         nn.Module.__init__(self)
         if kwargs:
             raise ValueError(f"unsupported spatial policy options: {sorted(kwargs)}")
@@ -106,7 +107,10 @@ class SpatialPPOPolicy(StudentPPOPolicy):
                 raise ValueError(f"spatial policy requires {key} shape [B,{size}]")
         if not isinstance(value_potential_offset, bool):
             raise TypeError("value_potential_offset must be boolean")
+        if not isinstance(wait_move_factorization, bool):
+            raise TypeError("wait_move_factorization must be boolean")
         self.value_potential_offset = value_potential_offset
+        self.wait_move_factorization = wait_move_factorization
         self.obs_groups = deepcopy(obs_groups)
         self.num_actions, self.num_actor_obs, self.num_single_obs = NUM_ACTIONS, HISTORY * FRAME_DIM, FRAME_DIM
         self.num_critic_obs = FRAME_DIM
@@ -130,11 +134,29 @@ class SpatialPPOPolicy(StudentPPOPolicy):
         mask = mask.to(device=logits.device, dtype=torch.bool)
         if mask.shape != logits.shape or not mask.any(dim=-1).all():
             raise ValueError("action_mask must match logits and contain a legal action in every row")
+        if self.wait_move_factorization:
+            has_move = mask[:, 1:].any(dim=-1, keepdim=True)
+            moves = logits[:, 1:].masked_fill(~mask[:, 1:], -torch.inf)
+            # Avoid log_softmax(all -inf), including its backward path.
+            moves = torch.where(has_move, moves, torch.zeros_like(moves))
+            log_moves = torch.nn.functional.log_softmax(moves, dim=-1)
+            wait = logits[:, :1]
+            log_wait = torch.where(has_move, torch.nn.functional.logsigmoid(wait),
+                                   torch.zeros_like(wait))
+            log_move_gate = torch.where(mask[:, :1], torch.nn.functional.logsigmoid(-wait),
+                                        torch.zeros_like(wait))
+            # Joint log probabilities retain the original Categorical lifecycle.
+            logits = torch.cat((log_wait, log_move_gate + log_moves), dim=-1)
         self.distribution = Categorical(logits=logits.masked_fill(~mask, torch.finfo(logits.dtype).min), validate_args=False)
         return self.distribution.probs
 
     def act_inference(self, obs):
-        return self.action_probabilities(obs).argmax(dim=-1, keepdim=True)
+        probabilities = self.action_probabilities(obs)
+        if not self.wait_move_factorization:
+            return probabilities.argmax(dim=-1, keepdim=True)
+        choose_wait = probabilities[:, :1] >= probabilities[:, 1:].sum(dim=-1, keepdim=True)
+        move = probabilities[:, 1:].argmax(dim=-1, keepdim=True) + 1
+        return torch.where(choose_wait, torch.zeros_like(move), move)
 
     def evaluate(self, obs, is_teacher=False, **kwargs):
         if obs.batch_size[0] == 0:
