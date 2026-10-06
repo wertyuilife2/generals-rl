@@ -823,6 +823,20 @@ GPU smoke采用E4、N256/T4/B4/episode4/pool2/pub1，**3更新/3,072 transitions
 
 正式代码commit `649f0451d622c1ca13cfbfb4fdf9e4b72760c130`，108文件冻结于 `outputs/moe_cts/iterations/v17/source/`，manifest SHA `576f0695981ee4a1e9bb901114a01596bd560eed651966878a4834496e2770b5`；相对v16 runtime只有spatial_ppo.py变化。配置E4/B64/N16384/T32，γ.995/episode1024/local985/H4/LightC16/己将几何、reward/actions、mapbank65536均沿用v11，100%历史NN uniform stochastic pool8/pub50/rotate seats；CPU selector每100update/各AI400局，人工dev模型4，learner3/history8/eval近期3+best上限不变，预算最低1h/最多3h，每环境1M上限。
 
-2026-10-06T05:18:35.120000+00:00 新formal PID2568665/session10764已启动，CLI无resume/warm标志，新policy/newAdam/newpool。受控启动命令明确PYTHONPATH为本轮冻结source；没有读取进程环境。ownrandom0 SHA `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655` 已固定人工第1/4份，本轮自己的初始dev800开始新测量（不复用旧初始结果）。TensorBoard：`outputs/moe_cts/iterations/v17/train/`；正式启动核对 `v17_formal_launch_check.json` 为PASS_LIVE、无不一致，实际PID出生时间/argv/108文件/初始新pool0/config E4均吻合，own0 raw22与独立fresh门禁逐bit一致。正式胜率、曲线和最终结果待实际训练。
+2026-10-06T05:18:35.120000+00:00 新formal PID2568665/session10764已启动，CLI无resume/warm标志，新policy/newAdam/newpool。受控启动命令明确PYTHONPATH为本轮冻结source；没有读取进程环境。ownrandom0 SHA `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655` 已固定人工第1/4份，本轮自己的初始dev800已新测量完成：四AI胜率均0%，W/L/D0/200/0、0/20/180、0/180/20、0/14/186，总386draw。实际WAIT接近100%，不能复用旧初始结果。TensorBoard：`outputs/moe_cts/iterations/v17/train/`；正式启动核对 `v17_formal_launch_check.json` 为PASS_LIVE、无不一致，实际PID出生时间/argv/108文件/初始新pool0/config E4均吻合，own0 raw22与独立fresh门禁逐bit一致。正式胜率、曲线和最终结果待实际训练。
 
 v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_final_completion_audit.json` 为PASS_VERSION_DELIVERY_GOAL_NOT_MET，SHA `4bbe3654de2cff04a10c916b5ea35f88a38eafd2d7d3419ca3c11f1009fb8faa`，14点/96诊断TB值/49文件均吻合。它由同一demo作者追加核对并复用root实际视频证明，不冒充独立demo作者审计；整体目标尚未达到，计数5、参考v11，继续v17。
+
+本轮初始report SHA `793b6fee5092bd50c92e9ba536f7d33943ad8dc8d8be783cfca40d96b664c235`，1,004,555ticks/含setup579.894秒/1,733 CPU ticks/s/RSS836.07MiB/exit0；TB−1的24项DiagnosticReuse各写一次。首次selector99真实1,600局为32.5/57.25/75/68%，draw0/42/3/33计入分母；新99开发800已完成，结果见下。初始WAIT先验变化产生了更消极的实际初始行为，初次训练点弱于v11，但未按早期点结算版本、计数仍5。
+
+99新开发800为29.5/58/72.5/64.5%，W/L/D59/141/0、116/55/29、145/47/8、129/51/20；report SHA `5bc7e674b64b877af7caa547ea159f6570577e287c5f2e41ef212b52fce84a1e`，301,127ticks/含setup201.543秒/1,495 CPU ticks/s/RSS839.45MiB/exit0。与v11/99的800身份逐一相同，非胜→胜/胜→非胜20/55、17/50、3/50、3/63（−17.5/−16.5/−23.5/−30pp）；当前和v11均100updates/E4/52,428,800新样本，但实际轨迹和耗时不同。WAIT仅2.00/2.53/0.83/0.62%，反向44.44/72.69/62.22/73.33%，低WAIT与大量反向并存；不是NN概率证明或最后模型结论。TB−1/99共48个tag/step各一次。
+
+目前完整selector三点如下，299为当前最佳，训练仍在运行：
+
+| 更新 | aggressive | expansion | defensive | random |
+| ---: | ---: | ---: | ---: | ---: |
+| 99 | 32.5% | 57.25% | 75% | 68% |
+| 199 | 72.25% | 89.25% | 98.5% | 97.5% |
+| 299 | 81.5% | 97.25% | 98.25% | 97.75% |
+
+![v17早期：三个实际选模点及新初始/99开发诊断，训练仍在运行](rl_train_figures/v17.png)
