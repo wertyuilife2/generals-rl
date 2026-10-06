@@ -2,7 +2,7 @@
 
 当前目标：随机种子的 9×9、1v1 地图，部署 student 对 aggressive 胜率超过 90%、expansion 超过 95%、defensive 与 random 达到 100%；每个方案从零开始，训练只使用历史模型自对弈。达到目标或连续 20 个训练版本无有效提升后停止。在 `codex_dev` 分支依次管理训练方案；main 保留 baseline commit `0189d55`。
 
-**当前状态：v16 已完成，最终799新开发胜率80.5% / 92.5% / 99% / 97%，未超过v11，连续无提升为5；正在准备v17，回到v11 E4仅尝试WAIT/MOVE分层参数化。训练仍只使用历史神经网络自对弈。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
+**当前状态：v16 已完成，最终799新开发胜率80.5% / 92.5% / 99% / 97%，未超过v11，连续无提升为5；v17已从随机参数启动，回到v11 E4仅尝试WAIT/MOVE分层参数化。训练仍只使用历史神经网络自对弈。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -808,3 +808,21 @@ GPU smoke采用E4、N256/T4/B4/episode4/pool2/pub1，**3更新/3,072 transitions
 最终败局开局WAIT18/23/25/24tick，守将时仍有明显失误：A255敌距4时将军80派6留1，259的3守兵被9兵攻下，P1计划动作因P0先夺将而跳过；E210邻接60格敌4兵可见，将军69仍派8留1，211增长后2守兵被3攻下；D终局前82兵31地领先67兵14地，167仍远处38→47移13，邻接敌27兵攻下增长后的4守兵；R283将军44派3留1、284WAIT、285增长到2又HALF派1留1，被邻接2兵攻下。四例原生invalid/zero-MOVE均0。A/E仅见敌将5/3tick，D未见，R见70tick直到末局，不能把失败统一归因于敌将遗忘；世界帧不是实际actor输入或网络概率证明。
 
 中期399的八段录像保留独立标记Snapshot8。其四败局仅做45个开局WAIT+32个末期决策的原H4/actor概率核对：308次publicstats匹配、77/77greedy与planned一致，无新环境赛程/critic泄漏；4个强制WAIT、41个非强制WAIT中23个pWAIT<sumMOVE而WAIT为最大单类别。该选定窗口证据仅说明flat joint argmax与MOVE组概率存在差别，不是最终799或全局统计，也不证明改动能提高胜率。原始 `middle_at_399/analysis/nn_wait_probe.{json,md}` 保留。下一版仅尝试通用WAIT/MOVE分层参数化及一致的组决策，重新随机训练，训练对手仍100%历史神经网络。
+
+## v17：WAIT/MOVE分层参数化
+
+动机：v16 E2更快但最佳新开发四率均低于v11，撤回E2、恢复v11 E4参考。flat categorical把WAIT一个类别与许多MOVE类别平级，WAIT可能是最大单类别，但其概率低于MOVE集合。v16中期399的77个选定决策核对有这种现象；其证据仅限该中期模型的窗口，不能作为最终799的概率结论，也不能证明它是失败原因。
+
+唯一新方案为 `wait_move_factorization=True`（配置相对v11仅此flag与run_id）：沿用原actor的一个WAIT logit w及648个MOVE logits m。若两组均合法，P(WAIT)=sigmoid(w)，P(MOVE)=sigmoid(−w)，MOVE内按合法m的softmax选择；实现采用稳定的logsigmoid/log_softmax，仍用原Categorical进行joint sampling、logprob和entropy，原版PPO.update不变。greedy经同一policy.act_inference先比较两组概率（相等选WAIT），再取最大MOVE；learner训练、历史对手采样、greedy历史推理和baseline评测共享该参数化。不是改变旧模型的后处理解码规则，正式模型重新随机训练。
+
+原obs/reward/649动作编号与合法规则、22个NN张量/15,786参数、critic、storage和vendor均不改；flag默认False且strictbool，原flat路径逐bit保持，历史池已有policy_config签名会拒绝新旧flag混用。所有MOVE不可用时安全强制WAIT/零梯度，WAIT不可用时MOVE组概率1。新参数化把零logit时WAIT先验从1/(合法MOVE数+1)改为1/2，可能使初始对手更消极、探索或早期学习更慢；收益仍待实测。没有加入任何baseline训练。
+
+最小生产patch仅SpatialPPO构造/action_probabilities/act_inference，新flag不增加额外stochastic argmax或host同步；没有新框架模块。6项CPU目标检查实际exit0，包括4项focused tests及2项已有layout/privacy/value regression：手算联合分布/logprob/entropy/梯度、掩码/forcedWAIT/禁WAIT、float32±1000/empty CNN、default初始权重与flat probs/entropy/sample/logprob逐bit相同；实际新Light StudentPPO两次更新32样本/Adamstep8，pool factory与签名flagTrue、flagFalse拒绝reload，CPU eval从该测试新checkpoint重建flagTrue。
+
+正常规模GPU门禁5updates/2,621,440新转移，采样5.067秒/更新12.732秒，compute147,281/s；冷启动wall27.218秒/full96,314/s，allocated12.56GiB/reserved13.58GiB、RSS1990.39MiB、swaps0、exit0。只执行初始random0；结束发布的1尚未对战，不能代表成熟池速度或正式胜率。独立CPU完整CTS/Task在任何torch.load前按seed20261013构造，flagTrue、raw22与实际门禁初始逐bit相同、Adam空、iteration/storage0；最终88模型/Adam张量有限、实际step1280=5×4×64，第二optimizer=None，原版PPO SHA未变。`outputs/rl_iteration_audit/pure_scratch_phase/v17_wait_move_gate_audit.json` 为PASS，SHA `1be9116d0f7bf719c47428816b9259cbcb5b70f4206eab75a014b4ec882dd667`。门禁权重仅用于核对，不用于正式初始化。
+
+正式代码commit `649f0451d622c1ca13cfbfb4fdf9e4b72760c130`，108文件冻结于 `outputs/moe_cts/iterations/v17/source/`，manifest SHA `576f0695981ee4a1e9bb901114a01596bd560eed651966878a4834496e2770b5`；相对v16 runtime只有spatial_ppo.py变化。配置E4/B64/N16384/T32，γ.995/episode1024/local985/H4/LightC16/己将几何、reward/actions、mapbank65536均沿用v11，100%历史NN uniform stochastic pool8/pub50/rotate seats；CPU selector每100update/各AI400局，人工dev模型4，learner3/history8/eval近期3+best上限不变，预算最低1h/最多3h，每环境1M上限。
+
+2026-10-06T05:18:35.120000+00:00 新formal PID2568665/session10764已启动，CLI无resume/warm标志，新policy/newAdam/newpool。受控启动命令明确PYTHONPATH为本轮冻结source；没有读取进程环境。ownrandom0 SHA `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655` 已固定人工第1/4份，本轮自己的初始dev800开始新测量（不复用旧初始结果）。TensorBoard：`outputs/moe_cts/iterations/v17/train/`；正式启动核对 `v17_formal_launch_check.json` 为PASS_LIVE、无不一致，实际PID出生时间/argv/108文件/初始新pool0/config E4均吻合，own0 raw22与独立fresh门禁逐bit一致。正式胜率、曲线和最终结果待实际训练。
+
+v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_final_completion_audit.json` 为PASS_VERSION_DELIVERY_GOAL_NOT_MET，SHA `4bbe3654de2cff04a10c916b5ea35f88a38eafd2d7d3419ca3c11f1009fb8faa`，14点/96诊断TB值/49文件均吻合。它由同一demo作者追加核对并复用root实际视频证明，不冒充独立demo作者审计；整体目标尚未达到，计数5、参考v11，继续v17。
