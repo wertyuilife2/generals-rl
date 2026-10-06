@@ -12,9 +12,7 @@ from generals_rl.cts import GeneralsCTSVecEnv
 from generals_rl.mdp import RewardConfig
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.spatial_ppo import policy_config
-from generals_rl.student_ppo import StudentPPO
 from generals_rl.task import GeneralsTask
-from rsl_rl.algorithms import PPO
 from rsl_rl.runners import OnPolicyRunnerCTS
 from rl_test_utils import assert_nested_equal, small_training_config
 
@@ -51,7 +49,6 @@ class StorageObsKeysTests(unittest.TestCase):
             runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(cfg["runner"]), None, "cpu")
             prepare_self_play(task, runner, cfg, directory)
             alg, storage = runner.alg, runner.alg.storage
-            self.assertIs(StudentPPO.update, PPO.update)
             initial = deepcopy(alg.policy.state_dict())
             obs = runner.env.get_observations()
             records, timeouts = [], 0

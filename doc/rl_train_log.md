@@ -946,3 +946,17 @@ Aggressive 的799−499差值，greedy为−18pp，stochastic为−3.42pp；gree
 TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnostics/NN_vs_*/` 和四 baseline 的 greedy、各seed采样、采样均值、draw、时长及开局WAIT指标。固定源码核对、实际执行工具副本、赛程、模型哈希和报告清单均随结果保存。旧训练未记录的 PPO KL 无法由这些离线比赛补回。
 
 ![v18离线检查：历史模型采样矩阵与四baseline的greedy/采样胜率，误差线为三个动作seed的标准差](rl_train_figures/v18_offline_diagnostics.png)
+
+**默认 PPO 监控与 categorical 自适应 LR。** 用户授权的代码改动已完成，未启动v19或长期训练。新增 `rl/configs/self_play_ppo.json` 采用v17的网络、MDP和纯历史池，algorithm默认adaptive/desired_kl.02/monitor开启；历史v1–v18配置不改。每次收集524,288条转移，4epochs×64minibatches、每batch8192条，即256次Adam更新。vendor仅增加 `ppo.py` 的 categorical KL 分支与可选观察钩子；完整补丁记录在 `rl/vendor/rsl_rl/PATCHES.md`。
+
+学习率使用已选动作新/旧log-prob计算非负近似KL `expm1(log_ratio)-log_ratio`；沿用上游每minibatch规则：KL>.04时LR÷1.5，0<KL<.01时LR×1.5，范围[1e-5,1e-2]。这是采样估计，不是精确KL或硬性更新上限。`storage.mu/sigma`继续不分配，保留已有显存节省。另在每次更新前，用独立RNG选择最多8192条有效观测，缓存旧logits，按1024条分块在各epoch结束后计算相同obs/mask下的精确KL；该精确指标参照更新开始时策略，近似指标参照rollout行为策略。TensorBoard `PPO/` 共43项，包括approx/exact KL、p95、clip fraction、梯度范数、entropy、LR实际值/范围/改变次数，以及WAIT/MOVE gate与按旧MOVE质量加权的条件MOVE KL。
+
+**验证与短GPU对照。** 37项相关CPU测试通过；覆盖近似KL的期望、精确分解、mask/forcedWAIT、有效短前缀、LR升降/上下限、真实self-play/resume/eval与TensorBoard。fixed LR开启监控时，参数/Adam/梯度/损失/RNG与旧更新逐bit一致。还直接读取纯净导入commit38c6cad中的PPO（SHA `7ca324fb...`）作Normal fixed/adaptive对照，完整参数/Adam/梯度/损失/RNG/LR逐bit一致，原Gaussian路径未改变。
+
+两次正常GPU门禁均从全新随机policy/Adam/历史池开始，N16,384/T32/E4/B64，仅监控开关不同，各5updates、2,621,440转移、1280个Adamstep，资源wrapper正常exit0，最终模型和Adam及所有PPO指标有限。开启/关闭监控的最终模型、完整Adam、loss和对局统计逐bit一致；开启时全部43个tag各有5点，关闭时没有PPO tag。自己的初始和最终历史模型各一份，完整checkpoint一份，不增加旧版本模型存档。
+
+监控开启采样5.128s、更新13.336s，compute **141,981转移/s**、含冷启动wall27.799s/full94,301/s；关闭采样5.174s、更新13.323s，compute141,722/s、wall28.006s。单次短对照速度相当（更新时间差+0.095%，不足以精确估计长期开销）。小批观测+旧logits实际缓存148.48MiB，其中logits20.28MiB；峰值GPU allocated开启12.610GiB、关闭12.560GiB，reserved均13.582GiB。首次更新精确KL.0402，后四次.0189/.0185/.0177/.0180；LR首轮结束降至下限1e-5，后四轮结束.000577/.002919/.004379/.009853。这说明调节运行正常，也说明它没有硬性KL上限；短门禁不能推断长期稳定性或胜率提升。
+
+实际产物 `outputs/rl_diagnostics/categorical_ppo_smoke/`：`verification.json`保存运行源码哈希、Normal原始对照及所有指标，`train/`为监控开启TensorBoard，`train_monitor_off/`为同种子关闭对照。长期迭代仍暂停，reference17/counter0不变。
+
+![categorical PPO五次更新的实际KL、clip fraction与学习率；仅运行门禁，非胜率训练结果](rl_train_figures/categorical_ppo_smoke.png)

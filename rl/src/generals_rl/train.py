@@ -150,6 +150,9 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             last_losses = kwargs["loss_dict"]
             if not all(math.isfinite(value) for value in last_losses.values()):
                 raise FloatingPointError(f"non-finite training loss: {last_losses}")
+            update_metrics = getattr(runner.alg, "update_metrics", {})
+            if not all(math.isfinite(value) for value in update_metrics.values()):
+                raise FloatingPointError(f"non-finite PPO update metric: {update_metrics}")
             snapshot = self_play.after_update(kwargs["it"]) if self_play is not None else None
             original_log(**kwargs)
             if evaluator is not None:
@@ -164,6 +167,8 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             elapsed = perf_counter() - started
             if runner.logger.writer is not None:
                 writer = runner.logger.writer
+                for name, value in update_metrics.items():
+                    writer.add_scalar(f"PPO/{name}", value, kwargs["it"])
                 writer.add_scalar("Perf/environment_steps", sampled_ticks * task.num_envs, kwargs["it"])
                 writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_fps", sampled_ticks * task.num_envs / elapsed, kwargs["it"])

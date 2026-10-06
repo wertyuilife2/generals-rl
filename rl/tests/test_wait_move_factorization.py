@@ -16,9 +16,7 @@ from torch.distributions import Categorical, kl_divergence
 from generals_rl.evaluate_builtin import _load_student, evaluate_builtin
 from generals_rl.self_play import HistoricalPolicyPool
 from generals_rl.spatial_ppo import LightSpatialPPOPolicy, policy_config
-from generals_rl.student_ppo import StudentPPO
 from generals_rl.train import train
-from rsl_rl.algorithms import PPO
 from rl_test_utils import assert_nested_equal, small_training_config
 from test_spatial_ppo import GROUPS, observations
 
@@ -142,7 +140,6 @@ class WaitMoveFactorizationTests(unittest.TestCase):
             run = Path(directory) / "run"
             with patch.object(HistoricalPolicyPool, "_make_model", tracked_factory):
                 summary = train(cfg, run, iterations=2)
-            self.assertIs(StudentPPO.update, PPO.update)
             self.assertEqual((summary["iterations"], summary["environment_steps"], summary["teacher_envs"]), (2, 32, 0))
             self.assertTrue(made and all(made))
             checkpoint = torch.load(run / "checkpoint.pt", weights_only=True, map_location="cpu")

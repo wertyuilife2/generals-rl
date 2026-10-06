@@ -1,14 +1,17 @@
-"""Student-only PPO using upstream PPO.update and corrected CTS rollout logic.
+"""Student-only PPO using upstream PPO losses and corrected CTS rollout logic.
 
 CTS remains the default. This adapter gives the deployed local student task
 gradients with one optimizer and no privileged latent-distillation target.
 """
 from __future__ import annotations
 
+import math
 import torch
 
 from rsl_rl.algorithms import MoECTS, PPO
 from rsl_rl.modules import ActorCriticMoECTS
+
+from .ppo_monitor import PPOUpdateMonitor
 
 
 class StudentPPOPolicy(ActorCriticMoECTS):
@@ -65,15 +68,20 @@ class StudentPPO(PPO):
 
     def __init__(self, policy, storage, num_envs, *, teacher_env_ratio=0.0,
                  student_encoder_learning_rate=None, load_balance_coef=0.0,
-                 schedule="fixed", desired_kl=None, learning_rate=3e-4,
+                 schedule="adaptive", desired_kl=0.02, learning_rate=3e-4,
+                 ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
                  betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, StudentPPOPolicy):
             raise TypeError("StudentPPO requires StudentPPOPolicy")
         if storage.num_envs != num_envs or storage.teacher_num_envs != 0:
             raise ValueError("student PPO requires matching all-student storage")
-        if schedule != "fixed" or desired_kl is not None:
-            raise ValueError("categorical PPO requires schedule=fixed and desired_kl=None")
+        if schedule not in ("fixed", "adaptive"):
+            raise ValueError("PPO schedule must be fixed or adaptive")
+        if (desired_kl is not None and (isinstance(desired_kl, bool) or not isinstance(desired_kl, (int, float))
+                                      or not math.isfinite(desired_kl) or desired_kl <= 0)
+                or schedule == "adaptive" and desired_kl is None):
+            raise ValueError("adaptive PPO requires a positive finite desired_kl")
         if load_balance_coef != 0:
             raise ValueError("student-only PPO has no distillation/load-balance loss")
         if student_encoder_learning_rate not in (None, learning_rate):
@@ -93,6 +101,22 @@ class StudentPPO(PPO):
         self.student_num_envs = num_envs
         self.teacher_env_idxs = torch.empty(0, dtype=torch.long, device=self.device)
         self.student_env_idxs = torch.arange(num_envs, device=self.device)
+        self.monitor = PPOUpdateMonitor(enabled=ppo_monitor, probe_samples=ppo_probe_samples,
+                                        probe_batch_size=ppo_probe_batch_size)
+        self.update_metrics = {}
+
+    def _on_ppo_minibatch(self, log_ratio, entropy, grad_norm):
+        self.monitor.minibatch(self, log_ratio, entropy, grad_norm)
+
+    def update(self):
+        self.update_metrics = {}
+        try:
+            self.monitor.begin(self)
+            losses = super().update()
+            self.update_metrics = self.monitor.finish(self)
+            return losses
+        finally:
+            self.monitor.release()
 
     def process_env_step(self, obs, rewards, dones, extras):
         if extras.get("terminal_observations") is None:

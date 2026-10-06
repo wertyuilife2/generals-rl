@@ -19,7 +19,6 @@ from generals_rl.mdp import RewardConfig, ShapedReward
 from generals_rl.student_ppo import StudentPPO, StudentPPOPolicy
 from generals_rl.task import GeneralsTask, TaskConfig
 from generals_rl.train import train
-from rsl_rl.algorithms import PPO
 from rsl_rl.storage import RolloutStorageCTS
 from test_mdp import capture_state
 from test_student_ppo import observation, student_config
@@ -168,7 +167,6 @@ class PotentialValueOffsetTests(unittest.TestCase):
             for key in adam_left['state'][parameter]:
                 torch.testing.assert_close(adam_left['state'][parameter][key],
                     adam_right['state'][parameter][key], rtol=1e-4, atol=2e-6)
-        self.assertIs(StudentPPO.update, PPO.update)
 
     def test_real_self_play_pool_signature_and_local_evaluation_and_early_guards(self):
         with tempfile.TemporaryDirectory() as temporary, redirect_stdout(io.StringIO()):

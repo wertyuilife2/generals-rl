@@ -30,6 +30,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 .venv/bin/python -m generals_rl.train --config rl/configs/gpu.json \
   --steps-per-env 1000000 --output outputs/moe_cts/gpu_run
 
+# 当前学生 PPO：v17 网络/MDP，默认开启 categorical 自适应 LR 与 PPO 监控
+.venv/bin/python -m generals_rl.train --config rl/configs/self_play_ppo.json --replace-policy \
+  --steps-per-env 1000000 --output outputs/moe_cts/self_play_ppo
+
 # v9：随机初始化的轻量 CNN，纯历史模型 self-play；每轮最多 3 小时
 .venv/bin/python -m generals_rl.train --config rl/configs/v9.json --replace-policy \
   --steps-per-env 1000000 --output outputs/moe_cts/iterations/v9/train
@@ -70,6 +74,16 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 训练记录保存在 TensorBoard，结束时生成 `summary.json`；`run_config.json` 保存本次完整配置。
 速度分别报告采样加更新的 transition/s、包括评估等待在内的全流程 transition/s。
 
+学生 PPO 默认 `schedule="adaptive", desired_kl=0.02, ppo_monitor=true`。自适应 LR 使用每个
+minibatch 的已采样动作 log-prob 估计 KL，沿用 rsl_rl 的调节规则；监控另在最多8192条固定
+rollout观测上每epoch计算精确 KL，按1024条分块forward，不保存完整rollout的旧分布。
+TensorBoard 的 `PPO/` 下记录 approximate/exact KL、clip fraction、entropy、梯度范数、实际 LR、
+每epoch的 WAIT/MOVE gate 与加权条件 MOVE KL，以及小批观测缓存大小。
+精确 KL 衡量更新开始到epoch结束的变化；近似 KL 相对 rollout 的行为策略。
+在 `runner.algorithm` 设置 `schedule="fixed", desired_kl=null` 关闭 LR 调节，
+设置 `ppo_monitor=false` 关闭监控；`ppo_probe_samples` 和 `ppo_probe_batch_size` 控制监控开销。
+旧 `v1`–`v18` 配置保持原实验的 fixed LR，不会因新默认值改变学习率。
+
 - 周期训练 checkpoint：`save_interval=2000`；最终模型统一为 `checkpoint.pt`，包含两个 optimizer。
 - 历史对手池：每 50 次更新发布权重快照，结束时补充最终模型；最多保留初始模型和最近 7 个候选。
   已分配到对局的旧模型保持引用至该局结束，不因从池中淘汰而中途更换对手。
@@ -89,7 +103,7 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
 | `cts.py` | RSL VecEnv/TensorDict 适配与算法配置 |
-| `student_ppo.py` | 可选的全学生 PPO；复用原版 PPO 更新，学生获得任务梯度 |
+| `student_ppo.py`、`ppo_monitor.py` | 全学生 PPO、categorical 自适应 LR、默认开启的更新监控；学生获得任务梯度 |
 | `map_sampling.py` | 回合重置时从独立随机地图池抽图 |
 | `opponents.py`、`self_play.py` | 冻结历史 student、采样及局内对手生命周期 |
 | `self_play_training.py` | CTS 模型工厂和快照发布 |

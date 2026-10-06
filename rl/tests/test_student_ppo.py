@@ -1,4 +1,4 @@
-"""Student task gradients and the unchanged upstream PPO update/lifecycle."""
+"""Student gradients, legacy PPO equivalence and real self-play lifecycle."""
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
@@ -109,7 +109,8 @@ class StudentPPOTests(unittest.TestCase):
             with self.subTest(normalization=normalization):
                 torch.manual_seed(123)
                 obs = observation()
-                candidate = algorithm(obs, normalization=normalization)
+                candidate = algorithm(obs, normalization=normalization,
+                                      schedule="fixed", desired_kl=None)
                 reference_policy = policy(obs, normalization=normalization)
                 reference_policy.load_state_dict(candidate.policy.state_dict())
                 # Original encoder-with-grad then latent.detach value path.
@@ -140,7 +141,8 @@ class StudentPPOTests(unittest.TestCase):
                 assert_nested_equal(self, candidate.optimizer.state_dict(), reference.optimizer.state_dict())
                 for left, right in zip(candidate.policy.parameters(), reference_policy.parameters()):
                     assert_nested_equal(self, left.grad, right.grad)
-        self.assertIs(StudentPPO.update, PPO.update)
+                self.assertGreaterEqual(candidate.update_metrics["exact_update_kl"], 0)
+                self.assertIsNone(candidate.monitor.observations)
 
     def test_timeout_and_partial_prefix_gae_ignore_unused_nan_tail(self):
         obs = observation(4)
@@ -174,7 +176,8 @@ class StudentPPOTests(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in alg.update().values()))
 
     def test_config_and_active_sample_guards_and_simnorm_empty_teacher(self):
-        cases = ({"schedule": "adaptive"}, {"desired_kl": .02}, {"load_balance_coef": .01},
+        cases = ({"schedule": "unknown"}, {"desired_kl": None}, {"desired_kl": 0},
+                 {"desired_kl": float("nan")}, {"desired_kl": True}, {"load_balance_coef": .01},
                  {"teacher_env_ratio": .75}, {"student_encoder_learning_rate": .001},
                  {"rnd_cfg": {}}, {"symmetry_cfg": {}})
         for options in cases:
@@ -232,6 +235,12 @@ class StudentPPOTests(unittest.TestCase):
             last = torch.load(root / "resume/checkpoint.pt", map_location="cpu", weights_only=False)
             self.assertEqual({int(state["step"]) for state in last["optimizer_state_dict"]["state"].values()}, {8})
             for run, evidence in ((root / "warm", summary), (root / "resume", resumed)):
+                from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+                events = EventAccumulator(str(run)).Reload()
+                for tag in ("PPO/approx_kl", "PPO/clip_fraction", "PPO/learning_rate",
+                            "PPO/exact_update_kl", "PPO/epoch_1/wait_move_gate_kl"):
+                    self.assertIn(tag, events.Tags()["scalars"])
+                    self.assertEqual(len(events.Scalars(tag)), evidence["iterations"])
                 self.assertEqual((evidence["evaluation"]["completed"], evidence["evaluation"]["failed"]), (1, 0))
                 jobs = json.loads((run / "evaluations/index.json").read_text())["jobs"]
                 self.assertEqual(jobs[0]["status"], "completed")
