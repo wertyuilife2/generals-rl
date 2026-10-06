@@ -226,20 +226,23 @@ class MapPPOTests(unittest.TestCase):
         config = {"task": asdict(task), "runner": runner, "torch_threads": 1,
                   "self_play": {"pool_size": 2, "snapshot_interval": 1}, "evaluation": {"enabled": False},
                   "training_control": {"max_seconds": None, "min_seconds": 0, "plateau_evaluations": None}}
-        with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            root = Path(directory)
-            summary = train(config, root, iterations=1)
-            saved = torch.load(root / "checkpoint.pt", map_location="cpu", weights_only=False)
-            report = evaluate_builtin(root / "checkpoint.pt", maps_per_ai=1, batch_size=8,
-                                      max_ticks=2, device="cpu", cpu_threads=1)
-        self.assertEqual((summary["environment_steps"], summary["teacher_envs"], summary["student_envs"]), (4, 0, 2))
-        self.assertEqual(summary["truncated_episodes"], 2)
-        self.assertTrue(all(math.isfinite(value) for value in summary["last_losses"].values()))
-        self.assertEqual({int(value["step"]) for value in saved["optimizer_state_dict"]["state"].values()}, {1})
-        self.assertEqual(report["completed_games"], 8)
-        self.assertTrue(report["stochastic"])
-        self.assertTrue(report["persistent_knowledge"])
-        self.assertEqual(set(report["by_ai"]), {"aggressive", "defensive", "expansion", "random"})
+        for kind in ("resnet", "vit"):
+            config["runner"]["policy"]["backbone"] = kind
+            with self.subTest(backbone=kind):
+                with TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+                    root = Path(directory)
+                    summary = train(config, root, iterations=1)
+                    saved = torch.load(root / "checkpoint.pt", map_location="cpu", weights_only=False)
+                    report = evaluate_builtin(root / "checkpoint.pt", maps_per_ai=1, batch_size=8,
+                                              max_ticks=2, device="cpu", cpu_threads=1)
+                self.assertEqual((summary["environment_steps"], summary["teacher_envs"], summary["student_envs"]), (4, 0, 2))
+                self.assertEqual(summary["truncated_episodes"], 2)
+                self.assertTrue(all(math.isfinite(value) for value in summary["last_losses"].values()))
+                self.assertEqual({int(value["step"]) for value in saved["optimizer_state_dict"]["state"].values()}, {1})
+                self.assertEqual(report["completed_games"], 8)
+                self.assertTrue(report["stochastic"])
+                self.assertTrue(report["persistent_knowledge"])
+                self.assertEqual(set(report["by_ai"]), {"aggressive", "defensive", "expansion", "random"})
 
 
 if __name__ == "__main__":

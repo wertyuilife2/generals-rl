@@ -37,7 +37,7 @@ H4 / P2 时，actor 的示例空间输入为 `48 history planes + 11 knowledge p
 
 地图尺寸、行列坐标、相对己方大本营坐标、邻接关系、public 归一化和 map mask 应通过共同 geometry/layout 模块获得。改变地图大小不重新初始化模型权重，不把棋盘 resize 成固定 9×9。参数个数与 H/W 无关；ViT 位置表的学习参数固定在参考 9×9 网格，上游负责 runtime 插值。
 
-首版每个 env batch / optimizer sub-batch 使用一个实际 H/W，即同尺寸分桶。GroupNorm 的统计不依赖别的样本，但会包含空间位置；直接 padding 会改变空间统计。ViT 仅屏蔽 attention 也不够：每个样本的位置编码、pooling、action mask 仍须符合自己的真实尺寸。因此混合尺寸 padding/packing 需要单独实现完整语义，不能宣称现有动态尺寸能力已经完成该功能。
+首版每个run固定一个实际H/W；以该尺寸构造Task、CTS、storage和历史模型工厂，网络参数尺寸仍不依赖H/W。已经有7×11真实PPO/self-play/采样eval的CPU合同。单run内按bucket切换Task/storage/pool尚未实现，不能仅调用policy.set_geometry改变正在运行的流水线。GroupNorm的统计不依赖别的样本，但会包含空间位置；直接padding会改变空间统计。ViT 仅屏蔽 attention 也不够：每个样本的位置编码、pooling、action mask 仍须符合自己的真实尺寸。因此混合尺寸 padding/packing 需要单独实现完整语义，不能宣称现有动态尺寸能力已经完成该功能。
 
 ## 3. ResNet 详细结构
 
