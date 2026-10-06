@@ -1041,6 +1041,21 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 
 TensorBoard：`outputs/moe_cts/iterations/v19/train/`（InitialEval step−1与训练Eval/、PPO/等）。最终预算/资源/退出见 `train/summary.json`；固定best溯源 `final_best/capture.json`，开发报告 `final_best/development_report.json`，曲线及录像 `final_best/analysis/summary.json`；终局PPO与成对趋势 `diagnostic/terminal_training_review.json`。
 
+### v19 信息可用性补测
+
+为给后续记忆消融建立全赛程对照，对不可变1199模型增加一轮CPU只读observer复测：沿用开发seed与sampling_seed1001042、200地图/AI、双座、batch128、上限2000tick，共额外执行1600局实例。session76509实际exit0，148098次决策全部满足每局decision数等于report ticks；新旧1600个完整game records及by-AI/overall汇总逐项一致，原开发报告保留。开发种子已复用，仍不是heldout。observer仅从合法3×3可见区域记录决策前信息，终止/截断poststate不计为下一次观测；没有修改policy输入或随机流。微型OFF/ON实战与八段已有录像的2266决策独立核验也通过。
+
+| baseline | 败局数 | 从未见到敌将 | 曾见、最后H4可读 | 曾见、最后H4不可读 | 全决策中曾见但H4不可读 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| aggressive | 38 | 13 | 2 | 23 | 22.77% |
+| expansion | 11 | 5 | 3 | 3 | 11.87% |
+| defensive | 2 | 1 | 0 | 1 | 11.02% |
+| random | 2 | 0 | 1 | 1 | 18.34% |
+
+表中最后一列按实际决策数加权；信息分类描述输入中地标的可用性，不证明actor是否使用它，也不把缺失直接当作失败原因。28个“曾见、最后H4不可读”的败局，其末次决策距最后见将均至少8tick；aggressive的23局中22局至少32tick、1局16–31tick。因此，在这些已生成轨迹的最后决策上，H8比H4新增敌将地标覆盖为0/28。这支持将持久事实与短期历史分开实验，不能推导H8对更早决策或胜率没有帮助；换输入后整条轨迹也可能改变。
+
+证据：`v19/final_best/development_information.json`、`development_information_recheck_contract.json`，及 `information_audit/v19_development_summary.json`（均位于 `outputs/moe_cts/iterations/` 对应目录）。这是一项补充诊断，不增加正式训练版本，也未改变v19选模或停止决定。
+
 ## v20：仅让 critic 读取 actor 的 H4 信息（正式训练中）
 
 动机：同一完整棋盘下，actor 的短期可见信息不同，其未来行为和回报可以不同。检验 history-state critic 是否改善估值与自对弈学习；本轮不增加持久记忆、不扩大 actor、不改变资源 PBRS、gamma、lambda、rollout 或历史池。
