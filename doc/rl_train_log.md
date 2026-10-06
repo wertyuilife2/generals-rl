@@ -831,7 +831,7 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 
 99新开发800为29.5/58/72.5/64.5%，W/L/D59/141/0、116/55/29、145/47/8、129/51/20；report SHA `5bc7e674b64b877af7caa547ea159f6570577e287c5f2e41ef212b52fce84a1e`，301,127ticks/含setup201.543秒/1,495 CPU ticks/s/RSS839.45MiB/exit0。与v11/99的800身份逐一相同，非胜→胜/胜→非胜20/55、17/50、3/50、3/63（−17.5/−16.5/−23.5/−30pp）；当前和v11均100updates/E4/52,428,800新样本，但实际轨迹和耗时不同。WAIT仅2.00/2.53/0.83/0.62%，反向44.44/72.69/62.22/73.33%，低WAIT与大量反向并存；不是NN概率证明或最后模型结论。TB−1/99共48个tag/step各一次。
 
-目前完整selector评测如下，599为当前最佳，训练仍在运行：
+目前完整selector评测如下，1099为当前最佳，训练仍在运行。原599峰值后699–999四点未提升，但1099出现新峰88.25%，较84.5%提高3.75pp，因此继续同一进程，未请求STOP，也未结算版本：
 
 | 更新 | aggressive | expansion | defensive | random |
 | ---: | ---: | ---: | ---: | ---: |
@@ -842,6 +842,10 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 | 499 | 82.5% | 95.5% | 99.75% | 98% |
 | 599 | 84.5% | 96.75% | 100% | 99% |
 | 699 | 84.5% | 94.75% | 99% | 98.25% |
+| 799 | 83.75% | 95.25% | 99.75% | 98.5% |
+| 899 | 83.5% | 96.75% | 99% | 98.25% |
+| 999 | 81.25% | 96% | 99.5% | 98.75% |
+| 1099 | 88.25% | 96.75% | 99.25% | 98.25% |
 
 ![v17中期：实际选模点及新初始/99/499开发诊断，训练仍在运行](rl_train_figures/v17.png)
 
@@ -852,3 +856,7 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 本模型八段录像全部来自同一新dev800，A败66/P0/232tick胜11/P1/56；E败298/P0/221胜237/P1/55；D败547/P1/511胜428/P0/61；R败662/P0/96胜759/P1/54。1,286决策/1,294states，5,010视频帧/5,749,177bytes，原生Core核对通过；root核对每个case完整原报告match/action metrics/seat/ticks、trace初始header+tick、MP4 SHA/大小/H.264/yuv420p/24fps/1140×816/帧数/时长。固定为中期499/Snapshot10，不能与后来的599最佳混称。分析 `outputs/moe_cts/iterations/v17/diagnostic/middle_at_499/analysis/analysis.md`，SHA `49227b5141dfde0206651f5e795eca1a043eba1658e92536264f0be36ce5e33b`；49项输入/输出清单SHA `dd6eed9ad176dfb1dccb64e6a05cd8057e554c88318fb1371e92fa153607dfe2`，root逐项核对大小/hash。
 
 败局仍有守将和移动问题。Agg终局前50兵27地落后80兵38地，231敌邻65格18兵可见仍远处36→37移1，敌17兵夺将军；Exp无回将，220邻20格敌5兵可见仍36→27移1，敌4兵攻下2守兵。Def547全局仅16 WAIT、111次紧邻反向、89次回将，150/200tick仍仅6地；507–509将军39→48→39→48往返，509增长到43派42留1，510邻38敌43派42夺将，P1回军计划因P0先夺将而跳过。Random95将军78由2增长到3仍HALF派1留2，邻79敌4派3攻下，不能误写派兵后守1（敌夺将后才剩1）。四例原生invalid/zero-MOVE0。敌将见3/34/241/8tick，世界可见性不是实际actor历史/网络概率证明，也不由几局作因果归因。
+
+对这四个败局仅取末3个decision帧，共12帧，复用记录构造纯GameBatch，调用冻结原official local encoder一次（12×985），无NN/H4/Core/新赛程/weights/GPU；12/12风险公式吻合。Def509将军42+growth1、潜在友援0、risk17，margin26；实际ALL搬42留1。Def510将军1、潜在友援42、risk42，margin仍+1，但seat0先捕将，本方支援被跳过。Rand95将军2+growth1、友援0、risk3、margin0，HALF外调后实际仅2守兵。Agg231/Exp220的margin为−10/−2、risk17/4、距离1。当前margin是包含最大潜在友援的pre-action战力比较，不保证派兵后或实际座次顺序安全；这不是网络因果或代码bug证明。实际当前特征和来源SHA在 `outputs/rl_iteration_audit/pure_scratch_phase/v17_mid499_king_features.{json,md}`，尚未采用任何新设计。
+
+晚期1099/Snapshot22的1600局全部completed/exit0，四率 **88.25/96.75/99.25/98.25%**、draw均0，raw SHA `b9a4f67713b1664d0ce18376d1ad0e17edcede95b204c51f3650f336b3489596`。此时仍为live选模候选，人工模型3/4，尚未执行该模型新开发800或新heldout；最后名额保留给全部评估关闭后的最终最佳。此前54.76分钟的只读停止检查仅记录当时证据，不作为后来停止授权；实际训练已超过一小时，但新峰使平台判断重新开始。连续无提升计数仍5、参考v11。
