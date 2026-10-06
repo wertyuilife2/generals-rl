@@ -352,6 +352,10 @@ class TaskTests(unittest.TestCase):
                 self.masks.append(obs["action_mask"].clone())
                 return torch.zeros((len(obs), 1), dtype=torch.long)
 
+            def action_probabilities(self, obs):
+                return torch.zeros_like(obs["action_mask"], dtype=torch.float32).scatter_(
+                    1, self.act_inference(obs), 1)
+
         state = example_state()
         forward = Action.move(0, Direction.RIGHT).encode()
         for productive in (False, True):

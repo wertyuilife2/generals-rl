@@ -62,3 +62,28 @@ def test_explicit_demo_does_not_replace_best_model_identity(tmp_path, monkeypatc
     console = json.loads(capsys.readouterr().out)
     assert console["best_checkpoint"] == best["data"]["checkpoint"]
     assert summary["best"]["checkpoint_sha256"] != summary["demo_selection"]["checkpoint_sha256"]
+
+
+def test_sampled_checkpoint_evaluation_replays_selected_games_exactly(tmp_path, monkeypatch):
+    from contextlib import redirect_stdout
+    import io
+    from generals_rl.evaluate_builtin import evaluate_builtin
+    from generals_rl.train import train
+    from test_student_ppo import student_config
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    config = student_config()
+    config["evaluation"]["enabled"] = False
+    run = tmp_path / "run"
+    with redirect_stdout(io.StringIO()):
+        train(config, run, iterations=2)
+        checkpoint = run / "checkpoint.pt"
+        report = evaluate_builtin(checkpoint, maps_per_ai=4, seed=73, batch_size=5, max_ticks=64)
+        assert report["stochastic"] is True
+        assert report["sampling_protocol"] == "per_game_numpy_uniform_cdf_v1"
+        demos = analyze.demos(checkpoint, report, tmp_path / "analysis", render=False)
+    assert demos["cases"]
+    for case in demos["cases"]:
+        assert case["native_core_replay_verified"]
+        original = next(game for game in report["games"] if game["game_id"] == case["game_id"])
+        assert case["match"] == original

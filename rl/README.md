@@ -89,7 +89,10 @@ TensorBoard 的 `PPO/` 下记录 approximate/exact KL、clip fraction、entropy�
   已分配到对局的旧模型保持引用至该局结束，不因从池中淘汰而中途更换对手。
 - 定期评估默认开启：每发布 10 个周期 learner 快照评估一次，初始随机模型不计入周期。
 - 每次评估默认每 AI 50 张独立地图、每图交换两座位，共 400 局，时限 2000 tick。
-- 评估使用局部 student 的 argmax，完成整个固定赛程；超时单列为 draw，并计入总胜率分母。
+- 所有评估默认从局部 student 的 masked categorical 分布采样，完成整个固定赛程；超时单列为 draw，并计入总胜率分母。
+- 每局有独立采样随机流，默认由评估seed和game_id派生；报告记录模式、协议及每局采样seed，支持挑选单局复现录像。
+  独立评估可用 `--sampling-seed` 固定地图并更换动作种子；`--greedy` 或 `evaluation.stochastic=false` 显式选择greedy诊断。
+  TensorBoard `Eval/stochastic=1` 标识采样评估，历史greedy结果保留原模式标签。
 - CPU 评估子进程持有快照副本，结果写入 `evaluations/index.json`、各快照的 `report.json` 和 TensorBoard `Eval/`。
 - 可用 `--no-eval` 关闭定期评估。TensorBoard 启动：`tensorboard --logdir outputs/moe_cts`。
 

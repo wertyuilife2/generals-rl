@@ -221,8 +221,10 @@ def main():
                                               max_ticks=args.max_ticks, seed=batch_seed)
             else:
                 recorder = OpeningWaits()
+                # This adapter already samples using the archived batch-seed protocol.
                 completed, timing = battle_batch(specs, states, SampledPolicy(models[c], batch_seed), task,
-                                                  max_ticks=args.max_ticks, cpu_threads=1, recorder=recorder)
+                                                  max_ticks=args.max_ticks, stochastic=False,
+                                                  cpu_threads=1, recorder=recorder)
                 for g in completed:
                     g["opening_planned_wait_ticks"] = recorder.counts[g["game_id"]]
             games.extend(completed)

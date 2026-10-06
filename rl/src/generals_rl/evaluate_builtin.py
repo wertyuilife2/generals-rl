@@ -142,7 +142,8 @@ def _load_student(checkpoint, config, example_obs, device):
 
 
 def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
-                 device="cpu", stochastic=False, cpu_threads=1, recorder=None):
+                 device="cpu", stochastic=True, sampling_seed=1000042,
+                 cpu_threads=1, recorder=None):
     """Complete every fixed lane once; no autorestart or first-finished sampling.
 
     ``policy`` may be a small injected student interface in tests. Normal callers
@@ -151,6 +152,10 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     """
     if not specs or len(specs) != len(states) or max_ticks < 1:
         raise ValueError("provide matching nonempty specs/states and a positive tick limit")
+    if not isinstance(stochastic, bool):
+        raise TypeError("stochastic must be boolean")
+    if isinstance(sampling_seed, bool) or not isinstance(sampling_seed, int) or sampling_seed < 0:
+        raise ValueError("sampling_seed must be a nonnegative integer")
     if any(state.player_count != 2 or state.tick != 0 or state.terminated for state in states):
         raise ValueError("built-in matches require fresh nonterminal two-player states")
     started = perf_counter()
@@ -158,6 +163,11 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     timing = {"observation_seconds": 0.0, "policy_seconds": 0.0,
               "opponent_seconds": 0.0, "simulator_seconds": 0.0}
     count = len(specs)
+    # A game's random stream is independent of batch size, other games ending,
+    # policy construction and the global training RNG. Selected demos reuse it.
+    game_seeds = [int(np.random.SeedSequence([sampling_seed, spec.game_id])
+                      .generate_state(1, dtype=np.uint64)[0]) for spec in specs]
+    generators = [np.random.default_rng(seed) for seed in game_seeds] if stochastic else None
     player_ids = torch.tensor([spec.learner_seat for spec in specs], dtype=torch.long, device=device)
     action_space = make_action_space(training_task)
     action_metrics = ActionMetrics(count, device)
@@ -189,7 +199,14 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                 tick_start = perf_counter()
                 if stochastic:
                     probabilities = policy.action_probabilities(selected_obs)
-                    selected_actions = torch.multinomial(probabilities, 1)
+                    uniforms = np.array([generators[lane].random() for lane in np.flatnonzero(active)])
+                    # Inverse CDF samples the same categorical distribution while
+                    # keeping one independent stream per lane. Double precision
+                    # and normalization keep zero-mass masked actions unselected.
+                    cdf = probabilities.double().cumsum(-1)
+                    cdf = cdf / cdf[:, -1:]
+                    selected_actions = torch.searchsorted(
+                        cdf, torch.as_tensor(uniforms, device=device)[:, None], right=True)
                 else:
                     selected_actions = policy.act_inference(selected_obs)
                 selected_actions = action_space.validate(selected_actions, selected_obs["action_mask"])
@@ -253,6 +270,8 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                             "learner_final_stats": dict(zip(("army", "territory", "cities"), map(int, env.stats[lane, seat]))),
                             "opponent_final_stats": dict(zip(("army", "territory", "cities"), map(int, env.stats[lane, 1 - seat]))),
                         }
+                        if stochastic:
+                            records[lane]["sampling_seed"] = game_seeds[lane]
                         active[lane] = False
                 timing["opponent_seconds"] += perf_counter() - tick_start
                 tick_start = perf_counter()
@@ -267,12 +286,13 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
 
 
 def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_KINDS,
-                     batch_size=128, max_ticks=2000, device="cpu", stochastic=False,
-                     cpu_threads=1, output=None):
+                     batch_size=128, max_ticks=2000, device="cpu", stochastic=True,
+                     sampling_seed=None, cpu_threads=1, output=None):
     """Evaluate every scheduled game, paired by map and balanced by learner seat."""
     if batch_size < 1 or max_ticks < 1:
         raise ValueError("batch size and maximum ticks must be positive")
     opponents = tuple(opponents)
+    sampling_seed = seed if sampling_seed is None else sampling_seed
     started = perf_counter()
     checkpoint = Path(checkpoint).resolve()
     config = json.loads(checkpoint.with_name("run_config.json").read_text())
@@ -305,7 +325,8 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                 policy = _load_student(checkpoint, config, obs, device)
         completed, timing = battle_batch(specs, states, policy, training_task,
                                         max_ticks=max_ticks, device=device,
-                                        stochastic=stochastic, cpu_threads=cpu_threads)
+                                        stochastic=stochastic, sampling_seed=sampling_seed,
+                                        cpu_threads=cpu_threads)
         games.extend(completed)
         timings.append(timing)
         print(f"Built-in evaluation: {len(games)}/{len(schedule)} games completed", flush=True)
@@ -328,6 +349,8 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "cpu_threads": cpu_threads, "max_ticks": max_ticks,
         "clock_normalization_ticks": training_task.max_episode_steps,
         "stochastic": stochastic, "map_config": asdict(map_config),
+        "sampling_seed": sampling_seed if stochastic else None,
+        "sampling_protocol": "per_game_numpy_uniform_cdf_v1" if stochastic else None,
         "confidence_interval": "95% Wilson binomial interval; games are paired by map, interval treats games as independent",
         "overall": aggregate_games(games),
         "by_ai": {kind: aggregate_games([g for g in games if g["opponent"] == kind]) for kind in opponents},
@@ -354,14 +377,19 @@ def main(argv=None):
     parser.add_argument("--max-ticks", type=int, default=2000)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--cpu-threads", type=int, default=1)
-    parser.add_argument("--stochastic", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stochastic", action="store_true", help="sample categorical actions (default)")
+    mode.add_argument("--greedy", dest="stochastic", action="store_false", help="explicit greedy diagnostic")
+    parser.set_defaults(stochastic=True)
+    parser.add_argument("--sampling-seed", type=int, help="action sampling seed; defaults to --seed")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     output = args.output or args.checkpoint.with_name("builtin_evaluation.json")
     report = evaluate_builtin(args.checkpoint, maps_per_ai=args.maps_per_ai, seed=args.seed,
                               opponents=args.opponents, batch_size=args.batch_size,
                               max_ticks=args.max_ticks, device=args.device,
-                              stochastic=args.stochastic, cpu_threads=args.cpu_threads, output=output)
+                              stochastic=args.stochastic, sampling_seed=args.sampling_seed,
+                              cpu_threads=args.cpu_threads, output=output)
     print(json.dumps({key: value for key, value in report.items() if key != "games"}, indent=2))
     return 0
 

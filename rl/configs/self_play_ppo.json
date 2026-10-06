@@ -100,7 +100,8 @@
     "max_ticks": 2000,
     "seed": 271828,
     "cpu_threads": 1,
-    "keep_snapshots": 3
+    "keep_snapshots": 3,
+    "stochastic": true
   },
   "torch_threads": 1,
   "run_id": "self_play_ppo",

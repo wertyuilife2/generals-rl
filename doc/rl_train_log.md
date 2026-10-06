@@ -960,3 +960,9 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 实际产物 `outputs/rl_diagnostics/categorical_ppo_smoke/`：`verification.json`保存运行源码哈希、Normal原始对照及所有指标，`train/`为监控开启TensorBoard，`train_monitor_off/`为同种子关闭对照。长期迭代仍暂停，reference17/counter0不变。
 
 ![categorical PPO五次更新的实际KL、clip fraction与学习率；仅运行门禁，非胜率训练结果](rl_train_figures/categorical_ppo_smoke.png)
+
+**后续评估默认采样。** 按用户要求，独立评估API/CLI、`battle_batch`及训练期间的快照eval均默认 `stochastic=True`；`self_play_ppo.json`显式启用，训练worker的报告校验和TensorBoard同步切换。报告保存 `stochastic`、`sampling_protocol=per_game_numpy_uniform_cdf_v1`、全局动作seed及每局派生seed，TensorBoard额外写 `Eval/stochastic=1`。默认动作seed跟随评估seed，独立CLI可用 `--sampling-seed` 固定地图并重复不同动作采样；显式 `--greedy` / `evaluation.stochastic=false` 仍可用于对照。
+
+为支持之后从真实采样报告挑选输赢局录像，每局用独立NumPy RNG产生uniform，再在masked categorical概率上做逆CDF采样，单局随机流不受batch组成、其他局提前结束或模型构造影响。录像工具使用同一seed/协议重放，并核对完整逐局结果和原生Core trace。历史greedy及前述旧批次采样协议报告保留原标签，不能混作同一评估曲线；冻结实验源码未修改。
+
+相关unittest共33项（32通过，1项GPU测试跳过），录像/分析pytest3项通过。新测试验证默认采样确实产生非greedy动作、不消耗全局Torch/NumPy RNG、mask合法、换序/挑选局可完整复现；真实checkpoint以batch5评估32局后，挑选输赢局以不同batch录像，完整match及原生Core重放一致。长期训练继续暂停，本次仅切换评估协议，不计作新训练版本。

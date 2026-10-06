@@ -21,6 +21,7 @@ from generals.controllers import AI_KINDS
 @dataclass(frozen=True)
 class TrainingEvalConfig:
     enabled: bool = True
+    stochastic: bool = True
     every_n_snapshots: int = 10
     maps_per_ai: int = 50
     batch_size: int = 128
@@ -32,6 +33,8 @@ class TrainingEvalConfig:
     def __post_init__(self):
         if not isinstance(self.enabled, bool):
             raise TypeError("evaluation.enabled must be boolean")
+        if not isinstance(self.stochastic, bool):
+            raise TypeError("evaluation.stochastic must be boolean")
         for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "seed"):
             minimum = 0 if name == "seed" else 1
             value = getattr(self, name)
@@ -101,6 +104,7 @@ class PeriodicEvaluator:
             "checkpoint": str(checkpoint), "checkpoint_sha256": digest,
             "report": str(target / "report.json"),
             "worker_log": str(target / "worker.log"),
+            "stochastic": self.settings.stochastic,
             "status": "queued",
         }
         self.jobs.append(job)
@@ -133,6 +137,7 @@ class PeriodicEvaluator:
                        "--batch-size", str(settings.batch_size), "--max-ticks", str(settings.max_ticks),
                        "--seed", str(settings.seed), "--cpu-threads", str(settings.cpu_threads),
                        "--device", "cpu", "--output", job["report"]]
+            command.append("--stochastic" if settings.stochastic else "--greedy")
             environment = os.environ.copy()
             environment.update(CUDA_VISIBLE_DEVICES="", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
             try:
@@ -154,7 +159,7 @@ class PeriodicEvaluator:
                 or report["scheduled_games"] != expected
                 or set(report["by_ai"]) != set(AI_KINDS)
                 or report["policy"] != "student_local"
-                or report["device"] != "cpu" or report["stochastic"]):
+                or report["device"] != "cpu" or report["stochastic"] != self.settings.stochastic):
             raise RuntimeError("evaluation report does not match the requested snapshot/protocol")
         for kind in AI_KINDS:
             if report["by_ai"][kind]["games"] != 2 * self.settings.maps_per_ai:
@@ -168,6 +173,7 @@ class PeriodicEvaluator:
         score = (min(report["by_ai"][kind]["win_rate"] for kind in AI_KINDS),
                  report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
         point["selection_score"] = list(score)
+        point["stochastic"] = report["stochastic"]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):
             temporary = self.directory / "best.pt.tmp"
             shutil.copyfile(job["checkpoint"], temporary)
@@ -184,6 +190,7 @@ class PeriodicEvaluator:
             self.writer.add_scalar("Eval/environment_steps", job["environment_steps"], job["iteration"])
             self.writer.add_scalar("Eval/snapshot_id", job["snapshot_id"], job["iteration"])
             self.writer.add_scalar("Eval/worker_seconds", job["worker_seconds"], job["iteration"])
+            self.writer.add_scalar("Eval/stochastic", int(report["stochastic"]), job["iteration"])
             self.writer.add_scalar("Eval/worst_ai/win_rate", score[0], job["iteration"])
             self.writer.add_scalar("Eval/best_worst_ai/win_rate", self.best_completed["selection_score"][0], job["iteration"])
             self.writer.flush()

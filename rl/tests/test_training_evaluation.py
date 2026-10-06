@@ -33,9 +33,10 @@ class TrainingEvaluationTests(unittest.TestCase):
     def test_default_is_enabled_every_ten_learned_snapshots_and_validates_early(self):
         settings = TrainingEvalConfig()
         self.assertTrue(settings.enabled)
+        self.assertTrue(settings.stochastic)
         self.assertEqual(settings.every_n_snapshots, 10)
         self.assertEqual(settings.maps_per_ai, 50)
-        cases = ({"enabled": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
+        cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
                  {"batch_size": 0}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0})
         with tempfile.TemporaryDirectory() as directory:
             for values in cases:
@@ -69,12 +70,15 @@ class TrainingEvaluationTests(unittest.TestCase):
             self.assertEqual(report["device"], "cpu")
             self.assertEqual(report["policy"], "student_local")
             self.assertEqual(report["completed_games"], 8)
-            self.assertFalse(report["stochastic"])
+            self.assertTrue(report["stochastic"])
+            self.assertEqual(report["sampling_seed"], report["seed"])
+            self.assertEqual(report["sampling_protocol"], "per_game_numpy_uniform_cdf_v1")
             self.assertEqual(set(report["by_ai"]), set(AI_KINDS))
             for metrics in report["by_ai"].values():
                 self.assertEqual(metrics["games"], 2)
                 self.assertEqual(metrics["wins"] + metrics["losses"] + metrics["draws"], 2)
             events = EventAccumulator(str(output)).Reload()
+            self.assertEqual(events.Scalars("Eval/stochastic")[0].value, 1)
             for kind in (*AI_KINDS, "overall"):
                 logged = events.Scalars(f"Eval/{kind}/win_rate")
                 self.assertEqual(len(logged), 1)
@@ -154,7 +158,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                 report_path = evaluator.directory / f"report_{index}.json"
                 report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
                           "scheduled_games": 8, "completed_games": 8, "policy": "student_local",
-                          "device": "cpu", "stochastic": False, "overall": {"win_rate": overall},
+                          "device": "cpu", "stochastic": True, "overall": {"win_rate": overall},
                           "by_ai": {kind: {"games": 2, "win_rate": aggressive if kind == "aggressive" else worst}
                                     for kind in AI_KINDS}}
                 report_path.write_text(json.dumps(report))

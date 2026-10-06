@@ -36,6 +36,10 @@ class AttackStudent:
         assert "critic" not in observations.keys()
         return torch.full((len(observations), 1), Action.move(0, Direction.RIGHT).encode(), dtype=torch.long)
 
+    def action_probabilities(self, observations):
+        return torch.zeros_like(observations["action_mask"], dtype=torch.float32).scatter_(
+            1, self.act_inference(observations), 1)
+
 
 class MatchRecordingTests(unittest.TestCase):
     def test_native_terminal_and_timeout_traces_match_core_and_record_every_state(self):

@@ -126,8 +126,9 @@ def demos(checkpoint, report, output, *, render=False):
     from generals_rl.task import GeneralsTask
     from recordings import MatchRecorder
 
-    if report.get("stochastic"):
-        raise ValueError("demo replay requires a deterministic evaluation report")
+    stochastic = report.get("stochastic", False)
+    if stochastic and report.get("sampling_protocol") != "per_game_numpy_uniform_cdf_v1":
+        raise ValueError("sampled demo replay requires per-game sampling metadata")
     if sha256(checkpoint.read_bytes()).hexdigest() != report["checkpoint_sha256"]:
         raise ValueError("demo report and checkpoint differ; provide the matching --report")
     config = read_json(checkpoint.with_name("run_config.json"))
@@ -155,14 +156,18 @@ def demos(checkpoint, report, output, *, render=False):
     names = {spec.game_id: f"{spec.opponent}_{game['outcome']}" for spec, game in zip(specs, chosen)}
     with MatchRecorder(output / "recordings", names=names,
                        metadata={"checkpoint_sha256": report["checkpoint_sha256"],
-                                 "evaluation_seed": report["seed"]}) as recorder:
+                                 "evaluation_seed": report["seed"], "stochastic": stochastic,
+                                 "sampling_seed": report.get("sampling_seed"),
+                                 "sampling_protocol": report.get("sampling_protocol")}) as recorder:
         completed, timing = battle_batch(specs, states, policy, task,
                                           max_ticks=report["max_ticks"], device="cpu",
+                                          stochastic=stochastic,
+                                          sampling_seed=report["sampling_seed"] if stochastic else 1000042,
                                           cpu_threads=1, recorder=recorder)
         cases = recorder.finish()
     for case, expected, actual in zip(cases, chosen, completed, strict=True):
-        if (actual["outcome"], actual["ticks"]) != (expected["outcome"], expected["ticks"]):
-            raise RuntimeError("demo did not reproduce the evaluated game's outcome and length")
+        if actual != expected:
+            raise RuntimeError("demo did not reproduce the complete evaluated game")
         case.update(opponent=actual["opponent"], outcome=actual["outcome"],
                     learner_seat=actual["learner_seat"], match=actual)
         import gzip

@@ -38,8 +38,65 @@ class WaitStudent:
         assert observations["action_mask"][:, 0].all()
         return torch.zeros(len(observations), 1, dtype=torch.long)
 
+    def action_probabilities(self, observations):
+        actions = self.act_inference(observations)
+        return torch.zeros_like(observations["action_mask"], dtype=torch.float32).scatter_(1, actions, 1)
+
 
 class BuiltinEvaluationTests(unittest.TestCase):
+    def test_default_samples_reproducibly_per_game_with_masks_and_independent_rng(self):
+        class SampleOnly:
+            def action_probabilities(self, obs):
+                assert "critic" not in obs
+                moves = obs["action_mask"].float()
+                moves[:, 0] = 0
+                moves *= .4 / moves.sum(-1, keepdim=True)
+                moves[:, 0] = .6
+                return moves
+
+            def act_inference(self, obs):
+                raise AssertionError("default evaluation used greedy")
+
+        class Decisions:
+            def on_start(self, specs, states):
+                self.actions = {spec.game_id: [] for spec in specs}
+
+            def on_tick(self, spec, actions, state, moves, done):
+                self.actions[spec.game_id].append(actions[spec.learner_seat].encode())
+
+        count = 256
+        specs = [GameSpec(i, "random", 0, 5, 6, 0) for i in range(count)]
+        states = [tiny_state(adjacent=i % 2 == 0) for i in range(count)]
+        for state in states:
+            state.army.flat[0] = 20
+        config = TaskConfig(width=5, height=5, num_envs=count, history_length=2)
+        recorder = Decisions()
+        rng = torch.get_rng_state()
+        numpy_rng = np.random.get_state()
+        games, _ = battle_batch(specs, states, SampleOnly(), config, max_ticks=4,
+                                sampling_seed=838, recorder=recorder)
+        torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+        after = np.random.get_state()
+        self.assertEqual(numpy_rng[0], after[0]); np.testing.assert_array_equal(numpy_rng[1], after[1])
+        self.assertEqual(numpy_rng[2:], after[2:])
+        waits = sum(actions[0] == 0 for actions in recorder.actions.values()) / count
+        self.assertGreater(waits, .5); self.assertLess(waits, .7)
+        self.assertTrue(all(game["learner_invalid_actions"] == 0 for game in games))
+        # Reordered selected lanes reproduce full games after others end early.
+        selected = [13, 0, 91, 2, 188]
+        replay = Decisions()
+        reproduced, _ = battle_batch([specs[i] for i in selected], [states[i] for i in selected],
+                                     SampleOnly(), config, max_ticks=4, sampling_seed=838, recorder=replay)
+        self.assertEqual(reproduced, [games[i] for i in selected])
+        self.assertEqual(replay.actions, {i: recorder.actions[i] for i in selected})
+
+    def test_cli_defaults_to_sampling_with_explicit_greedy_override(self):
+        from generals_rl.evaluate_builtin import main
+        for options, expected in (([], True), (["--stochastic"], True), (["--greedy"], False)):
+            with self.subTest(options=options), patch("generals_rl.evaluate_builtin.evaluate_builtin", return_value={}) as evaluate:
+                main(["dummy.pt", *options])
+                self.assertEqual(evaluate.call_args.kwargs["stochastic"], expected)
+
     def test_schedule_pairs_maps_and_seats_for_all_four_original_kinds(self):
         schedule = make_schedule(maps_per_ai=3, seed=738)
         self.assertEqual(schedule, make_schedule(maps_per_ai=3, seed=738))
