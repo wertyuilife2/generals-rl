@@ -30,7 +30,6 @@ class TaskConfig:
     productive_actions: bool = False
     combat_features: bool = False
     king_threat_distance: bool = False
-    remember_enemy_general: bool = False
     critic_potential: bool = False
     map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
@@ -53,10 +52,6 @@ class TaskConfig:
             raise TypeError("critic_potential must be boolean")
         if self.combat_features and (self.players, self.width, self.height) != (2, 9, 9):
             raise ValueError("combat features require two players on a 9x9 map")
-        if not isinstance(self.remember_enemy_general, bool):
-            raise TypeError("remember_enemy_general must be boolean")
-        if self.remember_enemy_general and self.players != 2:
-            raise ValueError("seen enemy general requires two players")
         if not isinstance(self.king_threat_distance, bool):
             raise TypeError("king_threat_distance must be boolean")
         if self.king_threat_distance and (self.players, self.width, self.height) != (2, 9, 9):
@@ -125,8 +120,6 @@ class GeneralsTask:
         self.completed_episodes = 0
         self.truncated_episodes = 0
         self.terminated_episodes = 0
-        if self.config.remember_enemy_general:
-            self.observation_encoder.reset(self.batch())
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids))
         self._notify_opponent("on_reset")
         self.observations = self._observations()
@@ -174,8 +167,6 @@ class GeneralsTask:
         self.episode_length_buf[mask] = 0
         self.episode_return[mask] = 0
         self.action_metrics.reset(mask)
-        if self.config.remember_enemy_general:
-            self.observation_encoder.reset(self.batch(), mask)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids), mask)
         self._notify_opponent("on_reset", mask)
         self.observations = self._observations()

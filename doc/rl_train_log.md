@@ -761,3 +761,15 @@ GPU smoke采用E4、N256/T4/B4/episode4/pool2/pub1，**3更新/3,072 transitions
 四个失败例开局WAIT为1/39/49/49tick，说明不能把所有失败泛化为开局等待。Agg80虽立即出兵，后续经济长期落后，最后264–266连续WAIT，将军10兵被13攻下；Exp270在敌军距离2格时多次将军出兵留1；Def976见到敌将后仍在84从将军派出2兵留1，最终14敌兵击败3守军；Rand619在397把58兵全部北移留1，398计划回援却被座位0先夺将，座位1跳过。Random曾见敌将135–241之间共43tick，但静态世界帧不是实际actor输入，未验证memory投影或网络使用，不推断遗忘。完整逐tick兵力与来源见 `analysis/analysis.md`。
 
 下一版只比较PPO E4→E2：原版PPO更新不打补丁，N16,384×T32仍为524,288新样本、mini8192；每轮Adam256→128。期望减少重复优化成本，在相同墙钟收集更多经验；也可能欠拟合，需实际从零训练检验。撤回未改善的敌将记忆模块、专用测试及active README说明，历史commit与冻结v15源码保留。
+
+## v16：减少重复更新，增加墙钟内的新经验
+
+动机：目前正式E4训练约三分之二compute时间用于更新，继续更新还可能伴随策略漂移。减少同一rollout的重复优化，希望在有限单卡预算内收集更多新经验；这不是已经证实的失败原因，也不保证少epoch能提高胜率。回到v11参考，配置 `rl/configs/v16.json` 相对v11仅run_id与 `num_learning_epochs: 4→2`；未改善的v15观测模块和专用测试从active源码撤回，其旧commit/109文件冻结档案仍保留。
+
+N16,384×T32=524,288新样本/update；B64、mini8192，E2共128 Adam/update、1,048,576样本使用。gamma.995/lambda.95、LR1e−4/entropy.01、episode1024、mapbank65536、Light C16/RF5/己将几何与king threat distance、local985/H4、reward与productive动作均沿用v11。teacher0/StudentPPO仍调用原版PPO.update，没有vendor补丁。少epoch会减少PPO内refresh distribution时的采样RNG消耗，后续轨迹并非与E4逐bit配对。storage/模型/Adam形状和rollout采样量不变，显存不会减半。
+
+历史池仍8、初始random0+最近7、uniform stochastic整局固定/pub50、两座轮换，100%神经网络自对弈。CPU每100更新四AI各400局，固定选模seed271828；诊断seed1001042是复用开发集，draw计入分母。每轮最低1h/最多3h，自动12点patience/2pp；完整checkpoint3、history8、eval最近3+best、人工诊断4。训练新随机policy/newAdam/newpool，每环境1Mtick仅作为上限，不加载门禁或任何旧模型。
+
+正常规模5update门禁实际完成2,621,440条新转移，采样5.033秒/更新6.182秒，**compute233,754/s**；包含冷启动20.569秒的wall为127,446/s。GPU allocated12.56GiB/reserved13.75GiB、RSS1,986.78MiB、swaps0、exit0。5rollout仅执行random0，结束时pub1尚未执行，不能代表成熟8模型池速度或正式胜率。门禁路径 `outputs/rl_iteration_audit/pure_scratch_phase/epochs_two_candidate/runtime_bench/`。
+
+独立CPU完整CTS/Task构造在读取任何checkpoint前执行：seed20261013，22个raw参数/15,786参数与实际门禁初始random0逐bit一致，Adam.state空、storage与iteration0；没有load_state_dict或使用门禁权重初始化。门禁最终22参数+66Adam张量全部有限，实际step640=5×2×64，第二optimizer=None。active108 runtime文件与v11冻结源码一致，配置只有上述一项超参数改动。核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_e2_gate_audit.json`，SHA `b50cc2f19935039567e24db55f0c3caf44567385fa6b57557ee6bd9f688e941f`，PASS、无不一致；正式训练结果待实际新run。

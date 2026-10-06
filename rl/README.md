@@ -84,7 +84,7 @@ JSON 配置只指定需要关注或覆盖的参数；其余设置通过 `--confi
 | 模块 | 职责 |
 | --- | --- |
 | `mdp/state.py` | CPU/GPU 共用张量状态视图 |
-| `mdp/observations.py`、`mdp/combat.py`、`mdp/seen_general.py` | 局部/特权观测、每局历史、可选战斗特征与已见敌将记忆 |
+| `mdp/observations.py`、`mdp/combat.py` | 局部/特权观测、每局历史与可选战斗特征 |
 | `mdp/actions.py` | 动作编码、合法 mask |
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
@@ -106,10 +106,7 @@ teacher/critic 使用完整棋盘；部署和历史对手推理不接收 critic�
 训练、历史对手和评估共用该 mask；每次更新与整套评估记录等待、零兵、立即折返和实际移动兵力指标。
 v14 的等价 HALF 去重没有改善开发胜率，已撤回；复现该实验请使用 commit `670abe0` 或其冻结源码。
 
-`task.remember_enemy_general=true` 仅把本人局部视野实际见过的敌将格记入现有 general 平面，
-离开视野后保留至本局结束。该格的 visible、army、owner 等隐藏信息仍保持原值，critic 不变；
-默认关闭，985维与四帧历史不变。训练与历史对手共享同一 encoder，评估使用同一工厂。
-partial reset 清除该局两座记忆；搜索分支可用 encoder.clone() 复制已知位置，并独立维护其棋盘和历史。
+v15 的已见敌将记忆未改善开发胜率，已撤回；复现该实验请使用 commit `1fac98c` 或其冻结源码。
 
 `task.combat_features=true` 在 9×9、1v1 中用两张战斗特征替换重复的相对身份平面，维度保持 985。
 特征分别是可见敌军四邻域中下一次增长后最大留一攻击兵力，以及自身守军/一次增援与威胁的差值。
