@@ -5,7 +5,7 @@ import torch
 
 from generals import MapConfig, make_env
 
-from .mdp import (ActionMetrics, GameBatch, ObservationHistory, RewardConfig,
+from .mdp import (ActionMetrics, GameBatch, KnowledgeState, ObservationHistory, RewardConfig,
                   ShapedReward, make_action_space, make_observation_encoder)
 from .opponents import make_opponent
 
@@ -31,6 +31,7 @@ class TaskConfig:
     combat_features: bool = False
     king_threat_distance: bool = False
     critic_potential: bool = False
+    persistent_knowledge: bool = False
     map_pool_size: int = 0
     reward: RewardConfig = field(default_factory=RewardConfig)
 
@@ -50,12 +51,14 @@ class TaskConfig:
             raise TypeError("combat_features must be boolean")
         if not isinstance(self.critic_potential, bool):
             raise TypeError("critic_potential must be boolean")
-        if self.combat_features and (self.players, self.width, self.height) != (2, 9, 9):
-            raise ValueError("combat features require two players on a 9x9 map")
+        if not isinstance(self.persistent_knowledge, bool):
+            raise TypeError("persistent_knowledge must be boolean")
+        if self.combat_features and self.players != 2:
+            raise ValueError("combat features require two players")
         if not isinstance(self.king_threat_distance, bool):
             raise TypeError("king_threat_distance must be boolean")
-        if self.king_threat_distance and (self.players, self.width, self.height) != (2, 9, 9):
-            raise ValueError("king threat distance requires two players on a 9x9 map")
+        if self.king_threat_distance and self.players != 2:
+            raise ValueError("king threat distance requires two players")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
             raise ValueError("map_pool_size must be a nonnegative integer")
 
@@ -108,8 +111,10 @@ class GeneralsTask:
         self.observation_encoder = observation_encoder or make_observation_encoder(config)
         self.reward_model = reward_model or ShapedReward(config.reward)
         self.opponent = opponent or make_opponent(config.opponent, history_length=config.history_length,
-                                                  seed=config.seed)
+                                                  seed=config.seed,
+                                                  persistent_knowledge=config.persistent_knowledge)
         self.history = ObservationHistory(config.history_length)
+        self.knowledge = None
         self.generator = torch.Generator(device=self.device).manual_seed(config.seed)
         self.player_ids = torch.full((config.num_envs,), config.learner_seat,
                                      dtype=torch.long, device=self.device)
@@ -120,6 +125,10 @@ class GeneralsTask:
         self.completed_episodes = 0
         self.truncated_episodes = 0
         self.terminated_episodes = 0
+        if config.persistent_knowledge:
+            self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
+                                            config.players, self.device)
+            self.knowledge.update(self.batch(), self.player_ids)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids))
         self._notify_opponent("on_reset")
         self.observations = self._observations()
@@ -137,6 +146,8 @@ class GeneralsTask:
         }
         if self.config.critic_potential:
             observations["critic_potential"] = self.reward_model.potential(batch.learner_stats(self.player_ids))
+        if self.knowledge is not None:
+            observations["knowledge"] = self.knowledge.encode(batch.state["tick"], self.player_ids).flatten(1)
         return observations
 
     def get_observations(self):
@@ -167,6 +178,9 @@ class GeneralsTask:
         self.episode_length_buf[mask] = 0
         self.episode_return[mask] = 0
         self.action_metrics.reset(mask)
+        if self.knowledge is not None:
+            self.knowledge.reset(mask)
+            self.knowledge.update(self.batch(), self.player_ids, mask=mask)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids), mask)
         self._notify_opponent("on_reset", mask)
         self.observations = self._observations()
@@ -207,11 +221,18 @@ class GeneralsTask:
                                            alive, self.player_ids)
         self.episode_length_buf += 1
         self.episode_return += reward.total
+        if self.knowledge is not None:
+            self.knowledge.update(batch, self.player_ids)
         self.history.push(self.observation_encoder.encode(batch, self.player_ids))
         self._notify_opponent("on_step")
         terminal_obs = self._observations()
         metrics = {f"Reward/{key}": value.detach() for key, value in reward.terms.items()}
         metrics.update({f"Action/{key}": value for key, value in action_metrics.items()})
+        if self.knowledge is not None:
+            planes = terminal_obs["knowledge"].reshape(self.num_envs, len(self.knowledge.channels), -1)
+            metrics["Knowledge/explored_fraction"] = planes[:, 0].mean(1)
+            enemy_index = self.knowledge.channels.index("enemy_general_landmark")
+            metrics["Knowledge/known_enemy_general"] = planes[:, enemy_index].any(1).float()
         metrics.update({"Episode/return": self.episode_return[done].clone(),
                         "Episode/length": self.episode_length_buf[done].float().clone(),
                         "Episode/win": (batch.state["winner"][done] == self.player_ids[done]).float(),

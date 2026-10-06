@@ -54,7 +54,9 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     """Bind a pool after policy loading, before the first game tick.
 
     The original policy constructor is used only for feature shapes; snapshot
-    inference receives local policy/single_obs/action_mask and never critic.
+    inference receives local policy/single_obs/action_mask, optional knowledge,
+    and never critic. Actor-information critic inputs are independently chosen
+    by obs_groups; enabling memory does not require an information critic.
     Resume copies the old pool and excludes snapshots newer than the selected
     learner checkpoint. Environment and opponent RNG streams start afresh.
     A weights-only warm start supplies initial_source without restoring a pool.
@@ -89,6 +91,10 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     }
     if task.config.productive_actions:
         signature["mdp"]["productive_actions"] = True
+    if task.config.persistent_knowledge:
+        signature["mdp"]["persistent_knowledge"] = True
+        signature["knowledge_semantics"] = task.knowledge.semantics
+        signature["knowledge_channels"] = list(task.knowledge.channels)
     if hasattr(task.observation_encoder, "semantics"):
         signature["encoder_semantics"] = task.observation_encoder.semantics
     resume_pool = None

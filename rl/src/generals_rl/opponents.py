@@ -1,7 +1,7 @@
 """Vector opponent interface, independent of CTS and partial/full critic views."""
 import torch
 
-from .mdp import ObservationHistory
+from .mdp import KnowledgeState, ObservationHistory
 
 
 class WaitOpponent:
@@ -23,12 +23,17 @@ class SelfPlayOpponent:
     policy implementation are injected so this module does not depend on CTS.
     """
 
-    def __init__(self, *, history_length=4, seed=42, deterministic=False):
+    def __init__(self, *, history_length=4, seed=42, deterministic=False,
+                 persistent_knowledge=False):
+        if not isinstance(persistent_knowledge, bool):
+            raise TypeError("persistent_knowledge must be boolean")
         self.history_length = history_length
         self.seed = seed
         self.deterministic = deterministic
         self.pool = None
         self.histories = []
+        self.persistent_knowledge = persistent_knowledge
+        self.knowledge = None
         self.assignment_ids = None
         self.episode_assignments = 0
         self._snapshots = {}
@@ -43,12 +48,20 @@ class SelfPlayOpponent:
             self.assignment_ids = torch.full((batch.num_envs, batch.players), -1,
                                              dtype=torch.long, device=batch.device)
             self.histories = [ObservationHistory(self.history_length) for _ in range(batch.players)]
+            if self.persistent_knowledge:
+                self.knowledge = KnowledgeState(batch.num_envs, batch.width, batch.height,
+                                                batch.players, batch.device)
             # Independent of both the learner's global PyTorch RNG and the
             # task's heuristic-opponent generator.
             self.generator = torch.Generator(device=batch.device).manual_seed(self.seed + 217645177)
         self._learner_ids = learner_ids.clone()
+        if self.knowledge is not None:
+            self.knowledge.reset(mask)
         for pid, history in enumerate(self.histories):
-            history.reset(encoder.encode(batch, torch.full_like(learner_ids, pid)), mask)
+            seats = torch.full_like(learner_ids, pid)
+            history.reset(encoder.encode(batch, seats), mask)
+            if self.knowledge is not None:
+                self.knowledge.update(batch, seats, mask=mask)
         if self.pool is not None:
             self._assign(mask)
 
@@ -87,7 +100,10 @@ class SelfPlayOpponent:
     def on_step(self, batch, learner_ids, action_space, encoder):
         """Advance every seat's history exactly once per completed joint tick."""
         for pid, history in enumerate(self.histories):
-            history.push(encoder.encode(batch, torch.full_like(learner_ids, pid)))
+            seats = torch.full_like(learner_ids, pid)
+            history.push(encoder.encode(batch, seats))
+            if self.knowledge is not None:
+                self.knowledge.update(batch, seats)
 
     @torch.no_grad()
     def joint_actions(self, batch, learner_ids, action_space, encoder):
@@ -104,6 +120,7 @@ class SelfPlayOpponent:
             seats = torch.full_like(learner_ids, pid)
             current = encoder.encode(batch, seats)
             mask = action_space.mask(batch, seats)
+            knowledge = None if self.knowledge is None else self.knowledge.encode(batch.state["tick"], seats).flatten(1)
             for snapshot_id in self.assignment_ids[active, pid].unique().tolist():
                 lanes = active & (self.assignment_ids[:, pid] == snapshot_id)
                 rows = torch.where(lanes)[0]
@@ -111,6 +128,8 @@ class SelfPlayOpponent:
                 values = {"policy": self.histories[pid].frames.index_select(0, rows).flatten(1),
                           "single_obs": current.index_select(0, rows),
                           "action_mask": mask.index_select(0, rows)}
+                if knowledge is not None:
+                    values["knowledge"] = knowledge.index_select(0, rows)
                 observations = TensorDict(values, batch_size=[rows.numel()], device=batch.device)
                 if self.deterministic:
                     actions = snapshot.model.act_inference(observations).reshape(-1)
@@ -128,9 +147,10 @@ class SelfPlayOpponent:
         return {int(key): int(count) for key, count in zip(ids.tolist(), counts.tolist())}
 
 
-def make_opponent(name, *, history_length=4, seed=42):
+def make_opponent(name, *, history_length=4, seed=42, persistent_knowledge=False):
     if name == "self_play":
-        return SelfPlayOpponent(history_length=history_length, seed=seed)
+        return SelfPlayOpponent(history_length=history_length, seed=seed,
+                                persistent_knowledge=persistent_knowledge)
     classes = {"random": RandomOpponent, "wait": WaitOpponent}
     if name not in classes:
         raise ValueError(f"opponent must be one of {(*classes, 'self_play')}")

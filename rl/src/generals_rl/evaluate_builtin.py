@@ -30,6 +30,7 @@ from rsl_rl.utils import resolve_callable
 
 from .mdp import (ActionMetrics, GameBatch, ObservationHistory,
                   make_action_space, make_observation_encoder)
+from .mdp.knowledge import KnowledgeState
 from .config import seed_everything, task_config
 
 
@@ -110,13 +111,26 @@ def aggregate_games(games):
     return result
 
 
-def _local_inputs(batch, player_ids, encoder, history, action_space):
+def _local_inputs(batch, player_ids, encoder, history, action_space, knowledge=None):
     # No privileged critic key is ever passed into the deployed student.
-    return TensorDict({
+    observations = {
         "policy": history.flattened(),
         "single_obs": encoder.encode(batch, player_ids),
         "action_mask": action_space.mask(batch, player_ids),
-    }, batch_size=[batch.num_envs], device=batch.device)
+    }
+    if knowledge is not None:
+        observations["knowledge"] = knowledge.encode(batch.state["tick"], player_ids).flatten(1)
+    return TensorDict(observations, batch_size=[batch.num_envs], device=batch.device)
+
+
+def _initial_knowledge(batch, player_ids, training_task):
+    """One fresh player-local memory per fixed match lane, never a policy cache."""
+    if not training_task.persistent_knowledge:
+        return None
+    knowledge = KnowledgeState(batch.num_envs, batch.width, batch.height,
+                               batch.players, batch.device)
+    knowledge.update(batch, player_ids)
+    return knowledge
 
 
 def _load_student(checkpoint, config, example_obs, device):
@@ -187,12 +201,14 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     if recorder is not None:
         recorder.on_start(specs, states)
     with VecEnv.from_states(states, device="cpu", threads=cpu_threads, auto_reset=False, episode_ticks=max_ticks) as env:
-        history.reset(encoder.encode(GameBatch.from_backend(env, device), player_ids))
+        initial_batch = GameBatch.from_backend(env, device)
+        history.reset(encoder.encode(initial_batch, player_ids))
+        knowledge = _initial_knowledge(initial_batch, player_ids, training_task)
         with torch.inference_mode():
             while active.any():
                 tick_start = perf_counter()
                 batch = GameBatch.from_backend(env, device)
-                observations = _local_inputs(batch, player_ids, encoder, history, action_space)
+                observations = _local_inputs(batch, player_ids, encoder, history, action_space, knowledge)
                 active_tensor = torch.as_tensor(active.copy(), device=device)
                 selected_obs = observations[active_tensor]
                 timing["observation_seconds"] += perf_counter() - tick_start
@@ -275,7 +291,12 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                         active[lane] = False
                 timing["opponent_seconds"] += perf_counter() - tick_start
                 tick_start = perf_counter()
-                history.push(encoder.encode(GameBatch.from_backend(env, device), player_ids))
+                completed_batch = GameBatch.from_backend(env, device)
+                history.push(encoder.encode(completed_batch, player_ids))
+                if knowledge is not None:
+                    # Include lanes ending on this tick, but do not re-observe
+                    # previously finished lanes when other games keep running.
+                    knowledge.update(completed_batch, player_ids, mask=active_tensor)
                 timing["observation_seconds"] += perf_counter() - tick_start
     if any(record is None for record in records):
         raise RuntimeError("a scheduled built-in match did not finish")
@@ -320,8 +341,9 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                 encoder = make_observation_encoder(training_task)
                 history = ObservationHistory(training_task.history_length)
                 history.reset(encoder.encode(batch, pids))
+                knowledge = _initial_knowledge(batch, pids, training_task)
                 obs = _local_inputs(batch, pids, encoder, history,
-                                    make_action_space(training_task))
+                                    make_action_space(training_task), knowledge)
                 policy = _load_student(checkpoint, config, obs, device)
         completed, timing = battle_batch(specs, states, policy, training_task,
                                         max_ticks=max_ticks, device=device,
@@ -344,6 +366,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "training_opponent": training_task.opponent,
         "productive_actions": training_task.productive_actions,
         "combat_features": training_task.combat_features,
+        "persistent_knowledge": training_task.persistent_knowledge,
         "seed": seed, "maps_per_ai": maps_per_ai, "scheduled_games": len(schedule),
         "completed_games": len(games), "batch_size": batch_size, "device": str(device),
         "cpu_threads": cpu_threads, "max_ticks": max_ticks,

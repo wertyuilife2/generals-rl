@@ -967,7 +967,7 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 相关unittest共33项（32通过，1项GPU测试跳过），录像/分析pytest3项通过。新测试验证默认采样确实产生非greedy动作、不消耗全局Torch/NumPy RNG、mask合法、换序/挑选局可完整复现；真实checkpoint以batch5评估32局后，挑选输赢局以不同batch录像，完整match及原生Core重放一致。长期训练继续暂停，本次仅切换评估协议，不计作新训练版本。
 
 
-## v19：新采样协议下重跑 v17 结构对照（准备）
+## v19：新采样协议下重跑 v17 结构对照（训练中）
 
 2026-10-07 按用户新实验要求恢复迭代。先建立对照：actor/critic 结构、H4、MDP、奖励 gamma=.995/lambda=.95、N16384×T32、E4/B64、历史池8/pub50与 v17 相同；采用用户随后要求默认开启的 categorical adaptive LR（desired_kl=.02）、PPO 更新监控和可复现 sampled eval。旧 v17 是 fixedLR+greedy，不能作为新消融唯一的因果对照。v19 不引入事实记忆、不加 critic 历史输入、不扩容、不衰减奖励。
 
@@ -979,6 +979,10 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 
 第一点 update99 完成1600局 sampled，aggressive/expansion/defensive/random=59%/77%/93.75%/96.25%，worker131.83秒、failed0。这是早期 selector 结果，不是最终成绩或独立开发集；目前仍训练。另行评测本轮实际随机初始模型以记录起点。
 
+截至训练约71分钟，update999已经完成第10次selector评测，新的best为999：aggressive/expansion/defensive/random=92%/95%/99.25%/99%，仍在训练，不能称最终结果。299→999同地图及动作随机流的aggressive配对胜负变化为新赢30/丢赢22，净+2pp；expansion净−2.25pp，因此不是四AI一起持续改善。499之后aggressive连续回升，此时继续观察，不基于旧299 best提前认定平台。
+
+本轮实际随机初始模型独立采样1600局，四AI分别0.25%/4.25%/1.25%/3.75%，初始模型hash与初始化合同相符，已写入TensorBoard InitialEval/，不是旧模型重赛。中途299模型的开发seed1001042结果为89.25%/98%/99.5%/100%；该seed曾用于开发，明确不是heldout。299的八局实际selector输赢录像已完成逐局结果和Core trace核验，并保留failure_review，路径 `outputs/moe_cts/iterations/v19/diagnostic/best_at_299/analysis/`；由于best后来更新，这些仅属中途诊断，最终best需重新评估、录像和分析。
+
 ## v20：仅让 critic 读取 actor 的 H4 信息（实现与验证）
 
 动机：同一完整棋盘下，actor 的短期可见信息不同，其未来行为和回报可以不同。检验 history-state critic 是否改善估值与自对弈学习；本轮不增加持久记忆、不扩大 actor、不改变资源 PBRS、gamma、lambda、rollout 或历史池。
@@ -988,3 +992,19 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 配置 `rl/configs/v20.json` 相对 v19 只增加 critic 信息输入及其类/group 声明，run_id=v20；knowledge_channels=0。其余 N16384×T32、E4/B64（524288 新样本、8192/logical minibatch、256 Adam/update）、gamma=.995/lambda=.95、H4、episode1024、pool8/pub50、sampled eval 每100更新1600局、adaptive KL=.02、最少1h/最多3h均保持。该适配器也提供未开启的 memory 扩展，为下一步 2×2 使用，当前训练不会创建或存储 memory。
 
 验证：18 个 CPU tests 通过，包括禁用信息扩展时原模型/输出/梯度/RNG逐位一致、critic-only actor 初始化/动作概率/RNG逐位一致、新 critic 初始 value 在浮点舍入误差内一致、history/public 新权重梯度非零、actor 隐私，以及真实 self-play PPO 三次更新和 timeout bootstrap；categorical mask/WAIT-MOVE factorization 与轻量网络回归通过。未新增 vendor 补丁。正式训练及 GPU 门禁待 v19 完成后执行，不能把上述 CPU 通过当作训练提升。
+
+补充实际 smoke：v20 commit `61fea9053e9925b13dea590bb7ebc4a16a8e8c73` 的110个运行文件直接从Git blob冻结，排除所有尚未提交的记忆/架构/评测工作区改动。该冻结源跑N16/T8/episode8的五次fresh CPU更新，共640转移、80 timeout，teacher0；两次采样eval均成功，实际episode对手已执行训练后历史模型。独立CPU重新构造与自己的初始snapshot0全部张量逐位一致，actor10697/critic12209；actor初始张量和全局RNG与Light对照逐位一致，新增critic输入权重为零。证据 `outputs/moe_cts/iterations/v20/cpu_contract.json`；正式GPU门禁仍待对照结束。
+
+## v21：仅给 actor 增加持久事实记忆（实现与 CPU 准备）
+
+动机：H4会丢失更早的合法探索信息。单独检验不堆叠的持久知识是否改善自对弈，critic仍只读取当前privileged state，形成memory×critic-information消融的第三个条件。后续v22再启用相同记忆和history-state critic的组合；尚未进行这两轮正式训练。
+
+新增MDP模块 `KnowledgeState`，每个episode/player各维护compact状态，只由己方地块3×3合法视野更新。两人局11通道为explored、mountain、last_seen_city、general_landmark、enemy_general_landmark、not_enemy_general、last_seen_empty、last_seen_neutral、last_seen_owner_0/1、last_seen_age。general地标保留最初合法看见的将位置；斩将变城市后地标仍保留。owner和city明确是最后观测值，age按经过tick/1024截断到1；未知格explored=0，owner未知sentinel=-3。没有读取隐藏general_pos或预测隐藏兵力。
+
+知识单独存为 `knowledge`，不按H4重复堆叠。learner、episode固定历史对手与采样eval维护各自player-local知识；terminal observation先完成最后一次更新，随后reset清空选中lane所有seat，座位轮换不传递另一玩家的探索信息。模型池签名只在启用时加入schema与channels，防止不兼容旧pool加载；默认关闭路径不创建知识状态。clone提供独立信息状态，为之后搜索分支复用，不增加搜索算法依赖。
+
+复用已提交InformationSpatialPPOPolicy，actor的11个新输入通道零初始化，保留全新随机Light函数及RNG；critic不接收H4或knowledge。actor12281、critic5089、合计17370参数。其余N16384×T32、E4/B64、gamma=.995/lambda=.95、episode1024、H4、历史池与采样eval协议与v19/v20相同。新增知识rollout约1.740GiB，compact learner+opponent状态合计70.875MiB，GPU峰值和正式速度仍待门禁。
+
+同时将combat/king距离的9×9常数替换为实际H/W，供后续容量实验复用；v21仍只训练9×9。独立坐标枚举参考与旧9×9完整特征hash回归验证通过，不把支持形状运行当作地图泛化成绩。
+
+当前CPU单元36项中35通过、1 CUDA项跳过，覆盖隐藏信息、已探索事实、过期owner、将转城市、mask更新、clone、terminal/reset、双座历史对手、disabled行为、信息critic和几何回归。候选v21/v22各五次CPU更新、两次完整采样小eval通过；实际执行多个训练后历史模型，memory新权重已经学习，所有loss和TensorBoard指标有限。该候选smoke尚未冻结，记录于各自 `preparation/smoke_cpu_verification.json`；不能当作正式胜率结论，提交后将重新验证冻结源。

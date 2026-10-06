@@ -58,11 +58,16 @@ def make_observation_encoder(config):
         encoder = CombatObservationEncoder(config.max_episode_steps)
     else:
         encoder = LocalObservationEncoder(config.max_episode_steps)
+    if (config.width, config.height) != (9, 9):
+        if config.combat_features:
+            encoder.semantics = "combat_p2_spatial_v1"
+        elif config.king_threat_distance:
+            encoder.semantics = "local_p2_spatial_v1"
     return KingThreatDistanceEncoder(encoder) if config.king_threat_distance else encoder
 
 
 class KingThreatDistanceEncoder:
-    """Replace redundant seat-P1 with nearest observable mobile enemy / 16.
+    """Replace redundant seat-P1 with normalized nearest mobile enemy distance.
 
     Count public next-tick growth, not hypothetical actions. This is geometric
     potential only: ignores walls, routes, joint moves and absolute seat order.
@@ -77,10 +82,11 @@ class KingThreatDistanceEncoder:
         return self.base.visibility(batch, player_ids)
 
     def encode(self, batch, player_ids, privileged=False):
-        if (batch.players, batch.width, batch.height) != (2, 9, 9):
-            raise ValueError("king threat distance requires two players on a 9x9 map")
+        if batch.players != 2:
+            raise ValueError("king threat distance requires two players")
         result = self.base.encode(batch, player_ids, privileged=privileged)
-        planes = result[:, :972].reshape(batch.num_envs, 12, 81)
+        cells_count = batch.width * batch.height
+        planes = result[:, :12 * cells_count].reshape(batch.num_envs, 12, cells_count)
         visible, own, enemy = (planes[:, index].bool() for index in (0, 5, 6))
         own_general = planes[:, 4].bool() & own
         king = own_general.long().argmax(1)
@@ -91,9 +97,10 @@ class KingThreatDistanceEncoder:
         grows = ((tick % 2 == 0) & (planes[:, 3].bool() | planes[:, 4].bool())) | (tick % 50 == 0)
         mobile = enemy & ((army > 1) | ((army == 1) & grows))
         mobile &= batch.state["alive"].gather(1, (1 - player_ids)[:, None])
-        cells = torch.arange(81, device=batch.device)
-        distance = ((cells[None] // 9 - king[:, None] // 9).abs()
-                    + (cells[None] % 9 - king[:, None] % 9).abs()).float() / 16
+        cells = torch.arange(cells_count, device=batch.device)
+        distance = ((cells[None] // batch.width - king[:, None] // batch.width).abs()
+                    + (cells[None] % batch.width - king[:, None] % batch.width).abs()).float() / max(
+                        1, batch.width + batch.height - 2)
         nearest = distance.masked_fill(~mobile, 1).amin(1)
         result[:, -1] = torch.where(valid, nearest, 1)
         return result

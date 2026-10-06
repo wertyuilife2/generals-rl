@@ -77,7 +77,7 @@ class CombatObservationTests(unittest.TestCase):
         self.assertIs(type(original),LocalObservationEncoder)
         self.assertIs(type(make_observation_encoder(TaskConfig(combat_features=True))),
                       CombatObservationEncoder)
-        for updates in ({"players":3},{"width":8},{"height":8}):
+        for updates in ({"players":3},):
             with self.assertRaises(ValueError):
                 TaskConfig(combat_features=True,**updates)
         with self.assertRaises(TypeError):

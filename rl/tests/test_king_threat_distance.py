@@ -118,7 +118,7 @@ class KingThreatDistanceTests(unittest.TestCase):
             batch.state['alive'][3,0]=False
             self.assertEqual(enabled.encode(batch,ids,privileged=True)[3,-1].item(),1)
         self.assertIs(type(make_observation_encoder(TaskConfig())),LocalObservationEncoder)
-        for updates in ({'players':3},{'width':8},{'height':8}):
+        for updates in ({'players':3},):
             with self.assertRaises(ValueError):
                 TaskConfig(king_threat_distance=True,**updates)
         with self.assertRaises(TypeError):
