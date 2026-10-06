@@ -2,7 +2,7 @@
 
 当前目标：随机种子的 9×9、1v1 地图，部署 student 对 aggressive 胜率超过 90%、expansion 超过 95%、defensive 与 random 达到 100%；每个方案从零开始，训练只使用历史模型自对弈。达到目标或连续 20 个训练版本无有效提升后停止。在 `codex_dev` 分支依次管理训练方案；main 保留 baseline commit `0189d55`。
 
-**当前状态：v17 已正常结束，final1699新开发胜率88% / 98% / 100% / 99%，按既定规则超过v11，连续无提升5→0、新参考v17；最终7段真实demo及失败分析已完成，Defensive无败局所以仅录胜局。训练仍只使用历史神经网络自对弈，完整目标尚未达到。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
+**当前状态：v18 已从零开始正式训练，唯一新增己将局部表征的全局actor context，冻结源码6b94c13；训练仍只使用历史神经网络自对弈。v17已完成训练及7段真实demo，final1699新开发胜率88% / 98% / 100% / 99%，连续无提升计数5→0、新参考v17；完整目标尚未达到。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -873,3 +873,5 @@ Report SHA `ee821f103c02bbc42751e4953fe11143b083ee4c8bfb0443c92900c868653a1b`；
 **训练配置与边界。** 配置 `rl/configs/v18.json` 相对v17仅run_id及该flag不同：N16,384/T32/E4/B64、gamma.995、episode1024、原985/H4观测和649动作、原奖励、纯NN uniform stochastic pool8/pub50、选模100updates/1600局、1–3h预算与有界存档。每轮重新构造随机policy、空Adam及新pool，禁止用v17或本次门禁权重初始化。gate只验证运行、梯度与效率，不计正式版本训练结果。若正式开发结果无有效提升，下轮撤回此结构，不堆叠无用设计。
 
 **正式前验证。** 3项新CPU测试及1项既有隐私回归通过：旧路径公式/state/RNG逐bit、开启后旧actor部件与critic初始化逐bit、可微己将gather向远端MOVE/WAIT传播、最新local标记/缺失/多标记/privileged隐私及float32/64/空batch。正常GPU5updates采样2,621,440，采样5.092s/更新13.004s、compute144,863/s、冷wall27.571s/full95,081/s；allocated12.562GiB/reserved13.582GiB、RSS1987.98MiB/swaps0/exit0。新真实CPU CTS/Task构造在任何checkpoint读取之前完成，自己的random0逐bit等于门禁22张量、Adam为空；门禁最终88模型/Adam张量有限，step1280=5×4×64、原PPO.update identity。验证辅助脚本最初用错字段名，改正后检查通过，GPU训练无错误。证据 `outputs/rl_iteration_audit/pure_scratch_phase/own_king_context_candidate/`；当前短门禁速度较v17门禁约−1.64%，不作等成熟预算比较。
+
+**正式启动。** 2026-10-06T08:08:41.15 UTC（北京时间16:08:41），PID2660864/session15200，从未存在的v18/train目录开始，无resume/warm/load参数。源码commit `6b94c13537fe7d1f8bde21c4daff83b68bafda8b` 冻结108个运行文件，较v17仅 `generals_rl/spatial_ppo.py` 有变化，env49文件与main相同。显式controlled-launch PYTHONPATH指向冻结源码，不读取进程environ。初始snapshot0 SHA `1e690bbe5ab56855f307e44a79536cb0e4c2c4b85de1511a17c5aef714911cdc`；与门禁同seed构造的随机张量一致，不是加载门禁或旧权重。TensorBoard `outputs/moe_cts/iterations/v18/train/`，配置、启动和hash证据保存在v18目录。自己的初始模型固定人工名额1/4，CPU1新开发800正在执行；尚无正式胜率或版本提升结论。
