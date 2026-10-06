@@ -812,3 +812,7 @@ v15最终交付独立核对 `outputs/rl_iteration_audit/pure_scratch_phase/v15_f
 早期计算预算比较 `outputs/rl_iteration_audit/v16_early_budget_comparison.json`，SHA `b96658db81e5f3beebd3467b213ecf605ec9d5a8ce53c7215cb5bcd630a85cb6`。实际411–510共100次更新，E2 **214,262/s** 对v11 E4 **142,855/s**（1.4999×），采样1.2239/1.2268秒、更新1.2230/2.4433秒。相同新样本量下Agg差−13.25/−6.5/−9.25/−4pp（99/199/299/399），每点1600身份均配对。近似墙钟只取预算内的已有v11快照，不插值：v16/299比v11/199仅早6.04秒，只能按预先规则取落后353秒的v11/99；v16/399允许的v11/199也落后236.40秒。因此不能把离散checkpoint比较宣称为精确同时间优势，更不能由早期数据宣称最终改善。
 
 ![v16中期：七个实际选模点及本轮新初始/99/399开发诊断，699为当前最佳，训练尚未结束](rl_train_figures/v16.png)
+
+后续799选模为84/94.25/99/96.75%，成为新最佳；899为80.75/95.75/99.5/97.5%，只有一个post-peak回落点，继续至少一小时训练，不能提前结算。本节399录像仍是固定中期模型。
+
+对上述四个399败局仅核对45个开局WAIT及32个末8tick，共77个已录制决策，不运行新赛程或环境模拟。冻结399模型、原encoder/H4/clock1024/CPU1，308次历史publicstats与原compute_stats相同，77次官方history等价；重算greedy全部77/77匹配planned action、0mismatch，无真实critic输入。4个WAIT被无合法MOVE强制，41个非强制开局WAIT中23个满足pWAIT<sumMOVE而WAIT仍为最大单类别；A/E/D/R分别6/11、6/9、5/10、6/11。例如E234/t4：pWAIT0.47011438、maxMOVE0.19357729、sumMOVE0.52988571、8个合法MOVE。这证明这些样本中存在单类别argmax与MOVE集合概率的差异，不是全局统计，也不证明改变策略参数化会提高胜率。四局末期均选择MOVE，不能把守将失败归为WAIT。详细 `diagnostic/middle_at_399/analysis/nn_wait_probe.{md,json}`，JSON SHA `d041e26b58dd06ad5e8749cebc0c50faf781fd70a9257590e48e593159649378`；首次scratch helper字符串SyntaxError在执行前退出，修复后单次77tick计划成功，生产训练未受影响。没有修改当前模型解码规则或采用下一候选。
