@@ -5,8 +5,10 @@ gradients with one optimizer and no privileged latent-distillation target.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 import math
 import torch
+from torch.distributions import Categorical
 
 from rsl_rl.algorithms import MoECTS, PPO
 from rsl_rl.modules import ActorCriticMoECTS
@@ -70,6 +72,7 @@ class StudentPPO(PPO):
                  student_encoder_learning_rate=None, load_balance_coef=0.0,
                  schedule="adaptive", desired_kl=0.02, learning_rate=3e-4,
                  ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
+                 physical_minibatch_size=None, amp_bfloat16=False,
                  betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, StudentPPOPolicy):
@@ -88,6 +91,34 @@ class StudentPPO(PPO):
             raise ValueError("student PPO uses one learning rate for its single optimizer")
         if kwargs.get("rnd_cfg") is not None or kwargs.get("symmetry_cfg") is not None:
             raise ValueError("student-only PPO does not support RND or symmetry")
+        if (physical_minibatch_size is not None
+                and (isinstance(physical_minibatch_size, bool)
+                     or not isinstance(physical_minibatch_size, int)
+                     or physical_minibatch_size < 1)):
+            raise ValueError("physical_minibatch_size must be a positive integer or None")
+        if not isinstance(amp_bfloat16, bool):
+            raise TypeError("amp_bfloat16 must be boolean")
+        # Map policies also autocast rollout/inference forwards. Updating a
+        # float32 rollout in bf16 (or vice versa) introduces numerical policy
+        # drift before any optimizer step. Legacy policies have no such flag.
+        if hasattr(policy, "amp_bfloat16") and policy.amp_bfloat16 != amp_bfloat16:
+            raise ValueError("policy and StudentPPO amp_bfloat16 must match for rollout/update precision")
+        self.physical_minibatch_size = physical_minibatch_size
+        self.amp_bfloat16 = amp_bfloat16
+        self._chunked_update = physical_minibatch_size is not None or amp_bfloat16
+        if self._chunked_update:
+            if (getattr(policy, "action_distribution", None) != "categorical"
+                    or policy.is_recurrent or kwargs.get("multi_gpu_cfg") is not None):
+                raise ValueError("microbatch/AMP requires feedforward categorical single-device student PPO")
+            if any(isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
+                   or isinstance(module, torch.nn.modules.dropout._DropoutNd) and module.p > 0
+                   or type(module).__name__ == "DropPath" and getattr(module, "drop_prob", 0) > 0
+                   for module in policy.modules()):
+                raise ValueError("microbatch/AMP requires sample-independent deterministic network layers")
+            if amp_bfloat16:
+                device = torch.device(kwargs.get("device", "cpu"))
+                if device.type != "cuda" or not torch.cuda.is_bf16_supported():
+                    raise ValueError("amp_bfloat16 requires a CUDA device with bfloat16 support")
         super().__init__(policy, storage, schedule=schedule, desired_kl=desired_kl,
                          learning_rate=learning_rate, **kwargs)
         if self.num_learning_epochs < 1 or self.num_mini_batches < 1:
@@ -112,11 +143,112 @@ class StudentPPO(PPO):
         self.update_metrics = {}
         try:
             self.monitor.begin(self)
-            losses = super().update()
+            # The disabled path remains upstream PPO.update, including its RNG
+            # draws, reduction order and observer lifecycle.
+            losses = self._update_microbatched() if self._chunked_update else super().update()
             self.update_metrics = self.monitor.finish(self)
+            if self._chunked_update:
+                self.update_metrics.update(self.microbatch_metrics)
             return losses
         finally:
             self.monitor.release()
+
+    def _update_microbatched(self):
+        """Memory-bounded execution of existing logical categorical PPO batches.
+
+        Losses/adaptive-KL mirror vendored algorithms/ppo.py:246-317; gradient
+        clipping/step and observer mirror :367-409. This adapter supports only
+        the StudentPPO subset already excluding RND, symmetry and recurrence.
+        Gradients are mathematically identical in float32, with normal floating
+        point differences from chunked kernels and reduction order.
+        """
+        mean_losses = {"value": 0.0, "surrogate": 0.0, "entropy": 0.0}
+        physical_batches = 0
+        logical_batch_size = 0
+        for (obs, actions, old_values, advantages, returns, old_log_probs,
+             _old_mean, _old_std, _hidden, _masks) in self.storage.mini_batch_generator(
+                 self.num_mini_batches, self.num_learning_epochs):
+            count = obs.batch_size[0]
+            logical_batch_size = count
+            if self.normalize_advantage_per_mini_batch:
+                # Normalize the full logical minibatch, never each physical
+                # chunk. Global normalization already happens in CTS GAE.
+                with torch.no_grad():
+                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            chunk_size = self.physical_minibatch_size or count
+            self.optimizer.zero_grad()
+            batch_losses = {key: returns.new_zeros(()) for key in mean_losses}
+            log_ratios, entropies, probabilities = [], [], []
+            for start in range(0, count, chunk_size):
+                end = min(count, start + chunk_size)
+                sl = slice(start, end)
+                context = (torch.autocast("cuda", dtype=torch.bfloat16)
+                           if self.amp_bfloat16 else nullcontext())
+                with context:
+                    # Unlike act(), probability evaluation consumes no policy
+                    # sampling RNG. One full-batch draw below preserves the
+                    # upstream update's otherwise-unused sample call.
+                    self.policy.action_probabilities(obs[sl])
+                    values = self.policy.evaluate(obs[sl])
+                if self.policy.distribution.logits.dtype != torch.float32:
+                    self.policy.distribution = Categorical(
+                        logits=self.policy.distribution.logits.float(), validate_args=False)
+                action_log_probs = self.policy.get_actions_log_prob(actions[sl]).float()
+                entropy = self.policy.entropy.float()
+                log_ratio = action_log_probs - old_log_probs[sl].squeeze(-1).float()
+                ratio = torch.exp(log_ratio)
+                advantage = advantages[sl].squeeze(-1).float()
+                surrogate = -advantage * ratio
+                clipped_surrogate = -advantage * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
+                surrogate_loss = torch.maximum(surrogate, clipped_surrogate).mean()
+                values = values.float()
+                target, old_value = returns[sl].float(), old_values[sl].float()
+                value_losses = (values - target).pow(2)
+                if self.use_clipped_value_loss:
+                    clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
+                    value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
+                value_loss = value_losses.mean()
+                entropy_loss = entropy.mean()
+                weight = (end - start) / count
+                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_loss
+                (loss * weight).backward()
+                for key, value in (("value", value_loss), ("surrogate", surrogate_loss),
+                                   ("entropy", entropy_loss)):
+                    batch_losses[key] += value.detach() * weight
+                log_ratios.append(log_ratio.detach())
+                entropies.append(entropy.detach())
+                probabilities.append(self.policy.distribution.probs.detach())
+                physical_batches += 1
+            # Categorical.sample() uses precisely this one multinomial call on
+            # its flattened probabilities. Sampling each chunk changes RNG
+            # consumption and the subsequent rollout/mini-batch plan.
+            torch.multinomial(torch.cat(probabilities), 1, replacement=True)
+            log_ratio = torch.cat(log_ratios)
+            entropy = torch.cat(entropies)
+            if self.desired_kl is not None and self.schedule == "adaptive":
+                with torch.inference_mode():
+                    kl_mean = (torch.expm1(log_ratio) - log_ratio).clamp_min(0).mean()
+                    if kl_mean > self.desired_kl * 2.0:
+                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                    elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                    for group in self.optimizer.param_groups:
+                        group["lr"] = self.learning_rate
+            # bf16 keeps float32 master weights/gradients and needs no fp16
+            # scaler. Clip and Adam step only after the complete logical batch.
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            self.optimizer.step()
+            self._on_ppo_minibatch(log_ratio, entropy, grad_norm.detach())
+            for key in mean_losses:
+                mean_losses[key] += batch_losses[key].item()
+        updates = self.num_learning_epochs * self.num_mini_batches
+        self.storage.clear()
+        self.microbatch_metrics = {
+            "physical_minibatch_size": float(self.physical_minibatch_size or logical_batch_size),
+            "logical_minibatch_size": float(logical_batch_size),
+            "microbatches": float(physical_batches), "amp_bfloat16": float(self.amp_bfloat16),
+        }
+        return {key: value / updates for key, value in mean_losses.items()}
 
     def process_env_step(self, obs, rewards, dones, extras):
         if extras.get("terminal_observations") is None:
