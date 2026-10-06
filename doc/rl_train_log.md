@@ -1008,3 +1008,11 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 同时将combat/king距离的9×9常数替换为实际H/W，供后续容量实验复用；v21仍只训练9×9。独立坐标枚举参考与旧9×9完整特征hash回归验证通过，不把支持形状运行当作地图泛化成绩。
 
 当前CPU单元36项中35通过、1 CUDA项跳过，覆盖隐藏信息、已探索事实、过期owner、将转城市、mask更新、clone、terminal/reset、双座历史对手、disabled行为、信息critic和几何回归。候选v21/v22各五次CPU更新、两次完整采样小eval通过；实际执行多个训练后历史模型，memory新权重已经学习，所有loss和TensorBoard指标有限。该候选smoke尚未冻结，记录于各自 `preparation/smoke_cpu_verification.json`；不能当作正式胜率结论，提交后将重新验证冻结源。
+
+v21已独立提交为 `d55a835908556f28e3f7ab0fc1730598c30849e0`，111个运行文件从该commit的Git blob冻结，排除GPU评测、混合精度和大网络候选改动。冻结源N16/T8/episode8重新完成五次fresh CPU更新，640转移、80 timeout，两次完整采样小eval、failed0。独立重建确认初始policy与本轮snapshot0逐位一致、Adam空状态、actor新增知识权重为零，knowledge storage实际为[8,16,891]。证据 `outputs/moe_cts/iterations/v21/cpu_contract.json`；正式训练仍排在v20之后，CPU门禁不计正式训练版本成绩。
+
+## v22：持久知识与 history-state critic 组合（准备）
+
+补齐 v19/v20/v21/v22 的 memory × critic-information 2×2。相对 v21，仅开启 `critic_actor_information`，critic group 引用已存的 policy/knowledge；actor仍是 H4＋11个非堆叠知识通道，critic为 S＋H4＋K。无需复制一份历史或知识 rollout，也无需增加 vendor 补丁。actor12281、critic13793、合计26074参数，新增critic输入权重零初始化；正式配置其余训练、历史池、采样评估与资源保留设置均与v19一致。
+
+配置 `rl/configs/v22.json`；已有工作区候选五次CPU更新证明新critic通道有梯度并执行了训练后历史对手，但不当作冻结源或正式成绩。提交后从Git blob重新冻结并执行fresh CPU合同；正式训练顺序仍是v19→v20→v21→v22，GPU门禁及1–3h训练待前序完成。此处不预先声称组合方案胜率更高。
