@@ -250,6 +250,9 @@ class PeriodicEvaluator:
             if report["by_ai"][kind]["games"] != 2 * self.settings.maps_per_ai:
                 raise RuntimeError(f"evaluation did not finish all scheduled {kind} games")
         if torch.device(self.settings.device).type == "cuda":
+            requested_cudnn = self.run_config.get("cudnn_allow_tf32")
+            if requested_cudnn is not None and report.get("cudnn_allow_tf32") != requested_cudnn:
+                raise RuntimeError("evaluation cuDNN TF32 setting differs from the requested run")
             traces = report["selected_game_traces"]
             if traces["protocol"] != "recorded_joint_actions_core_v1":
                 raise RuntimeError("evaluation did not record the requested action trace protocol")
@@ -281,7 +284,7 @@ class PeriodicEvaluator:
                  report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
         point["selection_score"] = list(score)
         point["stochastic"] = report["stochastic"]
-        for key in ("device", "matmul_precision", "parameter_dtype", "inference_dtype"):
+        for key in ("device", "matmul_precision", "cudnn_allow_tf32", "parameter_dtype", "inference_dtype"):
             if key in report:
                 point[key] = job[key] = report[key]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):

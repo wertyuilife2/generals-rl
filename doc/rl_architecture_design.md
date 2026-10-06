@@ -158,4 +158,6 @@ PYTHONPATH=rl/src:env/src:rl/vendor/rsl_rl:rl/tests .venv/bin/python -m unittest
 
 physical64的投影显示默认每100更新评测无法在1–3h内产生足够曲线。下一空闲GPU窗口先比较physical512的两种精度，再用共同精度测1024/2048；不立即增加compile、删除上游层或减少NT。正式配置需经过真实环境、成熟池与监控/eval的完整显存门禁。按实测iteration秒数选择两种架构共同的发布/评测间隔，并记录各模型真实更新数量；projection和微基准都不是正式训练吞吐。
 
+为复现严格FP32，训练配置增加可选顶层 `cudnn_allow_tf32=false`，与 `matmul_precision="highest"` 配套；默认null保持现有cuDNN设置，训练退出或异常均恢复调用前设置。CUDA评估复用并记录实际cuDNN精度；若报告与显式配置不一致，父进程拒绝接受该评测。已有冻结v20不受这项候选配置控制改动影响。CPU控制/eval/trace/wall-cap检查37 tests、41 subtests通过，新增报告拒绝合同随后单独执行12 tests、16 subtests通过。此配置入口尚未做正式GPU训练验证，不把上述孤立GPU微基准冒充对新入口的验证。
+
 候选整体CPU检查一次执行80 tests、117 subtests全部通过（28.47秒），日志 `architecture_preparation/candidate_integration_cpu_tests.log`；其中含网络/动态几何、微批次、原PPO监控及准备中的评测/课程合同。另用随机ResNet1M、0 PPO更新完成32局实际GPU BF16采样评估，四条真实loss轨迹共528tick在CPU/native/Core按记录动作精确重放并生成四段MP4；缺少的四类win明确标注。证据 `evaluation_preparation/cuda_smoke_random_1m/cuda_gate.json` 及 `analysis/demo_manifest.json`。该门禁父进程仅微小占用，不能证明训练满池下eval峰值或100M容量。

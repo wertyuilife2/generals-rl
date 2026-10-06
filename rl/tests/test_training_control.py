@@ -159,29 +159,42 @@ class TrainingControlTests(unittest.TestCase):
 
     def test_matmul_precision_is_explicit_and_restored_after_success_or_failure(self):
         original_precision = torch.get_float32_matmul_precision()
+        original_cudnn = torch.backends.cudnn.allow_tf32
         config = small_training_config()
         config["evaluation"] = {"enabled": False}
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             with patch("torch.set_float32_matmul_precision", wraps=torch.set_float32_matmul_precision) as setter:
                 train(config, Path(directory) / "default", iterations=1)
                 setter.assert_not_called()
+            self.assertEqual(torch.backends.cudnn.allow_tf32, original_cudnn)
             config["matmul_precision"] = "high"
+            config["cudnn_allow_tf32"] = not original_cudnn
 
             def capture(*args, **kwargs):
                 self.assertEqual(torch.get_float32_matmul_precision(), "high")
+                self.assertEqual(torch.backends.cudnn.allow_tf32, not original_cudnn)
                 return prepare_self_play(*args, **kwargs)
 
             with patch("generals_rl.train.prepare_self_play", capture):
                 train(config, Path(directory) / "high", iterations=1)
             self.assertEqual(torch.get_float32_matmul_precision(), original_precision)
+            self.assertEqual(torch.backends.cudnn.allow_tf32, original_cudnn)
             with patch("generals_rl.train.GeneralsTask", side_effect=RuntimeError("construction failed")), \
                     self.assertRaisesRegex(RuntimeError, "construction failed"):
                 train(config, Path(directory) / "failed", iterations=1)
             self.assertEqual(torch.get_float32_matmul_precision(), original_precision)
+            self.assertEqual(torch.backends.cudnn.allow_tf32, original_cudnn)
             for invalid in ("low", True, {}):
                 config["matmul_precision"] = invalid
                 output = Path(directory) / "invalid"
                 with self.subTest(precision=invalid), self.assertRaises(ValueError):
+                    train(config, output, iterations=1)
+                self.assertFalse(output.exists())
+            config["matmul_precision"] = None
+            for invalid in (1, "false", {}):
+                config["cudnn_allow_tf32"] = invalid
+                output = Path(directory) / "invalid_cudnn"
+                with self.subTest(cudnn=invalid), self.assertRaises(TypeError):
                     train(config, output, iterations=1)
                 self.assertFalse(output.exists())
 

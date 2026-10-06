@@ -32,6 +32,25 @@ def small_config():
 
 
 class TrainingEvaluationTests(unittest.TestCase):
+    def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_precision_before_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+                                          {"cudnn_allow_tf32": False}, directory, None)
+            report_path = evaluator.directory / "report.json"
+            report = {"checkpoint_sha256": "snapshot", "completed_games": 8, "scheduled_games": 8,
+                      "policy": "student_local", "device": "cuda:0", "stochastic": True,
+                      "by_ai": {kind: {"games": 2} for kind in AI_KINDS}}
+            for actual in (None, True):
+                if actual is None:
+                    report.pop("cudnn_allow_tf32", None)
+                else:
+                    report["cudnn_allow_tf32"] = actual
+                report_path.write_text(json.dumps(report))
+                with self.subTest(actual=actual), self.assertRaisesRegex(RuntimeError, "cuDNN TF32"):
+                    evaluator._complete({"report": str(report_path), "checkpoint_sha256": "snapshot"})
+                self.assertIsNone(evaluator.best_completed)
+                self.assertFalse((evaluator.directory / "best.pt").exists())
+
     def test_precision_metadata_distinguishes_cuda_autocast_from_cpu_parameters(self):
         policy = torch.nn.Linear(2, 1)
         policy.amp_bfloat16 = True

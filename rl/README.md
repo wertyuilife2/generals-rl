@@ -80,6 +80,8 @@ rollout观测上每epoch计算精确 KL，按1024条分块forward，不保存完
 TensorBoard 的 `PPO/` 下记录 approximate/exact KL、clip fraction、entropy、梯度范数、实际 LR、
 每epoch的 WAIT/MOVE gate 与加权条件 MOVE KL，以及小批观测缓存大小。
 精确 KL 衡量更新开始到epoch结束的变化；近似 KL 相对 rollout 的行为策略。
+大网络严格FP32对照可显式设顶层 `matmul_precision="highest", cudnn_allow_tf32=false`，
+分别控制矩阵与卷积TF32；默认不覆盖cuDNN设置。CUDA评估复用配置，报告/trace记录实际精度。
 在 `runner.algorithm` 设置 `schedule="fixed", desired_kl=null` 关闭 LR 调节，
 设置 `ppo_monitor=false` 关闭监控；`ppo_probe_samples` 和 `ppo_probe_batch_size` 控制监控开销。
 旧 `v1`–`v18` 配置保持原实验的 fixed LR，不会因新默认值改变学习率。

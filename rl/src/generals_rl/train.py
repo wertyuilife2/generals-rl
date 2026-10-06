@@ -25,17 +25,24 @@ from .training_control import TrainingControlConfig, TrainingController, Trainin
 
 
 @contextmanager
-def _matmul_precision(precision):
+def _matmul_precision(precision, cudnn_allow_tf32=None):
     """Change this process's precision only for an explicitly configured run."""
-    if precision is None:
+    if precision is None and cudnn_allow_tf32 is None:
         yield
         return
     previous = torch.get_float32_matmul_precision()
+    previous_cudnn = torch.backends.cudnn.allow_tf32
     try:
-        torch.set_float32_matmul_precision(precision)
+        if precision is not None:
+            torch.set_float32_matmul_precision(precision)
+        if cudnn_allow_tf32 is not None:
+            torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
         yield
     finally:
-        torch.set_float32_matmul_precision(previous)
+        if cudnn_allow_tf32 is not None:
+            torch.backends.cudnn.allow_tf32 = previous_cudnn
+        if precision is not None:
+            torch.set_float32_matmul_precision(previous)
 
 
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
@@ -48,6 +55,9 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     precision = config.get("matmul_precision")
     if precision is not None and precision not in ("highest", "high", "medium"):
         raise ValueError("matmul_precision must be highest, high, medium or null")
+    cudnn_allow_tf32 = config.get("cudnn_allow_tf32")
+    if cudnn_allow_tf32 is not None and not isinstance(cudnn_allow_tf32, bool):
+        raise TypeError("cudnn_allow_tf32 must be boolean or null")
     if (iterations is None) == (steps_per_env is None):
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
@@ -99,7 +109,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     last_losses = None
     stop_reason = None
     warm_source = None
-    with _matmul_precision(precision), GeneralsTask(settings) as task:
+    with _matmul_precision(precision, cudnn_allow_tf32), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output), str(task.device))
         if resume:
