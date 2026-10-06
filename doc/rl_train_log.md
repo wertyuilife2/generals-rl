@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19 对照训练正在运行（PID2961698，冻结源码 commit898c838），保留 v17 的轻量网络与 MDP，采用当前 categorical adaptive LR、PPO 监控和 sampled eval。v20 critic-only 已完成 CPU 合同验证，尚未正式训练；记忆和成熟网络为后续实现准备，尚无正式胜率结论。** 旧 v9–v18 的阈值与版本停止规则属于此前阶段，以下历史结果及 greedy 标签原样保留。v1–v8 使用过续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零纯自对弈的公平对照。
+**当前状态：v19 对照已完成约122分钟正式训练，最终选模最佳为迭代1199；采样开发复测四AI胜率为90.5%/97%/99.5%/99.5%，该开发种子已复用，不是heldout。v20 critic-only 已通过冻结源CPU验证和全规模GPU五更新门禁，并从同一冻结源正式fresh启动（session74897、预算1–3h），尚无正式胜率结论；v21/v22 已提交、冻结并通过CPU门禁，正式训练按顺序推进。成熟网络、可变地图与课程模块仍处于后续实验准备，没有正式胜率结论。高baseline分数不代表完整阶段任务或地图泛化目标已完成。** 旧 v9–v18 的阈值与版本停止规则属于此前阶段，以下历史结果及 greedy 标签原样保留。v1–v8 使用过续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零纯自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -967,23 +967,81 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 相关unittest共33项（32通过，1项GPU测试跳过），录像/分析pytest3项通过。新测试验证默认采样确实产生非greedy动作、不消耗全局Torch/NumPy RNG、mask合法、换序/挑选局可完整复现；真实checkpoint以batch5评估32局后，挑选输赢局以不同batch录像，完整match及原生Core重放一致。长期训练继续暂停，本次仅切换评估协议，不计作新训练版本。
 
 
-## v19：新采样协议下重跑 v17 结构对照（训练中）
+## v19：新采样协议下重跑 v17 结构对照（已完成）
 
-2026-10-07 按用户新实验要求恢复迭代。先建立对照：actor/critic 结构、H4、MDP、奖励 gamma=.995/lambda=.95、N16384×T32、E4/B64、历史池8/pub50与 v17 相同；采用用户随后要求默认开启的 categorical adaptive LR（desired_kl=.02）、PPO 更新监控和可复现 sampled eval。旧 v17 是 fixedLR+greedy，不能作为新消融唯一的因果对照。v19 不引入事实记忆、不加 critic 历史输入、不扩容、不衰减奖励。
+2026-10-07 按用户的新阶段要求建立从零对照。保持 v17 的轻量网络、H4、MDP 和纯历史自对弈；采用当前默认的 categorical adaptive LR、PPO 更新监控与可复现采样评估。v19 不引入持久事实、不增加 critic 历史输入、不扩容、不衰减奖励。旧 v17 的 fixed LR＋greedy 成绩只作历史参考，不能作为这些新消融的唯一对照。
 
-配置 `rl/configs/v19.json`，正式预算1..3h，平台 patience12 次评估/minimum1h、maximum3h；每100迭代四AI各200张地图双座，每轮1600局 sampled。所有正式 run 从零初始化，不 warm-start/resume；checkpoint3、pool8、eval3+best。完整后续范围与验收记录于 `doc/rl_experiment_plan.md`。当前处于 smoke/启动准备，未测得正式结果。
+配置 `rl/configs/v19.json`，源码 commit **`898c838b6e1d2f02b21305cf2a49392b8a1ba522`**；109个运行文件从该commit冻结至 `outputs/moe_cts/iterations/v19/source/`，train/eval/env/vendor import 合同通过。每次正式run随机初始化、新Adam、新历史池，无warm-start/resume；实际随机模型snapshot0 SHA256为 `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655`。只读核对它与原v17同seed的22个初始化张量逐位一致，没有把旧权重加载到本轮。
 
-门禁：CPU smoke 3 更新/192 transitions/48 timeout，3 次 sampled eval 全部完成、failed0；全规模 GPU smoke 5 更新/2,621,440 transitions，吞吐 140777/s，Torch peak allocated 12.610 GiB、reserved 13.582 GiB，loss/参数有限，teacher0。初次 GPU smoke 在第一 tick 前因 `.venv` 未找到 nvcc 退出；显式使用 backend 支持的 GENERALS_NVCC 指向现有 conda compiler 后通过，无 env/vendor 源码变更。短 smoke 不是正式胜率/吞吐结论；第五更新末发布的训练模型没有被后续 rollout 使用，不把发布当作已执行历史模型的证据。
+- 9×9、1v1，N=16384、T=32，即每更新524288个新样本；E=4/B=64，logical minibatch8192、256次Adam/update。episode最多1024tick、H4、地图池65536、训练seed20261013、座次轮换。
+- actor10697/critic5089、总15786参数：C16两层3×3卷积，局部特征与全局均值、己将几何和WAIT/MOVE因子化。productive mask、combat与king threat特征保留；actor仅用局部H4＋最新public，critic仅用完整当前state。
+- PBRS潜能 `Phi=.05*territory+.2*cities+.001*army`，potential_gamma与PPO gamma均.995，真实终局潜能归零；输赢±1、tick−.001，lambda.95、entropy coefficient.01。初始LR1e−4、adaptive desiredKL.02；PPO监控probe8192/chunk1024，teacher0。
+- 历史池8（保留随机初始模型＋最近7个训练快照），pub50、均匀抽样、整局固定对手，不混baseline训练对手。保存间隔2000、完整checkpoint最多3；eval保留最近3＋best，人工诊断模型最多4。
+- 每100迭代采样评估四AI，每AI200张地图×双座=400局，共1600局；seed与采样seed271828，CPU单线程/batch128、上限2000tick、按每局独立NumPy uniform/CDF流采样。win rate的分母包含draw。预算最少1h、最多3h，自动平台设置patience12/min_improvement2pp。
 
-正式 v19 已从 commit `898c838b6e1d2f02b21305cf2a49392b8a1ba522` 启动，109 runtime 文件冻结于 `outputs/moe_cts/iterations/v19/source/`，train/eval/env/vendor import 路径合同通过；训练 PID2961698。TensorBoard：`outputs/moe_cts/iterations/v19/train/`。独立读取原 v17 与本轮 seed snapshot0 核对：22 个随机初始化张量逐位相同，snapshot 文件 SHA256 同为 `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655`；只读核对未把旧权重加载到本轮，初始 source.kind=random_initial_policy，manifest resume_source=null。
+前置门禁：CPU三更新/192转移/48 timeout、三次采样eval全部成功；全规模GPU五更新/2621440转移、compute140777/s，allocated12.610GiB、reserved13.582GiB，loss/参数有限。首次GPU启动因`.venv`未找到nvcc，在第一tick前退出；改用backend已有的 `GENERALS_NVCC` 指向现有conda compiler后通过，没有修改env/vendor。短门禁不计正式成绩；末尾发布的训练模型没有后续rollout，不能据此声称已执行成熟历史池。
 
-第一点 update99 完成1600局 sampled，aggressive/expansion/defensive/random=59%/77%/93.75%/96.25%，worker131.83秒、failed0。这是早期 selector 结果，不是最终成绩或独立开发集；目前仍训练。另行评测本轮实际随机初始模型以记录起点。
+正式训练已正常退出，**1847次完整更新、每环境59104tick、968359936转移**。wall **7317.15秒（121.95分钟）**，collection2330.75秒＋update4967.20秒；compute **132689 transitions/s**，完整wall **132341/s**。GPU峰值allocated **12.616GiB**、reserved **13.916GiB**。完成6448272个episode（自然终止6426775、timeout21497，约0.33%）；18次selector全部完成，failed/cancelled/queued/running均0。publication计数38，最终池ID为0、31..37；已从可选池移除的30仍被部分未结束episode使用，符合整局固定对手规则。
 
-截至训练约71分钟，update999已经完成第10次selector评测，新的best为999：aggressive/expansion/defensive/random=92%/95%/99.25%/99%，仍在训练，不能称最终结果。299→999同地图及动作随机流的aggressive配对胜负变化为新赢30/丢赢22，净+2pp；expansion净−2.25pp，因此不是四AI一起持续改善。499之后aggressive连续回升，此时继续观察，不基于旧299 best提前认定平台。
+本轮停止原因是 **`requested_stop`**：约两小时后，best1199之后六个已完成选模点未刷新best，aggressive最近1599/1699/1799为93.25/90/88%，没有持续上升。主动创建STOP，在完整PPO更新边界保存并排空eval后exit0；**不是自动patience12触发**。自动控制参考停留在1099，最终7个点未超过2pp阈值，尚不足12点；也不声称已连续一小时无提升。每环境1M tick只是调用上限，本轮未跑满。依据见 `outputs/moe_cts/iterations/v19/diagnostic/stop_decision.json`。
 
-本轮实际随机初始模型独立采样1600局，四AI分别0.25%/4.25%/1.25%/3.75%，初始模型hash与初始化合同相符，已写入TensorBoard InitialEval/，不是旧模型重赛。中途299模型的开发seed1001042结果为89.25%/98%/99.5%/100%；该seed曾用于开发，明确不是heldout。299的八局实际selector输赢录像已完成逐局结果和Core trace核验，并保留failure_review，路径 `outputs/moe_cts/iterations/v19/diagnostic/best_at_299/analysis/`；由于best后来更新，这些仅属中途诊断，最终best需重新评估、录像和分析。
+最终按预定“最低AI胜率→aggressive→overall”规则选中 **snapshot24/iteration1199**，每环境38400tick、629145600转移。训练结束后固定到 `outputs/moe_cts/iterations/v19/final_best/checkpoint.pt`，SHA256 **`6d06d1875c939f186543ada410818151cd70354bfb6fd0e8382aaa511d295a62`**；不是末尾checkpoint，也不是中途299模型。capture记录确认最终训练exit0后取该best，避免后续文件覆盖。
 
-## v20：仅让 critic 读取 actor 的 H4 信息（实现与验证）
+| 评测 | aggressive | expansion | defensive | random |
+| --- | ---: | ---: | ---: | ---: |
+| 实际随机初始模型，selector协议，400局/AI | 0.25% | 4.25% | 1.25% | 3.75% |
+| 最终best1199，selector seed271828，400局/AI | **93.75%** | **97.5%** | **99.25%** | **99.5%** |
+| 最终best1199，复用开发seed1001042，400局/AI | **90.5%** | **97%** | **99.5%** | **99.5%** |
+| 最后selector1799，同selector协议，400局/AI | 88% | 95.75% | 99.25% | 99% |
+
+开发复测分别为362/38/0、388/11/1、398/2/0、398/2/0（win/loss/draw），合计1546/53/1、overall96.625%；开发seed1001042此前用于调试比较，**不是heldout或最终独立验收**。selector也在18次评测中反复用于选模。这里四项超过80%证明该有限开发赛程表现良好，不表示任意随机地图保证、不表示世界级策略，更不结束后续已约定的完整实验阶段。best的开发aggressive比选模低3.25pp，需要继续保持跨seed评估。
+
+完整18点采样selector，均为400局/AI：
+
+| 迭代 | aggressive | expansion | defensive | random |
+| --- | ---: | ---: | ---: | ---: |
+| 99 | 59% | 77% | 93.75% | 96.25% |
+| 199 | 87.75% | 96.75% | 99.25% | 99% |
+| 299 | 90% | 97.25% | 99.75% | 99.25% |
+| 399 | 87.5% | 97% | 99.25% | 99.25% |
+| 499 | 85.75% | 95.5% | 100% | 99.75% |
+| 599 | 86.5% | 96.5% | 99.75% | 99.75% |
+| 699 | 87.75% | 94.5% | 99.5% | 99.5% |
+| 799 | 89% | 94.75% | 99% | 99.5% |
+| 899 | 90% | 95% | 99.5% | 99.75% |
+| 999 | 92% | 95% | 99.25% | 99% |
+| 1099 | 93.75% | 95% | 100% | 99.5% |
+| 1199（best） | **93.75%** | **97.5%** | **99.25%** | **99.5%** |
+| 1299 | 90% | 96% | 99.5% | 99.25% |
+| 1399 | 88.5% | 95% | 98.5% | 99.5% |
+| 1499 | 92% | 94.75% | 98.75% | 99% |
+| 1599 | 93.25% | 94.75% | 99.25% | 99% |
+| 1699 | 90% | 95.25% | 99.5% | 99.5% |
+| 1799 | 88% | 95.75% | 99.25% | 99% |
+
+![v19完整采样胜率、损失、熵、吞吐、学习率和student回报曲线](rl_train_figures/v19.png)
+
+曲线与更新诊断：
+
+- aggressive在199已到87.75%，499跌到85.75%后逐步回升，1099/1199到93.75%；best后不是单调退化，1599曾回到93.25%，随后又下降。1199→1799同地图、座次和采样随机流有38局从胜转非胜、15局转胜，净−23/400=−5.75pp；按地图聚类bootstrap的95%差值区间[−9.5,−2.25]pp。best是在该反复使用的selector上选出的，因此该差值只描述固定赛程，不是无偏的泛化或因果估计。expansion−1.75pp、defensive不变、random−0.5pp。
+- 末100更新value loss0.03175、surrogate0.004389、entropy1.109、probe上的整轮精确categorical KL均值0.01450，优化过程平均clip fraction12.44%、grad norm0.251。熵早期下降后回升到约1.1，不符合持续熵塌缩的简单解释；value MSE不等同于critic解释方差，本轮未记录explained variance。
+- 自适应LR实际持续工作：末100更新的LR均值0.009734，每次更新内LR最大值都触及上限0.01；它依据minibatch选中动作的KL估计调节，整轮8192样本的精确KL仅用于监控。1209/1216/1219在best后出现整轮KL约0.1845/0.0937/0.1118，说明偶有较大策略改动；时间相邻并不能证明这些尖峰造成后续胜率下降，历史对手变化和随机赛程也影响学习。
+- 末100更新平均collection1.289秒、update2.688秒、compute131800/s；监控约0.0845秒/更新。历史池填满后吞吐约132k/s、显存稳定，没有观测到资源持续增长导致后期退步。末100 student回报−0.487、self-play episode胜率约63.17%；这些面向变化的历史对手和含PBRS/tick的回报，不能替代baseline胜率。
+
+最终best1199的每AI一败一胜录像位于 `outputs/moe_cts/iterations/v19/final_best/analysis/videos/`，失败逐决策审查为 `analysis/failure_review.md/json`。八局共 **2266tick**，按各类时长选中位例，不是无偏失败样本。它们重现了selector中相应对局的全部match字段；录制trace的选中联合动作、digest及独立Core重放逐tick一致。**原CPU周期eval没有保存原始逐动作trace，因此不能宣称这些录像与原eval的每个动作逐tick相同**；这里验证的是完整对局统计重现及新录制轨迹的Core一致性。分析使用冻结local encoder重建真实3×3视野，区分“曾经见过”与“当前H4仍可读”，不向actor补充旁观全图信息。
+
+- aggressive败局245tick：从未见到敌将。t25领地1/11、t100兵力38/71且领地13/32，长期经济落后；41次抽将、27次补将、31次相邻tick反向搬兵，存在回援但反复抽空。t242可以12→11补3兵却外攻，t243可见敌军距将2格仍抽将；t244己将1兵、相邻敌6兵，已无可用邻军。最终WAIT发生在此前的经济和部署劣势后，不能只改最后WAIT解释败局。
+- expansion败局199tick：终局前总兵力82/73，但t184从将上抽55兵，主力沿另一端行军，t198约35兵仍距己将6格。敌军连续在距将4→3→2→1格的合法视野内推进，终局邻接敌22兵、己将8兵。学生最后选14→5，因seat0先斩将而未执行；不是WAIT或action-mask错误，也不能把总体兵多当作已经守住主城。
+- defensive败局185tick：敌将t90..184连续可见，最后也在H4，**不能归因于遗忘敌将**。t179抽22兵，t180..183邻军23兵具备合法回援选项，却在其他位置行动；三次攻将的实际兵量均不足以超过增长后的守军，t183打平后敌将0兵仍存活。t184终于选择回援，但seat0先斩将，动作未执行；甚至补22兵也不足抵挡当时29兵进攻，没有证明最后改一步就可获胜。
+- random败局1345tick：t100仍有优势，t143用33兵攻40兵中立城未占城，对手t241获城；学生两次短暂夺回后又丢城，t1000兵力27/1269。敌将最后t621可见，H4保留到624，625起输入不再含该地标；这支持记忆消融的动机，不证明遗忘造成此败局。t1343动作在共同边界合法，但源格被先手夺走而NOT_OWNER；t1344选动作又因先手斩将跳过。该长例有321个决策超出训练episode1024tick窗口，评测上限是2000，clock范围差异需单列；经济劣势在超出窗口前已经形成。
+
+四个胜局分别74/66/81/71tick，均能集结并在敌将重新可见时完成足量攻击；部分胜局也有晚扩张、抽将、折返、敌将短期视野遗失。因此不把抽将或折返次数直接变成错误标签。这些例子支持检验信息状态、全图调度与信用分配，尚不能确认新增critic输入、持久记忆或更大网络有因果收益。
+
+中途诊断另存且仍保留：299模型开发复测89.25/98/99.5/100%，八局与failure_review在 `diagnostic/best_at_299/analysis/`，**不是本轮最终模型结果**。999时aggressive92%，299→999的配对转胜30/丢胜22净+2pp、expansion净−2.25pp，当时继续观察的决定保留为过程依据；不将中期失败事实套用到1199。
+
+TensorBoard：`outputs/moe_cts/iterations/v19/train/`（InitialEval step−1与训练Eval/、PPO/等）。最终预算/资源/退出见 `train/summary.json`；固定best溯源 `final_best/capture.json`，开发报告 `final_best/development_report.json`，曲线及录像 `final_best/analysis/summary.json`；终局PPO与成对趋势 `diagnostic/terminal_training_review.json`。
+
+## v20：仅让 critic 读取 actor 的 H4 信息（正式训练中）
 
 动机：同一完整棋盘下，actor 的短期可见信息不同，其未来行为和回报可以不同。检验 history-state critic 是否改善估值与自对弈学习；本轮不增加持久记忆、不扩大 actor、不改变资源 PBRS、gamma、lambda、rollout 或历史池。
 
@@ -991,9 +1049,9 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 
 配置 `rl/configs/v20.json` 相对 v19 只增加 critic 信息输入及其类/group 声明，run_id=v20；knowledge_channels=0。其余 N16384×T32、E4/B64（524288 新样本、8192/logical minibatch、256 Adam/update）、gamma=.995/lambda=.95、H4、episode1024、pool8/pub50、sampled eval 每100更新1600局、adaptive KL=.02、最少1h/最多3h均保持。该适配器也提供未开启的 memory 扩展，为下一步 2×2 使用，当前训练不会创建或存储 memory。
 
-验证：18 个 CPU tests 通过，包括禁用信息扩展时原模型/输出/梯度/RNG逐位一致、critic-only actor 初始化/动作概率/RNG逐位一致、新 critic 初始 value 在浮点舍入误差内一致、history/public 新权重梯度非零、actor 隐私，以及真实 self-play PPO 三次更新和 timeout bootstrap；categorical mask/WAIT-MOVE factorization 与轻量网络回归通过。未新增 vendor 补丁。正式训练及 GPU 门禁待 v19 完成后执行，不能把上述 CPU 通过当作训练提升。
+验证：18 个 CPU tests 通过，包括禁用信息扩展时原模型/输出/梯度/RNG逐位一致、critic-only actor 初始化/动作概率/RNG逐位一致、新 critic 初始 value 在浮点舍入误差内一致、history/public 新权重梯度非零、actor 隐私，以及真实 self-play PPO 三次更新和 timeout bootstrap；categorical mask/WAIT-MOVE factorization 与轻量网络回归通过。未新增 vendor 补丁。上述 CPU 合同不作为训练提升证据；正式运行使用下述冻结源。
 
-补充实际 smoke：v20 commit `61fea9053e9925b13dea590bb7ebc4a16a8e8c73` 的110个运行文件直接从Git blob冻结，排除所有尚未提交的记忆/架构/评测工作区改动。该冻结源跑N16/T8/episode8的五次fresh CPU更新，共640转移、80 timeout，teacher0；两次采样eval均成功，实际episode对手已执行训练后历史模型。独立CPU重新构造与自己的初始snapshot0全部张量逐位一致，actor10697/critic12209；actor初始张量和全局RNG与Light对照逐位一致，新增critic输入权重为零。证据 `outputs/moe_cts/iterations/v20/cpu_contract.json`；正式GPU门禁仍待对照结束。
+补充实际 smoke：v20 commit `61fea9053e9925b13dea590bb7ebc4a16a8e8c73` 的110个运行文件直接从Git blob冻结，排除所有尚未提交的记忆/架构/评测工作区改动。该冻结源跑N16/T8/episode8的五次fresh CPU更新，共640转移、80 timeout，teacher0；两次采样eval均成功，实际episode对手已执行训练后历史模型。独立CPU重新构造与自己的初始snapshot0全部张量逐位一致，actor10697/critic12209；actor初始张量和全局RNG与Light对照逐位一致，新增critic输入权重为零。证据 `outputs/moe_cts/iterations/v20/cpu_contract.json`。v19正常退出后，同一冻结源通过全规模GPU门禁：N16384/T32、E4/B64，五次完整更新、2621440转移，collection5.632秒/update16.150秒，compute120348/s，wall31.351秒（含启动，wall83616/s）；allocated12.951GiB、reserved13.703GiB，loss有限、teacher0、exit0。记录 `outputs/moe_cts/iterations/v20/smoke_gpu/summary.json`。这五次rollout仍仅执行初始随机对手，末尾发布的训练快照尚未被下一rollout使用，不能外推成熟pool吞吐或胜率。正式1–3h训练随后已从同一冻结源fresh启动，session74897、PID3066147，输出与TensorBoard为 `outputs/moe_cts/iterations/v20/train/`；CLI无resume/warm-start，不从GPU门禁权重续训。当前尚无正式胜率结果。实际seed snapshot0与独立fresh CPU构造全部张量逐位一致，actor初始化与Light对照一致、新critic输入列为零、独立Adam空状态；110个运行文件hash与所有import均来自冻结源。formal manifest的resume_source=null、初始source=random_initial_policy，证据 `v20/formal_initialization_contract.json`。
 
 ## v21：仅给 actor 增加持久事实记忆（实现与 CPU 准备）
 
@@ -1015,4 +1073,4 @@ v21已独立提交为 `d55a835908556f28e3f7ab0fc1730598c30849e0`，111个运行�
 
 补齐 v19/v20/v21/v22 的 memory × critic-information 2×2。相对 v21，仅开启 `critic_actor_information`，critic group 引用已存的 policy/knowledge；actor仍是 H4＋11个非堆叠知识通道，critic为 S＋H4＋K。无需复制一份历史或知识 rollout，也无需增加 vendor 补丁。actor12281、critic13793、合计26074参数，新增critic输入权重零初始化；正式配置其余训练、历史池、采样评估与资源保留设置均与v19一致。
 
-配置 `rl/configs/v22.json`；已有工作区候选五次CPU更新证明新critic通道有梯度并执行了训练后历史对手，但不当作冻结源或正式成绩。提交后从Git blob重新冻结并执行fresh CPU合同；正式训练顺序仍是v19→v20→v21→v22，GPU门禁及1–3h训练待前序完成。此处不预先声称组合方案胜率更高。
+配置 `rl/configs/v22.json`，已提交为 **`af9283171681f4d89a0d6754e88251179082cffa`**，111个运行文件从该commit的Git blob冻结，排除尚未提交的架构、GPU评测与课程改动。冻结源完成fresh CPU门禁：N8/T4/episode8、E1/B2、五更新共160转移；20个联合tick核验双座privacy/reset及learner与opponent独立知识，两次采样eval各8局、全部成功。自己的初始化snapshot0与fresh learner逐位一致、新Adam空状态、新critic历史/知识列初始为零且更新后学到非零权重；实际执行历史模型1/2/3。knowledge storage实际[4,8,891]，全部111个文件hash与import路径通过，证据 `outputs/moe_cts/iterations/v22/cpu_contract.json`。既有工作区候选smoke只属准备，冻结源验证也不计正式训练或胜率成绩。正式顺序仍是v19→v20→v21→v22；全规模GPU门禁及1–3h训练未开始，待前序完成。此处不预先声称组合方案胜率更高。

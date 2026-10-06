@@ -5,7 +5,7 @@
 ## 实验顺序与完整范围
 
 1. v19：重跑 v17 的 MDP、轻量网络和历史池，采用已启用的 categorical adaptive LR 和可复现采样评估，建立当前协议下的从零对照。旧 v17 的 fixed LR / greedy 成绩仅作历史背景。
-2. v20：仅给 critic 增加 actor H4 信息，actor 与 MDP 保持对照；v21：仅给 actor 增加持久事实记忆；v22：记忆与 history-state critic 组合，补齐 2×2 消融。版本顺序可根据实际结果调整，但必须保留四个条件的结果。
+2. v20：仅给 critic 增加 actor H4 信息，actor 与 MDP 保持对照；v21：仅给 actor 增加持久事实记忆；v22：记忆与 history-state critic 组合，补齐 2×2 消融。正式训练顺序为v19→v20→v21→v22，保留四个条件的结果。
 3. 解耦观测布局、地图 geometry 和动作 head；选择有成熟开源代码依据的 ResNet 与 ViT，记录上游版本、许可和适配。两种架构都支持可变地图大小，提供约 1M / 10M / 100M actor 档位。公平比较固定 critic、MDP、PPO、自对弈和评估协议；比较同样本量的学习曲线及同墙钟预算的强度、吞吐、显存。100M 必要时减 N 增 T，保持 N×T=524288；调整实际 microbatch/梯度累积以适配单卡。
 4. 在信息与容量结果上，先单独比较固定 gamma=.995 / .999，再测试 .995→.999 课程；分别检验 rollout 与 lambda，保持分段 PPO 和整局固定历史对手。所有 potential_gamma 与实际 return gamma 对齐。
 5. 最后检验 tick penalty 在 TensorBoard 训练迭代 0..1000 线性衰减 1→0。领地/城市/兵力 potential-based shaping 与胜负奖励不衰减。课程完成后留足目标阶段预算。
@@ -21,4 +21,8 @@
 
 ## 当前进度
 
-v19 对照正式训练已启动（PID2961698，冻结源 commit898c838），至少1h、最多3h。第一点 update99 sampled selector 已完成。v20 critic-only 配置和适配器已通过18项CPU合同验证，待对照结束后正式训练。持久记忆、完整上游ResNetV2/ViT及可变几何、microbatch/精度合同已实现并分别验证；GPU BF16、完整池显存和大模型训练中评测仍需门禁，尚未进行其正式训练。完整目标尚未完成。
+v19对照已完成1847更新、968359936转移、121.95分钟正式训练，并正常排空18次采样selector评测；停止为人工曲线平台判断后的`requested_stop`，不是自动patience12触发。最终best1199采样selector为93.75/97.5/99.25/99.5%，复用开发seed1001042为90.5/97/99.5/99.5%（400局/AI）。该开发集此前使用过，未作为heldout；最终八局录像、独立Core trace核验、失败分析、PPO/资源趋势及全部18点曲线已记录在训练日志。高baseline成绩不结束完整任务，也不构成可变地图泛化或世界级强度的证明。
+
+v20 critic-only冻结源commit61fea90已通过CPU合同及全规模GPU五更新门禁：16384×32、E4/B64、2621440转移，compute120348/s，allocated12.951GiB，参数与loss有限。短门禁只执行了初始对手，不是成熟pool的长期效率或胜率结果；正式fresh训练已启动（session74897，冻结源61fea90、输出v20/train、预算1–3h），尚无正式胜率。v21持久事实条件（d55a835）和v22组合条件（af92831）均已提交、从Git blob冻结并通过fresh CPU门禁，实际执行非初始历史模型；它们的全规模GPU门禁和正式训练仍按前序完成后顺序推进。
+
+成熟上游ResNetV2/ViT、可变地图布局/geometry/action head、microbatch与混合精度、训练中GPU评测/真实trace、可选gamma/tick课程模块正在做后续阶段准备和运行门禁。准备或微基准通过不计正式训练版本；尚无容量、gamma、tick衰减、H8的正式胜率结论。当前继续v20正式训练，随后完成v21→v22消融，再逐项执行两种成熟网络的1M/10M/100M、gamma/rollout/lambda、tick0..1000课程，最后H4/H8；完整目标保持未完成。
