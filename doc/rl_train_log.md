@@ -1024,7 +1024,7 @@ TensorBoard `outputs/rl_diagnostics/v18_regression/tensorboard/` 记录 `Diagnos
 曲线与更新诊断：
 
 - aggressive在199已到87.75%，499跌到85.75%后逐步回升，1099/1199到93.75%；best后不是单调退化，1599曾回到93.25%，随后又下降。1199→1799同地图、座次和采样随机流有38局从胜转非胜、15局转胜，净−23/400=−5.75pp；按地图聚类bootstrap的95%差值区间[−9.5,−2.25]pp。best是在该反复使用的selector上选出的，因此该差值只描述固定赛程，不是无偏的泛化或因果估计。expansion−1.75pp、defensive不变、random−0.5pp。
-- 末100更新value loss0.03175、surrogate0.004389、entropy1.109、probe上的整轮精确categorical KL均值0.01450，优化过程平均clip fraction12.44%、grad norm0.251。熵早期下降后回升到约1.1，不符合持续熵塌缩的简单解释；value MSE不等同于critic解释方差，本轮未记录explained variance。
+- 末100更新value loss0.03175、surrogate0.004389、entropy1.109、probe上的整轮精确categorical KL均值0.01450，优化过程平均clip fraction12.44%、grad norm0.251。熵早期下降后回升到约1.1，不符合持续熵塌缩的简单解释；`Loss/value` 是当前PPO的clipped value objective（取原始与裁剪平方误差的较大值），不是独立的原始预测MSE或critic解释方差，本轮未记录explained variance。
 - 自适应LR实际持续工作：末100更新的LR均值0.009734，每次更新内LR最大值都触及上限0.01；它依据minibatch选中动作的KL估计调节，整轮8192样本的精确KL仅用于监控。1209/1216/1219在best后出现整轮KL约0.1845/0.0937/0.1118，说明偶有较大策略改动；时间相邻并不能证明这些尖峰造成后续胜率下降，历史对手变化和随机赛程也影响学习。
 - 末100更新平均collection1.289秒、update2.688秒、compute131800/s；监控约0.0845秒/更新。历史池填满后吞吐约132k/s、显存稳定，没有观测到资源持续增长导致后期退步。末100 student回报−0.487、self-play episode胜率约63.17%；这些面向变化的历史对手和含PBRS/tick的回报，不能替代baseline胜率。
 
@@ -1055,6 +1055,25 @@ TensorBoard：`outputs/moe_cts/iterations/v19/train/`（InitialEval step−1与�
 表中最后一列按实际决策数加权；信息分类描述输入中地标的可用性，不证明actor是否使用它，也不把缺失直接当作失败原因。28个“曾见、最后H4不可读”的败局，其末次决策距最后见将均至少8tick；aggressive的23局中22局至少32tick、1局16–31tick。因此，在这些已生成轨迹的最后决策上，H8比H4新增敌将地标覆盖为0/28。这支持将持久事实与短期历史分开实验，不能推导H8对更早决策或胜率没有帮助；换输入后整条轨迹也可能改变。
 
 证据：`v19/final_best/development_information.json`、`development_information_recheck_contract.json`，及 `information_audit/v19_development_summary.json`（均位于 `outputs/moe_cts/iterations/` 对应目录）。这是一项补充诊断，不增加正式训练版本，也未改变v19选模或停止决定。
+
+### v19 与 v17 的学习模型交叉对战
+
+为补充固定 baseline 之外的强度测量，新执行 v17 best1699 与 v19 best1199 的采样交叉对战：9×9、800 张地图交换座次共1600局，地图seed314159265、sampling seed161803399、batch128、CPU单线程、max2000tick；双方保持各自H4、clock1024、合法动作mask及整场固定权重。v17模型来自原greedy selector，v19来自采样selector，本次双方动作均按各自Categorical概率采样。没有训练更新或GPU占用。
+
+| 模型 | 胜 / 负 / 平 | 对战胜率 | 800张配对地图 bootstrap 95%区间 |
+| --- | ---: | ---: | ---: |
+| v17 / 1699 | 675 / 925 / 0 | 42.19% | 39.88%–44.63% |
+| v19 / 1199 | 925 / 675 / 0 | **57.81%** | **55.38%–60.13%** |
+
+![v19与v17最佳学习模型的采样交叉对战](rl_train_figures/v19_crossplay_v17.png)
+
+全部1600局为真实终局、无timeout；v19位于绝对seat0/1时分别514/800（64.25%）及411/800（51.38%），保留两座结果而非只测先手。800张地图中，v19双胜261张、两方各胜一局403张、v17双胜136张。区间以整张地图为重采样单位，双座始终一起保留，20000次bootstrap；不是将1600座次视为独立样本。对战255659tick，battle58.70秒、含加载及兼容检查61.90秒，实际session75292 exit0。
+
+此次使用当前兼容解释器，完整核验v17/v19的108/109个冻结源文件与原Git commit及manifest；双方配置内容与原始提交一致。分别在隔离冻结源码中执行三帧CPU输入/前向probe，与当前解释器的输入逐字节一致、动作概率差为0。这些有限probe不等于所有状态的数值等价证明。仅记录预定首张地图的两局真实动作，不按输赢挑选；两局已通过Core逐tick digest、编码动作SHA、终局时间及赢家的精确重放核验。原生联合动作执行后拒绝数为331/577，双方采样动作均通过各自决策前mask，不能将该计数直接解释为单方mask非法动作率。
+
+两段说明例均体现兵力调度与守将问题：第0局v19在38tick获胜，终局前总兵19/19，v17继续外扩，v19用10兵攻下4兵守将；第1局v17在110tick获胜，最后集中兵力连续推进，v19总兵27略多于v17的26，但将上补防后只有4兵，被10兵攻下。末期邻域敌军均已处于合法可见区域，不能把这两例归因为记忆缺失。两例来自同一张预定地图，均由seat1获胜，不据它们推断总体席位效果或某个超参数的因果作用。详细记录 `learned_crossplay/v17_1699_vs_v19_final_1600_trace_review.json`。
+
+本次选定模型对战中v19占优，但两版训练预算、优化设置及选模方式不同，且各只有一个训练seed；不把差异归因为adaptive LR或某个单独设计，也不代表对任意学习型对手均占优。本补测不增加正式训练版本、不改变v19最终选模。原始report、真实会话记录、root赛程/配对统计审查位于 `outputs/moe_cts/iterations/learned_crossplay/v17_1699_vs_v19_final_1600{,_execution,_root_review}.json`；checkpoint SHA分别为 `b0905756…` 与 `6d06d187…`，完整值随报告保存。
 
 ## v20：仅让 critic 读取 actor 的 H4 信息（正式训练中）
 
