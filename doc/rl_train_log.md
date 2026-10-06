@@ -2,7 +2,7 @@
 
 当前目标：随机种子的 9×9、1v1 地图，部署 student 对 aggressive 胜率超过 90%、expansion 超过 95%、defensive 与 random 达到 100%；每个方案从零开始，训练只使用历史模型自对弈。达到目标或连续 20 个训练版本无有效提升后停止。在 `codex_dev` 分支依次管理训练方案；main 保留 baseline commit `0189d55`。
 
-**当前状态：v16 已完成，最终799新开发胜率80.5% / 92.5% / 99% / 97%，未超过v11，连续无提升为5；v17已从随机参数启动，回到v11 E4仅尝试WAIT/MOVE分层参数化。训练仍只使用历史神经网络自对弈。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
+**当前状态：v17 已正常结束，final1699新开发胜率88% / 98% / 100% / 99%，按既定规则超过v11，连续无提升5→0、新参考v17；最终7段真实demo及失败分析已完成，Defensive无败局所以仅录胜局。训练仍只使用历史神经网络自对弈，完整目标尚未达到。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -811,27 +811,15 @@ GPU smoke采用E4、N256/T4/B4/episode4/pool2/pub1，**3更新/3,072 transitions
 
 ## v17：WAIT/MOVE分层参数化
 
-动机：v16 E2更快但最佳新开发四率均低于v11，撤回E2、恢复v11 E4参考。flat categorical把WAIT一个类别与许多MOVE类别平级，WAIT可能是最大单类别，但其概率低于MOVE集合。v16中期399的77个选定决策核对有这种现象；其证据仅限该中期模型的窗口，不能作为最终799的概率结论，也不能证明它是失败原因。
+**动机与唯一方案变化。** v16 E2虽快但未超过v11，撤回E2、恢复E4参考。flat categorical中WAIT可能是最大单类别，却小于全部MOVE概率之和；据此前中期行为提出从零训练的 `wait_move_factorization=True`。保持原actor22张量/15,786参数：合法两组时 `P(WAIT)=sigmoid(w)`、`P(MOVE)=sigmoid(-w)`，组内按合法MOVE softmax；稳定joint logits仍交给原Categorical算sampling/logprob/entropy，原版PPO.update不改。共享greedy推理先选概率更大的组，再取最大MOVE；相等选WAIT。没有改变旧模型后处理，没有增加baseline训练或vendor patch。flag默认False保留原路径逐bit行为；新零logit WAIT先验约1/2，可能拖慢早期探索。
 
-唯一新方案为 `wait_move_factorization=True`（配置相对v11仅此flag与run_id）：沿用原actor的一个WAIT logit w及648个MOVE logits m。若两组均合法，P(WAIT)=sigmoid(w)，P(MOVE)=sigmoid(−w)，MOVE内按合法m的softmax选择；实现采用稳定的logsigmoid/log_softmax，仍用原Categorical进行joint sampling、logprob和entropy，原版PPO.update不变。greedy经同一policy.act_inference先比较两组概率（相等选WAIT），再取最大MOVE；learner训练、历史对手采样、greedy历史推理和baseline评测共享该参数化。不是改变旧模型的后处理解码规则，正式模型重新随机训练。
+**配置与验证。** 相对v11仅该flag和run_id变化，其他沿用：9×9/P2、N16,384/T32（524,288新样本/update）、E4/B64（8,192/minibatch、256Adam/update），γ.995/λ.95/LR1e−4/entropy.01/episode1024，local985/H4/LightC16/己将坐标/独立critic，原649动作与productive mask、reward `γΦ(next)−Φ(prev)±1终局−.001/tick`，Φ=.05land+.2city+.001army、terminalΦ归零。teacher0/student-only原PPO，历史NN均匀stochastic pool8（初始+最近7）、pub50、双座轮换，mapbank65,536。选模每100update，各AI200地图×双座=1,600局，seed271828/max2000；开发seed1001042/800局仅作复用诊断。最低1h/最多3h/每环境1M上限，learner3/history8/eval近期3+best/人工固定4限制。
 
-原obs/reward/649动作编号与合法规则、22个NN张量/15,786参数、critic、storage和vendor均不改；flag默认False且strictbool，原flat路径逐bit保持，历史池已有policy_config签名会拒绝新旧flag混用。所有MOVE不可用时安全强制WAIT/零梯度，WAIT不可用时MOVE组概率1。新参数化把零logit时WAIT先验从1/(合法MOVE数+1)改为1/2，可能使初始对手更消极、探索或早期学习更慢；收益仍待实测。没有加入任何baseline训练。
+6项CPU目标检查通过：分布/梯度/熵、掩码/forcedWAIT、极端logit、旧路径逐bit、真实新Light PPO两更新/Adam8、历史池和eval重建flag/签名隔离。正常规模GPU门禁5updates/2,621,440样本，compute147,281/s、冷wall27.218s/full96,314/s、allocated12.56GiB/reserved13.58GiB、exit0；门禁权重未用于正式初始化。正式source commit `649f0451d622c1ca13cfbfb4fdf9e4b72760c130`，108文件冻结；新policy/newAdam/newpool，无resume/warm，自己的random0与独立fresh构造逐bit相同。门禁/实际启动/终局证据分别见 `outputs/rl_iteration_audit/pure_scratch_phase/v17_{wait_move_gate_audit,formal_launch_check,terminal_training_audit}.{json,md}`，配置见 `rl/configs/v17.json`。原PPO SHA未变，env49文件与main一致。
 
-最小生产patch仅SpatialPPO构造/action_probabilities/act_inference，新flag不增加额外stochastic argmax或host同步；没有新框架模块。6项CPU目标检查实际exit0，包括4项focused tests及2项已有layout/privacy/value regression：手算联合分布/logprob/entropy/梯度、掩码/forcedWAIT/禁WAIT、float32±1000/empty CNN、default初始权重与flat probs/entropy/sample/logprob逐bit相同；实际新Light StudentPPO两次更新32样本/Adamstep8，pool factory与签名flagTrue、flagFalse拒绝reload，CPU eval从该测试新checkpoint重建flagTrue。
+**实际预算与效率。** 2026-10-06正常退出，2,270完整更新、72,640 tick/环境、1,190,133,760样本、8,252,390完成episode；requested_stop，22eval全部completed/exit0，无queued/running/failed。GPUcompute **137,892 transitions/s**，含全部wall **137,583/s**，wall8,650.304s（144.17min），采样2,869.583s/更新5,761.333s。峰值allocated12.568GiB/reserved13.916GiB，RSS2,312,296KiB（2258.10MiB）、swaps0。最终checkpoint实际Adam581,120=2270×4×64，88模型/optimizer张量全有限，secondoptimizer=None，所有存档上限满足；历史被淘汰ID38/39仍在未结束episode引用是预定行为。
 
-正常规模GPU门禁5updates/2,621,440新转移，采样5.067秒/更新12.732秒，compute147,281/s；冷启动wall27.218秒/full96,314/s，allocated12.56GiB/reserved13.58GiB、RSS1990.39MiB、swaps0、exit0。只执行初始random0；结束发布的1尚未对战，不能代表成熟池速度或正式胜率。独立CPU完整CTS/Task在任何torch.load前按seed20261013构造，flagTrue、raw22与实际门禁初始逐bit相同、Adam空、iteration/storage0；最终88模型/Adam张量有限、实际step1280=5×4×64，第二optimizer=None，原版PPO SHA未变。`outputs/rl_iteration_audit/pure_scratch_phase/v17_wait_move_gate_audit.json` 为PASS，SHA `1be9116d0f7bf719c47428816b9259cbcb5b70f4206eab75a014b4ec882dd667`。门禁权重仅用于核对，不用于正式初始化。
-
-正式代码commit `649f0451d622c1ca13cfbfb4fdf9e4b72760c130`，108文件冻结于 `outputs/moe_cts/iterations/v17/source/`，manifest SHA `576f0695981ee4a1e9bb901114a01596bd560eed651966878a4834496e2770b5`；相对v16 runtime只有spatial_ppo.py变化。配置E4/B64/N16384/T32，γ.995/episode1024/local985/H4/LightC16/己将几何、reward/actions、mapbank65536均沿用v11，100%历史NN uniform stochastic pool8/pub50/rotate seats；CPU selector每100update/各AI400局，人工dev模型4，learner3/history8/eval近期3+best上限不变，预算最低1h/最多3h，每环境1M上限。
-
-2026-10-06T05:18:35.120000+00:00 新formal PID2568665/session10764已启动，CLI无resume/warm标志，新policy/newAdam/newpool。受控启动命令明确PYTHONPATH为本轮冻结source；没有读取进程环境。ownrandom0 SHA `79daf4b0b7859f2e356b7db2053eccd6391b393186d6a13d548af354fad18655` 已固定人工第1/4份，本轮自己的初始dev800已新测量完成：四AI胜率均0%，W/L/D0/200/0、0/20/180、0/180/20、0/14/186，总386draw。实际WAIT接近100%，不能复用旧初始结果。TensorBoard：`outputs/moe_cts/iterations/v17/train/`；正式启动核对 `v17_formal_launch_check.json` 为PASS_LIVE、无不一致，实际PID出生时间/argv/108文件/初始新pool0/config E4均吻合，own0 raw22与独立fresh门禁逐bit一致。正式胜率、曲线和最终结果待实际训练。
-
-v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_final_completion_audit.json` 为PASS_VERSION_DELIVERY_GOAL_NOT_MET，SHA `4bbe3654de2cff04a10c916b5ea35f88a38eafd2d7d3419ca3c11f1009fb8faa`，14点/96诊断TB值/49文件均吻合。它由同一demo作者追加核对并复用root实际视频证明，不冒充独立demo作者审计；整体目标尚未达到，计数5、参考v11，继续v17。
-
-本轮初始report SHA `793b6fee5092bd50c92e9ba536f7d33943ad8dc8d8be783cfca40d96b664c235`，1,004,555ticks/含setup579.894秒/1,733 CPU ticks/s/RSS836.07MiB/exit0；TB−1的24项DiagnosticReuse各写一次。首次selector99真实1,600局为32.5/57.25/75/68%，draw0/42/3/33计入分母；新99开发800已完成，结果见下。初始WAIT先验变化产生了更消极的实际初始行为，初次训练点弱于v11，但未按早期点结算版本、计数仍5。
-
-99新开发800为29.5/58/72.5/64.5%，W/L/D59/141/0、116/55/29、145/47/8、129/51/20；report SHA `5bc7e674b64b877af7caa547ea159f6570577e287c5f2e41ef212b52fce84a1e`，301,127ticks/含setup201.543秒/1,495 CPU ticks/s/RSS839.45MiB/exit0。与v11/99的800身份逐一相同，非胜→胜/胜→非胜20/55、17/50、3/50、3/63（−17.5/−16.5/−23.5/−30pp）；当前和v11均100updates/E4/52,428,800新样本，但实际轨迹和耗时不同。WAIT仅2.00/2.53/0.83/0.62%，反向44.44/72.69/62.22/73.33%，低WAIT与大量反向并存；不是NN概率证明或最后模型结论。TB−1/99共48个tag/step各一次。
-
-目前完整selector评测如下，1699为当前最佳，训练仍在运行。晚期1099/1399/1499/1699刷新aggressive峰值到88.25/89.75/90.25/91%；1699 Random仍有一败，未同时达成完整目标。随后1799/1899回落至88.25/88%，峰值后只有两个完整观察点，继续观察；尚未请求STOP或结算版本。
+**曲线与停止。** 早期明显慢：初始greedy开发四率均0%，99开发只有29.5/58/72.5/64.5%；299开始接近参考，后半程多次新峰，1099/1399/1499/1699的aggressive为88.25/89.75/90.25/91%。1699后五次完整评估1799–2199为88.25/88/89.25/90/90.75%，有回升但均未超过该选模峰；在144分钟正常STOP，未宣称晚期单调下降或统计显著无上升。熵先从约4下降到.9、后回到约1再降至.8；value loss先升后波动回落，不能单凭两者认定策略变好或退化。常规吞吐约13.7万/s，未出现NaN或资源异常。
 
 | 更新 | aggressive | expansion | defensive | random |
 | ---: | ---: | ---: | ---: | ---: |
@@ -854,27 +842,26 @@ v16最终交付追加核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_f
 | 1699 | 91% | 97% | 100% | 99.75% |
 | 1799 | 88.25% | 97% | 99.5% | 98.5% |
 | 1899 | 88% | 97.75% | 99.75% | 99% |
+| 1999 | 89.25% | 97% | 98.75% | 99% |
+| 2099 | 90% | 99.25% | 99.25% | 99.25% |
+| 2199 | 90.75% | 98% | 99.5% | 100% |
 
-![v17中期：实际选模点及新初始/99/499开发诊断，训练仍在运行](rl_train_figures/v17.png)
+![v17最终完整22点选模曲线、初始/99/499/1699新开发诊断与实际训练指标](rl_train_figures/v17.png)
 
-早期只读配对 `outputs/rl_iteration_audit/pure_scratch_phase/v17_early_selector_comparison.json`：v17/v11六份报告各1600局，前三点有序game/AI/map/controller/seat全部相同。v17总体反向率66.26→9.89→10.50%，早期大幅缓解，但199→299并非持续下降；WAIT0.96→2.59→2.46%，draw78→4→0。299相对v11四率差+2/+1.25/−0.75/+0.25pp，不据此结算最终版本。实际200–299各100次更新，v17采样1.194829/更新2.539565秒、mean FPS140,408，v11为1.151601/2.447642秒、145,680/s，约慢3.62%；两者E4/N/T一致，但行为/RNG/历史对手/CPU评测重叠不同，不宣称因果。
+**最终固定模型及比较。** 全部worker关闭后固定 **1699/Snapshot34**，raw SHA `b0905756fdeaacd2511b4c69a7ea515ceacd057da633ce4290de9a179699e4a2`，人工最后4/4名额。选模四率91/97/100/99.75%，Exp2draw已计分母；开发800新测结果如下（不是未见seed验收）：
 
-完成499选模后固定当时最佳499/Snapshot10，SHA `543546b3cb8f6f3bf4c839aa3d72de6545aa85ac73f80e05797dbdac5c73ae59`，人工第3/4份，finalFalse。新dev800为 **85/95.5/99/99%**，W/L/D170/30/0、191/9/0、198/2/0、198/2/0，report SHA `fbc1030292306557c08faf6f410fb41dc9531554b5bb02f8dd216e31b27fbfc8`；65,897ticks/含setup36.315秒/1,818 CPU ticks/s/RSS840.42MiB/exit0。与v11 canonical499的800身份逐一相同，非胜→胜/胜→非胜16/19、6/8、1/2、2/2，差−1.5/−1/−0.5/0pp；两者均500updates/E4/262,144,000样本，但参数化/greedy/实际轨迹和耗时不同。TB−1/99/499共72项各写一次；这不是最终模型结算，计数仍5。
+| 模型/开发赛程 | aggressive | expansion | defensive | random |
+| --- | ---: | ---: | ---: | ---: |
+| v11 canonical499 | 86.5% | 96.5% | 99.5% | 99% |
+| v17 final1699 | **88%** | **98%** | **100%** | **99%** |
+| v17 W/L/D | 176/24/0 | 196/4/0 | 200/0/0 | 198/2/0 |
 
-本模型八段录像全部来自同一新dev800，A败66/P0/232tick胜11/P1/56；E败298/P0/221胜237/P1/55；D败547/P1/511胜428/P0/61；R败662/P0/96胜759/P1/54。1,286决策/1,294states，5,010视频帧/5,749,177bytes，原生Core核对通过；root核对每个case完整原报告match/action metrics/seat/ticks、trace初始header+tick、MP4 SHA/大小/H.264/yuv420p/24fps/1140×816/帧数/时长。固定为中期499/Snapshot10，不能与后来的599最佳混称。分析 `outputs/moe_cts/iterations/v17/diagnostic/middle_at_499/analysis/analysis.md`，SHA `49227b5141dfde0206651f5e795eca1a043eba1658e92536264f0be36ce5e33b`；49项输入/输出清单SHA `dd6eed9ad176dfb1dccb64e6a05cd8057e554c88318fb1371e92fa153607dfe2`，root逐项核对大小/hash。
+Report SHA `ee821f103c02bbc42751e4953fe11143b083ee4c8bfb0443c92900c868653a1b`；64,842ticks/含setup38.789s/1,674.87 CPU ticks/s/RSS841.20MiB/exit0。与v11的800有序map/controller/seat逐项相同，非胜→胜/胜→非胜15/12、7/4、1/0、1/1，四率差+1.5/+1.5/+.5/0pp。按既定归一化min/mean规则，score .9777778/.9998392超过参考.9611111/.9904751，计数 **5→0**，新参考v17。实际selected1699有1700更新/891,289,600样本，v11/499有500更新/262,144,000（3.4倍差）；不能把全部收益归因参数化或作等预算因果比较。中期499新开发85/95.5/99/99%，早期/晚期配对统计见 `v17_{early_selector_comparison,late_selector_comparison,remaining_losses_at1499}.{json,md}`。四份新诊断−1/99/499/1699共96个TB tag-step只写一次，TensorBoard `outputs/moe_cts/iterations/v17/train/`。
 
-败局仍有守将和移动问题。Agg终局前50兵27地落后80兵38地，231敌邻65格18兵可见仍远处36→37移1，敌17兵夺将军；Exp无回将，220邻20格敌5兵可见仍36→27移1，敌4兵攻下2守兵。Def547全局仅16 WAIT、111次紧邻反向、89次回将，150/200tick仍仅6地；507–509将军39→48→39→48往返，509增长到43派42留1，510邻38敌43派42夺将，P1回军计划因P0先夺将而跳过。Random95将军78由2增长到3仍HALF派1留2，邻79敌4派3攻下，不能误写派兵后守1（敌夺将后才剩1）。四例原生invalid/zero-MOVE0。敌将见3/34/241/8tick，世界可见性不是实际actor历史/网络概率证明，也不由几局作因果归因。
+**失败证据及设计限制。** 中期499八段真实录像仍在 `diagnostic/middle_at_499/analysis/`，都标非最终。唯一Random selector败局1573/map186/P1/37tick已另行复现：[录像](../outputs/rl_iteration_audit/v17_1699_random_failure/videos/random_loss.mp4)、[分析](../outputs/rl_iteration_audit/v17_1699_random_failure/failure.md)。连续35WAIT，移动前双方兵18对18、地1对14；decision35己将18生长到19，ALL派18到19留1，P0同期10→9派3；36计划19→18回援，但P0先派2夺将，本方原生skip。Core核对、完整原match、38state/trace、实际MP4/H264/yuv420p/24fps/255frames/10.625s/151,572bytes以及13文件大小/hash均通过；未新增模型或评估赛程，该重放不冒充新800。
 
-对这四个败局仅取末3个decision帧，共12帧，复用记录构造纯GameBatch，调用冻结原official local encoder一次（12×985），无NN/H4/Core/新赛程/weights/GPU；12/12风险公式吻合。Def509将军42+growth1、潜在友援0、risk17，margin26；实际ALL搬42留1。Def510将军1、潜在友援42、risk42，margin仍+1，但seat0先捕将，本方支援被跳过。Rand95将军2+growth1、友援0、risk3、margin0，HALF外调后实际仅2守兵。Agg231/Exp220的margin为−10/−2、risk17/4、距离1。当前margin是包含最大潜在友援的pre-action战力比较，不保证派兵后或实际座次顺序安全；这不是网络因果或代码bug证明。实际当前特征和来源SHA在 `outputs/rl_iteration_audit/pure_scratch_phase/v17_mid499_king_features.{json,md}`，尚未采用任何新设计。
+末3个当前特征向量由冻结official local encoder一次核对，无NN/H4/新局：decision34/35/36的G/g/F/risk为18/0/0/0、18/1/0/0、1/0/17/2，margin18/19/16、kingdistance1/.125/.0625。去除潜在友援只会将36的margin16改−1，外调当时35的当前输入数值不变；不能据此声称阻止外调或提升胜率。中期Def的回援同样可能因座次先后未执行；margin是pre-action潜力，不是已选动作的安全保证。证据见 `v17_{mid499_king_features,1699_random_current_features}.{json,md}`。尚未采用额外obs/reward或规则修改。
 
-晚期1099/Snapshot22的1600局全部completed/exit0，四率 **88.25/96.75/99.25/98.25%**、draw均0，raw SHA `b9a4f67713b1664d0ce18376d1ad0e17edcede95b204c51f3650f336b3489596`。此时仍为live选模候选，人工模型3/4，尚未执行该模型新开发800或新heldout；最后名额保留给全部评估关闭后的最终最佳。此前54.76分钟的只读停止检查仅记录当时证据，不作为后来停止授权；实际训练已超过一小时，但新峰使平台判断重新开始。连续无提升计数仍5、参考v11。
+最终新开发800的7段真实demo已完成，见 [最终分析](../outputs/moe_cts/iterations/v17/diagnostic/best_at_1699/analysis/analysis.md)。A败44/P0/287tick、胜163/P1/47；E败261/P1/309、胜267/P1/51；D胜514/P0/57；R败663/P1/67、胜778/P0/55。Def在开发200及同模型selector400均无败，不另找seed造败局。873决策/880states、3627视频帧/4,055,562bytes；7例原生Core核验、完整源report逐case及实际视频参数/hash通过，45项输入/输出文件大小与SHA均由root复核。最终分析SHA `943eeb9733d10a66645bd033203affab495413e670b9ed1afa6ac1022119f1b5`，manifest SHA `263e8cd831af5e42d3a9fd873828914e726912d680ce7cb6eb693ff3381711d8`，rootproof SHA `bd611b44bfd8d304fad84488bc77054bb97d016e3ed7c0db3effaa6e6019ad64`。
 
-晚期只读配对 `v17_late_selector_comparison.{json,md}`：五份现成selector报告各1600局的有序身份相同，root独立核对599→1099和v11/499→1099翻转计数。599→1099 Agg非胜→胜38、胜→非胜23，败局62→47（P0 34→27、P1 28→20）；Expansion9/9持平，Def0/3和Random3/6各净少3胜。Agg同旧败→新胜38局WAIT15.63→40.71%、反向8.17→5.21%、时长190.76→92.50tick；旧胜→新败23局WAIT29.21→14.26%、反向2.35→10.18%、时长99.87→256.17；剩余同败24局反向也上升，不能说行为统一改善或作NN因果解释。v11 selector499→1099 flips45/26、10/12、3/3、11/5，Agg净多19胜；但1099有1100updates/576,716,800样本，对比v11/499的500updates/262,144,000，不能当作等预算参数化收益。全部tick加权by_ai/座次动作聚合与原报告一致；夺将后终局stats未用于临死经济推断。1199新四率84.75/95.5/99.5/99，best仍1099，最终结果与counter待训练/全部worker关闭后结算。
-
-晚期1399/Snapshot28 completed/exit0，四率 **89.75/97.5/99/99.5%**，W/L/D359/41/0、390/10/0、396/4/0、398/2/0，raw SHA `f68c1a22a62a26a8c1745af25fbb11a9bb6229c6e15d94697d7d61f2d341d8c7`。这仍是同一selector赛程的live新峰，不是最终800或新seed验收；manual3/4、counter5保持，尚未满足完整目标。
-
-晚期1499/Snapshot30 completed/exit0，四率 **90.25/96.25/99.5/99%**，W/L/D361/39/0、385/15/0、398/2/0、396/4/0，raw SHA `c39a995b771b7e9a7f4e8d85537f32ef747fad07c18884779f245e89398e47cb`。这是本轮首次aggressive选模点超过90%，但Def/Random未达到100%；尚未执行该模型新dev800或未见seed验收。实际约97min/8亿训练样本、近期13.7万transitions/s，池仍纯历史NN；manual3/4、counter5仍未结算。
-
-1499剩余60败局的只读对照见 `v17_remaining_losses_at1499.{json,md}`；root逐项复核1099/1399/1499有序1600身份及1399→1499重合：Agg持续16/新增23/解决25，Exp1/14/9，Def1/1/3，Random1/3/1。Agg三点一直败8局，另外三AI分别1/0/0；少数败局随模型变化，并非可直接认定不可学的固定地图。1499失败条件下四AI平均时长296.41/213.53/198.50/179.50tick、WAIT11.25/15.45/17.13/18.94%、反向3.98/6.77/11.34/4.87%，zeroMOVE均0。这些是聚合行为，非空间/NN因果，未用夺将后stats推临死经济。随后1599四率89.75/97/100/98.75%（Exp1draw计分母），Def全胜但其余门槛未同时达成；继续训练，best仍1499，最终诊断与版本计数待关闭后。
-
-1699/Snapshot34 live选模四率 **91/97/100/99.75%**，只有Random一败（Exp2draw计分母），仍未达标；1799回落88.25/97/99.5/98.5%。从已保留eval权重SHA `b0905756fdeaacd2511b4c69a7ea515ceacd057da633ce4290de9a179699e4a2` 精确复现唯一Random败局1573/map186/P1/37tick，未复制新模型、跑800或新seed，固定人工模型仍3/4。35次连续WAIT，首次移动前双方兵18对18、地1对14；decision35己将18由18生长到19，派18到19留1，P0同期将敌3兵移到邻9；36己守1无growth，P1计划19→18回援，但P0先从9派2夺将，P1原生skip。不是非法动作，也不能把终局敌1误为原守军；仅由这一例不能归因网络或认定所有WAIT过长。真实[单局录像](../outputs/rl_iteration_audit/v17_1699_random_failure/videos/random_loss.mp4)和[分析](../outputs/rl_iteration_audit/v17_1699_random_failure/failure.md)，均标训练中非最终。Core核对、root完整match/rawSHA/38states+trace/MP4 H264-yuv420p-24fps-255frames-10.625s及13项大小/hash通过，视频SHA `e3c622fd1a4ac15f8ff210bfed2b09ec3fdd6390b6e0b826f28e415ae4439745`、manifest SHA `3c3e390a69f3c7659028a0029221670b545695ca1d6cf59bfbbfb661e6b14377`。这只是现有单局重放，不算新增评估，最终800与demo仍待训练关闭后。
+最终三败局提供两个改进方向：A死前41兵/10地对93/41，经济明显落后；decision286可见邻敌10兵时，己将7兵仍HALF派3留4，被敌派9夺将。E死前95/32对130/38，回援先后因P0夺来源格而invalid、夺将后skip；R decision65己将增长至6后ALL派5留1，下一tick邻敌派3夺将，计划回援因P0先手skip。世界帧末将军兵力是敌占后的剩余，不能当作己方守军。四胜例也开局WAIT32–38，不能笼统归因WAIT；这些定性案例未独立重建H4或NN使用，不能证明网络因果。下一轮优先尝试通用网络的己将局部特征全局汇聚，使远处动作也能获得己将附近的局部表征；保持obs/action/reward及纯NN训练对手，从零训练检验，而不是加入目标baseline或规则保护。**本轮未达成完整目标，无新heldout消耗；继续从零迭代。**
