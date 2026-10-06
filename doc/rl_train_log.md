@@ -2,7 +2,7 @@
 
 当前目标：随机种子的 9×9、1v1 地图，部署 student 对 aggressive 胜率超过 90%、expansion 超过 95%、defensive 与 random 达到 100%；每个方案从零开始，训练只使用历史模型自对弈。达到目标或连续 20 个训练版本无有效提升后停止。在 `codex_dev` 分支依次管理训练方案；main 保留 baseline commit `0189d55`。
 
-**当前状态：v15 已结束，最终选中699；新开发800局为81.5% / 97.5% / 100% / 99.5%，未超过v11参考。最终八局录像已核对，连续无提升3→4；下一版撤回敌将记忆，仅验证PPO从4 epoch减至2 epoch。训练仍只使用历史神经网络自对弈。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
+**当前状态：v15 已完成，最终699新开发胜率81.5% / 97.5% / 100% / 99.5%，未超过v11，连续无提升为4；v16已撤回敌将记忆，回到v11仅将PPO epoch改为2，并从随机参数启动。训练仍只使用历史神经网络自对弈。** v1–v8 属于此前目标（各 AI 超过 80%）的历史实验，使用了续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零训练的公平对照。旧目标已由 v8/update199 在新 seed161803398 的 8000 局达成：83.35% / 92.65% / 97.80% / 96.95%；该模型没有达到当前更高目标。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -773,3 +773,7 @@ N16,384×T32=524,288新样本/update；B64、mini8192，E2共128 Adam/update、1
 正常规模5update门禁实际完成2,621,440条新转移，采样5.033秒/更新6.182秒，**compute233,754/s**；包含冷启动20.569秒的wall为127,446/s。GPU allocated12.56GiB/reserved13.75GiB、RSS1,986.78MiB、swaps0、exit0。5rollout仅执行random0，结束时pub1尚未执行，不能代表成熟8模型池速度或正式胜率。门禁路径 `outputs/rl_iteration_audit/pure_scratch_phase/epochs_two_candidate/runtime_bench/`。
 
 独立CPU完整CTS/Task构造在读取任何checkpoint前执行：seed20261013，22个raw参数/15,786参数与实际门禁初始random0逐bit一致，Adam.state空、storage与iteration0；没有load_state_dict或使用门禁权重初始化。门禁最终22参数+66Adam张量全部有限，实际step640=5×2×64，第二optimizer=None。active108 runtime文件与v11冻结源码一致，配置只有上述一项超参数改动。核对 `outputs/rl_iteration_audit/pure_scratch_phase/v16_e2_gate_audit.json`，SHA `b50cc2f19935039567e24db55f0c3caf44567385fa6b57557ee6bd9f688e941f`，PASS、无不一致；正式训练结果待实际新run。
+
+正式commit `4f81b9912fc083d39f6fb4f2e659f039626a941c`；108文件冻结于 `outputs/moe_cts/iterations/v16/source/`，manifest SHA `f48bd42369b904a8bfb9e15915771ccac3d20a8e2d42c6dce9aeb13e0cff1ab8`。2026-10-06 04:00:24.520 UTC启动PID2525878/session99105，实际argv仅新配置/replace-policy/每环境1M上限，无resume/warm等加载标志，PYTHONPATH指向该冻结源码。真实新random0于04:00:35.162 UTC发布，SHA `a48be4a5bcedecb41600a5468792a035731e43431baba41f6e422723c3b264f2`；22张量与独立新构造门禁逐bit相同，是实际新初始化，未加载旧权重。TensorBoard：`outputs/moe_cts/iterations/v16/train/`；本轮自己的初始800局正在实际执行，另留99/499/最终三个诊断名额。
+
+v15最终交付独立核对 `outputs/rl_iteration_audit/pure_scratch_phase/v15_final_completion_audit.json`，SHA `eae18e7cbd2c0b6a98c3bf382303e63acc60cb3fbe8af514783f44396f797b7f`，PASS_VERSION_DELIVERY_GOAL_NOT_MET：12个selector、最终新800局、八段真实录像、96个开发TB值、native曲线及一次版本结算均吻合。整体任务仍未达到目标，继续v16。
