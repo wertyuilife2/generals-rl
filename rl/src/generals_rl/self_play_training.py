@@ -89,8 +89,6 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     }
     if task.config.productive_actions:
         signature["mdp"]["productive_actions"] = True
-    if hasattr(task.action_space, "semantics"):
-        signature["action_semantics"] = task.action_space.semantics
     if hasattr(task.observation_encoder, "semantics"):
         signature["encoder_semantics"] = task.observation_encoder.semantics
     resume_pool = None

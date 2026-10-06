@@ -58,7 +58,12 @@ def make_observation_encoder(config):
         encoder = CombatObservationEncoder(config.max_episode_steps)
     else:
         encoder = LocalObservationEncoder(config.max_episode_steps)
-    return KingThreatDistanceEncoder(encoder) if config.king_threat_distance else encoder
+    if config.king_threat_distance:
+        encoder = KingThreatDistanceEncoder(encoder)
+    if config.remember_enemy_general:
+        from .seen_general import SeenEnemyGeneralEncoder
+        encoder = SeenEnemyGeneralEncoder(encoder)
+    return encoder
 
 
 class KingThreatDistanceEncoder:

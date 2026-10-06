@@ -177,6 +177,8 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     if recorder is not None:
         recorder.on_start(specs, states)
     with VecEnv.from_states(states, device="cpu", threads=cpu_threads, auto_reset=False, episode_ticks=max_ticks) as env:
+        if training_task.remember_enemy_general:
+            encoder.reset(GameBatch.from_backend(env, device))
         history.reset(encoder.encode(GameBatch.from_backend(env, device), player_ids))
         with torch.inference_mode():
             while active.any():
@@ -299,6 +301,8 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                 pids = torch.tensor([spec.learner_seat for spec in specs], device=device)
                 encoder = make_observation_encoder(training_task)
                 history = ObservationHistory(training_task.history_length)
+                if training_task.remember_enemy_general:
+                    encoder.reset(batch)
                 history.reset(encoder.encode(batch, pids))
                 obs = _local_inputs(batch, pids, encoder, history,
                                     make_action_space(training_task))
