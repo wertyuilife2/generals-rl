@@ -35,6 +35,7 @@ class SpatialActor(nn.Module):
     def __init__(self, channels, blocks, trunk_factory=SpatialTrunk):
         super().__init__()
         self.trunk = trunk_factory(HISTORY * MAP_PLANES, channels, blocks)
+        self.own_king_context = False
         self.context = nn.Sequential(nn.Linear(channels + PUBLIC_DIM, channels), nn.ELU())
         self.cell_head = nn.Conv2d(channels, 8, 1)
         self.wait_head = nn.Sequential(nn.Linear(2 * channels, channels), nn.ELU(), nn.Linear(channels, 1))
@@ -46,7 +47,18 @@ class SpatialActor(nn.Module):
         maps = frames[..., :FRAME_DIM - PUBLIC_DIM].reshape(-1, HISTORY * MAP_PLANES, MAP_SIZE, MAP_SIZE)
         spatial = self.trunk(maps)
         pooled = spatial.mean(dim=(-2, -1))
-        context = self.context(torch.cat((pooled, frames[:, -1, -PUBLIC_DIM:]), dim=-1))
+        context_features = (pooled,)
+        if self.own_king_context:
+            # Latest local markers only; neither the privileged critic nor an
+            # old general location can supply this global actor context.
+            current = maps[:, -MAP_PLANES:]
+            marker = (current[:, 4].bool() & current[:, 5].bool()).flatten(1)
+            position = marker.long().argmax(1)
+            king = spatial.flatten(2).gather(
+                2, position[:, None, None].expand(-1, spatial.shape[1], 1)).squeeze(2)
+            king = torch.where(marker.sum(1).eq(1)[:, None], king, 0)
+            context_features += (king,)
+        context = self.context(torch.cat((*context_features, frames[:, -1, -PUBLIC_DIM:]), dim=-1))
         fused = torch.nn.functional.elu(spatial + context[..., None, None])
         cell_logits = self.cell_head(fused)
         wait = self.wait_head(torch.cat((pooled, context), dim=-1))
@@ -202,15 +214,18 @@ class LightSpatialPPOPolicy(SpatialPPOPolicy):
     semantics = "light_spatial_p2_hist4_current_public13_standard2_v1"
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16,
-                 spatial_dilation=1, own_king_geometry=False, **kwargs):
+                 spatial_dilation=1, own_king_geometry=False, own_king_context=False, **kwargs):
         if "residual_blocks" in kwargs:
             raise ValueError("light spatial policy uses two standard convolutions, no residual_blocks option")
         if not isinstance(spatial_dilation, int) or isinstance(spatial_dilation, bool) or spatial_dilation < 1:
             raise ValueError("spatial_dilation must be a positive integer")
         if not isinstance(own_king_geometry, bool):
             raise TypeError("own_king_geometry must be boolean")
+        if not isinstance(own_king_context, bool):
+            raise TypeError("own_king_context must be boolean")
         self.spatial_dilation = spatial_dilation
         self.own_king_geometry = own_king_geometry
+        self.own_king_context = own_king_context
         if spatial_dilation != 1:
             self.semantics = f"light_spatial_p2_hist4_current_public13_standard2_dilation{spatial_dilation}_v1"
         super().__init__(obs, obs_groups, num_actions, spatial_channels=spatial_channels,
@@ -224,6 +239,12 @@ class LightSpatialPPOPolicy(SpatialPPOPolicy):
                                     device=first.weight.device, dtype=first.weight.dtype)
             self.actor.trunk = nn.Sequential(OwnKingRelativeGeometry(), replacement, *layers)
             self.semantics += "_own_king_relative_xy_v1"
+        if own_king_context:
+            # Replace this layer last: existing actor layers and the independent
+            # critic keep their seeded initialization; disabled is bit-identical.
+            self.actor.context = nn.Sequential(
+                nn.Linear(2 * spatial_channels + PUBLIC_DIM, spatial_channels), nn.ELU())
+            self.actor.own_king_context = True
 
     def trunk_factory(self, inputs, channels, _residual_blocks):
         return nn.Sequential(nn.Conv2d(inputs, channels, 3, padding=1), nn.ELU(),
