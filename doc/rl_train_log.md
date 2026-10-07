@@ -2064,3 +2064,7 @@ it499 / snapshot10实际completed0，CPU一次1600局完整赛程/TB验收44e0cc
 | random | 98.00% | 397/3/0 | 99.25% | 98.75% |
 
 overall1512胜/88负/0和，94.50%。aggressive相对前一点又升7.5百分点，与.995同500更新差3.75；不是早期0%的最终能力失败。虽然此selector四项均>80%，它是反复用于选择模型的固定seed，未证明随机训练seed或世界级能力。已超过1h但曲线仍在升，保持82663原配置继续看599/699；不以达到baseline阈值代替用户要求的完整方案实验。中期固定492..541已具备读取条件，等待实际诊断artifact后报告，不将未读指标当证据。
+
+中期预先固定的it492–541已完成一次CPU诊断（304b84 exit0，root846b86读回；[原始数据](../outputs/moe_cts/iterations/v28/diagnostic/mid_training_dynamics.json)，SHA `5dd84395…`）。50轮26,214,400转移，collection76.255秒、update295.967秒、真实wall372.536秒，即70,367转移/秒；v27同窗口70,515，计算速度基本一致。KL均0.01598、clip13.57%、entropy1.4856；v27为0.02224/12.77%/0.6713。自适应LR终值在48/50轮触顶、2/50轮触底，选定33个tag共1650点均有限。这些是日志窗口的描述，不能单独证明最终强度或gamma作用机制。
+
+该窗口episode指标按每次日志batch等权：length100.59tick、自对弈win81.72%、truncated0.237%；不能当baseline胜率或按episode数加权的整轮结果。WAIT20.64%、backtrack7.99%（v27同窗20.05%/12.90%）；终局开发轨迹尚未生成，暂不推断具体守家/调兵行为。v28冻结源未包含后续新增return/advantage/EV监控，不能由value loss补造这些指标。
