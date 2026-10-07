@@ -2384,3 +2384,10 @@ it199/snapshot4实际completed0，104,857,600转移/25,600tick-env；aggressive3
 it299/snapshot6实际completed0，157,286,400全局转移/38,400tick-env；aggressive337/63/0、expansion380/20/0、defensive397/2/1、random390/10/0，采样胜率84.25%/95.00%/99.25%/97.50%，overall1504/95/1（94.00%）、mean88.562tick。快照training wall2574.043秒（42.901分钟），异步worker110.509秒另记；report SHA `e2e029c1…`、CP `ecda8cab…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样协议，完整1600游戏/map/AI/双座/逐game sampling seed、26个Perf/Eval TB点与实际配置/CP hash一致；唯一observer动态认证，独立aggregate2e2905 exit0从game导出counts/WLD/rates，root8a3e3b直接原report/index读回。[实际第三点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_299_validated_per_panel.json)，SHA `a31f8c75…`、aggregatecert `1868c7bd…`。
 
 aggressive较199增加2.25pp，达到预声明≥2pp趋势阈值，**趋势锚点更新为it299/84.25%**，四后续点观察重新计数；这不是统计显著性判断。同样本固定.995 v27it299胜率84.50%/95.50%/99.25%/99.75%，点估计差−0.25/−0.50/0/−2.25pp；本点未新增bootstrap，完整终局对照再统计，已有99/199 pair届时复用。前期44→82→84.25%仍在学习，当前未到最低1h，保持原43364/冻结配置继续。不以四baseline单点均>80%结束附件要求的完整逐项实验，也不声称泛化或世界级能力。
+
+
+#### v30 第四采样点：aggressive到88%，仍有上升趋势（训练继续）
+
+it399/snapshot8实际completed0，209,715,200全局转移/51,200tick-env；aggressive352/48/0、expansion388/12/0、defensive393/7/0、random394/6/0，采样胜率88.00%/97.00%/98.25%/98.50%，overall1527/73/0（95.4375%）、mean77.729tick。快照training wall3502.211秒（58.370分钟），异步worker84.903秒单列；report SHA `6e79a619…`、CP `17918f86…`。CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局，唯一observer确认完整game/map/AI/seat/RNG、26个Perf/Eval TB点与实际配置/hash；独立aggregate2ff840 exit0由game重算counts/WLD/rates及selectionscore，root234049直接原report/index和验证SHA读回。[实际第四点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_399_validated_per_panel.json)，SHA `3b72e845…`、aggregatecert `b99818c8…`。
+
+aggressive较299提高3.75pp，达到预声明≥2pp趋势阈值，**锚点更新it399/88%**、四后续点计数重置；这不等于统计显著性结论。同样本固定.995 v27it399为84.50%/97.00%/99.75%/98.00%，点估计差+3.50/0/−1.50/+0.50pp；本点未新增CI，终局完整N/T对照再统计，99/199既有pair复用。发布时略少1h，实际评测与root记录时原训练已超过1h且持续更新；当前仍在学习，不能因最低时间到达而平台STOP。原43364/冻结源配置继续，终局后开发/八录像/行为与完整sample/wall分析、再选择λ基座的流程不变。
