@@ -1475,3 +1475,7 @@ workers4这次快1.485×、评测主体少32.68%；完整update较此前FP32单�
 配置 `rl/configs/v23.json`，actor1,100,945、独立critic1,053,033参数；H4+K11 / S+H4+K11、9×9/episode1024、gamma.995/lambda.95、reward与自对弈算法保持信息阶段的指定基座。N16384×T32、E4/B64/logical8192/256Adam；采用上述完整pair选定的共同执行设置。纯历史池8、均匀抽取、整局固定对手，训练种子20261013/pool120261013，new weights/new Adam/new pool，无resume、warm-start或门禁权重。save_interval2000，完整checkpoint最多3（含final），eval最近3另加best，历史候选文件8；gamma/tick课程关闭，H8留到最后。
 
 生产CLI配置默认合并＋完整policy替换的CPU检查已实际通过，两版候选仅run_id/backbone不同；v23配置SHA `88f5824eedb0b9006782b873f09297b5036497e78eff644db358d3d751265b14`。本节先保存配置与动机，运行源码/配置从该版本commit提取，正式启动和自己的seed0验证随后记录；此时尚无正式训练结果。v24独立提交配对ViT配置并在v23结束后从零训练。比较同时报告胜率对transitions与wall曲线；CUDA同步评测后的Perf/wall_seconds表示该update及eval均完成的时刻。固定critic结构不代表初始张量相同；单训练seed、重复selector，以及tiny→Map同时扩大critic与改变计算方式，均限制归因。全部六档正式训练与后续gamma/rollout/lambda、tick课程、H8仍须逐项完成。
+
+### v24：配对ViT 1M从零self-play配置
+
+配置 `rl/configs/v24.json` 独立提交，actor1,079,945、critic1,053,033参数。配置原始字节SHA `25d8371a7704cb31d5de256ebd9b96400751396066f1b6e9ee89b57f347ae154`；相对v23仅run_id和policy.backbone改变，信息输入、MDP、PPO、BF16/physical512、历史池、1600局采样eval与1–3h预算完全一致。v23源码来自其配置commit `2c3a69155bd82320e2a6b00bed0d2cc30e6fc3b7`，v24源码将来自本次独立配置commit；训练均使用各自Git blob冻结，不包含后续工作区修改。单卡按v23→v24顺序执行，v24不从v23权重、Adam或历史池续训。此段记录配置，尚不构成正式训练或样本效率结果。
