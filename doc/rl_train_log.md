@@ -1990,3 +1990,21 @@ v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a5
 首30个完整更新CPU只读TB（a7979b exit0，观测it0–29、当时latest35）均有限：C均1.273/U均5.909秒，完整wall约69948转移/秒，exactKL均.01866、clip均24.76%、entropy均4.5605，末LR.01；v27同期clip均17.76%。这是启动窗口的描述，不推断baseline强度或gamma优劣。原始tags/窗口保存在[early_training_dynamics.json](../outputs/moe_cts/iterations/v28/diagnostic/early_training_dynamics.json)。
 
 TB：`outputs/moe_cts/iterations/v28/train/`。先完成该固定gamma对照的完整曲线、最佳开发评测、录像和失败分析，再进行已冻结的v29 gamma课程；rollout/lambda、真实TB0..1000 tick衰减及H8仍按顺序保留，容量探索暂缓。
+
+
+#### v28 首个采样panel与初期自对弈动态（继续训练）
+
+it99 / snapshot2实际completed0：100次更新、52,428,800转移、3200tick/env，四AI各200地图×双座，共1600唯一采样局。新正式82663/d20e62、CPU一次赛程/TB验收8c3d78、watcher68853/71acf6 exit0；root8bbec4读原报告并复用generic paired做实际地图簇配对。真正模型快照训练wall732.699秒（12.212分钟），worker587.473秒，二者异步重叠、不相加。CPU评测cost明显长于v27首次193.199秒；训练同样100更新的wall与v27的737.020秒接近，这一个早期点不是稳定吞吐结论。
+
+| AI | v27 同100更新胜率 | v28 胜/负/和 | v28 胜率 | v28 平均tick |
+|---|---:|---:|---:|---:|
+| aggressive | 33.75% | 0/400/0 | 0.00% | 132.35 |
+| expansion | 58.50% | 2/358/40 | 0.50% | 436.32 |
+| defensive | 86.75% | 5/262/133 | 1.25% | 1018.11 |
+| random | 82.50% | 2/324/74 | 0.50% | 881.63 |
+
+v28 overall9胜/1344负/247和，0.5625%胜率/15.4375%和局，平均617.1025tick。与v27这个相同样本/固定selector时点的overall差−64.8125百分点，200地图簇配对CI约[−67.25,−62.37]；aggressive差−33.75，CI[−38.5,−29.0]。这证明当前seed/配置下显著的早期学习差距，不证明最终强度、训练seed泛化或gamma的普遍因果结论。两个报告的CPU/FP32/highest、sampling protocol/seed/max2000和完整game/map/seat赛程一致；不比较不同样本或复用旧模型成绩。[实际首panel配对](../outputs/moe_cts/iterations/v28/diagnostic/first_selector_matched_gamma_comparison.json)。
+
+it50–99共同自对弈窗口的额外只读TB（8f5fee exit0）：v28已完成episode聚合的length均935.59tick、truncated均78.89%（45个记录点），v27为458.53tick/6.68%（50点）；WAIT均1.20% vs2.87%。因此长局不能简单解释成等待，eval中aggressive仍快速将其击败。whole-update KL均.01862 vs.01701、clip均16.19% vs18.78%，这段更新监控不支持“持续更高clip即唯一失败原因”。这是按日志batch等权平均，不是episode-count加权的整轮统计，也不是baseline胜率。后续真正终局best模型保留trace再观察调兵/交战；当前没有逐tick轨迹，不虚构行为。[initial_pool_phase_dynamics.json](../outputs/moe_cts/iterations/v28/diagnostic/initial_pool_phase_dynamics.json)。
+
+未达到至少1h、仅一个panel，保持冻结训练继续观察it199及后续曲线；不因首点差而修改gamma、lambda、奖励、学习率或中断重启。自身Git analysis工具已a07e07从source commit冻结，runtime/config核对通过；尚未执行终局开发、录像、review或完整曲线，不能标记v28完成。

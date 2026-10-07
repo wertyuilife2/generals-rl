@@ -13,6 +13,8 @@ gamma课程预声明为v29：从.995按绝对TB迭代线性增加，u1000达到.
 
 后续只选择一个较长rollout候选：N4096/T128，保持NT524288、E4/B64/256Adam、H4K11、episode1024、整局固定历史对手，以及每50更新发布/100更新采样eval。仅改N/T/run_id，待gamma实验完整分析后绑定基座并冻结；不新增算法或扩容实验。它同时改变每局连续采样和学生更新频率（32→128tick）、时间相关性及历史池相对每局时间的cadence，不称为纯GAE长度消融。主要rollout缓存因NT不变而基本不变，逐环境状态缩小，collection调用数增加四倍；实际C/U、显存和wall需由正式运行验证。用相同全局transitions比较，不能用相同每环境tick假装样本量相同。CPU只读核对已完成，配置/速度/强度尚未实测。
 
+lambda只试一个候选.99，对照.95；待gamma及rollout完整结果后固定其余配置，fresh训练。实现中的TD残差几何权重在gamma.999时，有效长度1/(1−gamma×lambda)从约19.63增至90.99tick；这只是直接GAE递推权重，不是bootstrap学习的时间上限，也不预言胜率。比较raw return/advantage的尺度与方差、critic EV、KL/clip/自适应LR及真实吞吐，不做多值搜索。
+
 ## 实验顺序与完整范围
 
 1. v19：重跑 v17 的 MDP、轻量网络和历史池，采用已启用的 categorical adaptive LR 和可复现采样评估，建立当前协议下的从零对照。旧 v17 的 fixed LR / greedy 成绩仅作历史背景。
