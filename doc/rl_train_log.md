@@ -1953,7 +1953,7 @@ v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a5
 
 ![v27完整时间曲线](rl_train_figures/v27_final_wall.png)
 
-**最终最佳模型开发评测。** 自身best499已独立捕获，SHA `fcc73aea…`；另外实际执行1600局采样CUDA/FP32/B128/workers4、seed/sampling_seed1001042/max2000，完整开发阶段70.452秒（另计于训练预算），保存8条joint-action轨迹。该开发seed此前用过，不是未见heldout；每AI400局，CI按200地图双座聚类bootstrap。
+**最终最佳模型开发评测。** 自身best499已独立捕获，SHA `fcc73aea…`；另外实际执行1600局采样CUDA/FP32/B128/workers4、seed/sampling_seed1001042/max2000，完整开发阶段70.452秒（另计于训练预算），保存8条joint-action轨迹。参数与推理tensor为float32，实际报告`matmul_precision=high`、`cudnn_allow_tf32=true`；不能称纯FP32算子或highest。v28开发评测须匹配这组实际设置，CPU训练期eval的highest另计。该开发seed此前用过，不是未见heldout；每AI400局，CI按200地图双座聚类bootstrap。
 
 | AI | best499 selector | latest899 selector | 开发胜/负/和 | 开发胜率 | 开发地图簇95% CI |
 |---|---:|---:|---:|---:|---:|
