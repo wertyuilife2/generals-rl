@@ -1449,4 +1449,29 @@ workers4仅改变评测controller分片。两次实际1600局均为200maps/AI×�
 
 原parent已独立确认不存在，完整runner model+Adam实际保存26,290,505B、save0.033s/hash0.012s，临时权重与轨迹全部清理。CPU复核重新比较完整对局记录、协议、case元数据和116源码SHA；临时动作payload已经删除，本次复核不声称重新执行Core replay。证据 `full_capacity_preparation/resnet_1m_bf16_p512_full_workers_comparison/{gate_result,baseline_worker_comparison,execution}.json`，result SHA `9fac3346fa466f46f9b410bb7c8e6c09c163ca4b2965197ea1c5637e579944b7`，execution SHA `a576094338fb13336ef9fbc5aebaee8986f058c451648354221d6774c0826806`。
 
-ViT同规格完整测试随后独立启动原session64661、PID3410920、launchc29c96；已实际完成256次Adam，update150.043s，尚在执行1600局workers1→4。对应进程终态与完整比较未证实前，不选择共同BF16/workers4或启动正式run。v23/v24的JSON候选准备与正式启动分开；六档正式训练、10M/100M完整容量证据和后续课程/H8的范围保持。
+ViT同规格完整测试随后独立启动原session64661、PID3410920、launchc29c96；以下记录其实际完成结果，不能把此前进行中状态作为终态证据。
+
+### ViT BF16完整结果与1M正式执行选择
+
+ViT原session64661、terminal74d5af实际exit0，root独立读回结果并确认原parent不存在、GPU无compute进程。NT524288/256Adam、24whole-policy驻留、保存/publication、两次1600局采样评测全部完成。workers1与4全部逐局结果一致，原helper比较7条选中轨迹的3421 tick联合动作一致；aggressive随机gate没有胜局，明确缺失该录像，不伪造第8局。
+
+| ViT1M 实际测量 | BF16/p512 |
+|---|---:|
+| 完整rollout+GAE / 256 Adam | 15.599 / 150.043s |
+| rollout+update吞吐 | 3,165 transitions/s |
+| workers1 / workers4评测主体wall | 540.146 / 363.653s |
+| 对应parent完整eval阶段 | 542.168 / 365.667s |
+| baseline controller/转换/反馈 | 452.789 / 272.184s |
+| parent peak allocated / reserved | 17.103 / 17.535 GiB |
+| sampled whole-device peak / 最少free | 18.698 / 4.799 GiB |
+| host peak RSS | 2.248 GiB |
+
+workers4这次快1.485×、评测主体少32.68%；完整update较此前FP32单次测量少33.21%。真实runner model+Adam文件25,928,201B，save0.027s/hash0.011s，临时权重/trace已清理；CPU复核现存reports与元数据，不重新执行已删除的动作payload。证据 `full_capacity_preparation/vit_1m_bf16_p512_full_workers_comparison/{gate_result,baseline_worker_comparison,execution}.json`，result SHA `220c03152e998c69929fb458751743287784da199774176df9ab648c3056a291`，execution SHA `cf851f271cf6bab3b1fda783d1ccfd031e17a6f7af36304cbe610d2514b823cb`。单次容量测量不证明ViT胜率更高或成熟历史收集同速。
+
+完整pair均实际exit0后，共同选择BF16/p512/inference512、workers4、pub2、每4updates一次1600局采样eval。较慢C+U=212.945s、完整E=404.623s，恒定耗时下K4周期约1256.403s、eval约占32.20%。timeout900、budget reserve1300，覆盖该Q加完整timeout后余187s用于保存/收尾与波动；它是工程余量，不是硬实时保证。预算min3600/max10800不变，plateau从tiny的12改为4：至少5个健康完成panel、至少1h，连续4次未超过2pp的既定worst/aggressive改善条件时结束。该规则不等同统计显著性检验。成对选择证据 `paired_1m_bf16_p512_full_capacity.json` SHA `922911f16095bd42ed4a55cceb3dda5f905cbeb23b8ee0c7114cbde74c7acb23`。
+
+### v23：成熟ResNet 1M从零self-play配置
+
+配置 `rl/configs/v23.json`，actor1,100,945、独立critic1,053,033参数；H4+K11 / S+H4+K11、9×9/episode1024、gamma.995/lambda.95、reward与自对弈算法保持信息阶段的指定基座。N16384×T32、E4/B64/logical8192/256Adam；采用上述完整pair选定的共同执行设置。纯历史池8、均匀抽取、整局固定对手，训练种子20261013/pool120261013，new weights/new Adam/new pool，无resume、warm-start或门禁权重。save_interval2000，完整checkpoint最多3（含final），eval最近3另加best，历史候选文件8；gamma/tick课程关闭，H8留到最后。
+
+生产CLI配置默认合并＋完整policy替换的CPU检查已实际通过，两版候选仅run_id/backbone不同；v23配置SHA `88f5824eedb0b9006782b873f09297b5036497e78eff644db358d3d751265b14`。本节先保存配置与动机，运行源码/配置从该版本commit提取，正式启动和自己的seed0验证随后记录；此时尚无正式训练结果。v24独立提交配对ViT配置并在v23结束后从零训练。比较同时报告胜率对transitions与wall曲线；CUDA同步评测后的Perf/wall_seconds表示该update及eval均完成的时刻。固定critic结构不代表初始张量相同；单训练seed、重复selector，以及tiny→Map同时扩大critic与改变计算方式，均限制归因。全部六档正式训练与后续gamma/rollout/lambda、tick课程、H8仍须逐项完成。
