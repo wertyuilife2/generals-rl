@@ -2420,3 +2420,10 @@ aggressive较399下降1.25pp，**锚点仍为399/88%，锚点后未达≥2pp改�
 v30中期wall吞吐低20.86%；采集合计2.287倍，PPO update仅1.00076倍，每轮C3.462/U5.920秒。固定NT并未带来速度收益；T增加导致更多环境/策略调用，N减少后的kernel开销与占用可能参与，但没有单独profiling隔离每项原因。异步worker时间未再加到训练wall。窗口内TB current allocated max12.248GiB/reserved14.287GiB，对照13.538/16.324GiB；这是当前分配观测，不能当完整正式训练峰值。当前方案省逐环境资源但采集效率下降，最终仍结合完整样本/wall胜率和best开发结果选择λ基座。
 
 v30 return std均值.58193、raw A std.23986、critic EV.82997；最后LR处于floor1/50、ceiling48/50，区间共52次自适应变化。KL/clip较低和backtrack减少伴随WAIT增多、entropy降低，不自动等于更好的守备或探索，也不能解释单个499胜率下降。self-play episode批次均长102.661tick/win.70754，不是baseline胜率。未见NaN或PPO采样/更新数量失配；保持原冻结实验继续观察，无奖励、学习率或历史池临时补丁。完整任务仍包括单λ候选、用户指定TB0..1000的tick衰减并实际200轮最终阶段、H8最后；剩余容量探索保持暂缓。
+
+
+#### v30 第六采样点：aggressive连续两点回落（训练继续）
+
+it599/snapshot12实际completed0，314,572,800全局转移/76,800tick-env；aggressive335/65/0、expansion378/22/0、defensive397/3/0、random389/11/0，采样胜率83.75%/94.50%/99.25%/97.25%，overall1499/101/0（93.6875%）、mean83.286tick。快照training wall5378.517秒（89.642分钟），异步worker76.299秒单列；report SHA `55c1548e…`、CP `56403f76…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局；唯一observer确认完整game/map/AI/双座/RNG、实际配置/hash及26个Perf/Eval TB点。独立aggregate dbb43b exit0重算counts/WLD/rates/selectionscore；root6ec161直接读原1600局report/CP SHA，098a60确认currentindex completed0及两证书hash。[实际第六点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_599_validated_per_panel.json)，SHA `166372f9…`、aggregatecert `784e6229…`。
+
+aggressive较499下降3pp、较399锚点下降4.25pp，expansion也连续两点下降，defensive仍接近99%。**锚点399/88%保持，锚点后未达≥2pp改进点数2/4**，尚未满足预定平台停止条件。两次回落值得观察，但未单独做配对显著性或因果归因；完整终局分析再一起处理，已有99/199配对结果复用。早/中期完整诊断已有，无重复TB扫描、临时奖励/算法改动或训练重启。原43364继续，后续真实699/799等panel动态观察，满足趋势规则再正常STOP并排空eval；完整best开发、八录像/败局行为、样本/wall曲线及后续λ→tick课程→H8范围保持不变。
