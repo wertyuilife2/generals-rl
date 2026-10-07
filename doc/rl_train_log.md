@@ -1793,3 +1793,18 @@ v25原session86930（ad8c00）/PID3689896已actual fresh启动，source/config�
 
 
 v25首轮实际完成（iteration0）：C71.032s/U453.056s，完整初始wall533.583s、wall982.58FPS；自身checkpointSHA `11b7ef3b0f850b0c332b58ede6501d9ce1366877b110a88ca875c7fa62b8c8db`、132579255B，全部328 Adam state step256，参数和moments均有限。CPU验收c81e7b exit0，root7d6127读回；formal没有安装clip/observer逐次计数hook，独立完整门禁三计数另列，不冒称formal实测。first-update contract为`v25/first_update_contract.json`。初始这一轮LR从1e-4经最大5.0625e-4最后降到1e-5，共14次变化；approx KL0.03088、max0.04318、endpoint exact KL0.04216/p95 .13199、clip .24832、entropy1.96290、grad .41798。学习率下限和KL偏高值得后续追踪，但一轮不能证明架构退化或长期收缩，不改已冻结配对协议。原86930继续，首个正式1600局selector在iteration1完成第二更新后；当前无正式baseline panel。
+
+### v25 首个正式采样评测（两个更新，训练继续）
+
+snapshot1 / iteration1现已completed/returncode0：两轮完整更新、1,048,576条新转移、64tick/env；200maps/AI×双座，共1600局，CUDA BF16采样、四个baseline worker。窄CPU读回actual `0fc32e exit0`、root `a44ee0` 验证自己的116文件冻结源、配置、checkpoint/report字节身份、实际双座赛程、15组统计及TensorBoard坐标一致。未运行新游戏或加载模型。
+
+| AI | 胜 / 负 / 和 | 采样胜率 |
+|---|---:|---:|
+| aggressive | 2 / 398 / 0 | 0.50% |
+| expansion | 27 / 340 / 33 | 6.75% |
+| defensive | 16 / 322 / 62 | 4.00% |
+| random | 26 / 368 / 6 | 6.50% |
+
+总体71胜1428负101和（4.4375%）。post-sync TB wall1489.262秒（24.82分钟），已包含431.071秒worker，不能重复加入评测耗时。checkpoint SHA `b60508a392ca0869bf96714bbdd0612766b8c9c90654434cba662d35abaef7ac`；详细读回 `v25/diagnostic/first_eval_readback.json`。首点样本和历史池均很浅，不能据此判定架构强度、平台或调整配对方案；原86930仍live（408054/fb8055），按共同最低1h/最高3h及预先冻结的评测规则继续，v26等待v25终局。
+
+仅CPU读取既有首轮指标的配对诊断发现：v23 Res1M首轮也到LR下限，iteration1/2末值回升至0.00017086/0.00057665；实际20轮的final/max LR均未到0.01。v24 ViT1M则从iteration1到0.01。故不把“首轮触底”解释为持续收缩，也不误写两家1M都达到上限。三家critic规格相同但初始化张量不同，物理batch也不同，首轮差异不提供容量因果结论。证据 `v25/diagnostic/first_update_capacity_comparison.json`（root2876ec读回）。
