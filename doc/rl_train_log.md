@@ -1847,3 +1847,60 @@ snapshot3 / iteration5完成：6次更新、3,145,728条转移、192tick/env；�
 仅从现有两个panel的逐局记录分析，aggressive自然终止败局的局长中位数113→112tick；总体WAIT按tick加权30.68%→20.18%。policy摊销耗时135.98→135.74微秒/decision，obs基本稳定；决策数减少3.11%但opponent单位耗时增加6.21%，所以eval wall不能只用局长解释。证据 `v25/diagnostic/early_eval_behavior_lengths_panels1_2.json`（`b2deba/09bdd6 exit0`）。it0..3父进程TB观察的GPU allocated最大14.81GB、reserved最大19.83GB、peak RSS2.56GB；这些不是整卡峰值或全系统RAM。观察时checkpoint1/3、历史池3/8、eval目录2/3＋独立best，指定模型/日志范围逻辑大小0.375GiB；尚未验证满池淘汰，亦不代表整个run磁盘占用。证据 `v25/diagnostic/early_resource_retention_iteration3.json`（`c9bc30/09bdd6 exit0`）。
 
 对it3已保存的aggressive败局map0/seat0，完成112tick CPU/native/Core单局动作重放（`d2f945 exit0`；无新比赛或模型推理）。pre111本营35有3兵、增长后4，当前可见敌44有7兵；敌实际44→35出6兵，于tick112夺将，learner同tick33→24出2兵而未回援。相邻己26有9兵、34有5兵；pre104/106还各从本营向26送出3兵。更早pre50兵力22比44、领土9比21，说明守将失误伴随已有资源劣势。全部learner动作合法，敌将49整局未曾进入current/H4/K，因此本局不支持动作错位或遗忘已知敌将的解释。这是一个早期真实现象，不能估计失败频率、归因架构/reward，或证明改一个动作就能赢。关键帧与末20tick见 `v25/diagnostic/early_aggressive_loss_trace_analysis.json`（root `af1626`）；最终best仍会另做完整回放与报告。
+
+
+### v25 终局：10M ResNet 在两小时预算内仍处于早期学习
+
+本轮为上文已冻结的 v25 配置，从随机权重、空优化器和新历史池开始；10M actor＋固定1.053M critic，H4＋K11 / S＋H4＋K11，纯历史模型自对弈。没有使用随机容量门禁或其他 run 的模型初始化。正式进程实际 exit0，停止原因为 `evaluation_plateau`，不是异常或显存耗尽。
+
+共完成 **10次更新、5,242,880条新转移、320tick/env**，实际完整wall **123.09分钟**；collection716.739秒、update4530.849秒，compute吞吐 **999.10转移/秒**，包括同步评测的完整wall吞吐 **709.87转移/秒**。parent allocator peak allocated18.161GiB、reserved18.598GiB；这是训练父进程PyTorch报告值，不是整卡或评测worker独立峰值。940局自然结束、0截断。
+
+五次selector均为采样、4AI各200张地图×双座，共1600局；post-sync wall已包含评测，不另加worker时间：
+
+| iteration / 新转移 | wall分钟 | aggressive | expansion | defensive | random | 总体 |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 / 1,048,576 | 24.82 | 0.50% | 6.75% | 4.00% | 6.50% | 4.4375% |
+| 3 / 2,097,152 | 49.54 | 2.25% | 5.00% | 5.75% | 7.50% | 5.1250% |
+| 5 / 3,145,728 | 74.16 | 0.50% | 6.50% | 9.25% | 10.75% | 6.7500% |
+| 7 / 4,194,304 | 98.63 | 0.50% | 7.50% | 9.00% | 10.75% | 6.9375% |
+| 9 / 5,242,880 | 123.09 | 1.00% | 7.50% | 12.25% | 11.25% | 8.0000% |
+
+![v25：实际新转移与四AI采样胜率](rl_train_figures/v25_final_samples.png)
+
+![v25：完整训练wall与四AI采样胜率](rl_train_figures/v25_final_wall.png)
+
+按预设最弱项/aggressive优先的selector，**best仍为it3**，而非总体最高的it9。停止规则要求最弱项达到严格2pp改善并有4个patience间隔；不能因此称全部曲线收敛。it3→it9总体+2.875pp，地图簇bootstrap95%CI为[1.50,4.25]pp；defensive+6.50pp [3.25,9.75]，aggressive−1.25pp [−2.50,0]。expansion和random也上升，但区间分别跨零/含零。使用共同200地图、双座配对及20000次重采样；这些区间只描述复用selector地图上的固定模型差异，不包含训练随机性或选模偏差。
+
+另对终局best it3做1600局采样开发评测（seed1001042，200地图/AI×双座）；这是历次run复用开发种子，**不是独立保留集**。额外评测wall418.737秒在训练停止后发生，不计入上述正式训练时间。
+
+| AI | selector best | selector latest | best开发集胜 / 负 / 和 | best开发胜率 |
+|---|---:|---:|---:|---:|
+| aggressive | 2.25% | 1.00% | 4 / 396 / 0 | 1.00% |
+| expansion | 5.00% | 7.50% | 23 / 339 / 38 | 5.75% |
+| defensive | 5.75% | 12.25% | 28 / 307 / 65 | 7.00% |
+| random | 7.50% | 11.25% | 37 / 356 / 7 | 9.25% |
+| overall | 5.125% | 8.000% | 92 / 1398 / 110 | 5.75% |
+
+全部10轮PPO更新的endpoint exact KL均值.03150、最大.04216、末值.02291；clip fraction均值33.18%、末值35.15%。末LR在1e−5与7.59375e−5间反复触底和回升，各轮最大LR均高于下限，不能解释成没有自适应LR或停止更新。entropy1.963→4.541、rollout WAIT52.55%→6.67%，而WAIT/move gate entropy下降；合法动作支持集随局面变化，原始总熵不是独立探索能力指标。平均C71.674/U453.085秒，未见更新计时持续恶化或非有限数值。只有10次更新，明显不足以判断10M网络的能力上限。
+
+有限预算中的对手分布也不成熟：终点16,384条活动lane里，seed0占 **15,755（96.16%）**，学习模型仅629（3.84%）；池内ID0..5，6次发布含初始seed，17,324次episode assignment。seed可在reset后被再次抽到，因此此数不是“仍处于初始局”的比例，也不是全程transition mixture。当前TB未记录逐快照交互占比；它提示冷启动和整局固定对手的时间尺度限制，但不证明低胜率由此导致。与1M各20更新/640tick相比，10M该轮仅10更新/320tick；大模型的有限wall比较同时受经验量和局面深度限制。
+
+终局best自身checkpoint SHA `94792179c7076d98bafa087ff82dd467cc7249848accd72ac4731a2e9bc94af7`。四AI各一胜一败共8个实际selector录像，4700tick，全部按原joint actions完成native/Core重放验证；没有为录像另跑比赛。四败均为首张地图/seat0，以下只作定性案例，不能估计总体失败频率或证明替代行动必胜：
+
+| 对手 / 局长 | 直接终局事实 | 敌将长期记忆 |
+|---|---|---|
+| aggressive / 112 | pre111本营增长后4兵，可见敌44→35出6；自己33→24出2，本营邻26有9、34有5仍未回援。 | 敌将49从未被观测，K未知。 |
+| expansion / 226 | 最后35→26出3，把本营降至1；可见敌44→35出16夺将。 | 自tick73记录在K，终局仍存在。 |
+| defensive / 308 | pre304本营24兵外送23，pre305再外送1；终局敌44→35出38，己邻26仍有12。 | 自tick22记录在K。 |
+| random / 815 | pre813本营增长后58兵，35→26出57只留1；随后敌34→35出6。己另有223兵城市与邻将58兵。 | 自tick73记录在K。 |
+
+四败的计划动作全部符合mask、native invalid为0。八局唯一native invalid在expansion胜局pre58：seat1的合法源48先被seat0的39→48攻占，是联合顺序执行而非计划mask错位。这些案例支持守将和兵力调度尚弱；三局K已保留敌将位置，不支持“忘记曾见过敌将”的解释。K存在不证明网络实际使用了它，也不能据四例归因架构或reward。
+
+| AI | 胜局录像 | 败局录像 |
+|---|---|---|
+| aggressive | [win](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/aggressive_win.mp4) | [loss](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/aggressive_loss.mp4) |
+| expansion | [win](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/expansion_win.mp4) | [loss](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/expansion_loss.mp4) |
+| defensive | [win](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/defensive_win.mp4) | [loss](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/defensive_loss.mp4) |
+| random | [win](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/random_win.mp4) | [loss](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/random_loss.mp4) |
+
+终局入口：[完整训练诊断](../outputs/moe_cts/iterations/v25/diagnostic/terminal_training_review.json)、[开发评测](../outputs/moe_cts/iterations/v25/final_best/development_report.json)、[逐帧行为事实](../outputs/moe_cts/iterations/v25/final_best/analysis/recorded_behavior_final.json)、[终点对手占用](../outputs/moe_cts/iterations/v25/diagnostic/terminal_self_play_opponent_occupancy.json)。训练原session86930实际9376d2/exit0，开发原56500实际41b00e/exit0，录像原89264实际b71e13/exit0。终局review实际3b5569/exit0，完整曲线335d82/exit0且已由root视觉核对。TB：`outputs/moe_cts/iterations/v25/train/`。下一轮v26保持同档共同协议，从零启动；不以这轮失败中途改变对照组。
