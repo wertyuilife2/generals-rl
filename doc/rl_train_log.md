@@ -1920,3 +1920,6 @@ v25完整终局报告提交 `be78f29` 后，实际启动v26原session30384/PID37
 用户指出ResNet/ViT训练太慢，要求先跳过架构探索、推进其他项。当前v26已按请求停止：精确终止自己的PID3797686，原session30384实际af1a53/exit143，无评测子进程；保留已完成iteration0的checkpoint/TB，未完成的第二更新丢弃。**v26未完成正式预算、没有baseline panel，不报告其终局胜率或架构强度。** 暂不执行两家100M容量门禁及正式训练；已完成v23–v25结果保留。
 
 下一阶段以v22已实现的信息语义和小网络为共同基座（H4K11/SH4K11、InformationSpatialPPOPolicy/spatial16、N16384/T32、E4/B64、uniform历史池8/pub50、每100updates异步CPU采样1600局、min1h/max3h及bounded retention），分别从零训练v27固定gamma.995和v28固定gamma.999。两者只改run_id、PPO gamma及与其匹配的PBRS potential_gamma，不复用v22模型。保留原lambda.95、reward/tick、actor/critic和adaptiveLR，不开启gamma或reward课程，以便解释固定gamma差异。历史v22平均C1.483/U5.925秒每更新、完整吞吐70,625转移/秒仅作预算参考，不保证新run速率。后续顺序仍为gamma课程、rollout/lambda、真实tick0..1000衰减及足够零tick训练，最后H8。
+
+
+v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a531d2e132a82e8c1a362c45435731da62`；各自从Git blobs冻结116运行文件，两份runtime字节相同（1ffedc exit0）。v27原session51203/af15da、PID3808814已实际fresh启动，日志确认从自身source导入、resume/warm_start均null；已有多个完整更新，初期约7.2秒/update，尚无baseline panel，不作为稳定性能结论。TensorBoard为 `outputs/moe_cts/iterations/v27/train/`。v28保持冻结等待，从零开始且不继承v27优化器/历史池；首个v27采样panel在iteration99。
