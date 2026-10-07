@@ -2238,3 +2238,6 @@ it499/snapshot10实际completed0（observer620ae3，root b863d8原report SHA/WLD
 
 
 it599/snapshot12实际completed0（原79020/4a2f98；root c86e7f原report SHA/WLD核对）：aggressive331/69/0、expansion371/29/0、defensive393/7/0、random393/7/0，胜率82.75%/92.75%/98.25%/98.25%，overall1488/112/0（93.00%）、mean105.194tick。314,572,800转移/19200tick-env，快照wall4443.730秒（74.062分钟）、worker112.433秒另记，CP `43181b0b…`、report `99446808…`。同一1600局CPU采样协议与完整赛程验收通过。aggressive较499下降1.25pp，固定.995/.999同点均85.75%；只列点估计，未新增bootstrap。原87039仍正常继续至实际最终200轮后判定平台，当前课程还未到.999；没有为了近期回落重启、修改配置或提前停止。
+
+
+it699/snapshot14实际completed0（root6bfed3原report SHA/WLD/采样协议验收）：aggressive337/63/0、expansion376/24/0、defensive393/7/0、random386/14/0，胜率84.25%/94.00%/98.25%/96.50%，overall1492/108/0（93.25%）、mean102.761tick。367,001,600转移/22400tick-env，快照wall5188.877秒（86.481分钟）、异步worker119.918秒另记，CP `c51d2c7d…`、report `6ef96d8a…`。CPU/highest/float32/B128/workers1/200地图双座位1600采样局的排程、哈希和TB验收通过。aggressive较599回升1.5pp，399以后在82.75%–84.25%间波动，未达到相对399锚点≥2pp的预声明提升；固定.995/.999同样700更新为86.00%/90.25%，仅点估计、未新增CI。课程尚未到最终.999，保留原训练到实际u1000..1199最少200轮，不因当前平台提前停止。
