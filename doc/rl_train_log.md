@@ -2358,7 +2358,7 @@ CLI实际run_config相对声明后的v27仅多出显式默认eval baseline_worke
 已预声明早期0..29单次telemetry窗口与可达到时的492..541中期窗口；读取return/raw advantage/critic EV、KL/clip/LR/entropy、actual C/U/wall与显存，旧固定gamma控制缺少的新增tag不补造。初期20次更新约1049万转移、约7.8–8.1秒/轮，仅运行性观察，不判断学习或速度收益；尚无baseline panel。TensorBoard：`outputs/moe_cts/iterations/v30/train/`。ResNet/ViT仍暂缓，后续单个λ.99、TB0..1000 tick衰减并实际留足最终200轮、H8最后的范围不变。
 
 
-v30预声明0..29实际CPU诊断71f614 exit0：30更新/15,728,640转移，C62.864秒/U177.165秒（每轮2.095/5.906），C+U吞吐65,528.2/s；u29完整wall247.900秒、63,447.5/s，启动开销包含在wall。1035个实际记录点全部finite，EV valid30/30；return std均值.61096/raw advantage std.07479、EV.85430、whole-update KL.01427/clip.15942/entropy4.54247，自适应LR均值.00935。是启动诊断，不与旧训练终局速度作公平窗口比较、不推为baseline学习效果。窗口内TB current allocated max12.248GiB/reserved14.221GiB，不是完整训练peak。固定γ未启用课程，Curriculum/*按自身实现不记录；Episode/*前五轮无完成episode，实际只有25点，不补0。只读统计最初沿用课程标签/密集episode假设而失败，修正统计输入后通过，无训练改动或重复运行。[实际早期诊断](../outputs/moe_cts/iterations/v30/diagnostic/early_training_dynamics.json)，SHA `f6f88552…`。唯一CPU selector observer69739/PID39345/start428799528动态观察真实panel直到终局排空；不新增对局/推理。
+v30预声明0..29实际CPU诊断71f614 exit0：30更新/15,728,640转移，C62.864秒/U177.165秒（每轮2.095/5.906），C+U吞吐65,528.2/s；u29完整wall247.900秒、63,447.5/s，启动开销包含在wall。1035个实际记录点全部finite，EV valid30/30；return std均值.61096/raw advantage std.07479、EV.85430、whole-update KL.01427/clip.15942/entropy4.54247，自适应LR均值.00935。是启动诊断，不与旧训练终局速度作公平窗口比较、不推为baseline学习效果。窗口内TB current allocated max12.248GiB/reserved14.221GiB，不是完整训练peak。固定γ未启用课程，Curriculum/*按自身实现不记录；Episode/*在u0/8/16/21/24未记录完成episode，实际只有25点，不补0；缺失位置以原诊断JSON为准。只读统计最初沿用课程标签/密集episode假设而失败，修正统计输入后通过，无训练改动或重复运行。[实际早期诊断](../outputs/moe_cts/iterations/v30/diagnostic/early_training_dynamics.json)，SHA `f6f88552…`。唯一CPU selector observer69739/PID39345/start428799528动态观察真实panel直到终局排空；不新增对局/推理。
 
 
 #### v30 首个采样点：初期样本效率上升，wall速度下降（训练继续）
@@ -2391,3 +2391,10 @@ aggressive较199增加2.25pp，达到预声明≥2pp趋势阈值，**趋势锚�
 it399/snapshot8实际completed0，209,715,200全局转移/51,200tick-env；aggressive352/48/0、expansion388/12/0、defensive393/7/0、random394/6/0，采样胜率88.00%/97.00%/98.25%/98.50%，overall1527/73/0（95.4375%）、mean77.729tick。快照training wall3502.211秒（58.370分钟），异步worker84.903秒单列；report SHA `6e79a619…`、CP `17918f86…`。CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局，唯一observer确认完整game/map/AI/seat/RNG、26个Perf/Eval TB点与实际配置/hash；独立aggregate2ff840 exit0由game重算counts/WLD/rates及selectionscore，root234049直接原report/index和验证SHA读回。[实际第四点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_399_validated_per_panel.json)，SHA `3b72e845…`、aggregatecert `b99818c8…`。
 
 aggressive较299提高3.75pp，达到预声明≥2pp趋势阈值，**锚点更新it399/88%**、四后续点计数重置；这不等于统计显著性结论。同样本固定.995 v27it399为84.50%/97.00%/99.75%/98.00%，点估计差+3.50/0/−1.50/+0.50pp；本点未新增CI，终局完整N/T对照再统计，99/199既有pair复用。发布时略少1h，实际评测与root记录时原训练已超过1h且持续更新；当前仍在学习，不能因最低时间到达而平台STOP。原43364/冻结源配置继续，终局后开发/八录像/行为与完整sample/wall分析、再选择λ基座的流程不变。
+
+
+#### v30 第五采样点：首个锚点后未提升点（训练继续）
+
+it499/snapshot10实际completed0，262,144,000全局转移/64,000tick-env；aggressive347/53/0、expansion387/13/0、defensive396/4/0、random387/13/0，采样胜率86.75%/96.75%/99.00%/96.75%，overall1517/83/0（94.8125%）、mean79.766tick。快照training wall4439.998秒（74.000分钟），异步worker85.665秒单列；report SHA `25368171…`、CP `15c8bf09…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局，唯一observer确认完整game/map/AI/seat/RNG、实际配置/hash及26个Perf/Eval TB点；独立aggregate a82ed0 exit0从game重算counts/WLD/rates和selectionscore，root0d319e直接原report/index与模型/两证书SHA读回。[实际第五点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_499_validated_per_panel.json)，SHA `1de7fd97…`、aggregatecert `d775b256…`。
+
+aggressive较399下降1.25pp，**锚点仍为399/88%，锚点后未达≥2pp改进点数1/4**。这一个波动点不足以判断平台或退化，不改变冻结配置，不恢复/重启训练。原43364/PID34774仍真实运行；完整N/T对照在终局一次完成，既有99/199配对复用。本次还将早期诊断文字中的缺失episode位置修正为JSON实际u0/8/16/21/24（非连续前五轮），未改任何原始指标或训练。中期492..541窗口须真实完成后再读取，最终best开发/八录像/行为分析、全程sample/wall曲线及后续单个λ、tick衰减、H8流程保持。
