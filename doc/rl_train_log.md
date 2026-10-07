@@ -2218,3 +2218,11 @@ overall1410胜/189负/1和，88.125%，mean120.889tick；aggressive增加47百�
 中期诊断预先固定492..541窗口（声明后的读回最新为u278），与v27/v28原中期窗口匹配：届时只读一次真实C/U/wall、common PPO/action/episode指标，并记录v29新增return/raw advantage/critic EV；两控制的缺失newtags不造比较。实际u1199完成后再验u999/u1000及u1000..1199是否有200轮.999/tick_scale1，以实际TB和累计样本证明最终阶段，不用计划日程代替完成。持续观察实际新selector直到真终局，不指定必须出现未发布的终局点。
 
 自身三个Git-tracked分析工具已从v29 source commit冻结一次（d83972 exit0，manifest SHA `3e24e576…`），无新训练/推理/评测；后续不重复冻结。真正终局后先不可变best捕获，再独立CUDA开发与joint-action记录，CPU原动作Core重放、失败分析和完整sample/wall曲线；录像输入需显式用development_report而非无trace的selector_report。之后才选择下轮gamma基座并推进rollout/lambda、tick0..1000及H8。架构探索仍暂缓。
+
+
+it299/snapshot6随后实际completed0（同一continuation observer79020/4090879，21df0d验收；root直接核对原report SHA）：四AI采样WLD317/83/0、377/23/0、393/7/0、392/8/0，胜率79.25%/94.25%/98.25%/98.00%，overall1479/121/0（92.4375%），mean102.103tick。157,286,400转移/9600tick-env，快照training wall2210.964秒（36.849分钟），异步worker119.068秒另记；checkpoint `bef5db5f…`、report `1494d6eb…`。aggressive再增6.25pp，仍低于固定.995同点84.5%、高于固定.999同点53.25%；这里仅列实际点估计，未新增该点配对CI，不伪造统计结果。原正式87039继续，课程尚在u1000前；新唯一CPU observer动态观察后续现有panel至真终局，同一training PID/start绑定且没有重启，不要求预算内必须发布某个预设末点。窗口492..541与实际最终200轮验证保持预声明。
+
+
+it399/snapshot8实际completed0（同一observer79020，4dd27c验收；root059108读原report，原CP/SHA与validation一致）：aggressive331/69/0、expansion374/26/0、defensive396/4/0、random391/9/0，胜率82.75%/93.50%/99.00%/97.75%，overall1492/108/0（93.25%），mean93.527tick。209,715,200转移/12800tick-env，快照training wall2953.199秒（49.220分钟）、wall吞吐71,013转移/秒，异步worker105.338秒另记；CP `f0c4e2bf…`、report `4986b018…`。aggressive增加3.5pp；与固定.995同点差−1.75pp、固定.999同点差+5.5pp，仅为selector点估计，这里未新增CI。四项>80%不替代完整课程验证，保持原训练与预声明最低最终200轮要求。
+
+已只读核对本版独立开发评测语义：frozen evaluate_builtin仅用policy配置和checkpoint actor权重，输入H4/action mask/K11及训练时clock normalization；不构造PPO、不调用critic、不将PBRS gamma或reward tick输入actor，也不将课程应用为另一次参数变换。因此保存初始.995的run_config不会把中途best转换为.995策略。终局报告另读实际TB selected_iteration的Curriculum/gamma，标明生成best那次更新所用的γ，并与初始.995、最终.999和真正完成的最终阶段分开；checkpoint本身积累了此前整个课程的学习。源路径为本版`evaluate_builtin.py:201–243,291–331`和`spatial_ppo.py:144–181`。
