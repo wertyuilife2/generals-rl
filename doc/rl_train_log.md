@@ -2,7 +2,8 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；四个正式1600局采样panel均completed0，最新iteration15为2/9.75/22.25/17.5%，对应16轮更新、8388608转移；仍为早期结果，训练继续。v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并退出，单seed结果尚不能证明信息改动的最终因果收益。容量阶段采用actor H4+K11、critic S+H4+K11；两种1M完整GPU门禁及v23/v24从零正式训练均已完成。两轮各20更新、10485760新转移，best对aggressive均2%；ViT计算吞吐快约29%，但整体强度未胜出。开发复测、八局录像、失败分析、完整曲线与地图簇配对结果已记录下文。两家实际profiler均已退出并各完成256次Adam更新；trace与GPU ABBA完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet完整门禁已启动。诊断不计正式训练或容量门禁。四个10M/100M完整门禁与正式训练、gamma/rollout/lambda、tick penalty 0..1000课程及足够末阶段训练、最后H8仍待完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1702,3 +1703,41 @@ ViT compute吞吐3161.93对2451.59/s（**1.290×**），完整wall2063.27对1682
 ![两种1M网络：实际完整训练时间](rl_train_figures/capacity_1m_terminal_wall.png)
 
 配对artifact为full_capacity_preparation/actual_1m_terminal_pair.json，SHA `889165e330cd66240ed8bd11e61145453e7971876d946a65961ead134ee1c39a`；两图actual c7c9d8/exit0并由root视觉核对。1M两轮完成不替代四个10M/100M完整门禁及从零正式训练。下一步实际profile两种1M更新、定位可优化成本，再继续容量阶段；gamma/rollout/lambda、tick TB0..1000且足够末阶段训练、H8最后仍全部保留。
+
+
+### 容量阶段性能诊断：1M ResNet / ViT 与重复 mask 校验
+
+两轮正式1M训练结束后，分别用各自冻结源码与配置执行实际PPO profiler，随机初始化seed20261017，真实N16384/T32、NT524288、4epoch/64minibatch/logical8192/physical512、BF16与FP32 master/storage。先收集完整rollout/GAE，再保留8候选加16压力尾部（24个whole policies），每家实际完成256次Adam/clip/observer。只捕获ordinary第3/4 logical batch及epoch边界第64批的短trace，关闭shape/stack/memory dump；不保存模型或运行新baseline比赛，不将诊断算作容量验收或正式训练。
+
+| 实测项目 | ResNet1M | ViT1M |
+|---|---:|---:|
+| Actor batch512 CUDA event p50 / p95 | 7.702 / 8.025 ms | 3.884 / 3.912 ms |
+| Actor batch512 同步wall p50 / p95 | 7.710 / 8.036 ms | 3.892 / 3.927 ms |
+| 含profiler instrumentation的完整update | 229.842 s | 177.468 s |
+| ordinary捕获kernel数 | 111620 | 75206 |
+| ordinary捕获kernel时长和 | 1385.009 ms | 1097.984 ms |
+| ordinary可可靠关联scope的kernel时长比例 | 30.324% | 29.686% |
+
+Actor延迟在profiler和包装全部移除后测量，8次warmup/20次测量、固定batch512；包含输入适配、backbone/head和FP32 logits，不含mask、采样、critic或游戏。ViT该测量降低49.57%，不能直接外推为完整self-play提速。完整update时间含instrumentation，不代替此前正式或无profiler的吞吐结果；CUDA event跨度也不是纯kernel时长和。
+
+ViT普通窗口actor/backbone捕获时长109.765ms，比ResNet201.921ms小；两者固定ResNet critic约203.158/202.093ms。大量kernel涉及卷积weight-gradient、GroupNorm backward和类型转换，但约60–70%的捕获CUDA时长在autograd worker上没有可靠scoped link，保持unknown；不能把主线程backward分类约28微秒解释成反向几乎免费，也不能据此给出完整GPU利用率或actor/critic反向占比。
+
+每32个physical forward的mask自身GPU计算均约1.904ms，但mask检查中的主机同步等待分别246.808/321.918ms。等待包含之前的GPU计算，actor更快时等待发生位置也会变化，不能把累计等待直接当作可节省收益。history/gather和Adam/clip未显示为优先成本；保留PPO监控，不用专门选择的epoch边界窗口占比外推整个训练。
+
+最小候选commit `ef2b38cfa8d620da524dd28545c256fc93e6b53e`：Spatial/Map公开API仍默认检查mask合法行；microbatched StudentPPO先检查整个logical batch，再在physical chunks保留shape检查、跳过重复合法行GPU→host检查。仅3个adapter生产文件改变，vendor、MDP、reward、动作概率、优化公式、学习率及RNG协议均不改。CPU新增microbatch套件10项及原有Spatial/Map/Student/Information20项通过；有效概率、梯度、参数、Adam与RNG逐位一致，末chunk非法行在任何physical forward/Adam之前拒绝。CPU actual48924/9c6cde、55181/0890f1均exit0。是否有实际性能收益仍由无profiler GPU A/B决定，不以CPU正确性替代测速。
+
+root actual ResNet63882/7d9e5e、ViT27289/1a1443均exit0；profile result SHA分别`f710cb59788e5e1de2fac3d6dfa5bd74e68d4db0a4f76ca8038611692236342b`、`8226924270bb9014f49a16ca283215e1361612906bd2225f33bf806f5a3abc28`。两家CPU trace分析实际62464/ab393d、70347/3b3bb2 exit0，root3035d8/1b6bac读回。入口为[ResNet trace分析](../outputs/moe_cts/iterations/full_capacity_preparation/performance_preparation/resnet_1m_profile/fresh_trace_analysis/analysis.md)、[ViT trace分析](../outputs/moe_cts/iterations/full_capacity_preparation/performance_preparation/vit_1m_profile/fresh_trace_analysis/analysis.md)。源码从Git blob冻结116文件，候选只改变3个runtime成员；A/B与后续10M/100M门禁使用明确的新source身份，v23/v24已完成训练的源码和成绩保持原绑定。
+
+
+### 两家1M重复mask校验：无profiler GPU ABBA实际结果
+
+候选代码commit `ef2b38c`；从Git blobs冻结116运行文件，父子25模块路径/SHA一致。ResNet原session52882/6756b2、ViT原87604/d21356均实际exit0。各自真实NT524288 rollout与24模型驻留后，从完全相同的初始权重、空Adam、LR和CPU/CUDA/monitor RNG执行control→candidate→candidate→control；每臂8个logical8192，physical512，首批预热，control/candidate各14个测量批。每臂8次Adam/clip/observer，四臂32次。control为每physical合法行校验，candidate每logical一次完整合法行校验，仍保留公开API、shape与缺失mask检查。
+
+|actor|control平均秒/logical|candidate平均秒/logical|耗时下降|样本访问吞吐提高|完整最终状态|
+|---|---:|---:|---:|---:|---|
+|ResNet1M|0.739740|0.726952|1.729%|1.759%|四臂逐位一致|
+|ViT1M|0.584546|0.570156|2.462%|2.524%|四臂逐位一致|
+
+完整状态核对包含模型、梯度、Adam、loss、LR、非计时monitor与CPU/CUDA/monitor RNG，最大差0；ResNet end-state SHA `4aa13cb0…`，ViT `162fb81e…`。实际result SHA分别`cf480abcd1cb648eb9c9f88a92cce9bc649767e676080a97df18d8326519a5ff`与`942db9c1bc50d54830cc2dad169bc36a7d9745c08820ac8ba2d2cf7a47743891`，配对原始JSON位于`outputs/moe_cts/iterations/full_capacity_preparation/performance_preparation/mask_validation_abba_pair.json`。
+
+这是截取8个逻辑批的短诊断，未执行完整256批、未做save/eval或正式学习，不作为容量/胜率结果。计时包含gather、完整PPO逻辑批体和末尾同步，排除状态复原、CPU snapshot以及monitor begin/finish，首8批没有epoch64 probe；不能等同完整一轮提速。profiler同步等待包含此前排队GPU工作，不能把246/322ms等待全当作可省成本。两个架构都有小幅稳定收益且数值完全一致，保留最小补丁。单卡空闲后已实际启动10M ResNet BF16/p256完整容量门禁（original39678，3f5884），不复用这次短诊断替代满存储/256Adam/1600局验收。

@@ -45,3 +45,9 @@ v24已完成四个采样selector（iteration3/7/11/15，均1600局completed0）�
 
 
 v24正式训练及1M配对已完成：original66320/22f0eb exit0，20更新/10485760转移/84.70分钟，5个完整采样selector，best19为2/12/8.75/11.5%，复用开发为2.5/11.75/12/9.5%。终局review、八录像2528tick/真实Core核验、失败分析、完整sample/wall图已记录训练日志。相同样本的ViT compute约1.290×、wall约1.226×，expansion较高、defensive/random较低，aggressive均2%；单seed浅历史池不构成架构上限。真实终局CPU pair274b77/exit0及地图簇CI完成，没有合成wall点。root空闲GPU开始ResNet1M性能诊断original63882，之后ViT；诊断不是新容量门禁或正式训练。四个10M/100M门禁/正式训练、gamma/rollout/lambda、tick0..1000课程和最后H8仍待完成。
+
+
+两家1M profiler均actual exit0，各完整256Adam；CPU trace分析完成。固定batch512 actor p50为ResNet7.702ms、ViT3.884ms，不能外推self-play速度。kernel归因缺口约60–70%，同步等待不直接等于可省成本。最小mask验证候选ef2b38c仅改变3个adapter、30个CPU checks通过；root已从该commit冻结116文件。先做无profiler短窗口GPU ABBA验证实际收益，再按实测配对门禁选择10M/100M执行设置；其后的全部课程和H8范围不变。
+
+
+两家1M无profiler mask ABBA已actual exit0：ResNet逻辑批均值0.739740→0.726952秒（−1.729%），ViT0.584546→0.570156秒（−2.462%），完整model/gradient/Adam/LR/loss/monitor/RNG逐位一致。短8批诊断不是完整容量/正式学习；保留ef2b38c最小补丁，10M ResNet完整门禁original39678已启动，随后按相同设置执行ViT。全部更大容量正式训练及后续gamma/rollout/lambda、TB0..1000课程与最后H8仍待完成。

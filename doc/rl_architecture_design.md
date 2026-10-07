@@ -1,6 +1,6 @@
 # Generals RL：成熟 ResNet / ViT 的逐地块适配设计
 
-日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。v23 ResNet1M与v24 ViT1M从零正式训练、五点完整曲线、开发评测与最佳模型录像均已完成；真实终局pair已执行，ViT计算更快而当前有限预算的强度未整体胜出。两轮结束后的实际profiler正在执行；10M/100M GPU门禁与正式结果尚待完成。随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
+日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。v23 ResNet1M与v24 ViT1M从零正式训练、五点完整曲线、开发评测与最佳模型录像均已完成；真实终局pair已执行，ViT计算更快而当前有限预算的强度未整体胜出。两家实际profiler、CPU trace与无profiler GPU ABBA均已完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet完整门禁已启动，10M/100M正式结果尚待完成。随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
 
 ## 1. 选择与来源
 
@@ -169,3 +169,6 @@ physical64的投影显示默认每100更新评测无法在1–3h内产生足够�
 候选整体CPU检查一次执行80 tests、117 subtests全部通过（28.47秒），日志 `architecture_preparation/candidate_integration_cpu_tests.log`；其中含网络/动态几何、微批次、原PPO监控及准备中的评测/课程合同。另用随机ResNet1M、0 PPO更新完成32局实际GPU BF16采样评估，四条真实loss轨迹共528tick在CPU/native/Core按记录动作精确重放并生成四段MP4；缺少的四类win明确标注。证据 `evaluation_preparation/cuda_smoke_random_1m/cuda_gate.json` 及 `analysis/demo_manifest.json`。该门禁父进程仅微小占用，不能证明训练满池下eval峰值或100M容量。
 
 容量审查补充：`PeriodicEvaluator` 的 CUDA 报告验收现同时检查显式配置的 matmul precision，以及 policy 的 AMP 推理 dtype（默认 float32，开启 AMP 则 bfloat16）；字段缺失或不符时拒绝评测。未配置 matmul precision 时不强制该项，CPU 路径保持原样。新增四项 stub 合同连同原精度元数据/worker 路由检查共七项 targeted CPU tests 通过，实际 session81866、exit0；没有运行新游戏或 GPU 测试。仅修改评测验收及既有测试，不改变 PPO/vendor，也不改变已冻结的 v21/v22。
+
+
+两家1M无profiler mask ABBA已actual exit0：ResNet逻辑批均值0.739740→0.726952秒（−1.729%），ViT0.584546→0.570156秒（−2.462%），完整model/gradient/Adam/LR/loss/monitor/RNG逐位一致。短8批诊断不是完整容量/正式学习；保留ef2b38c最小补丁，10M ResNet完整门禁original39678已启动，随后按相同设置执行ViT。全部更大容量正式训练及后续gamma/rollout/lambda、TB0..1000课程与最后H8仍待完成。
