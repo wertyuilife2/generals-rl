@@ -2092,3 +2092,5 @@ it599 / snapshot12 actual completed0，共1600采样局，CPU验收5a300a、root
 it699 / snapshot14 actual completed0、1600采样局，CPU验收2a78a3 exit0，root核对report SHA `8d60736b…`与实际WLD；observer11156/97dce2 exit0，两目标全完成。四AI胜/负/和分别361/39/0、390/10/0、399/1/0、396/4/0，胜率90.25%/97.50%/99.75%/99.00%，overall1546/54/0（96.625%）。累计367,001,600转移/22400tick-env，快照training wall5178.963秒（86.316分钟）、异步worker82.305秒，不相加；checkpoint SHA `0a2d4362…`。
 
 aggressive较it599上升4.5百分点，曲线仍有明显提升，继续原82663/冻结配置看799/899。该点比v27同700更新的86%高4.25百分点，仅是selector点估计；当前六点配对artifact截至599，没有把尚未计算的it699 CI或终局gamma优劣当结果。最佳独立开发评测、trace/demo、完整曲线及最终配对均待真正终局后完成。
+
+it799 / snapshot16随后actual completed0（d762c2 exit0，root核对report SHA `05a9bc91…`）：四AI采样WLD363/37/0、391/9/0、397/2/1、396/4/0，胜率90.75%/97.75%/99.25%/99.00%，overall1547/52/1（96.6875%）。累计419,430,400转移/25600tick-env，快照training wall5922.427秒（98.707分钟），异步worker89.838秒另记；checkpoint SHA `482aa279…`。aggressive只增加0.5百分点，是一个较平的点，不足以确认平台；原82663继续，原observer9949继续等it899。
