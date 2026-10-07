@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。新5da947a源码116文件/25模块父子CPU合同已通过，首个ResNet1M完整容量GPU门禁实际启动；尚未获得完整容量结果或任何容量正式学习曲线。全部六档、gamma/rollout/lambda、tick课程及H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。新5da947a源码116文件/25模块父子CPU合同已通过，ResNet1M与ViT1M的严格FP32/p512完整容量门禁均已actual exit0，验证NT524288、256Adam、24历史模型驻留和1600局采样CUDA评测；另有p1024的单logical短诊断，不等同完整门禁。尚无任何容量正式学习曲线，四个10M/100M门禁、全部六档正式训练及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1399,3 +1399,33 @@ TensorBoard与正式输出为`outputs/moe_cts/iterations/v22/train/`。早期实
 实际完整CPU评测复用v21固定best、seed/sampling1001042、200maps/AI×双座、B128/max2000：初版每batch重新spawn耗时89.245秒，比相同源码无诊断的串行80.478秒更慢，启动/清理抵消收益，该失败测量保留。跨13批次复用后actual session68918 exit0，耗时**72.900秒**（含启动/reset/清理1.505秒），整个function含setup72.996秒，较串行80.570秒约**1.104×**；三份完整1600局记录、117505决策tick及全部聚合精确相同。旧v21开发报告114.16秒含K/history观察器开销，不能拿它推导纯并行收益。
 
 证据`controller_parallel_preparation/persistent_full_1600_comparison.json`，配对运行实际session29337/68918均exit0。这是一个固定轻量模型的两次顺序CPU测量，v22训练同期继续，不是多次受控硬件benchmark，也不证明大模型GPU评测同样提速。当前保留可选项；后续共同容量GPU门禁将实际检验eval时间、parent/child显存和host RSS，再决定同档ResNet/ViT共同使用的worker数。
+
+
+## 容量阶段：1M 成对完整门禁与效率选择（尚未正式训练）
+
+采用已记录的 actor H4+K11、critic S+H4+K11。两种成熟 actor 共用独立 1,053,033 参数 ResNet critic、128-channel head、MDP与StudentPPO；严格FP32、matmul highest、两类TF32关闭，physical512/inference512。N16384×T32=524288，每轮E4/B64、logical8192，实际Adam/clip/logical-observer均256。运行源来自5da947a的116个Git blobs，helper当时SHA `b1d43760b020c6493df5bbfa267d641ecc72602807388afab097785e5966b18c`；基座配置SHA `0113142ccac7106422f0573d53e6237075e32f96bc5524231c552a5bcbd42372`。
+
+| 实际容量测量 | ResNet1M | ViT1M |
+|---|---:|---:|
+| Actor 参数 | 1,100,945 | 1,079,945 |
+| 完整NT rollout+GAE | 27.716s | 26.457s |
+| 完整256次Adam更新 | 235.925s | 224.653s |
+| 1600局采样CUDA评测 | 565.735s | 543.044s |
+| 全部门禁墙钟 | 840.012s | 804.545s |
+| rollout+update吞吐 | 1,989 transitions/s | 2,088 transitions/s |
+| parent peak allocated / reserved | 16.770 / 17.139 GiB | 17.599 / 18.141 GiB |
+| sampled whole-device peak | 18.294 GiB | 19.297 GiB |
+| host peak RSS | 2.061 GiB | 2.071 GiB |
+| runner完整model+Adam文件 | 26,290,505 B | 25,928,201 B |
+
+Res实际session82273、terminal cfa29e、exit0；ViT实际7690、terminal98c3a0、exit0，原parent/eval子进程已独立确认不存在。每个gate执行自己的随机模型和一次完整更新，不加载旧训练权重。rollout阶段实际使用8个原始随机pool模型；随后压力发布并保留16个退役handle，在update/publication/eval阶段共驻留24个真实whole policy。部分handle来自进行中对局，另有压力保留handle；这些同权重拷贝不代表24种已训练策略，也不测最大成熟pool分组的收集时间。
+
+CUDA child在parent learner、storage、Adam、历史模型仍驻留时完整执行200地图/AI×双座=1600局，batch128、max2000、seed/sampling271828、stochastic=true、workers1，实际report精度与父配置一致。评测前生产模块释放unused allocator cache，live tensors不释放；报告中的peak_reserved包括释放前峰值，不能当成评测结束的当前占用。模型与trace属于临时门禁产物，均已清理，只保留数值证据。随机门禁胜率不用于选强模型或宣称训练能力。
+
+保存、hash和publication时间远小于update及eval。上述单次顺序测量不能作为多repeat受控硬件排名：ViT这次更新约快4.8%，不是样本效率或最终强度结论。共同固定1M critic与精度改变也使tiny→capacity不再是纯actor参数量的因果比较。
+
+完整1600报告显示baseline controller/转换/反馈约占评测wall的78.4%（Res）与83.9%（ViT）；policy只有66.97/33.51秒。因此下一步同时关注PPO分块和现有CPU baseline worker并行收益，不靠减少赛程或NT制造提速。容量正式eval不能沿用每100更新：按目前速度，3h内都未必到该点。每4更新的共同候选间隔预计可保留多个曲线点，但正式cadence、timeout与budget reserve尚未冻结，必须结合最终实测选定。
+
+另已完成共同p1024的first-logical短诊断：Res session91542/terminal367a55 exit0、ViT89076/terminal0ecba9 exit0；完整NT后只执行1个logical8192/1次Adam，32局max64采样eval。parent peak allocated分别21.253/22.566GB，ViT仅剩0.774GB driver free。此诊断包含monitor.begin而跳过monitor.finish，不能将其时间乘256推算完整update，也不能替代1600/max2000门禁；尚未选择p1024为正式配置。
+
+原始结果与actual执行绑定见 `outputs/moe_cts/iterations/full_capacity_preparation/{resnet,vit}_1m_fp32_p512_full_v22info/{gate_result,execution,capacity_evaluation}.json`。成对证据 `paired_1m_fp32_p512_full_capacity.json` SHA `98fa3e15cb93add4ff88fbf48de8fa2b523e039a28f113f29fef1e469a5f4b85`。全部六档从零1–3h正式训练尚未开始；其后的gamma/rollout/lambda、tick0..1000课程和最终H8仍在完整范围内。
