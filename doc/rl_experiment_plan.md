@@ -51,3 +51,9 @@ v24正式训练及1M配对已完成：original66320/22f0eb exit0，20更新/1048
 
 
 两家1M无profiler mask ABBA已actual exit0：ResNet逻辑批均值0.739740→0.726952秒（−1.729%），ViT0.584546→0.570156秒（−2.462%），完整model/gradient/Adam/LR/loss/monitor/RNG逐位一致。短8批诊断不是完整容量/正式学习；保留ef2b38c最小补丁，10M ResNet完整门禁original39678已启动，随后按相同设置执行ViT。全部更大容量正式训练及后续gamma/rollout/lambda、TB0..1000课程与最后H8仍待完成。
+
+
+10M ResNet完整容量门禁original39678/f121a9 actual exit0（NT524288、256Adam/clip/observer、24驻留、save/额外publication、1600采样对局），完整wall16.265m；ViT10M同设置original88259/fb17d4已启动。v25/v26草案仍在ignored preparation，未选择或启动正式训练；等完整配对成本后共同确定评测cadence/timeout/reserve，分别commit/freeze并fresh训练1..3h。后续范围不变。
+
+
+两种10M完整门禁均actual exit0（Res39678/f121a9、ViT88259/a28934），CPU实际paired selection3f99fd完成：BF16/p256、pub2/eval每2updates、timeout900/reserve1680、min1h/max3h，共同配置仅runid/backbone不同。目标五点+余量9132s；明确约36.6%评测占比取舍和随机门禁吞吐限制。接下来各自commit/freeze，fresh v25/v26正式训练，容量验证不代替学习曲线；100M和后续课程/H8仍待完成。

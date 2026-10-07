@@ -1,6 +1,6 @@
 # Generals RL：成熟 ResNet / ViT 的逐地块适配设计
 
-日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。v23 ResNet1M与v24 ViT1M从零正式训练、五点完整曲线、开发评测与最佳模型录像均已完成；真实终局pair已执行，ViT计算更快而当前有限预算的强度未整体胜出。两家实际profiler、CPU trace与无profiler GPU ABBA均已完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet完整门禁已启动，10M/100M正式结果尚待完成。随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
+日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。v23 ResNet1M与v24 ViT1M从零正式训练、五点完整曲线、开发评测与最佳模型录像均已完成；真实终局pair已执行，ViT计算更快而当前有限预算的强度未整体胜出。两家实际profiler、CPU trace与无profiler GPU ABBA均已完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；两种10M完整门禁均actual exit0，BF16/p256及共同正式cadence/timeout/reserve已依据实测选择，10M/100M正式结果尚待完成。随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
 
 ## 1. 选择与来源
 
@@ -172,3 +172,9 @@ physical64的投影显示默认每100更新评测无法在1–3h内产生足够�
 
 
 两家1M无profiler mask ABBA已actual exit0：ResNet逻辑批均值0.739740→0.726952秒（−1.729%），ViT0.584546→0.570156秒（−2.462%），完整model/gradient/Adam/LR/loss/monitor/RNG逐位一致。短8批诊断不是完整容量/正式学习；保留ef2b38c最小补丁，10M ResNet完整门禁original39678已启动，随后按相同设置执行ViT。全部更大容量正式训练及后续gamma/rollout/lambda、TB0..1000课程与最后H8仍待完成。
+
+
+10M ResNet BF16/p256完整NT/256Adam/24驻留/save/publication/1600局采样门禁已actual exit0（39678/f121a9）：collect72.294s、update452.941s、complete eval437.927s，parent peak18.492GiB、driver peak20.042GiB，wall16.265m。ViT同配置原88259正在执行；p256与正式预算/cadence须待配对全部通过再选。容量随机结果不是正式学习曲线。
+
+
+配对ViT10M完整门禁88259/a28934 actual exit0：C46.985s/U332.565s/E384.105s、NT524288/256Adam/24驻留/1600采样全通过，update peak17.664GiB，driver19.100GiB。两家共同正式pub2/eval每2updates、timeout900/reserve1680、min1h/max3h，由实际成本与五点可行性单次选择；v25/v26将各自commit/freeze后从零训练。容量compute ViT约1.384×但没有正式胜率结论。
