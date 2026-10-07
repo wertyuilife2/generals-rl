@@ -2377,3 +2377,10 @@ it199/snapshot4实际completed0，104,857,600转移/25,600tick-env；aggressive3
 新一次仅第二点CPU配对ac41aa exit0，复用首点而不重算；相同104,857,600全局样本、200地图簇20kbootstrap/seed20261007。固定.995 v27同点81.75%/92.50%/99.25%/99.25%，overall93.1875%。v30−v27 aggressive+0.25pp，95%CI[−4.25,+4.75]；expansion+1.75pp[−1.25,+5.00]；defensive−0.75pp[−2.50,+0.75]；random−0.50pp[−2.00,+0.75]；overall+0.1875pp[−1.3125,+1.7500]。该点没有显示明确胜率增益，不能把首点改善外推为持续领先。对照真实snapshot wall1472.756秒，v30多210.149秒；worker耗时不加入训练时钟。[第二点配对](../outputs/moe_cts/iterations/v30/diagnostic/second_selector_matched_rollout_comparison.json)，SHA `a63428e6…`。
 
 相对首点aggressive增加38pp，学习仍明显，**趋势锚点更新it199/82%**；四后续点观察重计数，且未到最少1h，不触发平台STOP。原43364与冻结配置继续。N/T系统混杂、单训练seed与条件地图CI限制保持；两点不足以决定最终rollout、证明同强度或T因果。终局完整对照后才进入λ、TB0..1000 tick课程和最后H8，ResNet/ViT仍暂缓。
+
+
+#### v30 第三采样点：趋势锚点更新到299（训练继续）
+
+it299/snapshot6实际completed0，157,286,400全局转移/38,400tick-env；aggressive337/63/0、expansion380/20/0、defensive397/2/1、random390/10/0，采样胜率84.25%/95.00%/99.25%/97.50%，overall1504/95/1（94.00%）、mean88.562tick。快照training wall2574.043秒（42.901分钟），异步worker110.509秒另记；report SHA `e2e029c1…`、CP `ecda8cab…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样协议，完整1600游戏/map/AI/双座/逐game sampling seed、26个Perf/Eval TB点与实际配置/CP hash一致；唯一observer动态认证，独立aggregate2e2905 exit0从game导出counts/WLD/rates，root8a3e3b直接原report/index读回。[实际第三点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_299_validated_per_panel.json)，SHA `a31f8c75…`、aggregatecert `1868c7bd…`。
+
+aggressive较199增加2.25pp，达到预声明≥2pp趋势阈值，**趋势锚点更新为it299/84.25%**，四后续点观察重新计数；这不是统计显著性判断。同样本固定.995 v27it299胜率84.50%/95.50%/99.25%/99.75%，点估计差−0.25/−0.50/0/−2.25pp；本点未新增bootstrap，完整终局对照再统计，已有99/199 pair届时复用。前期44→82→84.25%仍在学习，当前未到最低1h，保持原43364/冻结配置继续。不以四baseline单点均>80%结束附件要求的完整逐项实验，也不声称泛化或世界级能力。
