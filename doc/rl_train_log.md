@@ -2368,3 +2368,12 @@ it99/snapshot2实际completed0，52,428,800转移/12,800tick-env；aggressive176
 新一次CPU paired map bootstrap9acc8b exit0（200地图簇/20k/seed20261007），仅比较v30it99与固定.995的v27it99，不重复已有gamma统计/游戏。相同52,428,800全局转移，v27胜率33.75%/58.50%/86.75%/82.50%，overall65.375%。v30−v27 aggressive+10.25pp、95%CI[+5.00,+15.75]；expansion+2.75pp[−2.50,+8.25]；defensive+4.50pp[+1.00,+8.00]；random+3.25pp[−1.50,+8.00]；overall+5.1875pp[+2.4375,+7.9375]。v27真实快照wall737.019653秒、v30830.505981秒，多93.486秒，同样本累计wall吞吐低11.26%；包含启动，不把这个首点当作稳定中期效率。worker时间不混入训练时钟，不以不同每环境tick直接比较样本量。[首点配对结果](../outputs/moe_cts/iterations/v30/diagnostic/first_selector_matched_rollout_comparison.json)，SHA `ca27a5d5…`。首次只读pair算完后误读不存在的configuration.json而未写产物（e0dc58 exit1），更正为实际frozen_config.json后完成；执行收据保留失败，无GPU/训练/源码改动。
 
 首点支持初期样本效率改善，但只有一个训练seed与一个早期快照，N/T联合变化也不能隔离T因果；不同wall下的最佳模型尚未比较，不能决定最终rollout基座。初始趋势锚点it99/aggressive44%；尚不足至少1h预算，原43364继续。后续真实panel若提升≥2pp则更新趋势锚点，连续四后续点无该提升再结合≥1h正常STOP，最长3h优先；最终仍需best独立CUDA开发、八局真实录像/失败分析、完整sample/wall曲线和v27对照，之后才推进λ。
+
+
+#### v30 第二采样点：胜率继续学习，与对照接近（训练继续）
+
+it199/snapshot4实际completed0，104,857,600转移/25,600tick-env；aggressive328/72/0、expansion377/23/0、defensive394/6/0、random395/5/0，采样胜率82.00%/94.25%/98.50%/98.75%，overall1494/106/0（93.375%）、mean98.936tick。快照training wall1682.904秒（28.048分钟）、累计wall吞吐62,307.5转移/秒，异步worker97.329秒单列；report SHA `aa90b76d…`、checkpoint `a89c514c…`。唯一observer69739验收全部1600局游戏/map/AI/seat/逐game采样seed及26个Perf/Eval TB点；实际独立aggregatecert c80016 exit0，root e17240直接原report/index一致。验证SHA `81e3c27b…`、aggregatecert `5b6314b4…`。[第二点实际验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_199_validated_per_panel.json)。
+
+新一次仅第二点CPU配对ac41aa exit0，复用首点而不重算；相同104,857,600全局样本、200地图簇20kbootstrap/seed20261007。固定.995 v27同点81.75%/92.50%/99.25%/99.25%，overall93.1875%。v30−v27 aggressive+0.25pp，95%CI[−4.25,+4.75]；expansion+1.75pp[−1.25,+5.00]；defensive−0.75pp[−2.50,+0.75]；random−0.50pp[−2.00,+0.75]；overall+0.1875pp[−1.3125,+1.7500]。该点没有显示明确胜率增益，不能把首点改善外推为持续领先。对照真实snapshot wall1472.756秒，v30多210.149秒；worker耗时不加入训练时钟。[第二点配对](../outputs/moe_cts/iterations/v30/diagnostic/second_selector_matched_rollout_comparison.json)，SHA `a63428e6…`。
+
+相对首点aggressive增加38pp，学习仍明显，**趋势锚点更新it199/82%**；四后续点观察重计数，且未到最少1h，不触发平台STOP。原43364与冻结配置继续。N/T系统混杂、单训练seed与条件地图CI限制保持；两点不足以决定最终rollout、证明同强度或T因果。终局完整对照后才进入λ、TB0..1000 tick课程和最后H8，ResNet/ViT仍暂缓。
