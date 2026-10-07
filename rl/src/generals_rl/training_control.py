@@ -12,6 +12,7 @@ class TrainingControlConfig:
     min_improvement: float = 0.02
     keep_checkpoints: int | None = None
     budget_reserve_seconds: float = 0.0
+    min_completed_updates: int = 0
 
     def __post_init__(self):
         for name in ("max_seconds", "min_seconds", "min_improvement", "budget_reserve_seconds"):
@@ -33,6 +34,9 @@ class TrainingControlConfig:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
                 raise ValueError(f"training_control.{name} must be a positive integer or null")
+        if (isinstance(self.min_completed_updates, bool)
+                or not isinstance(self.min_completed_updates, int) or self.min_completed_updates < 0):
+            raise ValueError("training_control.min_completed_updates must be a nonnegative integer")
 
 
 class TrainingStopped(Exception):
@@ -60,7 +64,7 @@ class TrainingController:
         else:
             self.evaluations_without_improvement += 1
 
-    def stop_reason(self, elapsed_seconds, *, evaluation_healthy=True):
+    def stop_reason(self, elapsed_seconds, *, evaluation_healthy=True, completed_updates=0):
         if self.settings.max_seconds is not None and elapsed_seconds >= self.settings.max_seconds:
             return "max_seconds"
         if (self.settings.budget_reserve_seconds > 0
@@ -69,6 +73,7 @@ class TrainingController:
         patience = self.settings.plateau_evaluations
         if (patience is not None and evaluation_healthy
                 and elapsed_seconds >= self.settings.min_seconds
+                and completed_updates >= self.settings.min_completed_updates
                 and self.completed_evaluations >= patience + 1
                 and self.evaluations_without_improvement >= patience):
             return "evaluation_plateau"

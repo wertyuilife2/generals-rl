@@ -83,6 +83,57 @@ class TrainingControlTests(unittest.TestCase):
         self.assertIsNone(controller.stop_reason(20))
         self.assertEqual(controller.stop_reason(100, evaluation_healthy=False), "max_seconds")
 
+    def test_plateau_minimum_updates_does_not_override_time_or_reserve(self):
+        self.assertEqual(TrainingControlConfig().min_completed_updates, 0)
+        controller = TrainingController(TrainingControlConfig(
+            max_seconds=100, budget_reserve_seconds=40,
+            plateau_evaluations=1, min_completed_updates=5))
+        point = {"selection_score": [0.4, 0.4, 0.6]}
+        controller.on_evaluation(point)
+        controller.on_evaluation(point)
+        self.assertIsNone(controller.stop_reason(20, completed_updates=4))
+        self.assertEqual(controller.stop_reason(20, completed_updates=5), "evaluation_plateau")
+        self.assertEqual(controller.stop_reason(60, completed_updates=4), "budget_reserve")
+        self.assertEqual(controller.stop_reason(100, completed_updates=4), "max_seconds")
+
+    def test_plateau_minimum_updates_uses_absolute_resumed_callback_count(self):
+        config = small_training_config()
+        config["evaluation"] = {"enabled": False}
+        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+        observed = []
+        original_stop_reason = TrainingController.stop_reason
+
+        def capture_stop(controller, elapsed, **kwargs):
+            reason = original_stop_reason(controller, elapsed, **kwargs)
+            observed.append((kwargs["completed_updates"],
+                             controller.evaluations_without_improvement, reason))
+            return reason
+
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            source = Path(directory) / "source"
+            train(config, source, iterations=2)
+            config["evaluation"] = {"enabled": True, "every_n_snapshots": 1}
+            config["training_control"] = {"plateau_evaluations": 1, "min_completed_updates": 5}
+            with patch("generals_rl.train.PeriodicEvaluator") as evaluator_type, \
+                    patch.object(TrainingController, "stop_reason", capture_stop):
+                evaluator = evaluator_type.return_value
+                evaluator.describe.return_value = {"failed": []}
+
+                def fixed_evaluation(*args, **kwargs):
+                    evaluator_type.call_args.kwargs["on_complete"]({"selection_score": [0.4, 0.4, 0.6]})
+
+                evaluator.on_snapshot.side_effect = fixed_evaluation
+                output = Path(directory) / "resumed"
+                summary = train(config, output, iterations=6, resume=str(source / "checkpoint.pt"))
+            self.assertEqual(observed, [(3, 0, None), (4, 1, None), (5, 2, "evaluation_plateau")])
+            self.assertEqual(summary["stop_reason"], "evaluation_plateau")
+            self.assertEqual(summary["iterations"], 3)
+            self.assertEqual(summary["steps_per_environment"], 12)
+            checkpoint = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
+            self.assertEqual(checkpoint["iter"], 4)
+            for key in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+                self.assertEqual({int(state["step"]) for state in checkpoint[key]["state"].values()}, {20})
+
     def test_time_or_file_stop_saves_a_complete_update_and_does_not_require_the_full_tick_budget(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             for reason in ("max_seconds", "requested_stop"):
@@ -123,6 +174,9 @@ class TrainingControlTests(unittest.TestCase):
                  {"budget_reserve_seconds": -1}, {"budget_reserve_seconds": float("nan")},
                  {"budget_reserve_seconds": float("inf")}, {"budget_reserve_seconds": True},
                  {"budget_reserve_seconds": "1"}, {"budget_reserve_seconds": 1},
+                 {"min_completed_updates": True}, {"min_completed_updates": -1},
+                 {"min_completed_updates": 1.0}, {"min_completed_updates": "1"},
+                 {"min_completed_updates": None},
                  {"max_seconds": 100, "budget_reserve_seconds": 100},
                  {"max_seconds": 100, "budget_reserve_seconds": 101},
                  {"max_seconds": 100, "min_seconds": 60, "budget_reserve_seconds": 41})

@@ -259,6 +259,7 @@ v9 起每个方案均从随机权重、新 optimizer、新历史池训练，不�
 配置使用本次 JSON 覆盖默认值。`--resume` 则继承原运行配置并恢复 optimizer 和历史池，二者互斥。
 可用 `matmul_precision=high` 启用本轮 float32 矩阵乘法加速，默认精度沿用进程设置。
 `training_control` 可设置时限、评估平台停止和完整 checkpoint 保留数量；开启早停时，采样预算为上限，实际步数和停止原因写入摘要。
+`training_control.min_completed_updates` 默认0，仅推迟评估平台早停，按包括 resume 历史在内的绝对已完成更新数判断；时限和预算预留仍优先停止。
 在该 run 输出目录创建 `STOP` 文件，可在当前完整更新结束后保存 checkpoint、完成已排队评估并写入摘要，再停止该轮训练。
 `evaluation.keep_snapshots` 限制已完成评估的权重数量，另保留按四 AI 最低胜率优先挑选的 `evaluations/best.pt`。
 TensorBoard 包含四 AI 与最低胜率、吞吐、显存、进程峰值内存及评估队列长度。
