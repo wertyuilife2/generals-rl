@@ -2167,3 +2167,16 @@ it999 / snapshot20 actual completed0（持久CPU observer4024597，744a7a exit0�
 四败局均真实夺将而非timeout，所有重建learner mask合法；终局被跳过的动作不是非法动作。观察支持继续研究信用分配和时间尺度，但未证明gamma因果作用、事实通道使用效果或普遍败因；不据此加入baseline特制规则。
 
 原始结果：[终局review](../outputs/moe_cts/iterations/v28/diagnostic/terminal_training_review.json)、[固定gamma最终配对](../outputs/moe_cts/iterations/v28/diagnostic/final_fixed_gamma_comparison.json)、[开发1600局](../outputs/moe_cts/iterations/v28/final_best/development_report.json)、[录像](../outputs/moe_cts/iterations/v28/final_best/analysis/videos/)、[重建行为](../outputs/moe_cts/iterations/v28/final_best/analysis/recorded_behavior_final.json)。TB：`outputs/moe_cts/iterations/v28/train/`。
+
+
+### v29 — gamma 课程（2026-10-08，正式训练已启动）
+
+在v27/v28实际终局、1600局开发对照、完整曲线与八局录像分析完成后，从已提交配置ee60ca14冻结的116源文件启动新v29。正式session87039、launch277677，PID4062503/start_ticks427497185；自身source/config启动回读3cbb17，run_config与冻结JSON相同，resume/warm_start均null、历史池全新。v27/v28结论commit1efe80f；不用旧权重起跑，也不继续ResNet/ViT实验。
+
+只检验gamma课程：PPO与PBRS在采集前同步 `γ(u)=.995+.004×min(u/1000,1)`，绝对TB u1000达到.999。tick_scale始终1、tick−.001，PBRS资源/胜负系数不衰减。其他设置同固定gamma控制：N16384/T32/NT524288/E4/B64，λ=.95、H4K11/SH4K11小网络、episode1024、历史池8/pub50、100更新一次1600局采样CPU异步selector、high和FP32张量。每轮目标在同一rollout/GAE内一致，跨rollout课程改变目标且episode可跨越边界，不称为全程平稳MDP。
+
+预算1–3h、min_completed_updates1200：平台早停不能抢在完成u1000..1199的200个最终gamma更新之前；预算仍优先，未完成阶段如实记录。人工趋势规则延续固定gamma的≥2百分点aggressive提升/四个后续selector无此提升，并同时满足最低更新与时间要求；最长3h停止。在最终阶段仍上升则继续至预算。不能为了赶时间缩短1000日程，也不把达到80%当实验完成。
+
+新版return/advantage/critic EV仅加入诊断（68c95fe），不改变训练目标或随机采样。首3轮真实TB c5f0a2：gamma为.995/.995004/.995008、tick_scale1；raw/buffer advantage及有效critic EV均已记录且有限，归一化buffer std约1。这只是启动验证，不是课程结果或稳定吞吐。以后用实际C/U、whole-update KL/clip、自适应LR、return/raw advantage尺度与EV，联合解释曲线。snapshot/checkpoint上限3、历史池8仍保持。
+
+TB：`outputs/moe_cts/iterations/v29/train/`；原始stdout：`outputs/moe_cts/iterations/v29/train.stdout.log`。先观察first30实测计算成本与it99/199的真实采样panel，不改变正在运行的配置。gamma阶段完成后才固定下轮基座，随后单一rollout候选N4096/T128、单一λ=.99、TB0..1000 tick衰减、最后H8。
