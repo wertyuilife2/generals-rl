@@ -2115,3 +2115,7 @@ v27正式训练已结束，其全部九个selector点均已与v28对应点对齐
 ![固定gamma共同样本坐标](rl_train_figures/v27_v28_fixed_gamma_common_samples.png)
 
 ![固定gamma真实快照时钟](rl_train_figures/v27_v28_fixed_gamma_common_wall.png)
+
+it999 / snapshot20 actual completed0（持久CPU observer4024597，744a7a exit0读取验证；root核对原report SHA `b2f0bfe1…`）：aggressive361/39/0、expansion389/11/0、defensive400/0/0、random400/0/0，胜率90.25%/97.25%/100%/100%，overall1550/50/0（96.875%）。累计524,288,000转移/32000tick-env；快照training wall7409.136秒（123.486分钟），独立worker97.168秒；checkpoint `cf6f31f2…`。aggressive较上点回落1.25百分点，best仍899。
+
+在1099结果出现前明确本轮平台观察规则：699的90.25%是最后一次≥2百分点的aggressive跃升；随后799/899/999分别90.75%/91.50%/90.25%。若1099仍低于92.25%，四个后续点、约50分钟没有≥2百分点提升，则正常STOP完成本轮；若达到该值则继续，最长3h预算不变。这是趋势停止规则，不将2百分点当统计显著性检验。保留实际best快照，不以最后一个模型替代best；之后补齐终局开发、录像/失败分析及完整曲线。
