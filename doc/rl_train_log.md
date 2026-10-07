@@ -2398,3 +2398,25 @@ aggressive较299提高3.75pp，达到预声明≥2pp趋势阈值，**锚点更�
 it499/snapshot10实际completed0，262,144,000全局转移/64,000tick-env；aggressive347/53/0、expansion387/13/0、defensive396/4/0、random387/13/0，采样胜率86.75%/96.75%/99.00%/96.75%，overall1517/83/0（94.8125%）、mean79.766tick。快照training wall4439.998秒（74.000分钟），异步worker85.665秒单列；report SHA `25368171…`、CP `15c8bf09…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局，唯一observer确认完整game/map/AI/seat/RNG、实际配置/hash及26个Perf/Eval TB点；独立aggregate a82ed0 exit0从game重算counts/WLD/rates和selectionscore，root0d319e直接原report/index与模型/两证书SHA读回。[实际第五点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_499_validated_per_panel.json)，SHA `1de7fd97…`、aggregatecert `d775b256…`。
 
 aggressive较399下降1.25pp，**锚点仍为399/88%，锚点后未达≥2pp改进点数1/4**。这一个波动点不足以判断平台或退化，不改变冻结配置，不恢复/重启训练。原43364/PID34774仍真实运行；完整N/T对照在终局一次完成，既有99/199配对复用。本次还将早期诊断文字中的缺失episode位置修正为JSON实际u0/8/16/21/24（非连续前五轮），未改任何原始指标或训练。中期492..541窗口须真实完成后再读取，最终best开发/八录像/行为分析、全程sample/wall曲线及后续单个λ、tick衰减、H8流程保持。
+
+
+#### v30 预声明中段492..541：采集更慢，更新耗时相同
+
+50个真实完整更新、26,214,400转移；一次CPU读取 d3ebae exit0，root15d036读回SHA/结果。39个tag共1950点全部finite、无重复/缺失，critic EV valid50/50、每轮256个Adam minibatch。使用旧v27/v28/v29同区间缓存，未重读旧TB或补造v27/v28不存在的return/A/EV；课程v29仅作背景，主要控制仍是同γ.995的v27。[中段真实诊断](../outputs/moe_cts/iterations/v30/diagnostic/mid_training_dynamics.json)，SHA `de1b7679…`。
+
+| 同492..541窗口 | v27 N16384/T32 | v30 N4096/T128 |
+|---|---:|---:|
+| collection合计 | 75.678秒 | 173.106秒 |
+| PPO update合计 | 295.764秒 | 295.989秒 |
+| 完整训练wall差分 | 371.754秒 | 469.739秒 |
+| wall转移/秒 | 70,515.4 | 55,806.3 |
+| whole-update KL均值 | .02224 | .01397 |
+| clip fraction均值 | .12768 | .10212 |
+| entropy均值 | .67131 | .56288 |
+| rollout WAIT均值 | .20045 | .33670 |
+| backtrack均值 | .12900 | .04461 |
+| value loss均值 | .04171 | .05229 |
+
+v30中期wall吞吐低20.86%；采集合计2.287倍，PPO update仅1.00076倍，每轮C3.462/U5.920秒。固定NT并未带来速度收益；T增加导致更多环境/策略调用，N减少后的kernel开销与占用可能参与，但没有单独profiling隔离每项原因。异步worker时间未再加到训练wall。窗口内TB current allocated max12.248GiB/reserved14.287GiB，对照13.538/16.324GiB；这是当前分配观测，不能当完整正式训练峰值。当前方案省逐环境资源但采集效率下降，最终仍结合完整样本/wall胜率和best开发结果选择λ基座。
+
+v30 return std均值.58193、raw A std.23986、critic EV.82997；最后LR处于floor1/50、ceiling48/50，区间共52次自适应变化。KL/clip较低和backtrack减少伴随WAIT增多、entropy降低，不自动等于更好的守备或探索，也不能解释单个499胜率下降。self-play episode批次均长102.661tick/win.70754，不是baseline胜率。未见NaN或PPO采样/更新数量失配；保持原冻结实验继续观察，无奖励、学习率或历史池临时补丁。完整任务仍包括单λ候选、用户指定TB0..1000的tick衰减并实际200轮最终阶段、H8最后；剩余容量探索保持暂缓。
