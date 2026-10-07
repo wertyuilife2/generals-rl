@@ -93,6 +93,8 @@ MAC 表是按 Conv/Linear 及 attention QK/AV 乘加推导的估算，C=61、81 
 4. **评价协议**：同一 sampled eval、相同地图与双座位、独立 held-out map/sampling seeds；报告每个 baseline 和均值。Baseline 只用于测量，不混入 self-play。选出的最佳 checkpoint 还应与 v17 以及同阶段其他策略做有限 cross-play，避免只以 baseline 排名推导世界冠军级能力。
 5. **选择规则**：选择吞吐与胜率 Pareto frontier 上适合本机的配置，不只看参数更大；若 100M 在三小时内学习很少，记录低采样量及更新次数，不能据此宣布 100M 的长期能力较差。
 
+归因边界：六个容量条件使用同一约1M ResNet critic，能比较配对actor架构与容量；轻量v19–v22的critic仅约5–14k，因此tiny→MapPPO还同时改变critic容量与计算设置，不能将系统差异全部归因actor变大。若需要这一因果结论，须另加tiny actor＋同一1M critic对照，而不是用六档现有比较代替该对照。可变尺寸的前向合同也只证明能运行，不证明已完成多尺寸训练或尺寸外泛化。
+
 先进行短 warm-up 的真实计算基准，再决定 N/T 与 physical microbatch；不凭参数量直接承诺 GPU 能容纳或能达到某个吞吐。三档都保留配置并实际测量，100M 若需要减环境数量，使用与它配对的 ResNet/ViT 同样 N/T，另用轻量对照量化 rollout 长度变化的影响。
 
 ## 6. 单机显存、长 rollout 与 100M
