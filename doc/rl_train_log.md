@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；首个iteration3正式1600局采样panel为1/8/7.75/13.25%，仅为4轮更新的早期结果，训练继续。v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；四个正式1600局采样panel均completed0，最新iteration15为2/9.75/22.25/17.5%，对应16轮更新、8388608转移；仍为早期结果，训练继续。v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1496,6 +1496,42 @@ snapshot2 / iteration3，即4轮完整更新、2,097,152条新转移、每环境
 该panel对应实际TB `Perf/wall_seconds=1264.937`，完整wall吞吐1657.91 transitions/s；step2→3增加616.217秒，已包含此次同步eval，画wall曲线时不另加worker时间。训练compute约2450 transitions/s、完整update约191秒；初期history-pool episode胜率不能作为baseline强度。仅4轮更新的一个panel不足以判定容量效果或平台，至少1h和多个健康评测后才按预定停止规则判断。
 
 checkpoint SHA `bff137cce5d39835507edfb2bcd4e1b5a9bea93d62bc66089c60a51b5f61742d`，report SHA `c7b6cda2f60a090a063e337c49ba1d6554228dcda7146ddc8beeb821097bb61b`。独立审查 `outputs/moe_cts/iterations/v23/diagnostic/first_eval/readback_contract.json`（actual379c8c exit0，root92d80a读回）验证赛程、聚合和8条真实胜负trace的SHA/header/3324joint-tick结构；本阶段未做Core重放，终局选定best后再生成录像及失败分析。原training session12099仍运行；v24未启动。
+
+### v23 三个正式采样点：尚未终局
+
+第三个selector snapshot6/iteration11已completed/returncode0、原eval PID3477970退出。1600局184胜1329负87和，四AI各400局；CP/report SHA、全部对局数量与15组聚合统计、TB四胜率和同步eval后wall已CPU读回匹配。未重复第一panel的完整赛程/trace审计，没有新比赛。三个实际点如下：
+
+| iteration / 新转移 | aggressive | expansion | defensive | random | 含同步eval的wall分钟 |
+|---|---:|---:|---:|---:|---:|
+| 3 / 2,097,152 | 1.00% | 8.00% | 7.75% | 13.25% | 21.08 |
+| 7 / 4,194,304 | 1.25% | 8.75% | 18.75% | 17.50% | 41.63 |
+| 11 / 6,291,456 | 1.75% | 7.75% | 21.75% | 14.75% | 62.51 |
+
+aggressive仍弱，defensive早期提高，另外两项波动；仅三个早期点不能判定容量收益、学习上限或平台。selector复用选模地图，最终另做开发评测。同步eval耗时已经包含在横轴中，不重复相加。原训练继续，v24等待实际终局；第三点CP SHA `273c3054c77c4b0a47cb29216a490bd60f87e06e79174b83a9f42e80b26e33a7`，窄读回`v23/diagnostic/third_eval_readback.json`（actual375515 exit0，root396084），绘图actual3cf3c2 exit0，root视觉核验。
+
+![v23早期三个采样点：按新转移](rl_train_figures/v23_partial_iteration11_samples.png)
+
+![v23早期三个采样点：按完整wall](rl_train_figures/v23_partial_iteration11_wall.png)
+
+随后snapshot8/iteration15第四个1600局selector也completed0：aggressive **2.00%**、expansion **9.75%**、defensive **22.25%**、random **17.50%**，总体206胜1307负87和（12.875%）。post-sync TB wall4997.485秒（83.29分钟），已包括390.551秒worker；四WR、CP/report SHA、specific PID3493318退出及聚合统计经窄CPU读回匹配（actual ea06cc exit0，`diagnostic/fourth_eval_readback.json`）。上图保留明确的前三点窗口；最终另画完整曲线。现有4个健康panel仍未满足预定至少5点的平台停止条件，原v23继续，不能当作终局结果。
+
+### v23 早期PPO与效率观察
+
+固定06:05 UTC event截面：collection/Loss/Episode覆盖iteration0..15，PPO/resource/wall仅0..14，因为第15轮同步eval当时尚未返回；缺项保留null，不把后来的第四panel补进旧截面。16轮collection均值22.808秒、learning190.876秒（标准差0.223秒），compute2454 transitions/s；更新占两者合计89.3%，本窗口没有更新持续变慢的证据。当前仅定位到更新阶段的成本，尚无profiler证明具体算子瓶颈；性能诊断等待v23/v24都真实结束再执行。
+
+15个可用整轮probe的exact KL为0.0210..0.0442、无明显尖峰；训练minibatch clip fraction首4轮均值27.5%到末4轮35.6%，adaptive LR真实调整，范围1e−5到约0.001297。joint entropy由1.943到4.703，但probe WAIT概率45.53%到3.96%、WAIT/MOVE gate熵0.635到0.135，末次约98.86%整轮KL来自条件MOVE变化。不同rollout状态和合法mask在变，且未记录合法动作数，不能把熵增长直接归为退化或战略进步。相对target .02的偏离也说明minibatch adaptive不等于整轮KL硬上限。
+
+完成局的history-pool胜率约78..92%，不是baseline强度；TB没有各snapshot胜率/活动人数，不能归因于随机seed0对手。episode约84到466tick、未折扣shaped return约0.246到−4.019；自然终局的未折扣PBRS和包含`−(1−gamma)*sum(Phi)`，局变长且资源势增加也会使raw return更负，不能据此判断折扣目标下降。clipped value objective不是最终raw MSE/EV；parent allocator采样也不是整卡峰值。实际CPU分析0b73e3 exit0，root fcacda/7d0982读回，源event副本SHA `8893e4ae609a74f1b3225ef1ba01a77d03422202a780133ab0bad9922845414c`，详细值与范围见`v23/diagnostic/early_learning_dynamics_iteration15.json`。
+
+### v23 早期失败录像：snapshot4 / iteration7
+
+保留第二个正式selector的不可变快照与原动作记录，CPU按记录联合动作重放并渲染四AI各一胜一负，共8局、4466tick。冻结分析工具实际exit0，native/Core逐tick状态与原记录匹配；没有重新加载策略推理或生成新比赛。该模型只有8轮更新、每环境256tick，是早期行为观察，不能当作终局best或用8段录像估计胜率。
+
+aggressive败局131tick，全局从未合法看到敌方本营。最后决策时，己方本营35只有2兵，相邻可见敌军34有7兵、可出6兵；模型却从相邻友军44向53出5兵，随后本营被攻占。自己另有21兵在距离本营曼哈顿3格处连续18个决策未动。这支持检查兵力调度与本营防守，不能归因为“发现敌将后忘记”，也未验证替代动作能赢下整局。
+
+另外三类败局同样有局部防守不足：expansion末期仍从本营出兵；defensive总兵248对202、领土40对31，却让7兵本营暴露于相邻34兵敌军，seat0先攻占后模型的计划WAIT未执行；random末期主力66兵距本营5格，邻军已不足以抵挡真实半兵进攻。上述为选中录像的事实描述，不是总体败因比例或容量瓶颈的因果证明。defensive胜局1376tick超过训练1024上限，属于现有eval max2000协议。
+
+详细观察：[observations.md](../outputs/moe_cts/iterations/v23/diagnostic/middle_at_iteration7/observations.md)；录像：[aggressive loss](../outputs/moe_cts/iterations/v23/diagnostic/middle_at_iteration7/analysis/videos/aggressive_loss.mp4)、[aggressive win](../outputs/moe_cts/iterations/v23/diagnostic/middle_at_iteration7/analysis/videos/aggressive_win.mp4)，其余六段在同一目录。执行与SHA记录为该目录`execution.json`，actual CPU replay/render session80094 terminal907232 exit0；仅此次早期捕获约39MiB。渲染结束早于第三次eval开始86.6秒，但与活动训练共享过CPU，wall曲线保留实际耗时，不当作无干扰微基准。
 
 ### v24：配对ViT 1M从零self-play配置
 
