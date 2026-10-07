@@ -2345,3 +2345,14 @@ episode批次平均长度由中期126.084到最终阶段169.993、末段180.614t
 | random | [win](../outputs/moe_cts/iterations/v29/final_best/analysis/videos/random_win.mp4) | [loss](../outputs/moe_cts/iterations/v29/final_best/analysis/videos/random_loss.mp4) |
 
 v29的训练、selector排空、best开发/录像、失败分析、全程曲线及三组对照均实际完成；整个后续迭代任务继续。TensorBoard位于`outputs/moe_cts/iterations/v29/train/events.out.tfevents.*`。
+
+
+### v30：N4096/T128较长rollout正式启动（2026-10-08）
+
+根据完整gamma结果采用固定γ.995，配置commit `6a83721f7bba43694ae0d1997156bad14049f362`；从v27只改N16384→4096、T32→128及run_id。NT524288/E4/B64/logical8192/256Adam、λ.95、H4K11/SH4K11小网络、episode1024、tick/PBRS/terminal、纯历史池pool8/pub50、CPU1600局采样eval100、seed20261013、save2000/ring3均保持。不是纯T消融：学生更新间隔32→128tick，每lane pub1600→6400/eval3200→12800，时间相关性、reset混合与对手cadence同时变化；按同全局样本及真实wall比较，不承诺四倍速度。
+
+现成Python环境CPU dataclass加载与精确三叶子diff已actual exit0。116个运行文件仅从本commit的Git blobs冻结一次，manifest SHA `c97bf37e2618ccc8b466604ace14f8208b6a86ca3c03cdd7a86c5aa9377e8482`、配置SHA `602cb69c51f372fa504903103fb91129291befd42ac56f4bdbc2adcbf7f17f36`。原第一次conda Python调用在import时缺tensordict，未创建train/未采样；失败日志保留`diagnostic/pre_training_import_failure.log`，改用仓库已有`.venv/bin/python`后正常首次正式启动，无依赖安装、源码补丁或重复freeze。正式original session43364/launch9f2cbe、PID34774/start428767355、2026-10-07T21:33:07.234250 UTC（北京时间10-08 05:33），自己的冻结train.py与配置SHA实际匹配，resume/warm_start均null，新Adam/新历史池。
+
+CLI实际run_config相对声明后的v27仅多出显式默认eval baseline_workers1/devicecpu/timeoutnull，实际旧协议一致；policy subtree整块替换，未混入默认actor。预算1..3h/iterations ceiling100000，min_completed_updates默认0（不带v29课程1200约束）。平台观察保持≥1h、aggressive锚点后的四个点无≥2pp改进即正常STOP，最长3h优先。首99/199后动态观察真正存在的panel，终局排空后再做不可变best、独立CUDA开发、四AI赢/输录像、失败分析及完整样本/wall对照，之后才选择λ候选的基座。
+
+已预声明早期0..29单次telemetry窗口与可达到时的492..541中期窗口；读取return/raw advantage/critic EV、KL/clip/LR/entropy、actual C/U/wall与显存，旧固定gamma控制缺少的新增tag不补造。初期20次更新约1049万转移、约7.8–8.1秒/轮，仅运行性观察，不判断学习或速度收益；尚无baseline panel。TensorBoard：`outputs/moe_cts/iterations/v30/train/`。ResNet/ViT仍暂缓，后续单个λ.99、TB0..1000 tick衰减并实际留足最终200轮、H8最后的范围不变。

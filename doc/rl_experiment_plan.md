@@ -10,7 +10,7 @@
 
 v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456秒，已通过TB验收；best999的实际γ=.99899601936，但后续目标阶段确实完成。14次selector全部completed0；原87039真实exit0、observer也exit0，正常平台STOP，不重启。源码新增return/raw advantage/critic EV为监控，不修改目标或RNG。课程后期aggressive/expansion回落，末段高EV并不证明终局价值准确。失败样本显示可见home威胁下分配/回援不足，知识保留正确不等于策略有效使用。
 
-**当前下一轮v30**只试一个较长rollout候选：N4096/T128，从v27配置仅改N/T/run_id，保持NT524288、E4/B64/256Adam、γ.995/λ.95、H4K11、episode1024、整局固定历史对手，以及每50更新发布/100更新采样eval、1–3h预算和bounded retention。无gamma课程，min_completed_updates默认0；所有正式版本从随机权重、新Adam、新历史池开始。v30 JSON精确三叶子diff与现成环境CPU dataclass加载已actual通过，尚未启动。它同时改变连续采样与学生更新频率（32→128tick）、时间相关性及历史池相对局长的cadence（每lane pub1600→6400/eval3200→12800tick），不称为纯GAE长度消融。主要rollout缓存因NT不变而基本不变，逐环境状态缩小，collection调用数增加四倍；实际C/U、显存和wall需正式运行测量，不能承诺四倍加速。胜率按相同全局transitions与真实wall比较。
+**当前下一轮v30**只试一个较长rollout候选：N4096/T128，从v27配置仅改N/T/run_id，保持NT524288、E4/B64/256Adam、γ.995/λ.95、H4K11、episode1024、整局固定历史对手，以及每50更新发布/100更新采样eval、1–3h预算和bounded retention。无gamma课程，min_completed_updates默认0；所有正式版本从随机权重、新Adam、新历史池开始。v30 JSON精确三叶子diff与CPU dataclass加载actual通过，已从commit6a83721冻结116文件并于2026-10-07T21:33:07 UTC从零启动original43364/PID34774，实际配置与新历史池确认。首个100更新采样panel尚待产生。它同时改变连续采样与学生更新频率（32→128tick）、时间相关性及历史池相对局长的cadence（每lane pub1600→6400/eval3200→12800tick），不称为纯GAE长度消融。主要rollout缓存因NT不变而基本不变，逐环境状态缩小，collection调用数增加四倍；实际C/U、显存和wall需正式运行测量，不能承诺四倍加速。胜率按相同全局transitions与真实wall比较。
 
 随后lambda只试一个候选.99，对照.95；等rollout完整分析后固定其余配置，从零训练。在所选gamma.995时，TD残差几何权重1/(1−gamma×lambda)由约18.26增至66.89tick；这只是GAE递推权重，不是bootstrap学习时间上限，不预言胜率。比较raw return/advantage、critic EV、KL/clip/自适应LR与实际吞吐，不做多值搜索。
 
