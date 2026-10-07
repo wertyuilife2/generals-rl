@@ -2492,10 +2492,15 @@ overall为1537/63/0，96.0625%，相对v27 −0.625pp，配对CI[−1.875,+0.625
 **下一轮工程决策：恢复v27 N16384/T32，固定gamma/PBRS .995，单独试λ.95→.99。** 长rollout首点有早期改善，却没有持续样本收益；独立开发无明确改善，wall成本显著。选择原rollout是当前机器预算下的工程取舍，不证明长rollout本质无效。λ.99会增加现有32tick GAE内后部TD残差权重；1/(1−γλ)的66.89是无限递推几何尺度，不是实际32tick采样被延长或最终奖励必须在该长度内出现。后续仍按顺序tick TB0..1000衰减并真实至少200轮最终零tick训练，再做H8；ResNet/ViT剩余探索遵用户请求暂缓，不把baseline>80%当完整附件任务结束。
 
 
-### v31：固定短rollout，仅提高GAE λ（正式训练准备）
+### v31：固定短rollout，仅提高GAE λ（正式训练进行中）
 
 v30完整报告与三曲线已提交1c6ddb1：较长N4096/T128没有持续样本/开发收益，wall吞吐低18.28%；本轮恢复v27 N16384/T32。唯一算法变化λ.95→.99，run_id=v31，γ/PBRS .995、NT524288/E4/B64/8192逻辑batch/256Adam、H4K11与SH4K11、小网络26074参数、episode1024、tick−.001、history8/pub50/eval100及所有MDP配置固定。保持categorical adaptive LR/desiredKL.02、原entropy .01；不混入tick衰减或H8，不增加baseline训练对手。
 
 动机是加强现有32tick采样内后部TD残差的权重，观察更长期credit与守将/终局学习是否改善；无限递推几何尺度66.89不代表实际rollout超过32tick。代价可能是advantage方差增大或更新不稳定，故记录raw return/A std、EV、每epoch及全轮exactKL/clip/自适应LR、entropy、WAIT/backtrack与真实C/U/wall和显存。代码无需新增算法补丁，仅配置一个λ候选，不做网格搜索。
 
 正式1–3h，从随机权重、新Adam、新历史池开始，不加载v27/v30权重；相同seed20261013。每100update四baseline×200map×双座1600局CPU采样selector（271828），按aggressive趋势锚点≥2pp更新、至少1h后四个后续点无该改进则正常train/STOP，最长3h优先。旧内置plateau12仍是配置兜底；报告明确实际停止来源。bounded checkpoint3/eval3+best/history抽样池8，活动episode可暂留旧对手。每个正式版本先commit，再一次从其Git blobs冻结116运行文件/配置，用自身冻结源训练和eval；不用新的大型网络门禁或冗余smoke。终局完整排空评测后固定best，1600局CUDA开发（复用1001042/highTF32true/FP32/B128/workers4）、8局实际joint-action录像与Core失败分析、完整sample/wall对照v27，再决定后续tick衰减基座。H8仍最后，ResNet/ViT剩余探索暂缓。此处是预声明，没有训练或胜率结果。
+
+
+v31实际启动记录：配置commit `a2d2447e0a4a8b923c5f2a58c1c9630a7f9e6ca0`，仅run_id/λ两叶变化，CPU配置验证2c9041 exit0且未初始化GPU；280ee2从commit冻结116运行文件/774804bytes一次，config SHA `f0b02e2c…`、manifest `1969d2c0…`。首次44727/e57435在首个GPU step因设置NVCC而加载器要求GENERALS_NVCC失败，真实4d3176 exit1、PID消失，没有成功环境转移或PPO update；已经构造的初始模型/历史池/第一次采样动作被舍弃。失败目录与日志保留于diagnostic/failed_initialization，未改源/配置/重新冻结或加载失败权重。
+
+仅将启动环境改为GENERALS_NVCC绝对路径，重新从零启动独立train输出：original60387/launchac95b8，PID153382/start429621062，2026-10-07T23:55:26.367747 UTC（上海10月8日07:55）。99e4f8回读原PID/start/live及compiler环境，run_config相对raw仅加入相同workers1/devicecpu/timeout_secondsnull默认值；λ.99/γ.995/N16384/T32确认。自身历史池只有seed0，source=random_initial_policy、resume_source=null、22张量，没有warm-start。原60387实际28e963仍运行；启动确认时已记录it3、2,097,152全局转移（4个完整更新），C1.300/U5.888秒、约72,933 compute transitions/s。没有已完成selector，不把初始化日志/self-play episode win当baseline胜率。100000更新ETA是安全iteration ceiling，实际max_seconds10800约束3h。后续继续原job观察每100update真实panel，早期0..29/中段492..541各只读一次实际诊断窗口，终局完成分析；不因丢失观察而重复启动。
