@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并退出，单seed结果尚不能证明信息改动的最终因果收益。容量阶段采用actor H4+K11、critic S+H4+K11；两种1M完整GPU门禁及v23/v24从零正式训练均已完成。两轮各20更新、10485760新转移，best对aggressive均2%；ViT计算吞吐快约29%，但整体强度未胜出。开发复测、八局录像、失败分析、完整曲线与地图簇配对结果已记录下文。两家实际profiler均已退出并各完成256次Adam更新；trace与GPU ABBA完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet/ViT两个完整门禁均actual exit0，共同BF16/p256正式设置已依据实测成本选择，v25/v26尚未启动。短性能诊断不计正式训练或容量门禁。其余10M/100M完整门禁和四轮正式训练、gamma/rollout/lambda、tick penalty 0..1000课程及足够末阶段训练、最后H8仍待完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并退出，单seed结果尚不能证明信息改动的最终因果收益。容量阶段采用actor H4+K11、critic S+H4+K11；两种1M完整GPU门禁及v23/v24从零正式训练均已完成。两轮各20更新、10485760新转移，best对aggressive均2%；ViT计算吞吐快约29%，但整体强度未胜出。开发复测、八局录像、失败分析、完整曲线与地图簇配对结果已记录下文。两家实际profiler均已退出并各完成256次Adam更新；trace与GPU ABBA完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet/ViT两个完整门禁均actual exit0，共同BF16/p256正式设置已依据实测成本选择，v25原86930已从自身commit冻结源从零启动，v26冻结待GPU；实际seed0的328张量与同seed fresh模型逐位一致。短性能诊断不计正式训练或容量门禁。其余10M/100M完整门禁和四轮正式训练、gamma/rollout/lambda、tick penalty 0..1000课程及足够末阶段训练、最后H8仍待完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -1781,3 +1781,15 @@ ViT C+U耗时为ResNet的72.3%（compute吞吐约1.384×）；eval包含不同�
 CPU实际选择入口3f99fd exit0从两家完整结果/源码身份/实际排程计算一次共同设置，不开展胜率超参搜索：pub2、每发布1个learned snapshot即每2更新做1600局采样评测、timeout900秒、reserve1680秒、min3600/max10800秒、plateau4且margin2pp。保持pool8、checkpoint3、eval3+best、MDP/PPO/critic一致。成本规则以慢侧L525.235s、E437.927s为依据：reserve向上取分钟覆盖1.25L＋timeout＋save/hash/publication代理＋120秒。20%评测占比目标给出K6，但五点在3h中不能容纳，预算可行的共同K2约36.6%评测占比，预计五点加余量9132.4秒；这是明确的测量/学习预算取舍，非强度结论或硬deadline保证。正式mature历史分组与实际对局长度可能改变耗时，继续监控。
 
 最终v25/v26候选SHA分别`a6d28ef3f904900379c997864d9cc148794f50b239084e529be427329a33910e`、`50d6c6c4ca4ea67c55d0ff8a102f688d79513591b39758f6bee021e1c66513fa`，仅run_id/backbone不同。配对artifact `full_capacity_preparation/paired_10m_bf16_p256_full_capacity.json`。下一步各自配置commit与Git blob冻结，再分别fresh1..3h正式训练；不用随机门禁权重初始化。100M两个完整门禁和正式训练、全部后续课程与H8仍待完成。
+
+
+## v25 / v26：10M成熟网络的从零配对正式训练
+
+动机：在已完成的1M有限预算配对之后，验证约10M actor是否在同样信息、MDP、固定critic和PPO下改善样本/时间效率；不以随机门禁胜率选方案。ResNet v25独立commit `1e7330102aab2be63ef66ff86197b86036f28af4`，ViT v26独立commit `0f92515174c1deaf1f62a7bd04d693fca80828ac`；从各自Git blobs冻结116运行文件及3个分析工具，逐文件与实际ef2b38c门禁源相同，配置只run_id/backbone不同。CPU dataclass配置验收e5d95b通过；父/子25模块各自source/SHA预检分别57886/f91265与31799/774b01 actual exit0，无CUDA初始化。
+
+共同配置为9x9/P2/episode1024、actorH4K11与criticSH4K11、N16384/T32/NT524288、E4/B64/logical8192/p256、BF16/FP32 master/storage、adaptiveKL.02、gamma.995/lambda.95、原PBRS/terminal/tick。纯uniform frozen neural-history8，整局对手固定；pub2/eval每2updates，4AI各200地图×双座采样/worker4/batch128/max2000，timeout900/reserve1680、min1h/max3h、plateau4和2pp规则。保存2000、regular3/evalrecent3+best；不加载旧权重或门禁模型，train API直接读取完整冻结JSON，避免CLI默认merge引入其他policy参数。
+
+v25原session86930（ad8c00）/PID3689896已actual fresh启动，source/config预检通过，resume=null、warm_start=null；实际history seed0与自己同seed fresh构造328 state tensors逐位一致，CPU13868/73e3d4 exit0、actor9,960,381/critic1,053,033，初始化结果SHA `df8a8afb4fb8786523f620bd03e30e4d9ac3c9114b51cc97e5dd8cf166487d66`。独立CPU Adam为空不能声称观察了formal初始Adam；第一轮自身checkpoint/TB现已CPU验证：328个模型tensor/Adam state有限、全部step256，NT524288/logical8192/physical256/8192chunks/BF16一致。TensorBoard位于`outputs/moe_cts/iterations/v25/train/`；第一selector在iteration1。此时尚无正式baseline panel或终局结论，v26自身冻结配置等待v25真实终局后从零启动。后续100M两家门禁/正式、gamma/rollout/lambda、tick0..1000与足够末阶段、H8均保留。
+
+
+v25首轮实际完成（iteration0）：C71.032s/U453.056s，完整初始wall533.583s、wall982.58FPS；自身checkpointSHA `11b7ef3b0f850b0c332b58ede6501d9ce1366877b110a88ca875c7fa62b8c8db`、132579255B，全部328 Adam state step256，参数和moments均有限。CPU验收c81e7b exit0，root7d6127读回；formal没有安装clip/observer逐次计数hook，独立完整门禁三计数另列，不冒称formal实测。first-update contract为`v25/first_update_contract.json`。初始这一轮LR从1e-4经最大5.0625e-4最后降到1e-5，共14次变化；approx KL0.03088、max0.04318、endpoint exact KL0.04216/p95 .13199、clip .24832、entropy1.96290、grad .41798。学习率下限和KL偏高值得后续追踪，但一轮不能证明架构退化或长期收缩，不改已冻结配对协议。原86930继续，首个正式1600局selector在iteration1完成第二更新后；当前无正式baseline panel。
