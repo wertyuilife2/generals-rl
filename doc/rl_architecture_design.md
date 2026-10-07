@@ -1,6 +1,6 @@
 # Generals RL：成熟 ResNet / ViT 的逐地块适配设计
 
-日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。尚无容量阶段正式自对弈曲线或10M/100M GPU结论；随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
+日期：2026-10-07。本文对应用户要求的 1M / 10M / 100M 三档、可变地图尺寸，以及相同参数量下的计算效率和样本效率比较。训练阶段顺序仍是：v19重跑v17对照 → 事实记忆与 critic 信息输入消融 → 本文网络比较 → gamma / rollout / lambda → tick penalty 衰减 → H4/H8。已执行上游检查、参数审计、CPU合同和1M孤立GPU校准；随后两种1M真实满存储/256Adam/24模型驻留/1600局CUDA采样容量门禁均已actual exit0，详见训练日志。v23 ResNet1M正式训练、完整曲线与最佳模型录像已完成；v24 ViT1M从零配对训练仍在进行，已核对四个完整采样panel。两轮真实终局后再完成正式pair和实际profiler；10M/100M GPU门禁与正式结果尚待完成。随机同权重pool压力测量不代表成熟已训练策略分组吞吐。
 
 ## 1. 选择与来源
 
@@ -102,6 +102,8 @@ MAC 表是按 Conv/Linear 及 attention QK/AV 乘加推导的估算，C=61、81 
 ## 6. 单机显存、长 rollout 与 100M
 
 当前逻辑 rollout 样本数为 `16384×32=524288`。可保持样本数用 `8192×64`、`4096×128`、`2048×256`、`1024×512`。降低 N 能减少实时环境、history/opponent 输入与整批推理临时激活；**如果 N×T 不变，展开 rollout 观测总量基本不变**。长 rollout 同时改变 GAE 的连续上下文，因此不能将这项变化视为完全不影响训练算法的显存技巧。
+
+H8留在最后单独消融。按当前9×9/P2单帧985个FP32值、N16384/T32，actor历史rollout由H4的7.6953GiB增至H8的15.3906GiB，增7.6953GiB；learner加两个seat的原始history frames再增0.7214GiB，task返回的独立flatten clone再增0.2405GiB。已明确的缓存增量至少约8.6572GiB，还未计push/cat、索引物化、激活和瞬时副本，不能将其当作完整峰值预测。BF16 forward不改变现有FP32 rollout dtype；降低N而保持NT也不会减少这部分rollout总量。执行H8前需对实际存储方案做显存门禁，不能只修改history配置后直接启动。
 
 100M float32 actor 的权重约 0.37 GiB；Adam 参数、梯度、两个状态合计约 1.49 GiB，仅为 actor。历史池若有八个全 GPU actor，权重另约 2.98 GiB；当前实现实际复制整policy，需另计每份critic。池大小8约束可选快照与磁盘，已淘汰但仍有未结束episode引用的模型继续驻留GPU，resident数量可以超过8；发布新模型也有临时重叠。保持整局固定对手，因此不能通过中途换模型释放这些引用。容量门禁必须包含活动尾部、真实rollout、learner/Adam、CUDA workspace、额外eval模型，不能按“权重不到0.4GiB”推断能用原batch8192。
 
