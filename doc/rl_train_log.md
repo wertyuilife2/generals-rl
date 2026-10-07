@@ -1609,3 +1609,18 @@ snapshot2 / iteration3已completed0，actual PID3555622退出；4个完整更新
 总体60胜1442负98和（3.75%）。post-sync TB wall **1020.636秒（17.01分钟）**，已包括349.798秒eval worker；v23相同2097152转移的wall1264.937秒（21.08分钟），本次早期完整耗时少19.31%。这一个点低于v23的早期胜率，但更快；仅128tick/env不足以判断架构优劣或平台，不能拿首点代替最终配对实验。原session66320继续，v24自己的终局best、开发评测、完整曲线和Core录像尚待完成。
 
 CP SHA `3154192a5748dd89c4c60683e466d3e03f8274807c7b87bedbf4fcb9952ec9db`，report SHA `8a2e5f906b405e2871c299c6581dc44fc811c371beacf65b4bec64e525e04885`；读回 `v24/diagnostic/first_eval_readback.json` SHA `61513a5380572dd5ef2bd56454eeaa36d2fa152c02b15d866ca902113ea4dec2`。不为单点另外生成曲线，最终展示完整实际panel及同transitions/同wall比较。
+
+### v24 四个正式采样点：训练仍在进行
+
+原session66320和Python PID3532285仍运行；root实际轮询返回live（da6d81、eb1027），specific cmdline/stat匹配自己的冻结配置和输出（2fe999）。以下四个selector各为1600局、200地图/AI×双座，采样CUDA/BF16；全部completed/returncode0，无失败或取消。时间取同步评测返回后的实际TensorBoard `Perf/wall_seconds`，已包含worker耗时。
+
+| iteration / 新转移 | aggressive | expansion | defensive | random | 完整wall分钟 |
+|---|---:|---:|---:|---:|---:|
+| 3 / 2,097,152 | 0.25% | 5.75% | 3.75% | 5.25% | 17.01 |
+| 7 / 4,194,304 | 1.25% | 8.25% | 4.00% | 7.25% | 33.82 |
+| 11 / 6,291,456 | 1.50% | 10.25% | 5.75% | 8.00% | 50.71 |
+| 15 / 8,388,608 | 1.25% | 14.00% | 8.75% | 11.00% | 67.67 |
+
+第四点140胜1341负119和，总体8.75%；worker354.033秒，post-sync wall4060.478秒。aggressive在1.25%附近，而其他三项仍有早期上升；四点尚未满足预定至少五个完整panel的平台停止条件，不手动更改本轮协议。相同8,388,608样本的v23为2%/9.75%/22.25%/17.5%，wall83.29分钟；这组ViT执行更快，expansion较高、其他三项较低，不能据此宣布最终架构胜负。selector是重复选模地图；终局选定best后还需开发评测、真实动作Core录像、完整曲线与配对分析。
+
+第二/三点窄审查actual01002c exit0，root本次b98932回读；合同SHA分别`17cfd246c14f4ffc77a0dff9407aef61a6d3a7b208f0ff53eda776d3fd917ab4`、`1d8e78bdf74ab7dfc16202396af7c088b0e11ed7bbb63883289309dcf72bc42e`。第四点actual97be2f exit0、root68e89b回读：`diagnostic/fourth_eval_readback.json` SHA `2ae8081a7696adc7920340bb422fb8e21efdd5ae454f9fd25f543bcfc29e5164`，重算1600局的15组胜/负/和及胜/平率、核对四个TB胜率与worker/config/CP身份；specific evaluator3591809已退出。CP SHA `5dd343119b7822f45d5d24ab90339405133e2ed723899931a329bc0f4b30b120`，report SHA `9e378201f6e5c259bfe2ca13f871e2dea5ce22677d1fde84e120e54bee51f8a3`。本次没有重跑旧panel、初始权重门禁、游戏或GPU诊断。

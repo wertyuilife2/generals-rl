@@ -40,3 +40,5 @@ v24已实际从零启动original66320/PID3532285，own e817a78冻结源/配置�
 v24首个iteration3采样selector现已completed0：1600局，aggressive/expansion/defensive/random为0.25/5.75/3.75/5.25%，post-sync wall17.01分钟、已含349.798秒worker。同2097152转移下早期胜率低于v23、完整wall少19.31%，仅一点评估不证明架构优劣。9ae146 CPU聚合/TB/SHA读回已完成，原66320仍live；继续执行预设共同1–3h/平台规则，之后完成v24终局及1M pair量化比较和实际性能诊断。四个更大容量门禁/正式训练、gamma/rollout/lambda、tick0..1000与最后H8仍待完成。
 
 容量配对量化入口已准备（ignored `full_capacity_preparation/capacity_pair_preparation/compare_terminal_pair.py`，SHA `51091be53c237259af8cf0ed163e82bd4d08ed50eff64f40b50d715e11304b94`）：仅接受两份真实终局review，ResNet/ViT同档位、同critic参数及共同运行实现，配置仅run_id/backbone可不同；复用已有按地图簇配对统计，比较确切共同transitions的实际panel。wall比较只列截止分钟前的真实panel和时差，不插值假造共同点。CPU help/compile通过，尚未执行完整输入load或v23/v24终局pair，不能算已完成容量结论；最终可按实际输入修正必要缺口。工具不修改正在运行的源码。
+
+v24已完成四个采样selector（iteration3/7/11/15，均1600局completed0），最新1.25/14/8.75/11%，post-sync完整wall67.67分钟、8388608转移。第四点CPU聚合/TB/身份审查97be2f exit0，root68e89b回读；原66320仍live，未达到至少五个panel的平台停止条件。其余三项成绩仍低但上升，aggressive未持续改善；保持本轮冻结协议，终局后再做开发/录像/完整曲线。准备性能trace的CPU分析不占GPU；实际profiler仍须等两轮1M正式训练都退出，四个更大容量实验和后续课程/H8尚未完成。
