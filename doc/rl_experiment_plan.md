@@ -6,7 +6,7 @@
 
 2026-10-07 用户要求暂缓耗时过长的 ResNet/ViT 架构探索。v23–v25已完成结果保留，v26在首轮后按请求中断，100M门禁及正式训练暂不继续；这些未完成项目不作为架构结论。下面的容量记录保留历史安排，当前执行改为小网络的固定gamma→gamma课程→rollout/lambda→tick衰减→H8。
 
-以v22 H4K11 / SH4K11和InformationSpatialPPOPolicy为共同基座：v27固定gamma.995已完成930更新/115.005分钟，全部9次采样selector排空、最佳模型开发评测和八局录像已完成；v28固定gamma.999已独立提交并冻结，现由original82663从零训练；startup确认自身source、resume/warm_start均null。两份运行源码相同，配置只run_id、PPOgamma和匹配PBRSgamma不同。原分段PPO、整局固定uniform历史对手、采样评测、1–3h预算及bounded retention保持。后续课程真实走到终点并留足目标阶段，最低更新数guard已实现、默认0；预算仍优先，未完成课程要如实标记。实际结果详见rl_train_log.md。
+以v22 H4K11 / SH4K11和InformationSpatialPPOPolicy为共同基座：v27固定gamma.995已完成930更新/115.005分钟，全部9次采样selector排空、最佳模型开发评测和八局录像已完成；v28固定gamma.999已完成1133更新/139.982分钟，11次采样selector排空、best899终局开发评测及八录像完成；实际内核进程exit0已确认，未重启。v27/v28开发aggressive均90.25%、overall均96.6875%，单seed证据不支持固定.999的明确最终增益，.995早期效率更好；继续预声明v29课程检验。两份运行源码相同，配置只run_id、PPOgamma和匹配PBRSgamma不同。原分段PPO、整局固定uniform历史对手、采样评测、1–3h预算及bounded retention保持。后续课程真实走到终点并留足目标阶段，最低更新数guard已实现、默认0；预算仍优先，未完成课程要如实标记。实际结果详见rl_train_log.md。
 
 gamma课程预声明为v29：从.995按绝对TB迭代线性增加，u1000达到.999；`min_completed_updates=1200`保证平台早停前至少留下u1000..1199的200个最终gamma更新，3h预算仍优先。这是依据实际吞吐作出的实验选择，用户指定的1000边界本来只针对tick衰减。v27中期50轮完整wall为371.754秒，1200轮线性预算参考约8922秒（2.48h），并非v29已测速度或完成保证。课程只变gamma，tick保持−.001，PBRS资源与胜负系数不衰减；PPO/PBRS gamma在采集前同步，同一rollout的采集、GAE和更新保持一致，跨rollout仍是非平稳目标。固定gamma两轮完成分析后才从零启动，不继承权重、Adam或历史池；新版return/advantage/EV监控只增加诊断。若预算先耗尽且终点或最终阶段不足，报告课程不完整，不能缩短日程。
 
