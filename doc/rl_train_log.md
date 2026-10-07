@@ -2226,3 +2226,12 @@ it299/snapshot6随后实际completed0（同一continuation observer79020/4090879
 it399/snapshot8实际completed0（同一observer79020，4dd27c验收；root059108读原report，原CP/SHA与validation一致）：aggressive331/69/0、expansion374/26/0、defensive396/4/0、random391/9/0，胜率82.75%/93.50%/99.00%/97.75%，overall1492/108/0（93.25%），mean93.527tick。209,715,200转移/12800tick-env，快照training wall2953.199秒（49.220分钟）、wall吞吐71,013转移/秒，异步worker105.338秒另记；CP `f0c4e2bf…`、report `4986b018…`。aggressive增加3.5pp；与固定.995同点差−1.75pp、固定.999同点差+5.5pp，仅为selector点估计，这里未新增CI。四项>80%不替代完整课程验证，保持原训练与预声明最低最终200轮要求。
 
 已只读核对本版独立开发评测语义：frozen evaluate_builtin仅用policy配置和checkpoint actor权重，输入H4/action mask/K11及训练时clock normalization；不构造PPO、不调用critic、不将PBRS gamma或reward tick输入actor，也不将课程应用为另一次参数变换。因此保存初始.995的run_config不会把中途best转换为.995策略。终局报告另读实际TB selected_iteration的Curriculum/gamma，标明生成best那次更新所用的γ，并与初始.995、最终.999和真正完成的最终阶段分开；checkpoint本身积累了此前整个课程的学习。源路径为本版`evaluate_builtin.py:201–243,291–331`和`spatial_ppo.py:144–181`。
+
+
+#### v29 第五采样点与实际中期窗口（训练继续）
+
+it499/snapshot10实际completed0（observer620ae3，root b863d8原report SHA/WLD验收）：aggressive336/64/0、expansion368/32/0、defensive392/8/0、random393/7/0，胜率84.00%/92.00%/98.00%/98.25%，overall1489/111/0（93.0625%），mean98.964tick。262,144,000转移/16000tick-env，快照training wall3698.889秒（61.648分钟），异步CPU worker104.942秒另记；CP `5269e31b…`、report `129355ad…`。同200地图×四AI×双座1600采样局、CPU/highest/float32/B128/workers1完整排程及TB通过验收。aggressive较399增加1.25pp，小于预声明2pp趋势阈值；固定.995/.999同点为88.5%/84.75%，此处仅点估计，没有新增CI。最少最终200轮尚未开始，保持原87039训练。
+
+492..541中期窗口按预声明一次实读71ad4d/root c84b2d，50轮26,214,400转移，C76.245秒/U296.099秒；u491→u541实际wall372.671秒，吞吐70,342转移/秒（C+U为70,404）。44tag×50=2200实录点均有限。同窗口v27/v28旧JSON的wall吞吐70,515/70,367，v29分别低0.25%/0.04%，差异很小，不能解释胜率差。whole-update KL均值.02007/max.09470，clip均值.12600、entropy.86643，LR最终到floor4轮/ceiling45轮、共195次内部变化；自适应LR仍开启。episode长度均值126.084、timeout批次均值.116%、WAIT.25245/backtrack.08506；episode统计为等权训练批次均值，不是baseline胜率或按episode数加权。
+
+新增return std均值.68522/raw advantage std.20194、buffer std.999999、critic EV均值.91305/min.90469（50/50 valid）。这是shaped bootstrap target的诊断，不据此断言终局价值准确；v27/v28缺少这些tag，不造旧版比较。实际γ .996967971→.997164011的全部50点符合课程，tick_scale均1/tick−.001，尚未达到.999。[中期实测与缓存控制对照](../outputs/moe_cts/iterations/v29/diagnostic/mid_training_dynamics.json)。下一步等待真实最终γ阶段和后续采样曲线；不继续已暂停的ResNet/ViT容量探索。
