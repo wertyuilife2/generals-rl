@@ -1808,3 +1808,20 @@ snapshot1 / iteration1现已completed/returncode0：两轮完整更新、1,048,5
 总体71胜1428负101和（4.4375%）。post-sync TB wall1489.262秒（24.82分钟），已包含431.071秒worker，不能重复加入评测耗时。checkpoint SHA `b60508a392ca0869bf96714bbdd0612766b8c9c90654434cba662d35abaef7ac`；详细读回 `v25/diagnostic/first_eval_readback.json`。首点样本和历史池均很浅，不能据此判定架构强度、平台或调整配对方案；原86930仍live（408054/fb8055），按共同最低1h/最高3h及预先冻结的评测规则继续，v26等待v25终局。
 
 仅CPU读取既有首轮指标的配对诊断发现：v23 Res1M首轮也到LR下限，iteration1/2末值回升至0.00017086/0.00057665；实际20轮的final/max LR均未到0.01。v24 ViT1M则从iteration1到0.01。故不把“首轮触底”解释为持续收缩，也不误写两家1M都达到上限。三家critic规格相同但初始化张量不同，物理batch也不同，首轮差异不提供容量因果结论。证据 `v25/diagnostic/first_update_capacity_comparison.json`（root2876ec读回）。
+
+### v25 第二个采样点与早期学习动态（仍未终局）
+
+snapshot2 / iteration3已completed/returncode0：4轮完整更新、2,097,152新转移、128tick/env，第二个1600局采样panel。CPU窄读回 `f13788 exit0`，root `4b864e/1901d5` 验证checkpoint/report身份、实际赛程、15组统计与TB对应坐标；没有新游戏、模型加载或重复完整源码审计。
+
+| AI | 第一panel胜率 | 第二panel胜 / 负 / 和 | 第二panel胜率 |
+|---|---:|---:|---:|
+| aggressive | 0.50% | 9 / 391 / 0 | 2.25% |
+| expansion | 6.75% | 20 / 344 / 36 | 5.00% |
+| defensive | 4.00% | 23 / 319 / 58 | 5.75% |
+| random | 6.50% | 30 / 365 / 5 | 7.50% |
+
+总体82胜1419负99和（5.125%），较首点+0.6875pp；aggressive +1.75pp，其他项有升有降。只有两个早期点，不作显著提升、平台或能力上限结论。C71.713秒/U452.474秒，worker433.605秒，post-sync TB wall2972.329秒（49.54分钟，已含eval）；完整wall吞吐705.56转移/秒。checkpoint SHA `94792179c7076d98bafa087ff82dd467cc7249848accd72ac4731a2e9bc94af7`，报告SHA `52580f51a75e1fbbaa13af6679f4d0e12f4b6071b4b48728bd11c3865dee5d69`；读回 `v25/diagnostic/second_eval_readback.json`。原86930继续（704e68/cf6a91确认live），下一panel按冻结配置在iteration5；v26保持待启动。
+
+实际it0..2完整TB窄读 `db8eda exit0`、root `69c2d6`：末LR为1e−5→7.59375e−5→1e−5，endpoint exact KL .04216/.03271/.03619、clip .2483/.2520/.3423、rollout WAIT .5255/.3907/.3180，C+U吞吐约1000转移/秒且没有早期持续变慢。学习率会回升，并非一直固定在下限；这些数据不证明成熟学习效果或具体失败原因。详细 `v25/diagnostic/early_learning_dynamics_iteration2.json`。
+
+补充跨容量归因限制：v19–22为T32/pub50，即每1600条单lane累计interaction发布；v23–26为T32/pub2，即每64条发布，周转加快25倍。pool8包含永久初始seed＋最新7个learned候选，满池learned最新到最旧跨度从300update/9600interaction变为12update/384interaction；累计interaction可跨episode reset。当前v25仅seed和iteration1/3三个候选，未满池，metadata也不能证明实际对手样本份额。故tiny→capacity除critic与计算方式外，还改变了历史池时间尺度，不能归为纯actor扩容；100M计划T512/pub1又改变该尺度。同档ResNet/ViT保持共同协议。CPU实际 `6dd98c exit0`、root `19b05f/97cf6d`，证据 `full_capacity_preparation/capacity_comparison_protocol_notes.json`；不据此归因当前低胜率，也不中途调整本轮配对配置。
