@@ -2359,3 +2359,12 @@ CLI实际run_config相对声明后的v27仅多出显式默认eval baseline_worke
 
 
 v30预声明0..29实际CPU诊断71f614 exit0：30更新/15,728,640转移，C62.864秒/U177.165秒（每轮2.095/5.906），C+U吞吐65,528.2/s；u29完整wall247.900秒、63,447.5/s，启动开销包含在wall。1035个实际记录点全部finite，EV valid30/30；return std均值.61096/raw advantage std.07479、EV.85430、whole-update KL.01427/clip.15942/entropy4.54247，自适应LR均值.00935。是启动诊断，不与旧训练终局速度作公平窗口比较、不推为baseline学习效果。窗口内TB current allocated max12.248GiB/reserved14.221GiB，不是完整训练peak。固定γ未启用课程，Curriculum/*按自身实现不记录；Episode/*前五轮无完成episode，实际只有25点，不补0。只读统计最初沿用课程标签/密集episode假设而失败，修正统计输入后通过，无训练改动或重复运行。[实际早期诊断](../outputs/moe_cts/iterations/v30/diagnostic/early_training_dynamics.json)，SHA `f6f88552…`。唯一CPU selector observer69739/PID39345/start428799528动态观察真实panel直到终局排空；不新增对局/推理。
+
+
+#### v30 首个采样点：初期样本效率上升，wall速度下降（训练继续）
+
+it99/snapshot2实际completed0，52,428,800转移/12,800tick-env；aggressive176/224/0、expansion245/150/5、defensive365/34/1、random343/57/0，采样胜率44.00%/61.25%/91.25%/85.75%，overall1129/465/6（70.5625%）、mean196.295tick。快照训练wall830.506秒（13.842分钟）、累计wall吞吐63,128.7转移/秒，异步worker228.600秒单列；report SHA `615fd493…`、checkpoint `b7f464d3…`。唯一observer69739真实动态验收，完整1600游戏/map/AI/双座/逐game采样seed排程及26个Perf/Eval TB点全部匹配；独立aggregatecert f165ee exit0重新从实际game导出四AI与overall counts/WLD/rates，root041deb直接读原report与index。验证SHA `f5447aa0…`、aggregatecert SHA `25f5cf54…`。[实际首点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_99_validated_per_panel.json)。
+
+新一次CPU paired map bootstrap9acc8b exit0（200地图簇/20k/seed20261007），仅比较v30it99与固定.995的v27it99，不重复已有gamma统计/游戏。相同52,428,800全局转移，v27胜率33.75%/58.50%/86.75%/82.50%，overall65.375%。v30−v27 aggressive+10.25pp、95%CI[+5.00,+15.75]；expansion+2.75pp[−2.50,+8.25]；defensive+4.50pp[+1.00,+8.00]；random+3.25pp[−1.50,+8.00]；overall+5.1875pp[+2.4375,+7.9375]。v27真实快照wall737.019653秒、v30830.505981秒，多93.486秒，同样本累计wall吞吐低11.26%；包含启动，不把这个首点当作稳定中期效率。worker时间不混入训练时钟，不以不同每环境tick直接比较样本量。[首点配对结果](../outputs/moe_cts/iterations/v30/diagnostic/first_selector_matched_rollout_comparison.json)，SHA `ca27a5d5…`。首次只读pair算完后误读不存在的configuration.json而未写产物（e0dc58 exit1），更正为实际frozen_config.json后完成；执行收据保留失败，无GPU/训练/源码改动。
+
+首点支持初期样本效率改善，但只有一个训练seed与一个早期快照，N/T联合变化也不能隔离T因果；不同wall下的最佳模型尚未比较，不能决定最终rollout基座。初始趋势锚点it99/aggressive44%；尚不足至少1h预算，原43364继续。后续真实panel若提升≥2pp则更新趋势锚点，连续四后续点无该提升再结合≥1h正常STOP，最长3h优先；最终仍需best独立CUDA开发、八局真实录像/失败分析、完整sample/wall曲线和v27对照，之后才推进λ。
