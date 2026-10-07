@@ -2252,3 +2252,15 @@ it899/snapshot18实际completed0（root b2ab02原report SHA/WLD/协议验收）�
 it999/snapshot20实际completed0（observer580bff，root f4b55d原report SHA/WLD/协议验收）：aggressive346/54/0、expansion377/21/2、defensive393/5/2、random391/9/0，胜率86.50%/94.25%/98.25%/97.75%，overall1507/89/4（94.1875%）、mean121.024tick。524,288,000转移/32000tick-env，快照wall7426.074秒（123.768分钟）、异步worker165.026秒另记；CP `9a3e0978…`、report `7b2eb52a…`，1600局CPU采样控制/排程/TB验收通过。较899增加2.5pp、较旧399趋势锚点增加3.75pp，达到预声明≥2pp趋势阈值，**趋势锚点更新为it999/86.50%**，四个后续点观察重新计数。这不是统计显著性结论，终局配对分析再报告CI。固定.999同1000更新aggressive90.25%；固定.995训练已终止，无1000更新对照，不造数据。
 
 root ae6df8已观察原87039超过u1000，按日程进入.999阶段，但实际u1000..1199全部200轮TB验收仍待完成；课程终点附近的快照不等于完成最终阶段。新趋势锚点意味着即使达到最少1200更新也不能只凭此前399后的平台STOP：继续按四后续点无≥2pp提升/预算最长3h判断，预算优先。root03726e只读资源：磁盘剩余897GB、v29整个目录25MB；驱动GPU占用17896MiB/24564MiB、util97%，不同于PyTorch allocated指标，不混用。无内存/磁盘压力，保持有界快照和原冻结配置。
+
+
+it1099/snapshot22实际completed0（observer6b1dd8，root5c481e原report SHA/WLD/协议验收）：aggressive325/75/0、expansion368/30/2、defensive388/12/0、random391/8/1，胜率81.25%/92.00%/97.00%/97.75%，overall1472/125/3（92.00%）、mean128.930tick。576,716,800转移/35200tick-env，快照wall8172.389秒（136.206分钟）、异步worker172.374秒另记；CP `9de73abe…`、report `0d14c1b4…`，1600局CPU采样排程/TB控制验收通过。aggressive较999下降5.25pp；固定.999同1100更新为90.25%，点估计差−9pp，此处未新做CI。999回升尚未延续，但这是999新锚点后的第一个无≥2pp提升观察点，不能绕过四后续点规则；实际最终200轮也尚未验收。保持原配置继续至趋势判定或3h预算，最终报告联合新增return/A/EV和对战录像分析，不将单点下跌归因于某项未经检验的机制。
+
+
+#### v29 实际最终200轮完成，it1199采样结果（训练继续）
+
+原observer ec5d42一次实际TB验收、root9de8af回读：u999 γ=.99899601936，u1000/u1199 γ=.99900001287；u1000..1199整段200个γ值均.999，tick_scale全1/tick−.001。missing0/duplicate0，Perf累计steps逐轮一致；终段104,857,600转移，u1199累计629,145,600。u999→u1199真实wall1492.456秒（24.874分钟）、吞吐70,258转移/秒，异步worker不加到快照时钟。这是实际完成证明而非日程推测。[最终200轮实际TB验收](../outputs/moe_cts/iterations/v29/diagnostic/course_final_phase_validation.json)，SHA `765155eb…`。
+
+it1199/snapshot24实际completed0（root3f50b1原report SHA/WLD/CPU采样协议验收）：aggressive344/56/0、expansion369/26/5、defensive395/5/0、random394/6/0，胜率86.00%/92.25%/98.75%/98.50%，overall1502/93/5（93.875%）、mean118.127tick。快照training wall8918.530秒（148.642分钟），worker149.974秒另记，38400tick-env；CP `1cec241b…`、report `1d80cdf2…`。同1600局采样控制及完整赛程/TB通过。较1099回升4.75pp，但仍低于999趋势锚点86.5%；999之后两个点未达88.5%，尚不满足四点观察。两个固定gamma控制都没有1200更新评测（已经真实终止），不造同时点比较。
+
+课程最低训练量和最终阶段评测均完成，**整个v29实验尚未结束**：原87039继续等待后续1299/1399等实际发布点，若无新≥2pp提升则在四后续点满足后正常STOP；最长3h预算优先，不要求预算外快照。随后不可变best、CUDA开发/录像、失败分析、完整曲线及三种gamma对照，才固定rollout基座。ResNet/ViT仍暂缓，rollout/λ、tick0..1000、H8仍待实施。
