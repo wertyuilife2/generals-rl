@@ -2180,3 +2180,23 @@ it999 / snapshot20 actual completed0（持久CPU observer4024597，744a7a exit0�
 新版return/advantage/critic EV仅加入诊断（68c95fe），不改变训练目标或随机采样。首3轮真实TB c5f0a2：gamma为.995/.995004/.995008、tick_scale1；raw/buffer advantage及有效critic EV均已记录且有限，归一化buffer std约1。这只是启动验证，不是课程结果或稳定吞吐。以后用实际C/U、whole-update KL/clip、自适应LR、return/raw advantage尺度与EV，联合解释曲线。snapshot/checkpoint上限3、历史池8仍保持。
 
 TB：`outputs/moe_cts/iterations/v29/train/`；原始stdout：`outputs/moe_cts/iterations/v29/train.stdout.log`。先观察first30实测计算成本与it99/199的真实采样panel，不改变正在运行的配置。gamma阶段完成后才固定下轮基座，随后单一rollout候选N4096/T128、单一λ=.99、TB0..1000 tick衰减、最后H8。
+
+
+#### v29 首个采样评测与新增 critic 指标（训练继续）
+
+it99/snapshot2已经真实completed0，仍是original87039/PID4062503/start427497185这轮从零训练。52,428,800转移/3200tick-env，实际快照training wall737.073秒（12.285分钟），异步CPU worker281.689秒另记；checkpoint `6ba751f7…`、report `edd5a1bc…`。原observer18220的一次完整赛程/TB/哈希验收通过，root53ab84读原结果、be1fc7复用generic paired对照两个固定gamma的同样本时点，没有新评测对局。
+
+| AI | v27 固定.995 同100更新 | v29 胜/负/和 | v29 胜率 | v28 固定.999 同100更新 |
+|---|---:|---:|---:|---:|
+| aggressive | 33.75% | 104/296/0 | 26.00% | 0.00% |
+| expansion | 58.50% | 203/190/7 | 50.75% | 0.50% |
+| defensive | 86.75% | 315/85/0 | 78.75% | 1.25% |
+| random | 82.50% | 289/109/2 | 72.25% | 0.50% |
+
+overall911胜/680负/9和，56.9375%，mean249.276tick。报告为200地图×四AI×双座1600采样局，CPU/highest/float32/B128/workers1/seed271828/max2000控制与完整game/map/AI/seat排程一致；各比较200地图簇/20k bootstrap。v29−v27 aggressive差−7.75pp、95%CI[−12.25,−3.25]，overall−8.4375pp[−11.4375,−5.4375]；v29−v28 aggressive+26pp[+21.75,+30.25]、overall+56.375pp[+53.6875,+59.00]。这是复用selector地图的单seed初期对照，不是最终优劣或课程泛化；尚未走到u1000，保持原配置继续看199及后续，不因首点低于.995控制而中断课程。[实际首点评测配对](../outputs/moe_cts/iterations/v29/diagnostic/first_selector_matched_gamma_comparison.json)。
+
+新增监控的first30窗口实际读92c61c、root eab23f：29tag×30=870点均有限，无缺失。collection38.679秒/update177.201秒；C+U吞吐72,858转移/秒，u0完成到u29完成的严格端点间隔29NT/208.836秒=72,805转移/秒，含启动开销的0..29累计wall为69,836转移/秒，口径不能混用。每轮monitor均.12784秒，不由这个短窗口宣称稳定整轮效率。gamma实际.995000005→.995115995、tick_scale均1；尚非课程终点。
+
+critic EV是**收集时value对本轮shaped GAE bootstrap target的方差解释度**，覆盖全部有效storage样本而非8192个policy probe。`returns=V_old+A_GAE`，不是完整对局MC胜负；使用FP32 population variance，`EV=1−Var(returns−V_old)/Var(returns)`，target方差不足或非有限时省略EV并标valid0。真实终止势能清零，timeout保留最终势能并加入old value bootstrap后截断done；普通rollout末端同样自举。
+
+first30 EV均值.7786、末轮.9697/valid30轮；末轮return std.45466、raw advantage std.07914，说明差值方差相对target方差小，但raw advantage mean仍−.10105，EV会忽略整体均值偏差。buffer advantage零均值/单位标准差来自标准化。固定gamma且边界自举一致时，shaped value包含`V_base−Φ(s)`，资源势能结构可能贡献大量target方差；当前没有Φ/去势能分解，不能断言它主导这些数值，也不能把高EV当作已学会终局胜负预测。γ课程跨轮还改变目标分布，return mean由+.229降到−2.958不能直接解释成胜率退化。终局需结合采样对战曲线判断。[first30实际标量摘要](../outputs/moe_cts/iterations/v29/diagnostic/early_training_dynamics.json)。
