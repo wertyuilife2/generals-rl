@@ -2008,3 +2008,17 @@ v28 overall9胜/1344负/247和，0.5625%胜率/15.4375%和局，平均617.1025ti
 it50–99共同自对弈窗口的额外只读TB（8f5fee exit0）：v28已完成episode聚合的length均935.59tick、truncated均78.89%（45个记录点），v27为458.53tick/6.68%（50点）；WAIT均1.20% vs2.87%。因此长局不能简单解释成等待，eval中aggressive仍快速将其击败。whole-update KL均.01862 vs.01701、clip均16.19% vs18.78%，这段更新监控不支持“持续更高clip即唯一失败原因”。这是按日志batch等权平均，不是episode-count加权的整轮统计，也不是baseline胜率。后续真正终局best模型保留trace再观察调兵/交战；当前没有逐tick轨迹，不虚构行为。[initial_pool_phase_dynamics.json](../outputs/moe_cts/iterations/v28/diagnostic/initial_pool_phase_dynamics.json)。
 
 未达到至少1h、仅一个panel，保持冻结训练继续观察it199及后续曲线；不因首点差而修改gamma、lambda、奖励、学习率或中断重启。自身Git analysis工具已a07e07从source commit冻结，runtime/config核对通过；尚未执行终局开发、录像、review或完整曲线，不能标记v28完成。
+
+
+#### v28 第二采样panel：仍在学习（训练继续）
+
+it199 / snapshot4实际1600局completed0，CPU一次完整赛程/TB验收a47109 exit0，root核对原report字节SHA `695bbfb7…`；checkpoint `a421c6bd…`。累计104,857,600转移/6400tick-env，快照训练wall1466.425秒（24.440分钟）、异步worker613.724秒，不相加。
+
+| AI | v28 it99 | v28 it199 胜/负/和 | v28 it199 胜率 | v27 同200更新胜率 |
+|---|---:|---:|---:|---:|
+| aggressive | 0.00% | 8/392/0 | 2.00% | 81.75% |
+| expansion | 0.50% | 31/330/39 | 7.75% | 92.50% |
+| defensive | 1.25% | 104/141/155 | 26.00% | 99.25% |
+| random | 0.50% | 126/162/112 | 31.50% | 99.25% |
+
+v28 overall269胜/1025负/306和，16.8125%胜率；相比首点有明显提升，但仍显著落后.995控制的同样本曲线，不能由两点判断最终差距。继续原82663及冻结配置，不改LR/reward/MDP；第三it299/snapshot6已actual CPU running（worker3961905），还未取得第三报告。本轮仍不足1h，尚非平台，更不是v28终局。
