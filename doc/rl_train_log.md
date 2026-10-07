@@ -2068,3 +2068,20 @@ overall1512胜/88负/0和，94.50%。aggressive相对前一点又升7.5百分点
 中期预先固定的it492–541已完成一次CPU诊断（304b84 exit0，root846b86读回；[原始数据](../outputs/moe_cts/iterations/v28/diagnostic/mid_training_dynamics.json)，SHA `5dd84395…`）。50轮26,214,400转移，collection76.255秒、update295.967秒、真实wall372.536秒，即70,367转移/秒；v27同窗口70,515，计算速度基本一致。KL均0.01598、clip13.57%、entropy1.4856；v27为0.02224/12.77%/0.6713。自适应LR终值在48/50轮触顶、2/50轮触底，选定33个tag共1650点均有限。这些是日志窗口的描述，不能单独证明最终强度或gamma作用机制。
 
 该窗口episode指标按每次日志batch等权：length100.59tick、自对弈win81.72%、truncated0.237%；不能当baseline胜率或按episode数加权的整轮结果。WAIT20.64%、backtrack7.99%（v27同窗20.05%/12.90%）；终局开发轨迹尚未生成，暂不推断具体守家/调兵行为。v28冻结源未包含后续新增return/advantage/EV监控，不能由value loss补造这些指标。
+
+
+#### v28 第六采样panel及固定gamma中途配对（训练继续）
+
+it599 / snapshot12 actual completed0，共1600采样局，CPU验收5a300a、root36e090核对report SHA `e16eeb2a…`。四AI胜/负/和为aggressive343/57/0、expansion389/10/1、defensive397/3/0、random398/2/0，胜率85.75%/97.25%/99.25%/99.50%；overall1527/72/1，95.4375%。累计314,572,800转移/19200tick-env，快照training wall4435.102秒（73.918分钟）、异步worker89.758秒。仍使用原82663和同一冻结配置，等待后续曲线。
+
+实际CPU复用generic paired完成截至it599的相同样本对照（b42b0a exit0，root e8e7f8读回；[interim_fixed_gamma_comparison.json](../outputs/moe_cts/iterations/v28/diagnostic/interim_fixed_gamma_comparison.json)，SHA `af4946b1…`）。it99复用原结果；其余点各200地图簇/20k bootstrap，完整game/map/AI/seat schedule及CPU/FP32/highest/B128/workers1/采样seed271828等协议相同。
+
+| iteration | v28−v27 aggressive百分点（95%地图簇CI） | overall百分点（95%地图簇CI） |
+|---:|---:|---:|
+| 199 | −79.75 [−83.75, −75.50] | −76.375 [−78.688, −74.000] |
+| 299 | −31.25 [−36.50, −26.00] | −15.563 [−17.688, −13.500] |
+| 399 | −7.25 [−11.50, −3.00] | −3.563 [−5.063, −2.125] |
+| 499 | −3.75 [−8.00, +0.25] | −1.375 [−2.750, −0.063] |
+| 599 | 0.00 [−4.50, +4.50] | +0.250 [−1.063, +1.500] |
+
+第六点全部四AI及overall差值CI包含0，说明当前点估计已接近，不证明等效或最终优劣；这是单训练seed、反复使用selector地图的中途对照。it599 v27/v28快照训练wall4441.586/4435.102秒接近，eval worker89.981/89.758秒另记，不相加。约84分钟的资源实测：GPU17.5GiB、输出17MB、磁盘剩余897GB，无需改变保留策略或训练规模。
