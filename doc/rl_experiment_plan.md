@@ -2,6 +2,12 @@
 
 用户需求来源：2026-10-07 附件 pasted-text-1.txt，以及 doc/temp_plan.md。用户补充优先于旧方案中的实验顺序与奖励衰减建议。所有正式训练从随机权重、新 Adam、新历史池开始，不加载旧权重；工作分支 codex_dev，main 不修改。
 
+## 当前执行路线（按用户最新调整）
+
+2026-10-07 用户要求暂缓耗时过长的 ResNet/ViT 架构探索。v23–v25已完成结果保留，v26在首轮后按请求中断，100M门禁及正式训练暂不继续；这些未完成项目不作为架构结论。下面的容量记录保留历史安排，当前执行改为小网络的固定gamma→gamma课程→rollout/lambda→tick衰减→H8。
+
+以v22 H4K11 / SH4K11和InformationSpatialPPOPolicy为共同基座：v27固定gamma.995已从零启动，v28固定gamma.999已独立提交并冻结，两份运行源码相同，配置只run_id、PPOgamma和匹配PBRSgamma不同。原分段PPO、整局固定uniform历史对手、采样评测、1–3h预算及bounded retention保持。后续课程真实走到终点并留足目标阶段，最低更新数guard已实现、默认0；预算仍优先，未完成课程要如实标记。实际结果详见rl_train_log.md。
+
 ## 实验顺序与完整范围
 
 1. v19：重跑 v17 的 MDP、轻量网络和历史池，采用已启用的 categorical adaptive LR 和可复现采样评估，建立当前协议下的从零对照。旧 v17 的 fixed LR / greedy 成绩仅作历史背景。
