@@ -6,14 +6,15 @@
 
 2026-10-07 用户要求暂缓耗时过长的 ResNet/ViT 架构探索。v23–v25已完成结果保留，v26在首轮后按请求中断，100M门禁及正式训练暂不继续；这些未完成项目不作为架构结论。下面的容量记录保留历史安排，当前执行改为小网络的固定gamma→gamma课程→rollout/lambda→tick衰减→H8。
 
-以v22 H4K11 / SH4K11和InformationSpatialPPOPolicy为共同基座：v27固定gamma.995已完成930更新/115.005分钟，全部9次采样selector排空、最佳模型开发评测和八局录像已完成；v28固定gamma.999已完成1133更新/139.982分钟，11次采样selector排空、best899终局开发评测及八录像完成；实际内核进程exit0已确认，未重启。v27/v28开发aggressive均90.25%、overall均96.6875%，单seed证据不支持固定.999的明确最终增益，.995早期效率更好；继续预声明v29课程检验。两份运行源码相同，配置只run_id、PPOgamma和匹配PBRSgamma不同。原分段PPO、整局固定uniform历史对手、采样评测、1–3h预算及bounded retention保持。后续课程真实走到终点并留足目标阶段，最低更新数guard已实现、默认0；预算仍优先，未完成课程要如实标记。实际结果详见rl_train_log.md。
+以v22 H4K11 / SH4K11和InformationSpatialPPOPolicy为共同基座，三种gamma实验与终局开发、八录像及完整曲线均完成。v27固定.995：930更新/115.005分钟；v28固定.999：1133更新/139.982分钟；v29 .995→.999：1435更新/177.879分钟。三组开发aggressive为90.25%/90.25%/82.00%，overall为96.6875%/96.6875%/93.0625%；实际相同采样协议下，课程相对两个固定控制aggressive−8.25pp，配对地图CI均不跨0。固定两组best开发没有明确差异，而.995早期学习更快，因此**后续采用固定gamma.995**。这是单训练seed的工程选择，不声称最优gamma或两模型等效。保留全部结果和真实预算限制，详见rl_train_log.md。
 
-gamma课程预声明为v29：从.995按绝对TB迭代线性增加，u1000达到.999；`min_completed_updates=1200`保证平台早停前至少留下u1000..1199的200个最终gamma更新，3h预算仍优先。这是依据实际吞吐作出的实验选择，用户指定的1000边界本来只针对tick衰减。v27中期50轮完整wall为371.754秒，1200轮线性预算参考约8922秒（2.48h），并非v29已测速度或完成保证。课程只变gamma，tick保持−.001，PBRS资源与胜负系数不衰减；PPO/PBRS gamma在采集前同步，同一rollout的采集、GAE和更新保持一致，跨rollout仍是非平稳目标。固定gamma两轮已完成分析，v29由original87039/PID4062503/start427497185从零启动；source ee60ca14与自身冻结config回读相符，不继承权重、Adam或历史池；新版return/advantage/EV监控只增加诊断。若预算先耗尽且终点或最终阶段不足，报告课程不完整，不能缩短日程。
+v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456秒，已通过TB验收；best999的实际γ=.99899601936，但后续目标阶段确实完成。14次selector全部completed0；原87039真实exit0、observer也exit0，正常平台STOP，不重启。源码新增return/raw advantage/critic EV为监控，不修改目标或RNG。课程后期aggressive/expansion回落，末段高EV并不证明终局价值准确。失败样本显示可见home威胁下分配/回援不足，知识保留正确不等于策略有效使用。
 
+**当前下一轮v30**只试一个较长rollout候选：N4096/T128，从v27配置仅改N/T/run_id，保持NT524288、E4/B64/256Adam、γ.995/λ.95、H4K11、episode1024、整局固定历史对手，以及每50更新发布/100更新采样eval、1–3h预算和bounded retention。无gamma课程，min_completed_updates默认0；所有正式版本从随机权重、新Adam、新历史池开始。v30 JSON精确三叶子diff与现成环境CPU dataclass加载已actual通过，尚未启动。它同时改变连续采样与学生更新频率（32→128tick）、时间相关性及历史池相对局长的cadence（每lane pub1600→6400/eval3200→12800tick），不称为纯GAE长度消融。主要rollout缓存因NT不变而基本不变，逐环境状态缩小，collection调用数增加四倍；实际C/U、显存和wall需正式运行测量，不能承诺四倍加速。胜率按相同全局transitions与真实wall比较。
 
-后续只选择一个较长rollout候选：N4096/T128，保持NT524288、E4/B64/256Adam、H4K11、episode1024、整局固定历史对手，以及每50更新发布/100更新采样eval。仅改N/T/run_id，待gamma实验完整分析后绑定基座并冻结；不新增算法或扩容实验。它同时改变每局连续采样和学生更新频率（32→128tick）、时间相关性及历史池相对每局时间的cadence，不称为纯GAE长度消融。主要rollout缓存因NT不变而基本不变，逐环境状态缩小，collection调用数增加四倍；实际C/U、显存和wall需由正式运行验证。用相同全局transitions比较，不能用相同每环境tick假装样本量相同。CPU只读核对已完成，配置/速度/强度尚未实测。
+随后lambda只试一个候选.99，对照.95；等rollout完整分析后固定其余配置，从零训练。在所选gamma.995时，TD残差几何权重1/(1−gamma×lambda)由约18.26增至66.89tick；这只是GAE递推权重，不是bootstrap学习时间上限，不预言胜率。比较raw return/advantage、critic EV、KL/clip/自适应LR与实际吞吐，不做多值搜索。
 
-lambda只试一个候选.99，对照.95；待gamma及rollout完整结果后固定其余配置，fresh训练。实现中的TD残差几何权重在gamma.999时，有效长度1/(1−gamma×lambda)从约19.63增至90.99tick；这只是直接GAE递推权重，不是bootstrap学习的时间上限，也不预言胜率。比较raw return/advantage的尺度与方差、critic EV、KL/clip/自适应LR及真实吞吐，不做多值搜索。
+再做用户指定TB0..1000的tick−.001乘linear1→0，其他PBRS资源/胜负保持固定；必须真实完成u1000..1199至少200轮零tick及目标阶段评测，3h预算优先且不足如实报告。若选定设置在预算内无法完成，则先做保持配对的较小NT constant-tick控制再做衰减，不偷偷缩短1000日程。H8最后，按实际rollout缓存与显存验证可执行性；若需减NT，同样补fresh H4控制。剩余容量探索暂缓，整个迭代目标仍继续。
 
 ## 实验顺序与完整范围
 
