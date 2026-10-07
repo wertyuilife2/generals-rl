@@ -1979,3 +1979,12 @@ v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a5
 | random | [win](../outputs/moe_cts/iterations/v27/final_best/analysis/videos/random_win.mp4) | [loss](../outputs/moe_cts/iterations/v27/final_best/analysis/videos/random_loss.mp4) |
 
 追溯入口：[源/配置manifest](../outputs/moe_cts/iterations/v27/source_manifest.json)、[终局review](../outputs/moe_cts/iterations/v27/diagnostic/terminal_training_review.json)、[开发报告](../outputs/moe_cts/iterations/v27/final_best/development_report.json)、[逐帧事实](../outputs/moe_cts/iterations/v27/final_best/analysis/recorded_behavior_final.json)。原训练51203/dbb4d0 exit0、开发47333/efac77 exit0、demo59181/8bfba8 exit0、behavior10124/7e4bc8 exit0；review66876/48d63a、完整曲线0d18c3均exit0且已视觉核对。TB：`outputs/moe_cts/iterations/v27/train/`。下一轮v28保持同源同配置，仅改匹配的PPO/PBRS gamma为.999，从零启动；随后v29按ee60ca1预声明的1000终点/至少1200更新课程运行，不将配置或边界测试当正式课程成绩。
+
+
+### v28：固定 gamma=0.999，从零对照（已启动）
+
+沿用v27的v22信息组合小网络、MDP、N16384/T32、NT524288/E4/B64、lambda.95、历史池8/pub50、CPU采样eval每100更新/1600局及1–3h预算；配置仅run_id、PPOgamma及匹配PBRSgamma .995→.999。源码commit `8620d5a531d2e132a82e8c1a362c45435731da62`、116运行文件与v27逐字节相同；configuration SHA `b39771725fc5124d2f6b73ea90278f3934488bf0feb50427f2697cad82fd016f`。没有课程、权重/Adam/历史池继承或中途改动。目的同时观察长期终局折扣与累计tick惩罚的共同变化，不把胜率变化单独归因某一个奖励项。
+
+首次启动77021/c9491b在第一个env step前因编译器变量错误退出（3d8cb7 exit1、零完整更新）；CUDA loader读`GENERALS_NVCC`而非`NVCC`。仅修启动环境，保留`failed_bootstrap_train`与`failed_bootstrap.stdout.log`，重新fresh创建正式目录。新原session82663/d20e62、PID3933826（以自身startup日志/执行状态为准），启动确认自身冻结source、resume/warm_start均null、编译器路径有效，已有完整更新。最初两轮约7.1–7.2秒/update，只是启动窗口；尚无baseline panel或强度结论。失败启动耗时另记，不混入正式训练计时。
+
+TB：`outputs/moe_cts/iterations/v28/train/`。先完成该固定gamma对照的完整曲线、最佳开发评测、录像和失败分析，再进行已冻结的v29 gamma课程；rollout/lambda、真实TB0..1000 tick衰减及H8仍按顺序保留，容量探索暂缓。
