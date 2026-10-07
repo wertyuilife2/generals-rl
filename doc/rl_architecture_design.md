@@ -73,6 +73,8 @@ GroupNorm 统一用4 groups，使三档的 narrow deep stem 与官方舍入后�
 
 参数预算以 **actor 独立参数** 为准，不把 critic 或历史池复制的权重算入一个 actor。critic 在同一比较阶段使用相同独立结构；若 later 证明 critic 是容量瓶颈，再开单独实验。不能同时替换 actor/critic 并把全部增益归给 actor。
 
+当前“相同 critic”指结构与参数量相同。构造顺序是先actor再critic，仅使用整体训练seed；不同actor消耗不同RNG，因此未经逐张量核验不能声称配对critic初始权重相同。这是单seed比较的归因限制，现有容量门禁不证明训练强度差异。
+
 共同 head 先 `Conv1×1(D→128)` 投影，再使用 `Linear(128+13→128)` 的 public context、`Conv1×1(128→8)` 的逐格 head、`Linear(256→128)→Linear(128→1)` 的 WAIT/MOVE gate。除输入投影外 head 参数为52,233，输入投影为128D+128。这样不会因为 ResNet 输出通道更宽，给它附加不同规模的深 action head。最终 run manifest 仍须从真实模型重新计算参数，不以文档估算代替实际数据。
 
 三档 backbone 参数差约1.39%、1.80%、0.14%；加入共同 head 后 actor 配对差约1.94%、0.48%、0.57%，均小于3%。

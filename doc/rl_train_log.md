@@ -1429,3 +1429,24 @@ CUDA child在parent learner、storage、Adam、历史模型仍驻留时完整执
 另已完成共同p1024的first-logical短诊断：Res session91542/terminal367a55 exit0、ViT89076/terminal0ecba9 exit0；完整NT后只执行1个logical8192/1次Adam，32局max64采样eval。parent peak allocated分别21.253/22.566GB，ViT仅剩0.774GB driver free。此诊断包含monitor.begin而跳过monitor.finish，不能将其时间乘256推算完整update，也不能替代1600/max2000门禁；尚未选择p1024为正式配置。
 
 原始结果与actual执行绑定见 `outputs/moe_cts/iterations/full_capacity_preparation/{resnet,vit}_1m_fp32_p512_full_v22info/{gate_result,execution,capacity_evaluation}.json`。成对证据 `paired_1m_fp32_p512_full_capacity.json` SHA `98fa3e15cb93add4ff88fbf48de8fa2b523e039a28f113f29fef1e469a5f4b85`。全部六档从零1–3h正式训练尚未开始；其后的gamma/rollout/lambda、tick0..1000课程和最终H8仍在完整范围内。
+
+### BF16/p512 与 baseline workers：ResNet 完整通过，ViT 对应测试进行中
+
+ResNet1M原session16380、launch023d52、terminal66af8c实际exit0。沿用5da947a冻结源与同一MDP，policy/algorithm同时开启BF16，参数和rollout存储仍为FP32；helper新增可选同权重workers比较，SHA `be21e8e355d6f92092c6699cfedab8dcb8f7271cfcd620d43024fa44e6c012f4`。NT524288、E4/B64/logical8192、physical512，实际Adam/clip/logical-observer均256；24个whole-policy压力驻留及额外publication构造、CUDA eval均完成。
+
+| ResNet1M 实际测量 | BF16/p512 |
+|---|---:|
+| 完整rollout+GAE / 256 Adam | 22.895 / 190.050s |
+| rollout+update吞吐 | 2,462 transitions/s |
+| workers1 / workers4 评测主体wall | 572.934 / 402.602s |
+| 对应parent完整eval阶段 | 574.991 / 404.623s |
+| baseline controller/转换/反馈时间 | 439.147 / 263.564s |
+| parent peak allocated / reserved | 17.462 / 17.885 GiB |
+| sampled whole-device peak / 最少free | 19.047 / 4.449 GiB |
+| host peak RSS | 2.260 GiB |
+
+workers4仅改变评测controller分片。两次实际1600局均为200maps/AI×双座、采样、max2000、batch128、seed/sampling271828、CUDA BF16；同checkpoint SHA下全部逐局记录精确一致。原helper逐文件验SHA后比较8条选中轨迹的4368个tick联合动作，全部一致。评测主体这次快1.423×、少29.73%；完整PPO update较此前严格FP32测量少19.44%。这些是一次顺序容量测量，不是多repeat精度排名、样本效率或正式策略强度结论。
+
+原parent已独立确认不存在，完整runner model+Adam实际保存26,290,505B、save0.033s/hash0.012s，临时权重与轨迹全部清理。CPU复核重新比较完整对局记录、协议、case元数据和116源码SHA；临时动作payload已经删除，本次复核不声称重新执行Core replay。证据 `full_capacity_preparation/resnet_1m_bf16_p512_full_workers_comparison/{gate_result,baseline_worker_comparison,execution}.json`，result SHA `9fac3346fa466f46f9b410bb7c8e6c09c163ca4b2965197ea1c5637e579944b7`，execution SHA `a576094338fb13336ef9fbc5aebaee8986f058c451648354221d6774c0826806`。
+
+ViT同规格完整测试随后独立启动原session64661、PID3410920、launchc29c96；已实际完成256次Adam，update150.043s，尚在执行1600局workers1→4。对应进程终态与完整比较未证实前，不选择共同BF16/workers4或启动正式run。v23/v24的JSON候选准备与正式启动分开；六档正式训练、10M/100M完整容量证据和后续课程/H8的范围保持。
