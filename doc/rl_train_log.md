@@ -1987,4 +1987,6 @@ v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a5
 
 首次启动77021/c9491b在第一个env step前因编译器变量错误退出（3d8cb7 exit1、零完整更新）；CUDA loader读`GENERALS_NVCC`而非`NVCC`。仅修启动环境，保留`failed_bootstrap_train`与`failed_bootstrap.stdout.log`，重新fresh创建正式目录。新原session82663/d20e62、PID3933826（以自身startup日志/执行状态为准），启动确认自身冻结source、resume/warm_start均null、编译器路径有效，已有完整更新。最初两轮约7.1–7.2秒/update，只是启动窗口；尚无baseline panel或强度结论。失败启动耗时另记，不混入正式训练计时。
 
+首30个完整更新CPU只读TB（a7979b exit0，观测it0–29、当时latest35）均有限：C均1.273/U均5.909秒，完整wall约69948转移/秒，exactKL均.01866、clip均24.76%、entropy均4.5605，末LR.01；v27同期clip均17.76%。这是启动窗口的描述，不推断baseline强度或gamma优劣。原始tags/窗口保存在[early_training_dynamics.json](../outputs/moe_cts/iterations/v28/diagnostic/early_training_dynamics.json)。
+
 TB：`outputs/moe_cts/iterations/v28/train/`。先完成该固定gamma对照的完整曲线、最佳开发评测、录像和失败分析，再进行已冻结的v29 gamma课程；rollout/lambda、真实TB0..1000 tick衰减及H8仍按顺序保留，容量探索暂缓。
