@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19对照与v20 critic-only均已正常完成正式训练及终局分析，分别121.95/153.51分钟。v20最佳1399的采样开发复测为93%/96.25%/99.5%/99.5%；重复开发种子不称heldout。v19/v20最佳模型新做1600局采样cross-play，v20胜率54.375%，但预算和单训练seed条件不支持信息改动的因果结论。v21 actor-only持久记忆已从冻结d55a835启动正式fresh训练，实际初始化核验和1600局初始采样评测完成；已完成99/199/299/399四个selector，当前最佳299为91%/97.5%/99.25%/99.5%，最新399为88.75%/96.75%/99.25%/99%。观察时正式训练约39分钟，尚未达到至少1h预算，不将单点回落判为平台或记忆收益结论。v22组合条件已冻结并通过CPU门禁，全规模GPU与正式训练按顺序等待。成熟网络、可变地图与课程模块仍是后续实验准备，没有正式容量/gamma/tick/H8胜率结论。完整阶段任务保持未完成。** 旧 v9–v18 的阈值与版本停止规则属于此前阶段，以下历史结果及 greedy 标签原样保留。v1–v8 使用过续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零纯自对弈的公平对照。
+**当前状态：v19对照与v20 critic-only均已正常完成正式训练及终局分析，分别121.95/153.51分钟。v20最佳1399的采样开发复测为93%/96.25%/99.5%/99.5%；重复开发种子不称heldout。v19/v20最佳模型新做1600局采样cross-play，v20胜率54.375%，但预算和单训练seed条件不支持信息改动的因果结论。v21 actor-only持久记忆已从冻结d55a835启动正式fresh训练，实际初始化核验和1600局初始采样评测完成；已完成99..599六个selector，当前最佳299为91%/97.5%/99.25%/99.5%，最新599为88.75%/98%/99.75%/98.75%。观察时正式训练约61分钟，峰后仅三个评测、约27分钟，继续观察，不将最低1h预算作为自动停训条件。v22组合条件已冻结并通过CPU门禁，全规模GPU与正式训练按顺序等待。成熟网络、可变地图与课程模块仍是后续实验准备，没有正式容量/gamma/tick/H8胜率结论。完整阶段任务保持未完成。** 旧 v9–v18 的阈值与版本停止规则属于此前阶段，以下历史结果及 greedy 标签原样保留。v1–v8 使用过续训或已有权重初始化；v6–v8 还混入少量 aggressive 训练对手，不能作为本轮从零纯自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1197,7 +1197,7 @@ v20实际终局后，v21冻结源通过全规模GPU五更新：N16384/T32、2621
 
 首个完整selector99已完成1600局，四项**50.25%/71%/91.25%/92.75%**，overall76.3125%；root逐局核对800配对地图、全部map/controller/采样seed、双座均衡、checkpoint SHA与汇总，见`diagnostic/live_99_root_review.json`。这仍是早期点，不支持收敛或记忆收益结论。观察到的184更新wall吞吐97339/s，allocated13.539GiB、reserved16.211GiB、父进程RSS约2.123GiB且swap0；不是正式全程峰值。TensorBoard与实际输出：`outputs/moe_cts/iterations/v21/train/`。继续至少1h、最多3h，待曲线平台后完成最佳模型、开发评测、录像及终局分析。
 
-截至2026-10-06 23:42 UTC，实际PID3188195仍在运行，约39分钟、425更新；未生成terminal summary。新增三个selector均实际returncode0，root重新从6400个逐局outcome核对胜数、四AI与双座均衡、checkpoint标识，尚不冻结最终best。训练曲线如下；每行1600局采样，使用相同200图×双座协议：
+截至2026-10-07 00:04 UTC，实际PID3188195仍在运行，TensorBoard读到677更新、wall61.33分钟，未取得训练句柄terminal exit或生成terminal summary。六个selector均实际returncode0，最新审查完整核对9600个逐局ID/outcome/winner/seat/map/controller/sampling seed及分座聚合，并绑定冻结配置、报告与index；被保留的快照另外核对当前文件hash，已经清理的早期快照仅使用已记录标识，尚不冻结最终best。训练曲线如下；每行1600局采样，使用相同200图×双座协议：
 
 | update | aggressive | expansion | defensive | random | overall |
 |---:|---:|---:|---:|---:|---:|
@@ -1205,8 +1205,18 @@ v20实际终局后，v21冻结源通过全规模GPU五更新：N16384/T32、2621
 | 199 | 87.75% | 94.25% | 98.5% | 98% | 94.625% |
 | 299 | 91% | 97.5% | 99.25% | 99.5% | 96.8125% |
 | 399 | 88.75% | 96.75% | 99.25% | 99% | 95.9375% |
+| 499 | 88.5% | 96.75% | 99.75% | 99.5% | 96.125% |
+| 599 | 88.75% | 98% | 99.75% | 98.75% | 96.3125% |
 
-99→299明显上升，399的单点回落不足以判定持续平台；尚未满足一小时最低预算，继续当前进程。完整胜率截图、全程速度/峰值与记忆覆盖失败分析待真实终局后生成。磁盘当前余量约902GiB，训练GPU占用约17.4GiB，未启动第二个GPU实验。
+99→299明显上升，299后aggressive连续三个评测在88.5%–88.75%，覆盖27.29分钟。299→599下降2.25pp，200地图配对bootstrap95%CI为[−5.75,+1.25]pp；499→599为+0.25pp、CI[−3.75,+4.5]pp。复用selector和postselected峰值使这些CI不是heldout或信息改动的因果证据。目前继续观察实际699/799，未发STOP，最终曲线与记忆覆盖失败分析待真实终局。证据 `v21/diagnostic/live_599_review.json`（SHA `1f3c71015333811fe2904edfeb9434b6d7cc9eb2e39d19e9162121180e4c532f`）。
+
+最近100更新（578..677）wall吞吐95970 transitions/s，collection/learning合计138.91/406.84秒；parent Torch allocated均值13.536GiB、reserved16.213GiB。whole-update categorical KL均值0.02051、p95 0.03975、最大0.05991，entropy均值0.4900、clip fraction0.1117；82%更新结束时LR位于真实上限0.01，adaptive仍实际工作。更早544曾出现whole-update KL0.11422且LR降到1e−5；minibatch选中动作的KL自适应并不保证整轮累计KL不超过target0.02。以上均为中途窗口，不能当作全程速度/峰值或数值发散结论。Knowledge指标描述训练poststep的可用信息，不证明网络使用了记忆。
+
+下图归档的是此前已实际完成99..499的partial快照，同时比较等样本及等wall预算；时间轴截到45.12分钟，v19/v20也只显示该窗口的真实点。17份实际returncode0报告、27200条对局、各冻结source/config/report/index及TB读取bytes已核验；连接线不代表补测了中间点，599只在上表增补。元数据 `v21/diagnostic/live_sample_wall_curves.json`，PNG SHA `710207102f47ca951c91cd66666d01a9a3b121be7491558d7897d56c4c1f1ddc`。这不是终局架构或记忆收益排名。
+
+![v19/v20/v21中途采样胜率：等样本与等wall窗口](rl_train_figures/v21_live_sample_wall_curves.png)
+
+后续容量准备另外修复了测速parent与eval child的源码路径一致性，并加强MDP/native/vendor清单成员检查；从生产补丁commit `5019504` 的115个Git blob逐字节回读后，实际CPU父子进程的23模块path/SHA完全一致，CUDA未初始化（session75100 exit0）。旧v21的information-only freeze被明确拒绝，真实负例exit1；此为预期拒绝，不是GPU训练失败。外部gate helper SHA `60208a1e17c860d6f05698125943bb073b41268d2572edbb4f54739ca6fbd7a7`，证据 `full_capacity_preparation/source_only_frozen_5019504/execution.json`。仅执行同环境`-c`导入probe，没有实际`-m evaluator`、模型、对局或容量GPU门禁，也没有提前选择正式memory条件。生产改动仅补CUDA评测matmul/AMP精度验收，七项targeted CPU checks通过；v21/v22冻结源码不变。
 
 ## v22：持久知识与 history-state critic 组合（准备）
 
