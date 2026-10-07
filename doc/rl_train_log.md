@@ -2356,3 +2356,6 @@ v29的训练、selector排空、best开发/录像、失败分析、全程曲线�
 CLI实际run_config相对声明后的v27仅多出显式默认eval baseline_workers1/devicecpu/timeoutnull，实际旧协议一致；policy subtree整块替换，未混入默认actor。预算1..3h/iterations ceiling100000，min_completed_updates默认0（不带v29课程1200约束）。平台观察保持≥1h、aggressive锚点后的四个点无≥2pp改进即正常STOP，最长3h优先。首99/199后动态观察真正存在的panel，终局排空后再做不可变best、独立CUDA开发、四AI赢/输录像、失败分析及完整样本/wall对照，之后才选择λ候选的基座。
 
 已预声明早期0..29单次telemetry窗口与可达到时的492..541中期窗口；读取return/raw advantage/critic EV、KL/clip/LR/entropy、actual C/U/wall与显存，旧固定gamma控制缺少的新增tag不补造。初期20次更新约1049万转移、约7.8–8.1秒/轮，仅运行性观察，不判断学习或速度收益；尚无baseline panel。TensorBoard：`outputs/moe_cts/iterations/v30/train/`。ResNet/ViT仍暂缓，后续单个λ.99、TB0..1000 tick衰减并实际留足最终200轮、H8最后的范围不变。
+
+
+v30预声明0..29实际CPU诊断71f614 exit0：30更新/15,728,640转移，C62.864秒/U177.165秒（每轮2.095/5.906），C+U吞吐65,528.2/s；u29完整wall247.900秒、63,447.5/s，启动开销包含在wall。1035个实际记录点全部finite，EV valid30/30；return std均值.61096/raw advantage std.07479、EV.85430、whole-update KL.01427/clip.15942/entropy4.54247，自适应LR均值.00935。是启动诊断，不与旧训练终局速度作公平窗口比较、不推为baseline学习效果。窗口内TB current allocated max12.248GiB/reserved14.221GiB，不是完整训练peak。固定γ未启用课程，Curriculum/*按自身实现不记录；Episode/*前五轮无完成episode，实际只有25点，不补0。只读统计最初沿用课程标签/密集episode假设而失败，修正统计输入后通过，无训练改动或重复运行。[实际早期诊断](../outputs/moe_cts/iterations/v30/diagnostic/early_training_dynamics.json)，SHA `f6f88552…`。唯一CPU selector observer69739/PID39345/start428799528动态观察真实panel直到终局排空；不新增对局/推理。
