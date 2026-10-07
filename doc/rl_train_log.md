@@ -1923,3 +1923,20 @@ v25完整终局报告提交 `be78f29` 后，实际启动v26原session30384/PID37
 
 
 v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a531d2e132a82e8c1a362c45435731da62`；各自从Git blobs冻结116运行文件，两份runtime字节相同（1ffedc exit0）。v27原session51203/af15da、PID3808814已实际fresh启动，日志确认从自身source导入、resume/warm_start均null；已有多个完整更新，初期约7.2秒/update，尚无baseline panel，不作为稳定性能结论。TensorBoard为 `outputs/moe_cts/iterations/v27/train/`。v28保持冻结等待，从零开始且不继承v27优化器/历史池；首个v27采样panel在iteration99。
+
+
+### v27 首个采样panel与后续信用分配诊断准备（训练继续）
+
+iteration99 / snapshot2已completed/returncode0：100次更新、52,428,800新转移、3200tick/env，4AI各200地图×双座，共1600局采样，CPU异步。实际赛程逐局核对无缺漏/重复，汇总与TB一致。快照对应训练wall737.020秒（12.284分钟），评测worker193.199秒；异步评测与后续训练重叠，不能把两者简单相加或称737秒为评测完成时的同步wall。
+
+| AI | 胜 / 负 / 和 | 胜率 |
+|---|---:|---:|
+| aggressive | 135 / 265 / 0 | 33.75% |
+| expansion | 234 / 164 / 2 | 58.50% |
+| defensive | 347 / 53 / 0 | 86.75% |
+| random | 330 / 70 / 0 | 82.50% |
+| overall | 1046 / 552 / 2 | 65.375% |
+
+这是一个早期点，不能判断平台或gamma优劣；继续既定预算。checkpoint SHA `039e89ee154d007be7e3d1e209317d8cfeec88d035eeb22e1c54bcf3f9d4d59f`，报告SHA `51f8b2eb…`。CPU窄验收7dbf28/exit0、root248372读回，无新比赛。首30轮TB只读诊断0f1eff/exit0、root804e10/5c06a9：排除首轮后C均1.294秒/U5.906秒（CV2.01%/.121%），exactKL .04056→.00948、clip27.22%→12.98%；it4..29末LR均.01上限，自适应调节正常。该窗口所有已记录scalar有限，25个episode聚合点timeout均0；未检验后续窗口，亦未把self-play win当baseline强度。[early_training_dynamics.json](../outputs/moe_cts/iterations/v27/diagnostic/early_training_dynamics.json)保留抽取区间。
+
+为后续rollout/lambda诊断，默认PPO monitor补充active-prefix FP32 return/raw advantage/buffer advantage的mean/std，以及采集时critic对bootstrapped GAE return的EV（总体方差）。rawA从原returns−values重建，不改GAE或vendor；return方差≤1e−8或EV非有限时只写valid=0、省略EV，避免伪值/NaN。复用已有finish一次tolist，没有新增逐指标host同步、criticforward或RNG；只缓存8个scalar，NT524288临时rawA约2MiB。CPU55759/08a668 exit0，22个monitor/StudentPPO/microbatch测试通过，覆盖analytic、两种归一化、constantreturn、NaN未用尾部及参数/Adam/梯度/RNG/storage不变。未测CUDA统计成本；当前v27/v28冻结源保持不变，新监控从后续版本采用，不中途污染固定gamma对照。

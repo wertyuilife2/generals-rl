@@ -80,6 +80,8 @@ class PPOMonitorTests(unittest.TestCase):
         torch.set_rng_state(rng)
         collect(disabled, obs)
         rng = torch.get_rng_state()
+        rollout = {name: getattr(enabled.storage, name).clone()
+                   for name in ("returns", "values", "advantages")}
         losses = enabled.update()
         final_rng = torch.get_rng_state()
         torch.set_rng_state(rng)
@@ -92,8 +94,18 @@ class PPOMonitorTests(unittest.TestCase):
         self.assertEqual(disabled.update_metrics, {})
         self.assertEqual(enabled.update_metrics["probe_samples"], 7)
         self.assertEqual(enabled.update_metrics["minibatches"], 2)
+        for name, value in rollout.items():
+            assert_nested_equal(self, getattr(enabled.storage, name), value)
+            assert_nested_equal(self, getattr(disabled.storage, name), value)
+        self.assertAlmostEqual(enabled.update_metrics["returns_mean"], rollout["returns"].mean().item(), places=6)
+        self.assertAlmostEqual(enabled.update_metrics["raw_advantage_std"],
+                               (rollout["returns"] - rollout["values"]).std(correction=0).item(), places=6)
         self.assertIsNone(enabled.monitor.observations)
         self.assertIsNone(enabled.monitor.old_logits)
+        self.assertIsNone(enabled.monitor.rollout_statistics)
+        # Disabled diagnostics must not access even an absent storage field.
+        disabled.monitor.begin(object())
+        self.assertEqual(disabled.monitor.finish(object()), {})
 
     def test_probe_restores_distribution_rng_and_uses_only_filled_prefix(self):
         torch.manual_seed(13)
@@ -106,6 +118,8 @@ class PPOMonitorTests(unittest.TestCase):
         for tensor in alg.storage.observations.values():
             if tensor.is_floating_point():
                 tensor[2:] = float("nan")
+        for tensor in (alg.storage.returns, alg.storage.values):
+            tensor[2:] = float("nan")
         distribution = alg.policy.distribution
         state = deepcopy(alg.policy.state_dict())
         rng = torch.get_rng_state()
@@ -119,6 +133,53 @@ class PPOMonitorTests(unittest.TestCase):
         alg.monitor.release()
         alg.update()
         self.assertEqual(alg.update_metrics["probe_samples"], 8)
+        self.assertTrue(all(math.isfinite(value) for value in alg.update_metrics.values()))
+
+    def test_rollout_statistics_match_analytic_population_moments(self):
+        for per_minibatch in (False, True):
+            with self.subTest(per_minibatch=per_minibatch):
+                obs = observation(4)
+                alg = algorithm(obs, schedule="fixed", desired_kl=None,
+                                normalize_advantage_per_mini_batch=per_minibatch)
+                alg.storage.num_transitions_per_env = 2
+                collect(alg, obs)
+                returns = torch.tensor([0., 1., 2., 3.]).repeat(2).reshape(2, 4, 1)
+                values = torch.tensor([0., 0., 1., 1.]).repeat(2).reshape(2, 4, 1)
+                raw = returns - values
+                with torch.inference_mode():
+                    alg.storage.returns[:2].copy_(returns)
+                    alg.storage.values[:2].copy_(values)
+                    alg.storage.advantages.copy_(raw if per_minibatch else
+                                                 (raw - raw.mean()) / (raw.std() + 1e-8))
+                alg.update()
+                expected = {"returns_mean": 1.5, "returns_std": math.sqrt(1.25),
+                            "raw_advantage_mean": 1., "raw_advantage_std": math.sqrt(.5),
+                            "buffer_advantage_mean": 1. if per_minibatch else 0.,
+                            "buffer_advantage_std": math.sqrt(.5 if per_minibatch else 7 / 8),
+                            "critic_explained_variance_valid": 1., "critic_explained_variance": .6}
+                for name, value in expected.items():
+                    self.assertAlmostEqual(alg.update_metrics[name], value, places=6)
+
+    def test_constant_return_omits_explained_variance_and_ignores_unused_tail(self):
+        obs = observation(4)
+        alg = algorithm(obs, schedule="fixed", desired_kl=None)
+        alg.storage.num_transitions_per_env = 2
+        collect(alg, obs)
+        alg.storage.returns[:2].fill_(2)
+        values = torch.tensor([-1., 0., 1., 2.]).repeat(2).reshape(2, 4, 1)
+        alg.storage.values[:2].copy_(values)
+        raw = 2 - values
+        with torch.inference_mode():
+            alg.storage.advantages.copy_((raw - raw.mean()) / (raw.std() + 1e-8))
+        for tensor in (alg.storage.returns, alg.storage.values):
+            tensor[2:] = float("nan")
+        alg.update()
+        self.assertEqual(alg.update_metrics["returns_mean"], 2)
+        self.assertEqual(alg.update_metrics["returns_std"], 0)
+        self.assertAlmostEqual(alg.update_metrics["raw_advantage_mean"], 1.5)
+        self.assertAlmostEqual(alg.update_metrics["raw_advantage_std"], math.sqrt(1.25), places=6)
+        self.assertEqual(alg.update_metrics["critic_explained_variance_valid"], 0)
+        self.assertNotIn("critic_explained_variance", alg.update_metrics)
         self.assertTrue(all(math.isfinite(value) for value in alg.update_metrics.values()))
 
     def test_probe_rng_is_preserved_even_with_stochastic_forward(self):

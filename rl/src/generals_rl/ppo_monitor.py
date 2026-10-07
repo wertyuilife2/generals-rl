@@ -47,6 +47,7 @@ class PPOUpdateMonitor:
 
     def release(self):
         self.observations = self.old_logits = None
+        self.rollout_statistics = None
 
     def _logits(self, policy):
         distribution = policy.distribution
@@ -72,6 +73,22 @@ class PPOUpdateMonitor:
         if storage.step != steps:
             raise ValueError("PPO monitoring requires a complete active rollout")
         self.started = perf_counter()
+        with torch.inference_mode():
+            returns = storage.returns[:steps].float()
+            values = storage.values[:steps].float()
+            raw_advantage = returns - values
+            return_var, return_mean = torch.var_mean(returns, correction=0)
+            raw_var, raw_mean = torch.var_mean(raw_advantage, correction=0)
+            buffer_var, buffer_mean = torch.var_mean(storage.advantages[:steps].float(), correction=0)
+            # Collection-time critic predictions against bootstrapped GAE
+            # returns, before this update. Near-constant targets have no usable
+            # explained variance; omit that scalar instead of logging NaN.
+            explained_variance = 1 - raw_var / return_var.clamp_min(1e-8)
+            valid = ((return_var > 1e-8) & torch.isfinite(return_var)
+                     & torch.isfinite(explained_variance))
+            self.rollout_statistics = torch.stack((
+                return_mean, return_var.sqrt(), raw_mean, raw_var.sqrt(),
+                buffer_mean, buffer_var.sqrt(), valid.float(), explained_variance))
         count = min(self.probe_samples, steps * storage.num_envs)
         indices = torch.randperm(steps * storage.num_envs, generator=self.generator)[:count].to(storage.actions.device)
         keys = list(dict.fromkeys([*algorithm.policy.obs_groups["policy"], "action_mask"] +
@@ -123,8 +140,17 @@ class PPOUpdateMonitor:
     def finish(self, algorithm):
         if not self.enabled:
             return {}
-        for name, value in zip(("approx_kl", "clip_fraction", "entropy", "grad_norm"), (self.sums / self.samples).tolist()):
+        # Reuse the existing summary transfer, rather than synchronizing once
+        # per rollout statistic. The validity branch consumes only CPU values.
+        scalars = torch.cat((self.sums / self.samples, self.rollout_statistics.double())).tolist()
+        for name, value in zip(("approx_kl", "clip_fraction", "entropy", "grad_norm"), scalars[:4]):
             self.metrics[name] = value
+        for name, value in zip(("returns_mean", "returns_std", "raw_advantage_mean", "raw_advantage_std",
+                                "buffer_advantage_mean", "buffer_advantage_std"), scalars[4:10]):
+            self.metrics[name] = value
+        self.metrics["critic_explained_variance_valid"] = scalars[10]
+        if scalars[10]:
+            self.metrics["critic_explained_variance"] = scalars[11]
         self.metrics.update(approx_kl_max=self.maximum_kl.item(), learning_rate=algorithm.learning_rate,
                             learning_rate_min=self.lr_min, learning_rate_max=self.lr_max,
                             learning_rate_changes=float(self.lr_changes), minibatches=float(self.batches),
