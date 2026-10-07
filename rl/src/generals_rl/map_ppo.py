@@ -171,12 +171,12 @@ physical_minibatch_size, not by concatenating graphs of inference chunks.
             values.append(value.float())
         return torch.cat(values, 0)
 
-    def action_probabilities(self, obs, is_teacher=False):
+    def action_probabilities(self, obs, is_teacher=False, *, validate_mask=True):
         if is_teacher:
             raise ValueError("map student policy has no teacher branch")
         # The same masking/factorization implementation as the v17 actor.
         logits = self._forward(obs)
-        return self._probabilities_from_logits(logits, obs.get("action_mask"))
+        return self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)
 
     def evaluate(self, obs, is_teacher=False, **kwargs):
         if obs.batch_size[0] == 0:

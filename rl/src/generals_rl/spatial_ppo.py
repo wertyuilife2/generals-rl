@@ -141,19 +141,28 @@ class SpatialPPOPolicy(StudentPPOPolicy):
         self.critic = PrivilegedCritic(spatial_channels, residual_blocks, self.trunk_factory)
         self.distribution = None
 
-    def action_probabilities(self, obs, is_teacher=False):
+    def action_probabilities(self, obs, is_teacher=False, *, validate_mask=True):
         if is_teacher:
             raise ValueError("spatial student policy has no teacher inference branch")
         logits = (self.actor(obs["policy"], obs.get("knowledge"))
                   if getattr(self.actor, "knowledge_channels", 0) else self.actor(obs["policy"]))
-        return self._probabilities_from_logits(logits, obs.get("action_mask"))
+        return self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)
 
-    def _probabilities_from_logits(self, logits, mask):
+    def validate_action_mask(self, obs):
+        """Check a complete logical PPO batch before splitting its forwards."""
+        mask = obs.get("action_mask")
+        if mask is None:
+            raise ValueError("categorical policies require action_mask")
+        mask = mask.to(device=obs["policy"].device, dtype=torch.bool)
+        if mask.shape != (len(obs["policy"]), self.num_actions) or not mask.any(dim=-1).all():
+            raise ValueError("action_mask must match logits and contain a legal action in every row")
+
+    def _probabilities_from_logits(self, logits, mask, *, validate_mask=True):
         """One action boundary shared by legacy CNNs and dynamic-map heads."""
         if mask is None:
             raise ValueError("categorical policies require action_mask")
         mask = mask.to(device=logits.device, dtype=torch.bool)
-        if mask.shape != logits.shape or not mask.any(dim=-1).all():
+        if mask.shape != logits.shape or (validate_mask and not mask.any(dim=-1).all()):
             raise ValueError("action_mask must match logits and contain a legal action in every row")
         if self.wait_move_factorization:
             has_move = mask[:, 1:].any(dim=-1, keepdim=True)

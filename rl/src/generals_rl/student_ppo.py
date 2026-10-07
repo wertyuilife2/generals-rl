@@ -165,6 +165,7 @@ class StudentPPO(PPO):
         mean_losses = {"value": 0.0, "surrogate": 0.0, "entropy": 0.0}
         physical_batches = 0
         logical_batch_size = 0
+        mask_validator = getattr(self.policy, "validate_action_mask", None)
         for (obs, actions, old_values, advantages, returns, old_log_probs,
              _old_mean, _old_std, _hidden, _masks) in self.storage.mini_batch_generator(
                  self.num_mini_batches, self.num_learning_epochs):
@@ -176,6 +177,10 @@ class StudentPPO(PPO):
                 with torch.no_grad():
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
             chunk_size = self.physical_minibatch_size or count
+            if mask_validator is not None:
+                # The full logical batch must be valid before any physical
+                # forward/backward; public inference keeps its own validation.
+                mask_validator(obs)
             self.optimizer.zero_grad()
             batch_losses = {key: returns.new_zeros(()) for key in mean_losses}
             log_ratios, entropies, probabilities = [], [], []
@@ -188,7 +193,10 @@ class StudentPPO(PPO):
                     # Unlike act(), probability evaluation consumes no policy
                     # sampling RNG. One full-batch draw below preserves the
                     # upstream update's otherwise-unused sample call.
-                    self.policy.action_probabilities(obs[sl])
+                    if mask_validator is None:
+                        self.policy.action_probabilities(obs[sl])
+                    else:
+                        self.policy.action_probabilities(obs[sl], validate_mask=False)
                     values = self.policy.evaluate(obs[sl])
                 if self.policy.distribution.logits.dtype != torch.float32:
                     self.policy.distribution = Categorical(

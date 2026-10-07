@@ -5,8 +5,11 @@ from unittest.mock import patch
 
 import torch
 
+from generals_rl.map_ppo import MapPPOPolicy
+from generals_rl.spatial_ppo import SpatialPPOPolicy
 from generals_rl.student_ppo import StudentPPO
 from rl_test_utils import assert_nested_equal
+from test_map_ppo import GROUPS as MAP_GROUPS, observations as map_observations
 from test_student_ppo import algorithm, collect, observation, policy
 from rsl_rl.storage import RolloutStorageCTS
 
@@ -212,6 +215,88 @@ class StudentMicrobatchTests(unittest.TestCase):
         assert_nested_equal(self, reference.policy.state_dict(), candidate.policy.state_dict())
         assert_nested_equal(self, reference.optimizer.state_dict(), candidate.optimizer.state_dict())
         self.assertNotIn("microbatches", candidate.update_metrics)
+
+    def _mask_validation_pair(self, kind):
+        torch.manual_seed(928)
+        obs = map_observations(7)
+        if kind == "map":
+            models = [MapPPOPolicy(obs, MAP_GROUPS, 649, backbone="vit", knowledge_channels=11)
+                      for _ in range(2)]
+        else:
+            groups = {"policy": ["policy"], "critic": ["critic"]}
+            models = [SpatialPPOPolicy(obs, groups, 649, spatial_channels=4,
+                                      residual_blocks=1, wait_move_factorization=True)
+                      for _ in range(2)]
+        models[1].load_state_dict(models[0].state_dict())
+        # Reference follows the original per-physical public validation path.
+        models[0].validate_action_mask = None
+        algorithms = []
+        for model in models:
+            storage = RolloutStorageCTS("rl", len(obs), 0, 2, obs, [1],
+                                       distribution_shape=[649], action_dtype=torch.long,
+                                       store_action_std=False, store_action_mean=False)
+            algorithms.append(StudentPPO(model, storage, len(obs), num_learning_epochs=2,
+                                         num_mini_batches=2, physical_minibatch_size=3,
+                                         schedule="adaptive", desired_kl=.02,
+                                         ppo_probe_samples=13, ppo_probe_batch_size=5))
+        rng = torch.get_rng_state()
+        collect(algorithms[0], obs)
+        torch.set_rng_state(rng)
+        collect(algorithms[1], obs)
+        return obs, *algorithms
+
+    def test_logical_mask_validation_preserves_probabilities_gradients_adam_lr_and_rng(self):
+        for kind in ("spatial", "map"):
+            with self.subTest(kind=kind):
+                obs, reference, candidate = self._mask_validation_pair(kind)
+                with torch.no_grad():
+                    expected = candidate.policy.action_probabilities(obs).clone()
+                    candidate.policy.validate_action_mask(obs)
+                    torch.testing.assert_close(candidate.policy.action_probabilities(obs, validate_mask=False),
+                                               expected, rtol=0, atol=0)
+                with patch.object(candidate.policy, "validate_action_mask",
+                                  wraps=candidate.policy.validate_action_mask) as validation:
+                    self._compare_updates(reference, candidate)
+                self.assertEqual(validation.call_count, 4)
+                self.assertEqual(candidate.update_metrics["microbatches"], 12)
+                assert_nested_equal(self, reference.policy.state_dict(), candidate.policy.state_dict())
+                assert_nested_equal(self, reference.optimizer.state_dict(), candidate.optimizer.state_dict())
+                for left, right in zip(reference.policy.parameters(), candidate.policy.parameters()):
+                    if left.grad is not None:
+                        torch.testing.assert_close(left.grad, right.grad, rtol=0, atol=0)
+
+    def test_invalid_late_chunk_is_rejected_before_forward_and_public_mask_guards_remain(self):
+        for kind in ("spatial", "map"):
+            with self.subTest(kind=kind):
+                obs, _, candidate = self._mask_validation_pair(kind)
+                invalid = obs.clone()
+                invalid["action_mask"][-1].zero_()
+                for operation in (candidate.policy.action_probabilities, candidate.policy.act_inference):
+                    with self.assertRaisesRegex(ValueError, "legal action in every row"):
+                        operation(invalid)
+                wrong_shape = obs.clone()
+                wrong_shape["action_mask"] = wrong_shape["action_mask"][:, :-1]
+                with self.assertRaisesRegex(ValueError, "action_mask must match logits"):
+                    candidate.policy.action_probabilities(wrong_shape, validate_mask=False)
+                before = {key: value.clone() for key, value in candidate.policy.state_dict().items()}
+                original_batches = candidate.storage.mini_batch_generator
+
+                def invalid_batches(*args):
+                    for batch in original_batches(*args):
+                        # Logical batch 7 splits 3/3/1; the bad row is last.
+                        batch[0]["action_mask"][-1].zero_()
+                        yield batch
+
+                candidate.monitor.enabled = False
+                with (patch.object(candidate.storage, "mini_batch_generator", side_effect=invalid_batches),
+                      patch.object(candidate.policy.actor, "forward", wraps=candidate.policy.actor.forward) as forward,
+                      patch.object(candidate.optimizer, "step", wraps=candidate.optimizer.step) as step):
+                    with self.assertRaisesRegex(ValueError, "legal action in every row"):
+                        candidate.update()
+                self.assertEqual(forward.call_count, 0)
+                self.assertEqual(step.call_count, 0)
+                self.assertFalse(candidate.optimizer.state)
+                assert_nested_equal(self, before, candidate.policy.state_dict())
 
     def test_invalid_chunk_amp_and_unsupported_execution_fail_before_training(self):
         obs = observation()
