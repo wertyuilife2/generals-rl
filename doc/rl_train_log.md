@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。尚无容量正式胜率结果，四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；首个iteration3正式1600局采样panel为1/8/7.75/13.25%，仅为4轮更新的早期结果，训练继续。v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1481,6 +1481,21 @@ workers4这次快1.485×、评测主体少32.68%；完整update较此前FP32单�
 实际初始快照0于2026-10-07 04:44:57 UTC创建，SHA `00b5393bdc4663d6c565f7961cd00a9fbf82acc41465321c46f12145c46b61dd`，pool resume_source=null、source=random_initial_policy。CPU独立构造核验全部328张量逐位一致，actor1,100,945/critic1,053,033；116运行文件及12模块path/SHA正确、实际run_config字节SHA与冻结配置相同，CUDA未初始化，actual CPU session64696 terminal aa0f29 exit0。独立空Adam不是正式optimizer-state证据，后续以实际完整checkpoint检查；初始化合同 `v23/formal_initialization_contract.json`。TensorBoard和训练输出 `outputs/moe_cts/iterations/v23/train/`；首个训练后1600局采样selector预定iteration3，本段尚未报告任何正式胜率。v24保持未启动，不复用v23初始化或模型池。
 
 首个完整正式更新iteration0已完成：524288新转移、collection21.831秒、learning190.831秒，compute2465/s、含启动wall2359/s。实际`model_0.pt` SHA `6dfffbeb0986def5382f113424c0c6b690980e587ab76d4da11e577721a84315`，328份Adam状态step均256、参数与两份moment均finite、无distillation optimizer；CPU读回77个TensorBoard scalar及physical512/logical8192/4096chunks/256minibatches/BF16字段，actual chunk67e42b exit0。whole-update exact KL0.04418、clip24.27%、entropy1.9428，adaptive LR本轮最高0.001139、末值1e−5；这是首轮诊断，不能推出长期稳定性或强度。合同 `v23/first_update_contract.json`；不再将独立Adam构造当作实际训练optimizer证据。
+
+### v23 首个正式采样评测（早期观察，训练未结束）
+
+snapshot2 / iteration3，即4轮完整更新、2,097,152条新转移、每环境128tick。冻结配置下执行200maps/AI×双座，共1600局，CUDA BF16推理、FP32参数、采样、workers4、seed/sampling271828。actual eval PID3447812已退出，index completed/returncode0；worker402.299秒，完整1600局统计经独立CPU审查，TensorBoard四项胜率与报告一致。
+
+| AI | 胜 / 负 / 和 | 采样胜率 |
+|---|---:|---:|
+| aggressive | 4 / 396 / 0 | 1.00% |
+| expansion | 32 / 327 / 41 | 8.00% |
+| defensive | 31 / 311 / 58 | 7.75% |
+| random | 53 / 341 / 6 | 13.25% |
+
+该panel对应实际TB `Perf/wall_seconds=1264.937`，完整wall吞吐1657.91 transitions/s；step2→3增加616.217秒，已包含此次同步eval，画wall曲线时不另加worker时间。训练compute约2450 transitions/s、完整update约191秒；初期history-pool episode胜率不能作为baseline强度。仅4轮更新的一个panel不足以判定容量效果或平台，至少1h和多个健康评测后才按预定停止规则判断。
+
+checkpoint SHA `bff137cce5d39835507edfb2bcd4e1b5a9bea93d62bc66089c60a51b5f61742d`，report SHA `c7b6cda2f60a090a063e337c49ba1d6554228dcda7146ddc8beeb821097bb61b`。独立审查 `outputs/moe_cts/iterations/v23/diagnostic/first_eval/readback_contract.json`（actual379c8c exit0，root92d80a读回）验证赛程、聚合和8条真实胜负trace的SHA/header/3324joint-tick结构；本阶段未做Core重放，终局选定best后再生成录像及失败分析。原training session12099仍运行；v24未启动。
 
 ### v24：配对ViT 1M从零self-play配置
 
