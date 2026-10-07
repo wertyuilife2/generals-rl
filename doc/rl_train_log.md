@@ -1826,19 +1826,23 @@ snapshot2 / iteration3已completed/returncode0：4轮完整更新、2,097,152新
 
 补充跨容量归因限制：v19–22为T32/pub50，即每1600条单lane累计interaction发布；v23–26为T32/pub2，即每64条发布，周转加快25倍。pool8包含永久初始seed＋最新7个learned候选，满池learned最新到最旧跨度从300update/9600interaction变为12update/384interaction；累计interaction可跨episode reset。当前v25仅seed和iteration1/3三个候选，未满池，metadata也不能证明实际对手样本份额。故tiny→capacity除critic与计算方式外，还改变了历史池时间尺度，不能归为纯actor扩容；100M计划T512/pub1又改变该尺度。同档ResNet/ViT保持共同协议。CPU实际 `6dd98c exit0`、root `19b05f/97cf6d`，证据 `full_capacity_preparation/capacity_comparison_protocol_notes.json`；不据此归因当前低胜率，也不中途调整本轮配对配置。
 
-### v25 第三个采样点与早期实际败局（训练继续）
+### v25 第三个、第四个采样点与早期实际败局（训练继续）
 
-snapshot3 / iteration5完成：6次更新、3,145,728条转移、192tick/env；相同1600局采样赛程。CPU验收 `8df58a exit0`、root `cd98bc`，详细 `v25/diagnostic/third_eval_readback.json`。三点趋势如下：
+snapshot3 / iteration5完成：6次更新、3,145,728条转移、192tick/env；相同1600局采样赛程。CPU验收 `8df58a exit0`、root `cd98bc`，详细 `v25/diagnostic/third_eval_readback.json`。snapshot4 / iteration7随后完成：8次更新、4,194,304条转移、256tick/env；CPU验收 `13ff98 exit0`、root `7488a4`，详细 `v25/diagnostic/fourth_eval_readback.json`。四点趋势如下：
 
-| AI | it1 | it3 | it5胜率 | it5胜 / 负 / 和 |
-|---|---:|---:|---:|---:|
-| aggressive | 0.50% | 2.25% | 0.50% | 2 / 398 / 0 |
-| expansion | 6.75% | 5.00% | 6.50% | 26 / 337 / 37 |
-| defensive | 4.00% | 5.75% | 9.25% | 37 / 300 / 63 |
-| random | 6.50% | 7.50% | 10.75% | 43 / 347 / 10 |
-| 总体 | 4.4375% | 5.125% | 6.75% | 108 / 1382 / 110 |
+| AI | it1 | it3 | it5 | it7胜率 | it7胜 / 负 / 和 |
+|---|---:|---:|---:|---:|---:|
+| aggressive | 0.50% | 2.25% | 0.50% | 0.50% | 2 / 398 / 0 |
+| expansion | 6.75% | 5.00% | 6.50% | 7.50% | 30 / 339 / 31 |
+| defensive | 4.00% | 5.75% | 9.25% | 9.00% | 36 / 307 / 57 |
+| random | 6.50% | 7.50% | 10.75% | 10.75% | 43 / 347 / 10 |
+| 总体 | 4.4375% | 5.125% | 6.75% | 6.9375% | 111 / 1391 / 98 |
 
-总体较第二点+1.625pp，但aggressive−1.75pp，按预设最弱项优先选择的best仍为it3。post-sync TB wall4449.432秒（74.16分钟，包含426.805秒worker）；C71.860/U453.008秒，完整wall吞吐707.00转移/秒。只有六次更新，尚不能判断收敛或容量能力上限；原86930继续冻结协议，v26仍等待终局报告。
+第三点总体较第二点+1.625pp，但aggressive−1.75pp，按预设最弱项优先选择的best仍为it3。该点post-sync TB wall4449.432秒（74.16分钟，包含426.805秒worker）；C71.860/U453.008秒，完整wall吞吐707.00转移/秒。该点仅六次更新，不能判断收敛或容量能力上限。
+
+第四点总体仅较第三点+0.1875pp，aggressive无改善，best仍是it3。post-sync TB wall5917.756秒（98.63分钟，包含418.302秒worker）；C71.980/U453.456秒，完整wall吞吐708.77转移/秒。尚未满足plateau所需最少五个健康panel；原86930继续，下一点在it9。停止规则观察最弱项/aggressive并设2pp幅度，不能把按该规则的停止表述成所有baseline曲线均已收敛。
+
+补充it0..5实际PPO监控（CPU `c0d714 exit0`、root `c69477`，`v25/diagnostic/early_learning_dynamics_iteration5.json`）：it3/4/5 endpoint exact KL .03079/.03450/.03153、clip .3225/.3779/.3726、grad norm 2.421/1.867/2.099；末LR7.59375e−5/1e−5/1e−5，而每轮max LR均高于下限，说明反复触底和回升，不是更新停滞或单调收缩。总体categorical entropy上升，同时WAIT/move gate entropy下降，合法支持集也随局面变化，不能把原始总熵直接当作探索能力。自对弈episode win较高仍不代表baseline强度；原配对协议保持不变。
 
 仅从现有两个panel的逐局记录分析，aggressive自然终止败局的局长中位数113→112tick；总体WAIT按tick加权30.68%→20.18%。policy摊销耗时135.98→135.74微秒/decision，obs基本稳定；决策数减少3.11%但opponent单位耗时增加6.21%，所以eval wall不能只用局长解释。证据 `v25/diagnostic/early_eval_behavior_lengths_panels1_2.json`（`b2deba/09bdd6 exit0`）。it0..3父进程TB观察的GPU allocated最大14.81GB、reserved最大19.83GB、peak RSS2.56GB；这些不是整卡峰值或全系统RAM。观察时checkpoint1/3、历史池3/8、eval目录2/3＋独立best，指定模型/日志范围逻辑大小0.375GiB；尚未验证满池淘汰，亦不代表整个run磁盘占用。证据 `v25/diagnostic/early_resource_retention_iteration3.json`（`c9bc30/09bdd6 exit0`）。
 
