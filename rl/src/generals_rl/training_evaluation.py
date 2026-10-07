@@ -253,6 +253,13 @@ class PeriodicEvaluator:
             requested_cudnn = self.run_config.get("cudnn_allow_tf32")
             if requested_cudnn is not None and report.get("cudnn_allow_tf32") != requested_cudnn:
                 raise RuntimeError("evaluation cuDNN TF32 setting differs from the requested run")
+            requested_matmul = self.run_config.get("matmul_precision")
+            if requested_matmul is not None and report.get("matmul_precision") != requested_matmul:
+                raise RuntimeError("evaluation matmul precision differs from the requested run")
+            policy_options = self.run_config.get("runner", {}).get("policy", {})
+            expected_dtype = "bfloat16" if policy_options.get("amp_bfloat16", False) else "float32"
+            if report.get("inference_dtype") != expected_dtype:
+                raise RuntimeError("evaluation inference dtype differs from the requested policy AMP setting")
             traces = report["selected_game_traces"]
             if traces["protocol"] != "recorded_joint_actions_core_v1":
                 raise RuntimeError("evaluation did not record the requested action trace protocol")

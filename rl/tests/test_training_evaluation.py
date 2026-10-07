@@ -31,6 +31,31 @@ def small_config():
     return config
 
 
+def completion_fixture(evaluator):
+    """A complete worker report stub; never launches inference or a process."""
+    checkpoint = evaluator.directory / "snapshot.pt"
+    checkpoint.write_bytes(b"immutable stub weights")
+    report_path = evaluator.directory / "report.json"
+    report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
+              "completed_games": 8, "scheduled_games": 8, "policy": "student_local",
+              "device": evaluator.settings.device, "stochastic": True,
+              "matmul_precision": "highest", "cudnn_allow_tf32": False,
+              "parameter_dtype": "float32", "inference_dtype": "float32",
+              "overall": {"win_rate": 0.0},
+              "by_ai": {kind: {"games": 2, "win_rate": 0.0} for kind in AI_KINDS},
+              "games": [{"game_id": index, "opponent": kind, "outcome": "draw"}
+                        for index, kind in enumerate(kind for kind in AI_KINDS for _ in range(2))],
+              "selected_game_traces": {"protocol": "recorded_joint_actions_core_v1", "cases": [],
+                  "missing": [{"opponent": kind, "outcome": outcome}
+                              for kind in AI_KINDS for outcome in ("loss", "win")]}}
+    job = {"status": "running", "snapshot_id": 1, "iteration": 2, "publication_index": 1,
+           "steps_per_environment": 32, "environment_steps": 128,
+           "checkpoint": str(checkpoint), "checkpoint_sha256": report["checkpoint_sha256"],
+           "report": str(report_path), "worker_seconds": 0.1}
+    evaluator.jobs.append(job)
+    return report_path, report, job
+
+
 class TrainingEvaluationTests(unittest.TestCase):
     def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_precision_before_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -50,6 +75,71 @@ class TrainingEvaluationTests(unittest.TestCase):
                     evaluator._complete({"report": str(report_path), "checkpoint_sha256": "snapshot"})
                 self.assertIsNone(evaluator.best_completed)
                 self.assertFalse((evaluator.directory / "best.pt").exists())
+
+    def test_cuda_report_rejects_missing_or_wrong_explicit_matmul_precision(self):
+        for actual in (None, "high"):
+            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
+                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+                                              {"matmul_precision": "highest"}, directory, None)
+                path, report, job = completion_fixture(evaluator)
+                if actual is None:
+                    report.pop("matmul_precision")
+                else:
+                    report["matmul_precision"] = actual
+                path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(RuntimeError, "matmul precision"):
+                    evaluator._complete(job)
+                self.assertIsNone(evaluator.best_completed)
+                self.assertFalse((evaluator.directory / "best.pt").exists())
+
+    def test_cuda_report_rejects_missing_or_wrong_policy_inference_dtype(self):
+        for amp, actual in ((False, None), (False, "bfloat16"), (True, None), (True, "float32")):
+            with self.subTest(amp=amp, actual=actual), tempfile.TemporaryDirectory() as directory:
+                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+                    {"runner": {"policy": {"amp_bfloat16": amp}}}, directory, None)
+                path, report, job = completion_fixture(evaluator)
+                if actual is None:
+                    report.pop("inference_dtype")
+                else:
+                    report["inference_dtype"] = actual
+                path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(RuntimeError, "inference dtype"):
+                    evaluator._complete(job)
+                self.assertIsNone(evaluator.best_completed)
+                self.assertFalse((evaluator.directory / "best.pt").exists())
+
+    def test_cuda_report_accepts_matching_precision_and_default_fp32_metadata(self):
+        cases = (({}, "high", "float32"),
+                 ({"matmul_precision": None}, "medium", "float32"),
+                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False,
+                   "runner": {"policy": {"amp_bfloat16": False}}}, "highest", "float32"),
+                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False,
+                   "runner": {"policy": {"amp_bfloat16": True}}}, "highest", "bfloat16"))
+        for config, matmul, dtype in cases:
+            with self.subTest(config=config), tempfile.TemporaryDirectory() as directory, \
+                    redirect_stdout(io.StringIO()):
+                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+                                              config, directory, None)
+                path, report, job = completion_fixture(evaluator)
+                report.update(matmul_precision=matmul, inference_dtype=dtype)
+                path.write_text(json.dumps(report))
+                evaluator._complete(job)
+                self.assertEqual(job["status"], "completed")
+                self.assertEqual(evaluator.latest_completed["matmul_precision"], matmul)
+                self.assertEqual(evaluator.latest_completed["inference_dtype"], dtype)
+                self.assertEqual((evaluator.directory / "best.pt").read_bytes(), b"immutable stub weights")
+
+    def test_cpu_report_keeps_precision_validation_disabled(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1),
+                {"matmul_precision": "highest", "cudnn_allow_tf32": False,
+                 "runner": {"policy": {"amp_bfloat16": True}}}, directory, None)
+            path, report, job = completion_fixture(evaluator)
+            for key in ("matmul_precision", "cudnn_allow_tf32", "inference_dtype"):
+                report.pop(key)
+            path.write_text(json.dumps(report))
+            evaluator._complete(job)
+            self.assertEqual(job["status"], "completed")
 
     def test_precision_metadata_distinguishes_cuda_autocast_from_cpu_parameters(self):
         policy = torch.nn.Linear(2, 1)

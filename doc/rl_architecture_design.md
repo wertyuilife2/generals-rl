@@ -161,3 +161,5 @@ physical64的投影显示默认每100更新评测无法在1–3h内产生足够�
 为复现严格FP32，训练配置增加可选顶层 `cudnn_allow_tf32=false`，与 `matmul_precision="highest"` 配套；默认null保持现有cuDNN设置，训练退出或异常均恢复调用前设置。CUDA评估复用并记录实际cuDNN精度；若报告与显式配置不一致，父进程拒绝接受该评测。已有冻结v20不受这项候选配置控制改动影响。CPU控制/eval/trace/wall-cap检查37 tests、41 subtests通过，新增报告拒绝合同随后单独执行12 tests、16 subtests通过。此配置入口尚未做正式GPU训练验证，不把上述孤立GPU微基准冒充对新入口的验证。
 
 候选整体CPU检查一次执行80 tests、117 subtests全部通过（28.47秒），日志 `architecture_preparation/candidate_integration_cpu_tests.log`；其中含网络/动态几何、微批次、原PPO监控及准备中的评测/课程合同。另用随机ResNet1M、0 PPO更新完成32局实际GPU BF16采样评估，四条真实loss轨迹共528tick在CPU/native/Core按记录动作精确重放并生成四段MP4；缺少的四类win明确标注。证据 `evaluation_preparation/cuda_smoke_random_1m/cuda_gate.json` 及 `analysis/demo_manifest.json`。该门禁父进程仅微小占用，不能证明训练满池下eval峰值或100M容量。
+
+容量审查补充：`PeriodicEvaluator` 的 CUDA 报告验收现同时检查显式配置的 matmul precision，以及 policy 的 AMP 推理 dtype（默认 float32，开启 AMP 则 bfloat16）；字段缺失或不符时拒绝评测。未配置 matmul precision 时不强制该项，CPU 路径保持原样。新增四项 stub 合同连同原精度元数据/worker 路由检查共七项 targeted CPU tests 通过，实际 session81866、exit0；没有运行新游戏或 GPU 测试。仅修改评测验收及既有测试，不改变 PPO/vendor，也不改变已冻结的 v21/v22。
