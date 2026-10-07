@@ -2098,3 +2098,20 @@ it799 / snapshot16随后actual completed0（d762c2 exit0，root核对report SHA 
 it899 / snapshot18 actual completed0（当前CPU0fc076/b46f82 exit0验收，root读回SHA `666e97e8…`）：四AI WLD366/34/0、395/5/0、399/1/0、399/1/0，胜率91.50%/98.75%/99.75%/99.75%，overall1559/41/0（97.4375%）。累计471,859,200转移/28800tick-env；真实快照training wall6665.492秒（111.092分钟），异步worker82.279秒另记；checkpoint SHA `b53799f5…`。相比上点aggressive增加0.75百分点，最近两点提升较小，继续观察999/1099确认平台。
 
 17:09UTC工具观察registry丢失，旧session82663不可再轮询，但实际PID3933826/PPID1/start_ticks426509309仍活着、日志继续增长（a80dba/65d5c0），没有重启或继承另一轮权重。以真实OS进程和自身日志/评测索引继续追踪；停止仍通过自身`train/STOP`在完整更新后正常保存并收尾，不把丢失的观察句柄当训练结束，也不声称未观测到的原session exitcode。新的CPU观察只负责已有评测结果，不新增对局。
+
+
+#### 固定gamma的九个共同采样坐标（v28仍训练）
+
+v27正式训练已结束，其全部九个selector点均已与v28对应点对齐。实际CPU83482/f5e1a4 exit0，只新增699/799/899的配对bootstrap，原六点与metadata不变；root4803b4读回JSON并目视核对两图。18份报告协议及完整地图/座位赛程相同，每点200地图簇、20k bootstrap。[完整九点数据](../outputs/moe_cts/iterations/v28/diagnostic/fixed_gamma_selector_comparison.json)，SHA `0591e502…`。
+
+| iteration | v28−v27 aggressive百分点（95%地图簇CI） | overall百分点（95%地图簇CI） |
+|---:|---:|---:|
+| 699 | +4.25 [+0.50, +8.00] | +1.625 [+0.375, +2.938] |
+| 799 | +3.00 [−0.50, +6.50] | +0.813 [−0.313, +1.938] |
+| 899 | +3.75 [0.00, +7.50] | +2.375 [+1.250, +3.563] |
+
+固定.999前期明显慢学，随后追上并在部分后期点有更高胜率；这不是由采样计算速度大幅变化解释的。不能由这些复用selector地图的点估计断言最终模型或训练seed泛化更优。v28尚未终局、独立开发评测尚未执行，不在这里选择后续实验的base。图只连接真实观测点；时间轴为各快照生成时的训练wall，不加异步worker时长、不插值补评测。稀疏评测下相同wall预算的最近可用snapshot可能不同，最终报告需列出实际坐标与时间差。
+
+![固定gamma共同样本坐标](rl_train_figures/v27_v28_fixed_gamma_common_samples.png)
+
+![固定gamma真实快照时钟](rl_train_figures/v27_v28_fixed_gamma_common_wall.png)
