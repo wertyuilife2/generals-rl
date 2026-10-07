@@ -1913,3 +1913,10 @@ v25完整终局报告提交 `be78f29` 后，实际启动v26原session30384/PID37
 自身iteration0 checkpoint及TB实际CPU becadc/exit0验收：NT524288、logical8192、physical256/BF16、256logical/8192microbatches；288个参与参数的Adam step均256、参数与moments有限。C46.330秒/U333.235秒、初始完整wall388.619秒（1349.11转移/秒）；endpoint exactKL .02269、clip22.02%、LR1e−4→7.59375e−4（5次变化），WAIT50.80%。首轮计时不是成熟速度或强度结果，formal未安装clip/observer计数hook。checkpoint SHA `e25e93d2bad2066c8809fdf9d3710850023e268789b4e62664105f5f02ea8342`；[首轮核验](../outputs/moe_cts/iterations/v26/first_update_contract.json) SHA `f09a77d6…`，root658ce3/a1e04b读回。TB：`outputs/moe_cts/iterations/v26/train/`。仍在正式训练，首个1600局采样panel于iteration1后完成；尚无v26正式baseline胜率。
 
 另外为后续真实tick TB0..1000实验加入默认0的 `training_control.min_completed_updates`（独立commit `e61b2d2`）：只推迟平台早停，按包括resume历史的绝对已完成更新数判定；时间预算与reserve仍优先。这是实验控制准备，不改变冻结v25/v26协议或宣称课程已验证。既有控制器套件CPU67790/8bdd3a exit0，12tests＋31subtests通过，包含真实small train恢复后绝对计数3→4→5和预算优先测试；不改vendor/MDP。今后若预算先耗尽且课程未到1000与足够零tick阶段，应报告实验不完整，不能缩短衰减边界。
+
+
+### 用户调整路线：暂缓网络扩容，转入小网络gamma实验
+
+用户指出ResNet/ViT训练太慢，要求先跳过架构探索、推进其他项。当前v26已按请求停止：精确终止自己的PID3797686，原session30384实际af1a53/exit143，无评测子进程；保留已完成iteration0的checkpoint/TB，未完成的第二更新丢弃。**v26未完成正式预算、没有baseline panel，不报告其终局胜率或架构强度。** 暂不执行两家100M容量门禁及正式训练；已完成v23–v25结果保留。
+
+下一阶段以v22已实现的信息语义和小网络为共同基座（H4K11/SH4K11、InformationSpatialPPOPolicy/spatial16、N16384/T32、E4/B64、uniform历史池8/pub50、每100updates异步CPU采样1600局、min1h/max3h及bounded retention），分别从零训练v27固定gamma.995和v28固定gamma.999。两者只改run_id、PPO gamma及与其匹配的PBRS potential_gamma，不复用v22模型。保留原lambda.95、reward/tick、actor/critic和adaptiveLR，不开启gamma或reward课程，以便解释固定gamma差异。历史v22平均C1.483/U5.925秒每更新、完整吞吐70,625转移/秒仅作预算参考，不保证新run速率。后续顺序仍为gamma课程、rollout/lambda、真实tick0..1000衰减及足够零tick训练，最后H8。
