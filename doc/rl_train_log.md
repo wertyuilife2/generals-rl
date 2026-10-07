@@ -1594,3 +1594,18 @@ aggressive败局131tick，全局从未合法看到敌方本营。最后决策时
 自身随机初始snapshot0 SHA `82c5fe6b5bb8d8c46e4d54bc0b78cedf51f6a8b5805cbb96a9d735e845bac7cc`，246张量与训练seed20261013独立构造的新ViT策略逐位一致，pool resume_source=null；116冻结文件及12模块path/SHA正确，实际run_config字节与自身冻结配置相同。actual CPU verifier84206/301ed9 exit0、root453f93回读；合同 `v24/formal_initialization_contract.json` SHA `37bb17cf24f2292a17c558425b5d750d15462b5bf82f35539dde9918c3998245`。核验未初始化CUDA或运行forward/game，独立空Adam不当作实际训练optimizer证据。
 
 首个正式完整更新iteration0：524288新转移、collection **15.012秒**、learning **150.514秒**，compute约 **3167 transitions/s**、含启动wall **2994.63/s**。实际`model_0.pt` SHA `ee1d8d3d96619d3790819847906477aca7e9bb9bfc83a178b94e4b1f3837195e`，246份Adam state均step256、模型/两份moment finite、无distillation optimizer；实际TB physical512/logical8192/4096chunks/256minibatches/BF16均匹配。CPU窄验actualb9647a exit0、root284006读回；合同 `v24/first_update_contract.json` SHA `2962a807101b28090f9873081b78a6b07e2dea2c1bf3018dbce51ca238c29e48`。whole-update KL0.017802、clip23.67%、entropy1.9679、末LR0.000759375（5次调整）。这只是自己的首轮计算证据，尚无正式baseline胜率，不能推出长期样本效率或架构强度优劣；训练继续等待iteration3首个1600局采样panel。
+
+### v24 首个正式采样评测：同样本量的早期观察
+
+snapshot2 / iteration3已completed0，actual PID3555622退出；4个完整更新、2097152新转移、128tick/env，1600局（200maps/AI×双座）、CUDA BF16采样、FP32参数、highest/TF32关闭、workers4、seed/sampling271828。全部15组计数/胜率/平率、CP/report/config SHA和TB四胜率经窄CPU读回匹配（actual9ae146 exit0，root9b172c），不是新增比赛或终局结果。
+
+| AI | 胜 / 负 / 和 | v24采样胜率 | v23相同iteration3胜率 |
+|---|---:|---:|---:|
+| aggressive | 1 / 399 / 0 | 0.25% | 1.00% |
+| expansion | 23 / 344 / 33 | 5.75% | 8.00% |
+| defensive | 15 / 328 / 57 | 3.75% | 7.75% |
+| random | 21 / 371 / 8 | 5.25% | 13.25% |
+
+总体60胜1442负98和（3.75%）。post-sync TB wall **1020.636秒（17.01分钟）**，已包括349.798秒eval worker；v23相同2097152转移的wall1264.937秒（21.08分钟），本次早期完整耗时少19.31%。这一个点低于v23的早期胜率，但更快；仅128tick/env不足以判断架构优劣或平台，不能拿首点代替最终配对实验。原session66320继续，v24自己的终局best、开发评测、完整曲线和Core录像尚待完成。
+
+CP SHA `3154192a5748dd89c4c60683e466d3e03f8274807c7b87bedbf4fcb9952ec9db`，report SHA `8a2e5f906b405e2871c299c6581dc44fc811c371beacf65b4bec64e525e04885`；读回 `v24/diagnostic/first_eval_readback.json` SHA `61513a5380572dd5ef2bd56454eeaa36d2fa152c02b15d866ca902113ea4dec2`。不为单点另外生成曲线，最终展示完整实际panel及同transitions/同wall比较。
