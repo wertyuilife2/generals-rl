@@ -42,3 +42,6 @@ v24首个iteration3采样selector现已completed0：1600局，aggressive/expansi
 容量配对量化入口已准备（ignored `full_capacity_preparation/capacity_pair_preparation/compare_terminal_pair.py`，SHA `51091be53c237259af8cf0ed163e82bd4d08ed50eff64f40b50d715e11304b94`）：仅接受两份真实终局review，ResNet/ViT同档位、同critic参数及共同运行实现，配置仅run_id/backbone可不同；复用已有按地图簇配对统计，比较确切共同transitions的实际panel。wall比较只列截止分钟前的真实panel和时差，不插值假造共同点。CPU help/compile通过，尚未执行完整输入load或v23/v24终局pair，不能算已完成容量结论；最终可按实际输入修正必要缺口。工具不修改正在运行的源码。
 
 v24已完成四个采样selector（iteration3/7/11/15，均1600局completed0），最新1.25/14/8.75/11%，post-sync完整wall67.67分钟、8388608转移。第四点CPU聚合/TB/身份审查97be2f exit0，root68e89b回读；原66320仍live，未达到至少五个panel的平台停止条件。其余三项成绩仍低但上升，aggressive未持续改善；保持本轮冻结协议，终局后再做开发/录像/完整曲线。准备性能trace的CPU分析不占GPU；实际profiler仍须等两轮1M正式训练都退出，四个更大容量实验和后续课程/H8尚未完成。
+
+
+v24正式训练及1M配对已完成：original66320/22f0eb exit0，20更新/10485760转移/84.70分钟，5个完整采样selector，best19为2/12/8.75/11.5%，复用开发为2.5/11.75/12/9.5%。终局review、八录像2528tick/真实Core核验、失败分析、完整sample/wall图已记录训练日志。相同样本的ViT compute约1.290×、wall约1.226×，expansion较高、defensive/random较低，aggressive均2%；单seed浅历史池不构成架构上限。真实终局CPU pair274b77/exit0及地图簇CI完成，没有合成wall点。root空闲GPU开始ResNet1M性能诊断original63882，之后ViT；诊断不是新容量门禁或正式训练。四个10M/100M门禁/正式训练、gamma/rollout/lambda、tick0..1000课程和最后H8仍待完成。

@@ -1624,3 +1624,81 @@ CP SHA `3154192a5748dd89c4c60683e466d3e03f8274807c7b87bedbf4fcb9952ec9db`，repo
 第四点140胜1341负119和，总体8.75%；worker354.033秒，post-sync wall4060.478秒。aggressive在1.25%附近，而其他三项仍有早期上升；四点尚未满足预定至少五个完整panel的平台停止条件，不手动更改本轮协议。相同8,388,608样本的v23为2%/9.75%/22.25%/17.5%，wall83.29分钟；这组ViT执行更快，expansion较高、其他三项较低，不能据此宣布最终架构胜负。selector是重复选模地图；终局选定best后还需开发评测、真实动作Core录像、完整曲线与配对分析。
 
 第二/三点窄审查actual01002c exit0，root本次b98932回读；合同SHA分别`17cfd246c14f4ffc77a0dff9407aef61a6d3a7b208f0ff53eda776d3fd917ab4`、`1d8e78bdf74ab7dfc16202396af7c088b0e11ed7bbb63883289309dcf72bc42e`。第四点actual97be2f exit0、root68e89b回读：`diagnostic/fourth_eval_readback.json` SHA `2ae8081a7696adc7920340bb422fb8e21efdd5ae454f9fd25f543bcfc29e5164`，重算1600局的15组胜/负/和及胜/平率、核对四个TB胜率与worker/config/CP身份；specific evaluator3591809已退出。CP SHA `5dd343119b7822f45d5d24ab90339405133e2ed723899931a329bc0f4b30b120`，report SHA `9e378201f6e5c259bfe2ca13f871e2dea5ce22677d1fde84e120e54bee51f8a3`。本次没有重跑旧panel、初始权重门禁、游戏或GPU诊断。
+
+
+### v24 正式训练终局：ViT 1M配对结果
+
+本轮检查成熟ViT actor在共同信息、MDP和PPO下的样本与计算效率。Actor1,079,945参数，独立ResNet critic1,053,033参数；相对v23，配置仅run_id/backbone不同。共同设置为9×9/P2、episode1024、actor H4+K11/critic S+H4+K11、gamma0.995/lambda0.95、资源PBRS/终局±1/tick−0.001；N16384×T32=524288、4 epochs/64 minibatches、logical8192/physical512、每轮256 Adam steps。BF16前向、FP32参数与storage、matmul highest；纯均匀历史self-play池8、整局固定对手、每2更新发布、每4更新同步1600局采样eval。课程关闭，H8尚未启用。自身e817a78冻结源、初始化/Adam/历史池均从零，不加载v23或门禁权重。
+
+原training66320实际22f0eb/exit0，20完整更新、10,485,760新转移、640tick/env，wall **5082.107秒（84.70分钟）**；5个selector全部completed0，无failed/cancelled/unfinished。停止按启动前冻结规则：至少1h、至少5个健康panel、patience4、worst/aggressive严格改善超过2pp。首点worst/aggressive=.25%，后四点最高2%，未越过2pp门槛，故触发evaluation_plateau；overall改善不会重置计数。这是工程早停，不能称四条曲线均平坦或模型能力上限。
+
+| iteration / 新转移 | aggressive | expansion | defensive | random | 含同步eval的wall分钟 |
+|---|---:|---:|---:|---:|---:|
+| 3 / 2,097,152 | 0.25% | 5.75% | 3.75% | 5.25% | 17.01 |
+| 7 / 4,194,304 | 1.25% | 8.25% | 4.00% | 7.25% | 33.82 |
+| 11 / 6,291,456 | 1.50% | 10.25% | 5.75% | 8.00% | 50.71 |
+| 15 / 8,388,608 | 1.25% | 14.00% | 8.75% | 11.00% | 67.67 |
+| 19 / 10,485,760 | 2.00% | 12.00% | 8.75% | 11.50% | 84.70 |
+
+按worst→aggressive→overall选择最后snapshot10/iteration19，selector137胜1349负114和（8.5625%）。虽然15的overall为8.75%，19的最低AI胜率更高；没有使用开发集重新选模。CP SHA `deb05cbbeb24a96e0cfa2f77bd0dca718ade5def18a89425fd54c7ee1a7a8cae`，在真正终局后不可变捕获自身配置、权重和8条原动作trace。完整五点来自终局review；图由root实际查看并逐字节复制，没有合成点或平滑。
+
+![v24终局五点采样胜率：新转移](rl_train_figures/v24_final_samples.png)
+
+![v24终局五点采样胜率：完整训练时间](rl_train_figures/v24_final_wall.png)
+
+固定best的开发评测使用复用seed/sampling1001042、200maps/AI×双座、max2000tick、CUDA/BF16/4 baseline workers；不是held-out。原root13938实际659aee/exit0，1600局143胜1346负111和（8.9375%），function含setup349.848秒，未计入正式训练wall。root440c7b核验CP、完整计数和8条开发trace SHA；receipt为final_best/development_execution.json。
+
+| AI | 开发胜 / 负 / 和 | 采样胜率 |
+|---|---:|---:|
+| aggressive | 10 / 390 / 0 | 2.50% |
+| expansion | 47 / 321 / 32 | 11.75% |
+| defensive | 48 / 276 / 76 | 12.00% |
+| random | 38 / 359 / 3 | 9.50% |
+
+Collection311.458秒/update3004.796秒，均值15.573/150.240秒；compute **3161.93 transitions/s**，含同步eval的wall **2063.27/s**。更新占C+U90.61%；五次selector worker共1755.228秒、约34.54%wall，已经包含在wall中。parent Torch peak allocated/reserved17.008/17.740GiB，进程peak RSS2.240GiB，不能代替整个GPU含子进程峰值。
+
+首4→末4轮均值：whole-policy exact KL .015385→.005807、minibatch clip20.94%→7.07%、entropy2.908→4.978、采集WAIT38.68%→2.93%、preclip grad norm .08377→.07118、value loss .002902→.003989。自适应LR正常启用，update0末.000759375、update1达.01上限，此后维持上限，前两轮提高5/14次。小KL和LR饱和是观测事实，不证明scheduler缺失或critic collapse；没有记录value target/advantage分布或explained variance。raw PBRS episode return是未折扣和，与PPO折扣GAE不同，下降也不能单独证明训练退化。详细20轮诊断：[final_training_dynamics.md](../outputs/moe_cts/iterations/v24/diagnostic/final_training_dynamics.md)。
+
+历史池仍浅：1854局自然结束、0截断，平均.113局/lane；18238次assignments、11次publication包含随机初始snapshot0。终局seed0占15001/16384活动lane（91.56%），退休1/2/3仍占761lane，符合整局固定对手。seed0可被reset重新抽中；此占比不能解释为全部初始局未结束或整轮transition mixture。缺少逐快照暴露/战绩，不能量化随机对手的贡献。
+
+最终selector四AI各一胜一负已按原joint actions生成8段MP4，共2528tick：CPU original20429实际002350/exit0，native/Core逐tick与原trace匹配，无新比赛或策略推理。全部learner计划动作在pre-state mask内；random_win pre99的一次native失效是seat0先夺取seat1原合法源格。四败均map0/seat0，以下只描述该地图的选中失败，不能估计总体败因占比，也没有替代动作获胜反事实。
+
+| 对手 / pre-tick | 可见局部威胁 | learner真实行动与失败事实 |
+|---|---|---|
+| aggressive / 88 | 本营2兵，敌44有4兵、出3 | 35→34出1、留1；敌44→35夺将。总兵己5/敌46，从未见敌将，终局已有明显资源劣势。 |
+| expansion / 221 | 本营2增长至3，敌44有54兵、出53 | 26→35真实回援1，补至4仍被夺将；有回援但量不足。K仍记得49，H4末期不含。 |
+| defensive / 462 | 本营117，敌34有211兵、出210 | 远处0→9半兵出2；己总兵426对280，未集中局部防御。97兵距本营5格，城市53有34兵距2格；本营pre307之后持续积兵，不能称末期抽空。 |
+| random / 438 | 邻敌44有4兵、出3；本营仅1 | pre437从本营出11至34留1，pre438又34→43出11，随后夺将。34是普通格，K一直记得敌将49。 |
+
+这些例子显示守将、经济和兵力调度尚未成熟；合法mask、K保留正确不代表网络有效使用，也不能据四例归因容量或reward。四个胜例86/572/108/549tick，低于训练1024上限；精选胜例不能反推整体强度。详细[observations.md](../outputs/moe_cts/iterations/v24/final_best/analysis/observations.md)与recorded_behavior_final.json保留原动作、H4/K和真实执行事实。
+
+| AI | 胜局录像 | 败局录像 |
+|---|---|---|
+| aggressive | [win](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/aggressive_win.mp4) | [loss](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/aggressive_loss.mp4) |
+| expansion | [win](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/expansion_win.mp4) | [loss](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/expansion_loss.mp4) |
+| defensive | [win](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/defensive_win.mp4) | [loss](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/defensive_loss.mp4) |
+| random | [win](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/random_win.mp4) | [loss](../outputs/moe_cts/iterations/v24/final_best/analysis/videos/random_loss.mp4) |
+
+终局review实际5e57d6/exit0，root6a8583读回，SHA `f580a7c721e828c258ec0dd3fd39834035c12e97f1a402889b8f624d8d97b7d9`；summary SHA `ce577d0b...3b81`。两图actual a85e0e/exit0，root视觉检查并42f48b复制。开发report SHA `c26806b2...d18c`，回放与视频身份见final_best/analysis/replay_render_evidence.json。TensorBoard仍在outputs/moe_cts/iterations/v24/train/。
+
+### 两轮1M终局配对：ViT更快，当前有限预算的强度未整体胜出
+
+真实CPU comparator274b77/exit0读取两轮终局review，逐项绑定source、configuration、summary、capture/CP、全部selector和开发report；runtime116文件SHA相同，配置仅run_id/backbone不同。实际actor ViT/ResNet参数比.980925，共同critic结构/数量不等于初始张量相同。相同10,485,760新转移、20更新时：
+
+| AI | ResNet v23 | ViT v24 | ViT−ResNet pp | 地图簇bootstrap95%CI pp |
+|---|---:|---:|---:|---|
+| aggressive | 2.00% | 2.00% | 0.00 | −1.75..1.75 |
+| expansion | 8.00% | 12.00% | +4.00 | .50..7.50 |
+| defensive | 26.25% | 8.75% | −17.50 | −22.50..−12.50 |
+| random | 17.50% | 11.50% | −6.00 | −10.25..−1.75 |
+| overall | 13.4375% | 8.5625% | −4.875 | −6.9375..−2.8125 |
+
+共同200张地图的双座/四AI整体重采样20000次，seed20261007；CI仅描述固定模型在复用地图上的差异，不包含训练随机性或选模偏差。复用开发集结果方向相同：aggressive均2.5%，ViT expansion+4pp、defensive−12.75pp、random−5.25pp、overall−3.5pp（CI−5.5..−1.5625）。单训练seed和浅历史池不能将结果解释为架构最终上限。
+
+ViT compute吞吐3161.93对2451.59/s（**1.290×**），完整wall2063.27对1682.89/s（**1.226×**）；update共3004.796对3818.948秒。总体是这两轮真实计时，含同步eval与同期CPU分析，不是隔离kernelbenchmark。截止90分钟最后完成panel分别为ResNet83.29分钟/8388608样本与ViT84.70分钟/10485760样本；相差84.583秒，不称严格共同wall坐标，未插值。截止60分钟对应41.63/50.71分钟，差9.08分钟；截止120分钟两者已经停止，不能假造之后的训练收益。
+
+![两种1M网络：相同新转移](rl_train_figures/capacity_1m_terminal_samples.png)
+
+![两种1M网络：实际完整训练时间](rl_train_figures/capacity_1m_terminal_wall.png)
+
+配对artifact为full_capacity_preparation/actual_1m_terminal_pair.json，SHA `889165e330cd66240ed8bd11e61145453e7971876d946a65961ead134ee1c39a`；两图actual c7c9d8/exit0并由root视觉核对。1M两轮完成不替代四个10M/100M完整门禁及从零正式训练。下一步实际profile两种1M更新、定位可优化成本，再继续容量阶段；gamma/rollout/lambda、tick TB0..1000且足够末阶段训练、H8最后仍全部保留。
