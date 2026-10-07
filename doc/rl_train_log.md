@@ -1929,13 +1929,13 @@ v27配置独立commit `5ebbfc504e9f265ea910e2e5f7fa58998ebd92d0`、v28 `8620d5a5
 
 iteration99 / snapshot2已completed/returncode0：100次更新、52,428,800新转移、3200tick/env，4AI各200地图×双座，共1600局采样，CPU异步。实际赛程逐局核对无缺漏/重复，汇总与TB一致。快照对应训练wall737.020秒（12.284分钟），评测worker193.199秒；异步评测与后续训练重叠，不能把两者简单相加或称737秒为评测完成时的同步wall。
 
-| AI | it99 胜 / 负 / 和 | it99 胜率 | it199 胜率 | it299 胜率 | it399 胜率 | it499 胜率 |
-|---|---:|---:|---:|---:|---:|---:|
-| aggressive | 135 / 265 / 0 | 33.75% | 81.75% | 84.50% | 84.50% | 88.50% |
-| expansion | 234 / 164 / 2 | 58.50% | 92.50% | 95.50% | 97.00% | 96.25% |
-| defensive | 347 / 53 / 0 | 86.75% | 99.25% | 99.25% | 99.75% | 100.00% |
-| random | 330 / 70 / 0 | 82.50% | 99.25% | 99.75% | 98.00% | 98.75% |
-| overall | 1046 / 552 / 2 | 65.375% | 93.1875% | 94.7500% | 94.8125% | 95.8750% |
+| AI | it99 胜 / 负 / 和 | it99 胜率 | it199 胜率 | it299 胜率 | it399 胜率 | it499 胜率 | it599 胜率 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| aggressive | 135 / 265 / 0 | 33.75% | 81.75% | 84.50% | 84.50% | 88.50% | 85.75% |
+| expansion | 234 / 164 / 2 | 58.50% | 92.50% | 95.50% | 97.00% | 96.25% | 97.00% |
+| defensive | 347 / 53 / 0 | 86.75% | 99.25% | 99.25% | 99.75% | 100.00% | 99.25% |
+| random | 330 / 70 / 0 | 82.50% | 99.25% | 99.75% | 98.00% | 98.75% | 98.75% |
+| overall | 1046 / 552 / 2 | 65.375% | 93.1875% | 94.7500% | 94.8125% | 95.8750% | 95.1875% |
 
 后两个panel也均1600局完整采样/completed0，CPU验收660c81/f6ee61 exit0、root9d30c3/7b2dc3读回。it199/299分别104,857,600/157,286,400转移，快照训练wall1472.756/2209.638秒，worker111.126/82.108秒（异步不相加）。截至300更新，aggressive还在上升；三个早期点不能判断平台或gamma优劣，且尚未达到至少1h的预算，原进程继续。checkpoint SHA `039e89ee154d007be7e3d1e209317d8cfeec88d035eeb22e1c54bcf3f9d4d59f`，报告SHA `51f8b2eb…`。CPU窄验收7dbf28/exit0、root248372读回，无新比赛。首30轮TB只读诊断0f1eff/exit0、root804e10/5c06a9：排除首轮后C均1.294秒/U5.906秒（CV2.01%/.121%），exactKL .04056→.00948、clip27.22%→12.98%；it4..29末LR均.01上限，自适应调节正常。该窗口所有已记录scalar有限，25个episode聚合点timeout均0；未检验后续窗口，亦未把self-play win当baseline强度。[early_training_dynamics.json](../outputs/moe_cts/iterations/v27/diagnostic/early_training_dynamics.json)保留抽取区间。
 
@@ -1944,5 +1944,7 @@ iteration99 / snapshot2已completed/returncode0：100次更新、52,428,800新�
 继续训练后，it399/499各1600局采样评测均completed/0。it499累计500次更新、262,144,000转移、16000tick/env，快照训练wall3697.370秒（61.623分钟），CPU worker74.665秒，异步不相加；aggressive354胜/46负、expansion385/15、defensive400/0、random395/5，均无和局。aggressive从84.5%升至88.5%，仍有提升，原训练继续；不能由这五个固定selector点宣称随机种子泛化、gamma优劣或训练已完成。best当前为it499，checkpoint SHA `fcc73aea76d44913273dd63668fa339968a00206d85eba7b702787296e2ded98`，report SHA `39ea41f8dd8566ecb60d625d8f471a14a26dc4512cf1efe17a2e391bce48c02e`。CPU验收26c4ca/9e6cc1 exit0，root cd9b7e/5ca88e读回，未运行新比赛。
 
 it399报告的62个aggressive败局均正常结束且非timeout，长度37–311tick、中位数172.5tick。该训练评测没有逐tick轨迹，不能从终局统计推断进攻或回防失误；终局最佳模型的开发评测将显式保存轨迹，再生成录像和失败行为分析。
+
+it599 / snapshot12也已1600局采样completed/0：aggressive343胜/57负、expansion388/12、defensive397/3、random395/5，均无和局。累计314,572,800转移、19200tick/env；快照训练wall4441.586秒（74.026分钟）、CPU worker89.981秒，异步不相加。aggressive回落2.75百分点，当前best仍it499；单次回落不判平台，原训练继续。CPU窄验收9b206c exit0、root15f92b读回，报告SHA `290915144e786266b1b801d386a8a13a44b1f306d92621e199bbf617500b08db`。
 
 中期只读TB诊断实际窗口it492–541，共50个完整更新：C均1.514秒、U均5.915秒；窗口26,214,400新转移/371.754秒，完整wall吞吐70,515转移/秒（与累计FPS区分）。全部已记录scalar有限；exactKL中位.01685、最大.08796，clip均12.77%，末LR有6轮到1e−5下限、41轮到.01上限，说明自适应仍在工作且有短暂较大更新。entropy均.671，比早期0–29的4.619低，但不能据此判断策略退化；同期最近baseline panel仍提升。当前自对弈episode win均69.42%、length均112.16、timeout均.03382%、WAIT均20.05%、backtrack均12.90%，均为每轮聚合值的平均，不是按episode数加权，也不是baseline胜率。value loss均.04171；冻结v27没有return/advantage/critic EV新监控，不能由value loss单独判断critic解释能力。[mid_training_dynamics.json](../outputs/moe_cts/iterations/v27/diagnostic/mid_training_dynamics.json)记录实际tags与窗口；诊断不加载模型、不运行新比赛或改变训练。
