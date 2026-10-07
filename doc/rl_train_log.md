@@ -2200,3 +2200,21 @@ overall911胜/680负/9和，56.9375%，mean249.276tick。报告为200地图×四
 critic EV是**收集时value对本轮shaped GAE bootstrap target的方差解释度**，覆盖全部有效storage样本而非8192个policy probe。`returns=V_old+A_GAE`，不是完整对局MC胜负；使用FP32 population variance，`EV=1−Var(returns−V_old)/Var(returns)`，target方差不足或非有限时省略EV并标valid0。真实终止势能清零，timeout保留最终势能并加入old value bootstrap后截断done；普通rollout末端同样自举。
 
 first30 EV均值.7786、末轮.9697/valid30轮；末轮return std.45466、raw advantage std.07914，说明差值方差相对target方差小，但raw advantage mean仍−.10105，EV会忽略整体均值偏差。buffer advantage零均值/单位标准差来自标准化。固定gamma且边界自举一致时，shaped value包含`V_base−Φ(s)`，资源势能结构可能贡献大量target方差；当前没有Φ/去势能分解，不能断言它主导这些数值，也不能把高EV当作已学会终局胜负预测。γ课程跨轮还改变目标分布，return mean由+.229降到−2.958不能直接解释成胜率退化。终局需结合采样对战曲线判断。[first30实际标量摘要](../outputs/moe_cts/iterations/v29/diagnostic/early_training_dynamics.json)。
+
+
+#### v29 第二采样点：课程初期持续学习（训练继续）
+
+it199/snapshot4已实际completed0，共1600采样局，独立observer18220/533409真实exit0、PID4066227消失；两目标验收已结束，不再轮询旧handle。原正式87039仍继续。累计104,857,600转移/6400tick-env，快照training wall1474.215秒（24.570分钟），wall吞吐71,128转移/秒；异步worker140.585秒另记。report `41e42a27…`、checkpoint `da551576…`，root a96bcb读真实报告并复用generic paired，未重跑旧point的bootstrap或新评测对局。
+
+| AI | v29 it99 | v29 it199 胜/负/和 | v29 it199 胜率 | v27 同200更新 | v28 同200更新 |
+|---|---:|---:|---:|---:|---:|
+| aggressive | 26.00% | 292/108/0 | 73.00% | 81.75% | 2.00% |
+| expansion | 50.75% | 341/58/1 | 85.25% | 92.50% | 7.75% |
+| defensive | 78.75% | 390/10/0 | 97.50% | 99.25% | 26.00% |
+| random | 72.25% | 387/13/0 | 96.75% | 99.25% | 31.50% |
+
+overall1410胜/189负/1和，88.125%，mean120.889tick；aggressive增加47百分点，明确仍在学习。相同200地图×四AI×双座、CPU/highest/float32/B128/workers1/seed271828/max2000采样控制与完整赛程一致；200地图簇20k bootstrap。v29−v27 aggressive为−8.75pp、95%CI[−13.50,−4.25]，overall−5.0625pp[−6.875,−3.3125]；v29−v28为+71pp[+66.25,+75.75]/+71.3125pp[+68.6875,+73.875]。课程初期仍落后固定.995，远好于固定.999，不能用两点决定最终gamma。约半小时且课程仅进行初段，保持冻结配置继续训练，不触发平台停止。[实际第二点配对](../outputs/moe_cts/iterations/v29/diagnostic/second_selector_matched_gamma_comparison.json)。
+
+中期诊断预先固定492..541窗口（声明后的读回最新为u278），与v27/v28原中期窗口匹配：届时只读一次真实C/U/wall、common PPO/action/episode指标，并记录v29新增return/raw advantage/critic EV；两控制的缺失newtags不造比较。实际u1199完成后再验u999/u1000及u1000..1199是否有200轮.999/tick_scale1，以实际TB和累计样本证明最终阶段，不用计划日程代替完成。持续观察实际新selector直到真终局，不指定必须出现未发布的终局点。
+
+自身三个Git-tracked分析工具已从v29 source commit冻结一次（d83972 exit0，manifest SHA `3e24e576…`），无新训练/推理/评测；后续不重复冻结。真正终局后先不可变best捕获，再独立CUDA开发与joint-action记录，CPU原动作Core重放、失败分析和完整sample/wall曲线；录像输入需显式用development_report而非无trace的selector_report。之后才选择下轮gamma基座并推进rollout/lambda、tick0..1000及H8。架构探索仍暂缓。
