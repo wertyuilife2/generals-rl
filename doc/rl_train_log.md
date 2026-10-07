@@ -1588,3 +1588,9 @@ aggressive败局131tick，全局从未合法看到敌方本营。最后决策时
 ### v24：配对ViT 1M从零self-play配置
 
 配置 `rl/configs/v24.json` 独立提交，actor1,079,945、critic1,053,033参数。配置原始字节SHA `25d8371a7704cb31d5de256ebd9b96400751396066f1b6e9ee89b57f347ae154`；相对v23仅run_id和policy.backbone改变，信息输入、MDP、PPO、BF16/physical512、历史池、1600局采样eval与1–3h预算完全一致。v23源码来自其配置commit `2c3a69155bd82320e2a6b00bed0d2cc30e6fc3b7`，v24源码将来自本次独立配置commit；训练均使用各自Git blob冻结，不包含后续工作区修改。单卡按v23→v24顺序执行，v24不从v23权重、Adam或历史池续训。此段记录配置，尚不构成正式训练或样本效率结果。
+
+正式启动：v23终局报告、完整曲线与最终录像分析完成并提交44dec92后，确认GPU无compute任务（96862b），仅启动v24原session66320 / launch768365 / Python PID3532285。使用自身e817a78冻结源码、配置与分析工具，SHA预检185787通过；`--replace-policy --steps-per-env 1000000 --output train`，输出启动前不存在，无resume/warm-start。百万tick是CLI上限，真实预算仍为min1h/max3h与共同plateau规则。root55999e直接核对该PID的cmdline/stat，TensorBoard目录为`outputs/moe_cts/iterations/v24/train/`。
+
+自身随机初始snapshot0 SHA `82c5fe6b5bb8d8c46e4d54bc0b78cedf51f6a8b5805cbb96a9d735e845bac7cc`，246张量与训练seed20261013独立构造的新ViT策略逐位一致，pool resume_source=null；116冻结文件及12模块path/SHA正确，实际run_config字节与自身冻结配置相同。actual CPU verifier84206/301ed9 exit0、root453f93回读；合同 `v24/formal_initialization_contract.json` SHA `37bb17cf24f2292a17c558425b5d750d15462b5bf82f35539dde9918c3998245`。核验未初始化CUDA或运行forward/game，独立空Adam不当作实际训练optimizer证据。
+
+首个正式完整更新iteration0：524288新转移、collection **15.012秒**、learning **150.514秒**，compute约 **3167 transitions/s**、含启动wall **2994.63/s**。实际`model_0.pt` SHA `ee1d8d3d96619d3790819847906477aca7e9bb9bfc83a178b94e4b1f3837195e`，246份Adam state均step256、模型/两份moment finite、无distillation optimizer；实际TB physical512/logical8192/4096chunks/256minibatches/BF16均匹配。CPU窄验actualb9647a exit0、root284006读回；合同 `v24/first_update_contract.json` SHA `2962a807101b28090f9873081b78a6b07e2dea2c1bf3018dbce51ca238c29e48`。whole-update KL0.017802、clip23.67%、entropy1.9679、末LR0.000759375（5次调整）。这只是自己的首轮计算证据，尚无正式baseline胜率，不能推出长期样本效率或架构强度优劣；训练继续等待iteration3首个1600局采样panel。
