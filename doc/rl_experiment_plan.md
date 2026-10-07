@@ -12,7 +12,7 @@ v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456�
 
 **v30完整结束并选择原rollout基座。** N4096/T128实际820更新、429,916,160转移、124.086分钟；八次selector全部completed0，best399的selector88/97/98.25/98.5%，独立CUDA开发88.25/97.25/99.25/99.5%、overall96.0625%。原43364正常STOP并真实exit0，observer正常退出/评测队列排空；immutable capture、开发1600、2615tick八实际录像/Core行为、终局last100/300、完整sample/wall与v27配对报告均完成。后六公共采样点aggressive CI均含0；开发aggressive相对v27−2pp CI[−5.75,+1.75]，overall−.625pp[−1.875,+.625]。全程wall吞吐57,744.4，较v27低18.28%，中段低20.86%，成本主要collection；峰值allocated13.5899GiB较v27少1.7033GiB。选择恢复v27 N16384/T32、NT524288/γ.995/λ.95为后续工程基座，单个λ.99候选接下来从零训练；不宣称纯T因果、训练随机性显著、长rollout本质无效或最佳开发同强度。失败录像显示较早部署/回援与长对局资源问题，最后一tickWAIT已不能补救。详细结果与三截图见rl_train_log.md。
 
-随后lambda只试一个候选.99，对照.95；等rollout完整分析后固定其余配置，从零训练。在所选gamma.995时，TD残差几何权重1/(1−gamma×lambda)由约18.26增至66.89tick；这只是GAE递推权重，不是bootstrap学习时间上限，不预言胜率。比较raw return/advantage、critic EV、KL/clip/自适应LR与实际吞吐，不做多值搜索。
+当前v31仅λ.95→.99，已依据完整v30恢复v27 N16384/T32，其余配置固定；run_id=v31，正式从零训练，对照v27 λ.95。在所选gamma.995时，TD残差几何权重1/(1−gamma×lambda)由约18.26增至66.89tick；这只是GAE递推权重，不是bootstrap学习时间上限，不预言胜率。比较raw return/advantage、critic EV、KL/clip/自适应LR与实际吞吐，不做多值搜索。
 
 再做用户指定TB0..1000的tick−.001乘linear1→0，其他PBRS资源/胜负保持固定；必须真实完成u1000..1199至少200轮零tick及目标阶段评测，3h预算优先且不足如实报告。若选定设置在预算内无法完成，则先做保持配对的较小NT constant-tick控制再做衰减，不偷偷缩短1000日程。H8最后，按实际rollout缓存与显存验证可执行性；若需减NT，同样补fresh H4控制。剩余容量探索暂缓，整个迭代目标仍继续。
 

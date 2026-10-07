@@ -2490,3 +2490,12 @@ overall为1537/63/0，96.0625%，相对v27 −0.625pp，配对CI[−1.875,+0.625
 失败行为：aggressive局前25tick仍仅1领土，对手11；后期敌军距离home3→2→1，学生仍远处推进，home终局增长后6对可见10攻击，P0先执行已夺将，P1计划动作跳过；没有最后一tick补救。expansion局敌将自64tick可见，112..114时home附近风险5且有8兵可回援，但选择外围合兵、随后把邻近9兵移走；115时已无直接增援并失守，不是没有看到敌将。defensive局长时间资源/主力劣势，终局己79兵/敌244、home6对172攻击，仍在远处移动；问题形成在更早的资源与部署阶段。random失败1318tick中294个决策超过训练1024tick窗口，敌将曾在128..648可见、966次已见但H4缺失；本次验证H4信息时序，并未据此独立验收每个K11通道，因此不把该案例归因为事实记忆丢失。末期己23兵/敌788，home没有及时集结。四失败最后一tick固定原对手动作的WAIT分支均仍输，只说明最后一tick等待无法补救，不声称找到最早败因、全局最优动作或完整反事实胜率。四胜局即使最终总兵少于对手也能夺将，说明资源领先不是胜负充分条件。录像是挑选样本，不能估计失败类型频率。[实际行为与局部反事实证据](../outputs/moe_cts/iterations/v30/diagnostic/recorded_behavior_review.json)。
 
 **下一轮工程决策：恢复v27 N16384/T32，固定gamma/PBRS .995，单独试λ.95→.99。** 长rollout首点有早期改善，却没有持续样本收益；独立开发无明确改善，wall成本显著。选择原rollout是当前机器预算下的工程取舍，不证明长rollout本质无效。λ.99会增加现有32tick GAE内后部TD残差权重；1/(1−γλ)的66.89是无限递推几何尺度，不是实际32tick采样被延长或最终奖励必须在该长度内出现。后续仍按顺序tick TB0..1000衰减并真实至少200轮最终零tick训练，再做H8；ResNet/ViT剩余探索遵用户请求暂缓，不把baseline>80%当完整附件任务结束。
+
+
+### v31：固定短rollout，仅提高GAE λ（正式训练准备）
+
+v30完整报告与三曲线已提交1c6ddb1：较长N4096/T128没有持续样本/开发收益，wall吞吐低18.28%；本轮恢复v27 N16384/T32。唯一算法变化λ.95→.99，run_id=v31，γ/PBRS .995、NT524288/E4/B64/8192逻辑batch/256Adam、H4K11与SH4K11、小网络26074参数、episode1024、tick−.001、history8/pub50/eval100及所有MDP配置固定。保持categorical adaptive LR/desiredKL.02、原entropy .01；不混入tick衰减或H8，不增加baseline训练对手。
+
+动机是加强现有32tick采样内后部TD残差的权重，观察更长期credit与守将/终局学习是否改善；无限递推几何尺度66.89不代表实际rollout超过32tick。代价可能是advantage方差增大或更新不稳定，故记录raw return/A std、EV、每epoch及全轮exactKL/clip/自适应LR、entropy、WAIT/backtrack与真实C/U/wall和显存。代码无需新增算法补丁，仅配置一个λ候选，不做网格搜索。
+
+正式1–3h，从随机权重、新Adam、新历史池开始，不加载v27/v30权重；相同seed20261013。每100update四baseline×200map×双座1600局CPU采样selector（271828），按aggressive趋势锚点≥2pp更新、至少1h后四个后续点无该改进则正常train/STOP，最长3h优先。旧内置plateau12仍是配置兜底；报告明确实际停止来源。bounded checkpoint3/eval3+best/history抽样池8，活动episode可暂留旧对手。每个正式版本先commit，再一次从其Git blobs冻结116运行文件/配置，用自身冻结源训练和eval；不用新的大型网络门禁或冗余smoke。终局完整排空评测后固定best，1600局CUDA开发（复用1001042/highTF32true/FP32/B128/workers4）、8局实际joint-action录像与Core失败分析、完整sample/wall对照v27，再决定后续tick衰减基座。H8仍最后，ResNet/ViT剩余探索暂缓。此处是预声明，没有训练或胜率结果。
