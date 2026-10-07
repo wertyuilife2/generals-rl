@@ -1825,3 +1825,21 @@ snapshot2 / iteration3已completed/returncode0：4轮完整更新、2,097,152新
 实际it0..2完整TB窄读 `db8eda exit0`、root `69c2d6`：末LR为1e−5→7.59375e−5→1e−5，endpoint exact KL .04216/.03271/.03619、clip .2483/.2520/.3423、rollout WAIT .5255/.3907/.3180，C+U吞吐约1000转移/秒且没有早期持续变慢。学习率会回升，并非一直固定在下限；这些数据不证明成熟学习效果或具体失败原因。详细 `v25/diagnostic/early_learning_dynamics_iteration2.json`。
 
 补充跨容量归因限制：v19–22为T32/pub50，即每1600条单lane累计interaction发布；v23–26为T32/pub2，即每64条发布，周转加快25倍。pool8包含永久初始seed＋最新7个learned候选，满池learned最新到最旧跨度从300update/9600interaction变为12update/384interaction；累计interaction可跨episode reset。当前v25仅seed和iteration1/3三个候选，未满池，metadata也不能证明实际对手样本份额。故tiny→capacity除critic与计算方式外，还改变了历史池时间尺度，不能归为纯actor扩容；100M计划T512/pub1又改变该尺度。同档ResNet/ViT保持共同协议。CPU实际 `6dd98c exit0`、root `19b05f/97cf6d`，证据 `full_capacity_preparation/capacity_comparison_protocol_notes.json`；不据此归因当前低胜率，也不中途调整本轮配对配置。
+
+### v25 第三个采样点与早期实际败局（训练继续）
+
+snapshot3 / iteration5完成：6次更新、3,145,728条转移、192tick/env；相同1600局采样赛程。CPU验收 `8df58a exit0`、root `cd98bc`，详细 `v25/diagnostic/third_eval_readback.json`。三点趋势如下：
+
+| AI | it1 | it3 | it5胜率 | it5胜 / 负 / 和 |
+|---|---:|---:|---:|---:|
+| aggressive | 0.50% | 2.25% | 0.50% | 2 / 398 / 0 |
+| expansion | 6.75% | 5.00% | 6.50% | 26 / 337 / 37 |
+| defensive | 4.00% | 5.75% | 9.25% | 37 / 300 / 63 |
+| random | 6.50% | 7.50% | 10.75% | 43 / 347 / 10 |
+| 总体 | 4.4375% | 5.125% | 6.75% | 108 / 1382 / 110 |
+
+总体较第二点+1.625pp，但aggressive−1.75pp，按预设最弱项优先选择的best仍为it3。post-sync TB wall4449.432秒（74.16分钟，包含426.805秒worker）；C71.860/U453.008秒，完整wall吞吐707.00转移/秒。只有六次更新，尚不能判断收敛或容量能力上限；原86930继续冻结协议，v26仍等待终局报告。
+
+仅从现有两个panel的逐局记录分析，aggressive自然终止败局的局长中位数113→112tick；总体WAIT按tick加权30.68%→20.18%。policy摊销耗时135.98→135.74微秒/decision，obs基本稳定；决策数减少3.11%但opponent单位耗时增加6.21%，所以eval wall不能只用局长解释。证据 `v25/diagnostic/early_eval_behavior_lengths_panels1_2.json`（`b2deba/09bdd6 exit0`）。it0..3父进程TB观察的GPU allocated最大14.81GB、reserved最大19.83GB、peak RSS2.56GB；这些不是整卡峰值或全系统RAM。观察时checkpoint1/3、历史池3/8、eval目录2/3＋独立best，指定模型/日志范围逻辑大小0.375GiB；尚未验证满池淘汰，亦不代表整个run磁盘占用。证据 `v25/diagnostic/early_resource_retention_iteration3.json`（`c9bc30/09bdd6 exit0`）。
+
+对it3已保存的aggressive败局map0/seat0，完成112tick CPU/native/Core单局动作重放（`d2f945 exit0`；无新比赛或模型推理）。pre111本营35有3兵、增长后4，当前可见敌44有7兵；敌实际44→35出6兵，于tick112夺将，learner同tick33→24出2兵而未回援。相邻己26有9兵、34有5兵；pre104/106还各从本营向26送出3兵。更早pre50兵力22比44、领土9比21，说明守将失误伴随已有资源劣势。全部learner动作合法，敌将49整局未曾进入current/H4/K，因此本局不支持动作错位或遗忘已知敌将的解释。这是一个早期真实现象，不能估计失败频率、归因架构/reward，或证明改一个动作就能赢。关键帧与末20tick见 `v25/diagnostic/early_aggressive_loss_trace_analysis.json`（root `af1626`）；最终best仍会另做完整回放与报告。
