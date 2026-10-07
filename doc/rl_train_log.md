@@ -2235,3 +2235,6 @@ it499/snapshot10实际completed0（observer620ae3，root b863d8原report SHA/WLD
 492..541中期窗口按预声明一次实读71ad4d/root c84b2d，50轮26,214,400转移，C76.245秒/U296.099秒；u491→u541实际wall372.671秒，吞吐70,342转移/秒（C+U为70,404）。44tag×50=2200实录点均有限。同窗口v27/v28旧JSON的wall吞吐70,515/70,367，v29分别低0.25%/0.04%，差异很小，不能解释胜率差。whole-update KL均值.02007/max.09470，clip均值.12600、entropy.86643，LR最终到floor4轮/ceiling45轮、共195次内部变化；自适应LR仍开启。episode长度均值126.084、timeout批次均值.116%、WAIT.25245/backtrack.08506；episode统计为等权训练批次均值，不是baseline胜率或按episode数加权。
 
 新增return std均值.68522/raw advantage std.20194、buffer std.999999、critic EV均值.91305/min.90469（50/50 valid）。这是shaped bootstrap target的诊断，不据此断言终局价值准确；v27/v28缺少这些tag，不造旧版比较。实际γ .996967971→.997164011的全部50点符合课程，tick_scale均1/tick−.001，尚未达到.999。[中期实测与缓存控制对照](../outputs/moe_cts/iterations/v29/diagnostic/mid_training_dynamics.json)。下一步等待真实最终γ阶段和后续采样曲线；不继续已暂停的ResNet/ViT容量探索。
+
+
+it599/snapshot12实际completed0（原79020/4a2f98；root c86e7f原report SHA/WLD核对）：aggressive331/69/0、expansion371/29/0、defensive393/7/0、random393/7/0，胜率82.75%/92.75%/98.25%/98.25%，overall1488/112/0（93.00%）、mean105.194tick。314,572,800转移/19200tick-env，快照wall4443.730秒（74.062分钟）、worker112.433秒另记，CP `43181b0b…`、report `99446808…`。同一1600局CPU采样协议与完整赛程验收通过。aggressive较499下降1.25pp，固定.995/.999同点均85.75%；只列点估计，未新增bootstrap。原87039仍正常继续至实际最终200轮后判定平台，当前课程还未到.999；没有为了近期回落重启、修改配置或提前停止。
