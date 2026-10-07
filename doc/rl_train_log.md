@@ -2094,3 +2094,7 @@ it699 / snapshot14 actual completed0、1600采样局，CPU验收2a78a3 exit0，r
 aggressive较it599上升4.5百分点，曲线仍有明显提升，继续原82663/冻结配置看799/899。该点比v27同700更新的86%高4.25百分点，仅是selector点估计；当前六点配对artifact截至599，没有把尚未计算的it699 CI或终局gamma优劣当结果。最佳独立开发评测、trace/demo、完整曲线及最终配对均待真正终局后完成。
 
 it799 / snapshot16随后actual completed0（d762c2 exit0，root核对report SHA `05a9bc91…`）：四AI采样WLD363/37/0、391/9/0、397/2/1、396/4/0，胜率90.75%/97.75%/99.25%/99.00%，overall1547/52/1（96.6875%）。累计419,430,400转移/25600tick-env，快照training wall5922.427秒（98.707分钟），异步worker89.838秒另记；checkpoint SHA `482aa279…`。aggressive只增加0.5百分点，是一个较平的点，不足以确认平台；原82663继续，原observer9949继续等it899。
+
+it899 / snapshot18 actual completed0（当前CPU0fc076/b46f82 exit0验收，root读回SHA `666e97e8…`）：四AI WLD366/34/0、395/5/0、399/1/0、399/1/0，胜率91.50%/98.75%/99.75%/99.75%，overall1559/41/0（97.4375%）。累计471,859,200转移/28800tick-env；真实快照training wall6665.492秒（111.092分钟），异步worker82.279秒另记；checkpoint SHA `b53799f5…`。相比上点aggressive增加0.75百分点，最近两点提升较小，继续观察999/1099确认平台。
+
+17:09UTC工具观察registry丢失，旧session82663不可再轮询，但实际PID3933826/PPID1/start_ticks426509309仍活着、日志继续增长（a80dba/65d5c0），没有重启或继承另一轮权重。以真实OS进程和自身日志/评测索引继续追踪；停止仍通过自身`train/STOP`在完整更新后正常保存并收尾，不把丢失的观察句柄当训练结束，也不声称未观测到的原session exitcode。新的CPU观察只负责已有评测结果，不新增对局。
