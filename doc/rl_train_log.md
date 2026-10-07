@@ -1904,3 +1904,12 @@ snapshot3 / iteration5完成：6次更新、3,145,728条转移、192tick/env；�
 | random | [win](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/random_win.mp4) | [loss](../outputs/moe_cts/iterations/v25/final_best/analysis/videos/random_loss.mp4) |
 
 终局入口：[完整训练诊断](../outputs/moe_cts/iterations/v25/diagnostic/terminal_training_review.json)、[开发评测](../outputs/moe_cts/iterations/v25/final_best/development_report.json)、[逐帧行为事实](../outputs/moe_cts/iterations/v25/final_best/analysis/recorded_behavior_final.json)、[终点对手占用](../outputs/moe_cts/iterations/v25/diagnostic/terminal_self_play_opponent_occupancy.json)。训练原session86930实际9376d2/exit0，开发原56500实际41b00e/exit0，录像原89264实际b71e13/exit0。终局review实际3b5569/exit0，完整曲线335d82/exit0且已由root视觉核对。TB：`outputs/moe_cts/iterations/v25/train/`。下一轮v26保持同档共同协议，从零启动；不以这轮失败中途改变对照组。
+
+
+### v26 已从零启动：10M ViT，首轮更新验收通过
+
+v25完整终局报告提交 `be78f29` 后，实际启动v26原session30384/PID3797686（374b48），直接读取自身冻结commit `0f92515174c1deaf1f62a7bd04d693fca80828ac` 的完整JSON；resume/warm_start均null，MDP、PPO、critic、历史池、评测及预算与v25相同。CPU fresh验收80576/5c6f62 exit0：288个seed0状态张量与自身全新构造逐位一致，actor10,008,521/critic1,053,033；不把独立Adam为空当作formal初始Adam实测。
+
+自身iteration0 checkpoint及TB实际CPU becadc/exit0验收：NT524288、logical8192、physical256/BF16、256logical/8192microbatches；288个参与参数的Adam step均256、参数与moments有限。C46.330秒/U333.235秒、初始完整wall388.619秒（1349.11转移/秒）；endpoint exactKL .02269、clip22.02%、LR1e−4→7.59375e−4（5次变化），WAIT50.80%。首轮计时不是成熟速度或强度结果，formal未安装clip/observer计数hook。checkpoint SHA `e25e93d2bad2066c8809fdf9d3710850023e268789b4e62664105f5f02ea8342`；[首轮核验](../outputs/moe_cts/iterations/v26/first_update_contract.json) SHA `f09a77d6…`，root658ce3/a1e04b读回。TB：`outputs/moe_cts/iterations/v26/train/`。仍在正式训练，首个1600局采样panel于iteration1后完成；尚无v26正式baseline胜率。
+
+另外为后续真实tick TB0..1000实验加入默认0的 `training_control.min_completed_updates`（独立commit `e61b2d2`）：只推迟平台早停，按包括resume历史的绝对已完成更新数判定；时间预算与reserve仍优先。这是实验控制准备，不改变冻结v25/v26协议或宣称课程已验证。既有控制器套件CPU67790/8bdd3a exit0，12tests＋31subtests通过，包含真实small train恢复后绝对计数3→4→5和预算优先测试；不改vendor/MDP。今后若预算先耗尽且课程未到1000与足够零tick阶段，应报告实验不完整，不能缩短衰减边界。
