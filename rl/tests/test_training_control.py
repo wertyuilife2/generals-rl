@@ -18,6 +18,56 @@ from rl_test_utils import assert_nested_equal, small_training_config
 
 
 class TrainingControlTests(unittest.TestCase):
+    def test_budget_reserve_defaults_off_and_preserves_nominal_deadline(self):
+        settings = TrainingControlConfig(max_seconds=100, min_seconds=100)
+        self.assertEqual(settings.budget_reserve_seconds, 0)
+        self.assertEqual(settings, TrainingControlConfig(max_seconds=100, min_seconds=100,
+                                                       budget_reserve_seconds=0))
+        controller = TrainingController(settings)
+        self.assertIsNone(controller.stop_reason(99.999))
+        self.assertEqual(controller.stop_reason(100), "max_seconds")
+        self.assertIsNone(TrainingController(TrainingControlConfig()).stop_reason(1e9))
+
+    def test_budget_reserve_stops_at_minimum_time_and_keeps_nominal_limit_priority(self):
+        settings = TrainingControlConfig(max_seconds=100, min_seconds=60, budget_reserve_seconds=40)
+        controller = TrainingController(settings)
+        self.assertIsNone(controller.stop_reason(59.999))
+        self.assertEqual(controller.stop_reason(60, evaluation_healthy=False), "budget_reserve")
+        self.assertEqual(controller.stop_reason(99.999), "budget_reserve")
+        self.assertEqual(controller.stop_reason(100), "max_seconds")
+        # The reserve leaves the configured nominal limit unchanged.
+        self.assertEqual(settings.max_seconds, 100)
+
+    def test_budget_reserve_finishes_one_update_and_passes_nominal_evaluation_budget(self):
+        config = small_training_config()
+        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+        # Exercise the synchronous evaluation-budget branch with no CUDA worker.
+        config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_snapshots": 1}
+        config["training_control"] = {
+            "max_seconds": 100, "min_seconds": 60, "budget_reserve_seconds": 40,
+        }
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()), \
+                patch("generals_rl.train.perf_counter", side_effect=[1000, 1060, 1060, 1060]), \
+                patch("generals_rl.train.PeriodicEvaluator") as evaluator_type:
+            evaluator = evaluator_type.return_value
+            evaluator.describe.return_value = {"failed": []}
+            output = Path(directory) / "reserve"
+            summary = train(config, output, steps_per_env=40)
+            checkpoint = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
+            self.assertEqual(summary["stop_reason"], "budget_reserve")
+            self.assertEqual(summary["iterations"], 1)
+            self.assertEqual(summary["steps_per_environment"], 4)
+            self.assertEqual(checkpoint["iter"], 0)
+            for key in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+                self.assertEqual({int(state["step"]) for state in checkpoint[key]["state"].values()}, {4})
+            self.assertTrue(evaluator_type.call_args.args[0].synchronous)
+            evaluator.on_snapshot.assert_called_once()
+            self.assertEqual(evaluator.on_snapshot.call_args.kwargs["remaining_seconds"], 40)
+            self.assertEqual(evaluator.on_snapshot.call_args.kwargs["publication_index"], 1)
+            self.assertEqual(evaluator.on_snapshot.call_args.args[0].metadata["iteration"], 0)
+            evaluator.finish.assert_called_once_with()
+            evaluator.close.assert_called_once_with()
+
     def test_plateau_needs_successful_points_minimum_time_and_meaningful_progress(self):
         controller = TrainingController(TrainingControlConfig(
             min_seconds=10, max_seconds=100, plateau_evaluations=3, min_improvement=0.02))
@@ -69,7 +119,13 @@ class TrainingControlTests(unittest.TestCase):
     def test_invalid_control_settings_fail_before_creating_output(self):
         cases = ({"max_seconds": 0}, {"max_seconds": float("nan")}, {"min_seconds": -1},
                  {"min_seconds": 2, "max_seconds": 1}, {"plateau_evaluations": True},
-                 {"keep_checkpoints": 0}, {"min_improvement": -0.1})
+                 {"keep_checkpoints": 0}, {"min_improvement": -0.1},
+                 {"budget_reserve_seconds": -1}, {"budget_reserve_seconds": float("nan")},
+                 {"budget_reserve_seconds": float("inf")}, {"budget_reserve_seconds": True},
+                 {"budget_reserve_seconds": "1"}, {"budget_reserve_seconds": 1},
+                 {"max_seconds": 100, "budget_reserve_seconds": 100},
+                 {"max_seconds": 100, "budget_reserve_seconds": 101},
+                 {"max_seconds": 100, "min_seconds": 60, "budget_reserve_seconds": 41})
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "run"
             for settings in cases:

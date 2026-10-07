@@ -11,9 +11,10 @@ class TrainingControlConfig:
     plateau_evaluations: int | None = None
     min_improvement: float = 0.02
     keep_checkpoints: int | None = None
+    budget_reserve_seconds: float = 0.0
 
     def __post_init__(self):
-        for name in ("max_seconds", "min_seconds", "min_improvement"):
+        for name in ("max_seconds", "min_seconds", "min_improvement", "budget_reserve_seconds"):
             value = getattr(self, name)
             if value is None and name == "max_seconds":
                 continue
@@ -23,6 +24,11 @@ class TrainingControlConfig:
                 raise ValueError(f"training_control.{name} must be positive or nonnegative as appropriate")
         if self.max_seconds is not None and self.min_seconds > self.max_seconds:
             raise ValueError("training_control.min_seconds must not exceed max_seconds")
+        if self.budget_reserve_seconds > 0:
+            if self.max_seconds is None or self.budget_reserve_seconds >= self.max_seconds:
+                raise ValueError("training_control.budget_reserve_seconds requires max_seconds and must be smaller")
+            if self.max_seconds - self.budget_reserve_seconds < self.min_seconds:
+                raise ValueError("training_control.budget_reserve_seconds must preserve min_seconds")
         for name in ("plateau_evaluations", "keep_checkpoints"):
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
@@ -57,6 +63,9 @@ class TrainingController:
     def stop_reason(self, elapsed_seconds, *, evaluation_healthy=True):
         if self.settings.max_seconds is not None and elapsed_seconds >= self.settings.max_seconds:
             return "max_seconds"
+        if (self.settings.budget_reserve_seconds > 0
+                and elapsed_seconds + self.settings.budget_reserve_seconds >= self.settings.max_seconds):
+            return "budget_reserve"
         patience = self.settings.plateau_evaluations
         if (patience is not None and evaluation_healthy
                 and elapsed_seconds >= self.settings.min_seconds
