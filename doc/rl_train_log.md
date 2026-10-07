@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。新5da947a源码116文件/25模块父子CPU合同已通过，ResNet1M与ViT1M的严格FP32/p512完整容量门禁均已actual exit0，验证NT524288、256Adam、24历史模型驻留和1600局采样CUDA评测；另有p1024的单logical短诊断，不等同完整门禁。尚无任何容量正式学习曲线，四个10M/100M门禁、全部六档正式训练及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22四个信息条件均已正式训练并正常退出。v22共958更新、502267904转移、118.529分钟，best499采样selector88.5/96.25/100/98.75%；同SHA模型的中期1600局开发评测89.75/97.5/99.5/99%与八局录像已真实完成，终局明确复用原证据。单训练seed和不同停止预算不能支持信息改动的最终因果结论。容量阶段共同采用actor H4+K11、critic S+H4+K11，遵循已接受的信息语义，未宣称该组合在tiny实验中胜出。116文件运行源码与两种1M严格FP32、BF16/p512完整门禁均已通过，验证NT524288、256Adam、24历史模型压力驻留和1600局采样CUDA评测；随机同权重驻留不等同成熟历史收集性能。v23 ResNet1M已从自身commit冻结源fresh启动（session12099/PID3436959），实际seed0的328张量与同seed独立新模型逐位一致；v24 ViT1M已独立提交并冻结，等待v23结束后从零训练。尚无容量正式胜率结果，四个10M/100M门禁、六档正式训练收尾及后续课程/H8仍须完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
 ## v9 起：从零训练的纯自对弈比较约定
 
 - 每个方案随机初始化 policy，使用新的 Adam 与历史池；禁止旧 checkpoint、warm start、resume、蒸馏初始化，以及 baseline AI 训练对手。历史初始随机模型作为快照 0 保留，随后均匀抽取冻结 student，整局固定对手。
@@ -1475,6 +1475,12 @@ workers4这次快1.485×、评测主体少32.68%；完整update较此前FP32单�
 配置 `rl/configs/v23.json`，actor1,100,945、独立critic1,053,033参数；H4+K11 / S+H4+K11、9×9/episode1024、gamma.995/lambda.95、reward与自对弈算法保持信息阶段的指定基座。N16384×T32、E4/B64/logical8192/256Adam；采用上述完整pair选定的共同执行设置。纯历史池8、均匀抽取、整局固定对手，训练种子20261013/pool120261013，new weights/new Adam/new pool，无resume、warm-start或门禁权重。save_interval2000，完整checkpoint最多3（含final），eval最近3另加best，历史候选文件8；gamma/tick课程关闭，H8留到最后。
 
 生产CLI配置默认合并＋完整policy替换的CPU检查已实际通过，两版候选仅run_id/backbone不同；v23配置SHA `88f5824eedb0b9006782b873f09297b5036497e78eff644db358d3d751265b14`。本节先保存配置与动机，运行源码/配置从该版本commit提取，正式启动和自己的seed0验证随后记录；此时尚无正式训练结果。v24独立提交配对ViT配置并在v23结束后从零训练。比较同时报告胜率对transitions与wall曲线；CUDA同步评测后的Perf/wall_seconds表示该update及eval均完成的时刻。固定critic结构不代表初始张量相同；单训练seed、重复selector，以及tiny→Map同时扩大critic与改变计算方式，均限制归因。全部六档正式训练与后续gamma/rollout/lambda、tick课程、H8仍须逐项完成。
+
+正式启动：v23配置commit `2c3a69155bd82320e2a6b00bed0d2cc30e6fc3b7` 与v24配置commit `e817a78c898f2235202ce45ae461a86f1f324ab0` 各自从Git blob冻结116个运行文件及3个当前Map/CUDA录像分析工具，逐字节回读，运行文件均与已验证5da947a门禁源一致（actual chunk3f9935 exit0）。v23 source manifest SHA `614e16d441489dbb70ae47812f0f2b268a36c0940b80206c4edd19873bad4e12`，绑定自身配置SHA；v24相应manifest为`abef85d3b2f26050246320de603489a0f15438be5ad3530ddaf027ff381ba626`。在GPU无compute进程（b82b22）后，仅启动v23：original session12099、launch fe963d、Python PID3436959。CLI为冻结配置、`--replace-policy --steps-per-env 1000000 --output train`，无resume/warm-start；1M tick是调用上限，仍由1–3h/平台规则提前结束，不承诺实际达到1M tick。
+
+实际初始快照0于2026-10-07 04:44:57 UTC创建，SHA `00b5393bdc4663d6c565f7961cd00a9fbf82acc41465321c46f12145c46b61dd`，pool resume_source=null、source=random_initial_policy。CPU独立构造核验全部328张量逐位一致，actor1,100,945/critic1,053,033；116运行文件及12模块path/SHA正确、实际run_config字节SHA与冻结配置相同，CUDA未初始化，actual CPU session64696 terminal aa0f29 exit0。独立空Adam不是正式optimizer-state证据，后续以实际完整checkpoint检查；初始化合同 `v23/formal_initialization_contract.json`。TensorBoard和训练输出 `outputs/moe_cts/iterations/v23/train/`；首个训练后1600局采样selector预定iteration3，本段尚未报告任何正式胜率。v24保持未启动，不复用v23初始化或模型池。
+
+首个完整正式更新iteration0已完成：524288新转移、collection21.831秒、learning190.831秒，compute2465/s、含启动wall2359/s。实际`model_0.pt` SHA `6dfffbeb0986def5382f113424c0c6b690980e587ab76d4da11e577721a84315`，328份Adam状态step均256、参数与两份moment均finite、无distillation optimizer；CPU读回77个TensorBoard scalar及physical512/logical8192/4096chunks/256minibatches/BF16字段，actual chunk67e42b exit0。whole-update exact KL0.04418、clip24.27%、entropy1.9428，adaptive LR本轮最高0.001139、末值1e−5；这是首轮诊断，不能推出长期稳定性或强度。合同 `v23/first_update_contract.json`；不再将独立Adam构造当作实际训练optimizer证据。
 
 ### v24：配对ViT 1M从零self-play配置
 
