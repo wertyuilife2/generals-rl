@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 from time import perf_counter
@@ -31,6 +32,7 @@ class TrainingEvalConfig:
     max_ticks: int = 2000
     seed: int = 1000042
     cpu_threads: int = 1
+    baseline_workers: int = 1
     keep_snapshots: int | None = None
     device: str = "cpu"
     timeout_seconds: float | None = None
@@ -53,7 +55,7 @@ class TrainingEvalConfig:
                 or not isinstance(self.timeout_seconds, (int, float))
                 or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
             raise ValueError("evaluation.timeout_seconds must be positive and finite or null")
-        for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "seed"):
+        for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "baseline_workers", "seed"):
             minimum = 0 if name == "seed" else 1
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
@@ -81,11 +83,22 @@ def _write_json(path, value):
 
 
 def _stop_worker(process):
-    process.terminate()
+    # The evaluator owns a separate session, including its spawned controllers.
+    # Reap the leader and kill surviving children even if the leader exits first.
     try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         process.wait()
 
 
@@ -195,6 +208,7 @@ class PeriodicEvaluator:
                 job["returncode"] = returncode
                 try:
                     if returncode != 0:
+                        _stop_worker(process)
                         raise RuntimeError(f"evaluation worker exited with code {returncode}")
                     self._complete(job)
                 except Exception as exc:
@@ -209,12 +223,13 @@ class PeriodicEvaluator:
                        job["checkpoint"], "--maps-per-ai", str(settings.maps_per_ai),
                        "--batch-size", str(settings.batch_size), "--max-ticks", str(settings.max_ticks),
                        "--seed", str(settings.seed), "--cpu-threads", str(settings.cpu_threads),
+                       "--baseline-workers", str(settings.baseline_workers),
                        "--device", settings.device, "--output", job["report"]]
             command.append("--stochastic" if settings.stochastic else "--greedy")
             if torch.device(settings.device).type == "cuda":
                 command.extend(["--trace-directory", str(Path(job["report"]).parent / "demo_traces")])
             environment = os.environ.copy()
-            environment.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
+            environment.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
             if torch.device(settings.device).type == "cpu":
                 environment["CUDA_VISIBLE_DEVICES"] = ""
             elif torch.cuda.is_initialized():
@@ -228,7 +243,7 @@ class PeriodicEvaluator:
             try:
                 with Path(job["worker_log"]).open("w") as stream:
                     process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
-                                               env=environment)
+                                               env=environment, start_new_session=True)
                 job["status"] = "running"
                 job["pid"] = process.pid
                 self.running = job, process, perf_counter()
@@ -246,6 +261,8 @@ class PeriodicEvaluator:
                 or report["policy"] != "student_local"
                 or report["device"] != self.settings.device or report["stochastic"] != self.settings.stochastic):
             raise RuntimeError("evaluation report does not match the requested snapshot/protocol")
+        if report.get("baseline_workers", 1) != self.settings.baseline_workers:
+            raise RuntimeError("evaluation baseline workers differ from the requested run")
         for kind in AI_KINDS:
             if report["by_ai"][kind]["games"] != 2 * self.settings.maps_per_ai:
                 raise RuntimeError(f"evaluation did not finish all scheduled {kind} games")
@@ -291,7 +308,7 @@ class PeriodicEvaluator:
                  report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
         point["selection_score"] = list(score)
         point["stochastic"] = report["stochastic"]
-        for key in ("device", "matmul_precision", "cudnn_allow_tf32", "parameter_dtype", "inference_dtype"):
+        for key in ("device", "matmul_precision", "cudnn_allow_tf32", "parameter_dtype", "inference_dtype", "baseline_workers"):
             if key in report:
                 point[key] = job[key] = report[key]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):

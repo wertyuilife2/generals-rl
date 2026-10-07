@@ -5,10 +5,11 @@ import io
 from pathlib import Path
 import shutil
 import subprocess
+import signal
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 
@@ -48,6 +49,7 @@ class EvalWallCapTests(unittest.TestCase):
                                                   side_effect=timed_copy))
         self.popen = self.stack.enter_context(patch("generals_rl.training_evaluation.subprocess.Popen",
                                                    return_value=self.process))
+        self.killpg = self.stack.enter_context(patch("generals_rl.training_evaluation.os.killpg"))
         self.stack.enter_context(patch("generals_rl.training_evaluation.torch.cuda.is_initialized",
                                       return_value=True))
         self.synchronize = self.stack.enter_context(
@@ -185,8 +187,8 @@ class EvalWallCapTests(unittest.TestCase):
         self.assertEqual(job["status"], "failed")
         self.assertIn("TimeoutError", job["error"])
         self.assertEqual((job["returncode"], job["worker_seconds"]), (-9, 2.))
-        self.process.terminate.assert_called_once_with()
-        self.process.kill.assert_called_once_with()
+        self.assertEqual(self.killpg.call_args_list,
+                         [call(self.process.pid, signal.SIGTERM), call(self.process.pid, signal.SIGKILL)])
         self.assertEqual(self.process.wait.call_count, 2)
         self.assertEqual(self.process.wait.call_args_list[0].kwargs, {"timeout": 5})
         self.assertIsNone(evaluator.latest_completed)

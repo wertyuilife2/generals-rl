@@ -16,6 +16,7 @@ import torch
 from generals import VecEnv
 from generals.controllers import AI_KINDS, make_controllers
 from generals.core.engine import CoreEngine
+from generals.core.recording import state_digest
 from generals.core.state import Action, Direction, GameState, MapLayout, MoveResult
 from generals_rl.evaluate_builtin import (
     GameSpec, _initial_knowledge, _local_inputs, aggregate_games, battle_batch,
@@ -57,6 +58,38 @@ class WaitStudent:
 
 
 class BuiltinEvaluationTests(unittest.TestCase):
+    def test_parallel_original_controllers_preserve_sampled_games_and_joint_traces(self):
+        class SampleStudent:
+            def action_probabilities(self, obs):
+                self_keys = set(obs.keys())
+                assert self_keys == {"policy", "single_obs", "action_mask", "knowledge"}
+                probabilities = obs["action_mask"].float()
+                return probabilities / probabilities.sum(-1, keepdim=True)
+
+        class Traces:
+            def __init__(self):
+                self.ticks = []
+
+            def on_start(self, *args):
+                pass
+
+            def on_tick(self, spec, actions, state, moves, done):
+                self.ticks.append((spec.game_id, tuple(action.encode() for action in actions),
+                                   state_digest(state), moves.tolist(), done.tolist()))
+
+        specs = make_schedule(maps_per_ai=1, seed=73)
+        states = [tiny_state() for _ in specs]
+        config = TaskConfig(width=5, height=5, persistent_knowledge=True)
+        serial, parallel = Traces(), Traces()
+        rng = torch.get_rng_state().clone()
+        original, _ = battle_batch(specs, states, SampleStudent(), config, max_ticks=96,
+                                   sampling_seed=419, baseline_workers=1, recorder=serial)
+        actual, _ = battle_batch(specs, states, SampleStudent(), config, max_ticks=96,
+                                 sampling_seed=419, baseline_workers=4, recorder=parallel)
+        self.assertEqual(actual, original)
+        self.assertEqual(parallel.ticks, serial.ticks)
+        torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+
     def test_information_checkpoint_report_and_selected_demo_replay_match(self):
         from tensordict import TensorDict
 

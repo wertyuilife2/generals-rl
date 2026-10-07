@@ -4,10 +4,13 @@ from copy import deepcopy
 from hashlib import sha256
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
+import signal
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, PropertyMock
@@ -19,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 from generals.controllers import AI_KINDS
 from generals_rl.evaluate_builtin import _inference_metadata, evaluate_builtin
 from generals_rl.train import train
-from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig
+from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig, _stop_worker
 from rl_test_utils import assert_nested_equal, small_training_config
 
 
@@ -57,6 +60,21 @@ def completion_fixture(evaluator):
 
 
 class TrainingEvaluationTests(unittest.TestCase):
+    def test_report_must_match_requested_parallel_baseline_workers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, baseline_workers=4),
+                                          {}, directory, None)
+            path, report, job = completion_fixture(evaluator)
+            for workers in (None, 1, 2):
+                with self.subTest(workers=workers):
+                    report.pop("baseline_workers", None)
+                    if workers is not None:
+                        report["baseline_workers"] = workers
+                    path.write_text(json.dumps(report))
+                    with self.assertRaisesRegex(RuntimeError, "baseline workers"):
+                        evaluator._complete(job)
+                    self.assertIsNone(evaluator.best_completed)
+
     def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_precision_before_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
             evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
@@ -160,6 +178,7 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual(settings.every_n_snapshots, 10)
         self.assertEqual(settings.maps_per_ai, 50)
         self.assertEqual(settings.device, "cpu")
+        self.assertEqual(settings.baseline_workers, 1)
         self.assertFalse(settings.synchronous)
         self.assertIsNone(settings.worker_timeout_seconds)
         self.assertTrue(TrainingEvalConfig(device="cuda:0").synchronous)
@@ -167,6 +186,7 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual(TrainingEvalConfig(device="cuda", timeout_seconds=15).worker_timeout_seconds, 15)
         cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
                  {"batch_size": 0}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0},
+                 {"baseline_workers": 0}, {"baseline_workers": True},
                  {"device": None}, {"device": "invalid"}, {"device": "mps"},
                  {"timeout_seconds": 0}, {"timeout_seconds": True}, {"timeout_seconds": float("inf")})
         with tempfile.TemporaryDirectory() as directory:
@@ -297,7 +317,7 @@ class TrainingEvaluationTests(unittest.TestCase):
 
     def test_cuda_worker_inherits_devices_and_releases_only_unused_cache(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0"), {}, directory, None)
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0", baseline_workers=4), {}, directory, None)
             job = {"checkpoint": "snapshot.pt", "report": "report.json",
                    "worker_log": str(evaluator.directory / "worker.log"), "status": "queued"}
             evaluator.jobs.append(job)
@@ -311,12 +331,106 @@ class TrainingEvaluationTests(unittest.TestCase):
                 evaluator.poll()
             command = popen.call_args.args[0]
             self.assertEqual(command[command.index("--device") + 1], "cuda:0")
+            self.assertEqual(command[command.index("--baseline-workers") + 1], "4")
+            self.assertTrue(popen.call_args.kwargs["start_new_session"])
             self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "test-device")
             self.assertEqual(popen.call_args.kwargs["env"]["PYTHONPATH"], "frozen-source")
+            self.assertEqual(popen.call_args.kwargs["env"]["OPENBLAS_NUM_THREADS"], "1")
             synchronize.assert_called_once_with()
             empty_cache.assert_called_once_with()
             # This is a fake routing worker; no CUDA context or process exists.
             evaluator.running = None
+
+    def test_worker_group_cleanup_kills_a_child_that_ignores_sigterm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ready = Path(directory) / "child_pid"
+            child_code = ("import os, signal, sys, time; from pathlib import Path; "
+                          "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                          "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)")
+            parent_code = ("import subprocess, sys, time; "
+                           "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]]); time.sleep(60)")
+            process = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(ready)],
+                                       start_new_session=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(ready.exists())
+                child_pid = int(ready.read_text())
+                _stop_worker(process)
+                self.assertIsNotNone(process.poll())
+                state_path = Path(f"/proc/{child_pid}/stat")
+                deadline = time.monotonic() + 2
+                while state_path.exists():
+                    state = state_path.read_text().rsplit(") ", 1)[1].split()[0]
+                    if state in ("Z", "X"):
+                        break
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(.01)
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=5)
+
+    def test_nonzero_worker_exit_poll_reaps_surviving_sigterm_ignoring_child(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            root = Path(directory)
+            ready = root / "child_pid"
+            child_code = ("import os, signal, sys, time; from pathlib import Path; "
+                          "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                          "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)")
+            parent_code = ("import subprocess, sys, time\nfrom pathlib import Path\n"
+                           "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]])\n"
+                           "while not Path(sys.argv[2]).exists():\n    time.sleep(.01)\n"
+                           "sys.exit(7)\n")
+            process = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(ready)],
+                                       start_new_session=True)
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(baseline_workers=4, keep_snapshots=1),
+                                          {}, root / "run", None)
+            checkpoint = root / "snapshot.pt"
+            checkpoint.write_bytes(b"immutable test stub; no model")
+            job = {"status": "running", "snapshot_id": 1, "iteration": 0,
+                   "publication_index": 1, "checkpoint": str(checkpoint),
+                   "report": str(root / "report.json"), "worker_log": str(root / "worker.log")}
+            evaluator.jobs.append(job)
+            try:
+                self.assertEqual(process.wait(timeout=5), 7)
+                self.assertTrue(ready.exists())
+                child_pid = int(ready.read_text())
+                state_path = Path(f"/proc/{child_pid}/stat")
+                self.assertTrue(state_path.exists())
+                self.assertNotIn(state_path.read_text().rsplit(") ", 1)[1].split()[0], ("Z", "X"))
+                evaluator.running = job, process, time.perf_counter()
+                evaluator.poll()
+                self.assertIsNone(evaluator.running)
+                self.assertEqual(job["status"], "failed")
+                self.assertEqual(job["returncode"], 7)
+                self.assertIn("exited with code 7", job["error"])
+                self.assertEqual(evaluator.describe()["failed"], 1)
+                self.assertIsNone(evaluator.latest_completed)
+                self.assertIsNone(evaluator.best_completed)
+                index = json.loads((evaluator.directory / "index.json").read_text())
+                self.assertEqual(index["jobs"][0]["status"], "failed")
+                self.assertEqual(index["jobs"][0]["returncode"], 7)
+                deadline = time.monotonic() + 2
+                while state_path.exists():
+                    try:
+                        state = state_path.read_text().rsplit(") ", 1)[1].split()[0]
+                    except FileNotFoundError:
+                        break
+                    if state in ("Z", "X"):
+                        break
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(.01)
+            finally:
+                evaluator.close()
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=5)
 
     def test_timeout_and_exception_cleanup_reap_workers_and_bound_failed_weights(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):

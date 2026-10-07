@@ -1302,6 +1302,33 @@ v21终局报告提交`ad6d8f6`后，实际启动v22正式进程session**31517**�
 
 TensorBoard与正式输出为`outputs/moe_cts/iterations/v22/train/`。早期实际35更新/18350080转移时wall261.68秒、全流程70124/s、当轮compute72046/s、whole-update KL0.01468、256 Adam，allocated13.534GiB/reserved16.319GiB；初始CPU评测同期运行，这些早期数值不是最终效率结论，首个完整selector99尚待完成。源码和正式配置不受后续容量准备改动影响。
 
+### 正式早期进展（仍在训练）
+
+以下只含实际完成的采样selector（每点1600局）：
+
+| 更新 | aggressive | expansion | defensive | random |
+|---:|---:|---:|---:|---:|
+| 99 | 33.75% | 58.50% | 86.75% | 82.50% |
+| 199 | 81.75% | 92.50% | 99.25% | 99.25% |
+| 299 | 84.50% | 95.50% | 99.25% | 99.75% |
+| 399 | 84.50% | 97.00% | 99.75% | 98.00% |
+| 499 | 88.50% | 96.25% | 100.00% | 98.75% |
+
+399与299的aggressive胜率同为84.5%，但499已升至88.5%，其余AI仍有波动；尚未判断进入平台。实际TB第510次更新时已训练63.03分钟、267911168转移，wall约70840转移/秒；继续观察后续曲线，最长3h。下图是部分进展，样本轴截到v22已完成的共同预算，wall轴采用实际训练观测窗口；时间标记为模型发布更新，不是异步eval完成时刻。最终结果、最优模型复测和失败录像尚待正式结束后补齐。
+
+![v22部分信息消融：相同样本与wall预算](rl_train_figures/v22_partial_information_curves.png)
+
+共同52428800转移（第99次更新）时的四条件早期对照：
+
+| 条件 | actor / critic | aggressive | overall | 前100次update compute FPS |
+|---|---|---:|---:|---:|
+| v19 | H4 / S | 59.00% | 81.5000% | 138521 |
+| v20 | H4 / S+H4 | 36.00% | 68.1875% | 120522 |
+| v21 | H4+K / S | 50.25% | 76.3125% | 99054 |
+| v22 | H4+K / S+H4+K | 33.75% | 65.3750% | 71999 |
+
+200个完整地图cluster共同重采样20000次，seed20261007：aggressive的memory主效应−5.50pp（95%CI−9.00..−1.875）、critic-information主效应−19.75pp（−23.75..−15.625）、交互+6.50pp（−2.00..14.756）。只有一个早期点、一个训练seed、复用选模地图，CI只反映这些固定模型的地图变异；memory在critic-information=true时也给critic K，参数量随条件变化，不能把它解释为纯actor记忆或最终因果收益。四版早期PPO entropy均值3.964/4.340/4.153/4.265，value指标是clipped训练objective而非raw MSE/EV；未观测到价值估计正确性的直接证据。v19的whole-KL均值含一次0.982尖峰，也不能单看均值归因早期胜率。证据`v22/diagnostic/early_2x2_99.json`（SHA `1fd2e3ed26962858e796c2baad7bf9dc60e51d9c803005cd35fd5a383424f814`）。此处不选择后续容量的信息条件。
+
 ## 后续阶段基础模块准备（非正式训练版本）
 
 成熟上游ResNetV2/ViT、可变观测布局/地块head和可选物理微批次已提交e8b79c5，设计与原始来源见[架构设计](rl_architecture_design.md)。候选整合CPU80 tests/117 subtests通过；严格FP32及BF16的两个1M真实GPU微基准已完成，high/TF32下FP32失败与关闭后的通过都保留。孤立微基准不含完整NT/成熟历史池，10M/100M与正式容量学习曲线仍待前序消融结束后执行。
@@ -1309,3 +1336,14 @@ TensorBoard与正式输出为`outputs/moe_cts/iterations/v22/train/`。早期实
 训练中GPU评估候选通过32局随机ResNet1M的实际BF16采样，按记录动作的四个真实败局共528tick在CPU/native/Core精确重放，生成四MP4；四类胜局缺失明确报告。deadline覆盖复制/hash/cache到worker结束，受剩余墙钟预算限制，超时回收worker；trace保留当前best加最近K个完成评测。默认CPU异步采样路径保持，满池100M峰值仍待真实门禁。
 
 可选课程默认关闭：tick penalty按TB迭代0..1000线性1→0，资源PBRS和终局系数不动；gamma课程要求显式final/end_iteration，并在每个rollout之前同步PPO与PBRS gamma。真实CPU训练/resume验证同rollout采样、GAE、更新设置一致，10项课程测试通过；关闭课程的三次实际更新与此前Git版model/Adam/RNG逐bit一致。课程尚未进入任何正式配置，严格保持先固定gamma比较、再课程/rollout/lambda、再tick衰减、最后H8的阶段顺序；已完成的v20只使用61fea90冻结源，不受这些候选改动影响。
+
+
+### 后续评测效率：原Python baseline的可选持久CPU分片
+
+当前builtin路径的baseline规划是原版Python controller；`cpu_threads`只并行CPU模拟器，`opponent_seconds`还包含状态/观测转换、动作装配和回调。新增独立`baseline_pool.py`，用spawn固定lane分片，原factory保留绝对seat的种子派生；actor、采样流、joint pre-growth tick和绝对seat0→1回调顺序不变。全局评测复用worker，仅在上一批对局全部结束后以原factory重建controller、记忆和RNG；小批次调试默认`baseline_workers=1`串行，可显式设4。PeriodicEvaluator透传并验收worker数量，独立进程组清理评测与子进程；不修改训练对手、MDP、PPO或vendor，也不改正在运行的v22冻结源。
+
+先重放八段实际录像，16copies合成128lane/12016决策，2/4进程逐tick动作、RNG和controller状态与serial一致；四进程synthetic稳态约1.922×，不把它当生产提速。新production API对应录像12016动作一致，覆盖绝对seat回调；相关CPU回归、actual joint-action/native digest比较、worker异常/意外退出、真实拒SIGTERM子进程的group清理、跨批次fresh RNG与partial-feedback拒绝reset均通过。最终pool 10项测试通过；另两项真实进程组测试通过，包含leader以7异常退出后poll清理存活子进程的失败路径。一次性录像replay helper归档到ignored实验目录，不放入提交用测试代码。
+
+实际完整CPU评测复用v21固定best、seed/sampling1001042、200maps/AI×双座、B128/max2000：初版每batch重新spawn耗时89.245秒，比相同源码无诊断的串行80.478秒更慢，启动/清理抵消收益，该失败测量保留。跨13批次复用后actual session68918 exit0，耗时**72.900秒**（含启动/reset/清理1.505秒），整个function含setup72.996秒，较串行80.570秒约**1.104×**；三份完整1600局记录、117505决策tick及全部聚合精确相同。旧v21开发报告114.16秒含K/history观察器开销，不能拿它推导纯并行收益。
+
+证据`controller_parallel_preparation/persistent_full_1600_comparison.json`，配对运行实际session29337/68918均exit0。这是一个固定轻量模型的两次顺序CPU测量，v22训练同期继续，不是多次受控硬件benchmark，也不证明大模型GPU评测同样提速。当前保留可选项；后续共同容量GPU门禁将实际检验eval时间、parent/child显存和host RSS，再决定同档ResNet/ViT共同使用的worker数。

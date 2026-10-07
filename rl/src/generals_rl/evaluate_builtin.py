@@ -8,6 +8,7 @@ The original controllers from generals.controllers.make_controllers are used.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -33,6 +34,7 @@ from .mdp import (ActionMetrics, GameBatch, ObservationHistory,
                   make_action_space, make_observation_encoder)
 from .mdp.knowledge import KnowledgeState
 from .config import seed_everything, task_config
+from .baseline_pool import BaselinePool
 
 
 @dataclass(frozen=True)
@@ -255,7 +257,7 @@ def _inference_metadata(policy, device):
 
 def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                  device="cpu", stochastic=True, sampling_seed=1000042,
-                 cpu_threads=1, recorder=None):
+                 cpu_threads=1, baseline_workers=1, recorder=None, _baseline_pool=None):
     """Complete every fixed lane once; no autorestart or first-finished sampling.
 
     ``policy`` may be a small injected student interface in tests. Normal callers
@@ -268,6 +270,8 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
         raise TypeError("stochastic must be boolean")
     if isinstance(sampling_seed, bool) or not isinstance(sampling_seed, int) or sampling_seed < 0:
         raise ValueError("sampling_seed must be a nonnegative integer")
+    if isinstance(baseline_workers, bool) or not isinstance(baseline_workers, int) or baseline_workers < 1:
+        raise ValueError("baseline_workers must be a positive integer")
     if any(state.player_count != 2 or state.tick != 0 or state.terminated for state in states):
         raise ValueError("built-in matches require fresh nonterminal two-player states")
     started = perf_counter()
@@ -288,7 +292,7 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     encoder = make_observation_encoder(training_task)
     history = ObservationHistory(training_task.history_length)
     controllers = []
-    for spec in specs:
+    for spec in specs if baseline_workers == 1 else ():
         kinds = ["random", "random"]  # The learner's factory slot is unused.
         kinds[1 - spec.learner_seat] = spec.opponent
         controllers.append(make_controllers(kinds, seed=spec.controller_seed)[1 - spec.learner_seat])
@@ -298,7 +302,11 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
     active = np.ones(count, dtype=bool)
     if recorder is not None:
         recorder.on_start(specs, states)
-    with VecEnv.from_states(states, device="cpu", threads=cpu_threads, auto_reset=False, episode_ticks=max_ticks) as env:
+    pool_context = (nullcontext(_baseline_pool) if _baseline_pool is not None else
+                    BaselinePool(specs, workers=baseline_workers) if baseline_workers > 1 else nullcontext())
+    with pool_context as baseline_pool, \
+            VecEnv.from_states(states, device="cpu", threads=cpu_threads,
+                               auto_reset=False, episode_ticks=max_ticks) as env:
         initial_batch = GameBatch.from_backend(env, device)
         history.reset(encoder.encode(initial_batch, player_ids))
         knowledge = _initial_knowledge(initial_batch, player_ids, training_task)
@@ -330,9 +338,13 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                 current_states = env.to_states()
                 joint = np.zeros((count, 2), dtype=np.int64)
                 actions_by_lane = {}
+                opponent_actions = (baseline_pool.act({
+                    lane: observe(current_states[lane], 1 - specs[lane].learner_seat, "local")
+                    for lane in np.flatnonzero(active)}) if baseline_pool is not None else None)
                 for offset, lane in enumerate(np.flatnonzero(active)):
                     seat = specs[lane].learner_seat
-                    opponent_action = controllers[lane].act(observe(current_states[lane], 1 - seat, "local"))
+                    opponent_action = (opponent_actions[lane] if opponent_actions is not None else
+                                       controllers[lane].act(observe(current_states[lane], 1 - seat, "local")))
                     if not isinstance(opponent_action, Action):
                         raise TypeError("built-in controller must return the original Action type")
                     learner_action = Action.decode(int(learner_actions[offset]))
@@ -356,18 +368,23 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                     for lane in np.flatnonzero(active):
                         recorder.on_tick(specs[lane], tuple(actions_by_lane[lane]), recorded_states[lane],
                                          result.moves[lane].copy(), result.done[lane].copy())
+                feedback = {}
                 for lane in np.flatnonzero(active):
                     seat = specs[lane].learner_seat
-                    opponent = controllers[lane]
+                    opponent = controllers[lane] if baseline_pool is None else None
+                    moves = []
                     for pid in (0, 1):
                         row = result.moves[lane, pid]
                         if row[0] and not row[1]:
                             invalid[lane, pid] += 1
                         move = decode_move(row, pid, actions_by_lane[lane][pid])
-                        if move is not None and pid == 1 - seat:
+                        moves.append(move)
+                        if opponent is not None and move is not None and pid == 1 - seat:
                             opponent.on_result(move)
-                        if move is not None and move.eliminated == 1 - seat and hasattr(opponent, "eliminate"):
+                        if opponent is not None and move is not None and move.eliminated == 1 - seat and hasattr(opponent, "eliminate"):
                             opponent.eliminate()
+                    if baseline_pool is not None:
+                        feedback[lane] = tuple(moves)
                     terminal, truncated = map(bool, result.done[lane])
                     if terminal or truncated:
                         winner = int(env.state["winner"][lane])
@@ -387,6 +404,8 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
                         if stochastic:
                             records[lane]["sampling_seed"] = game_seeds[lane]
                         active[lane] = False
+                if baseline_pool is not None:
+                    baseline_pool.feedback(feedback)
                 timing["opponent_seconds"] += perf_counter() - tick_start
                 tick_start = perf_counter()
                 completed_batch = GameBatch.from_backend(env, device)
@@ -406,10 +425,13 @@ def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,
 
 def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_KINDS,
                      batch_size=128, max_ticks=2000, device="cpu", stochastic=True,
-                     sampling_seed=None, cpu_threads=1, output=None, trace_directory=None):
+                     sampling_seed=None, cpu_threads=1, baseline_workers=1,
+                     output=None, trace_directory=None):
     """Evaluate every scheduled game, paired by map and balanced by learner seat."""
     if batch_size < 1 or max_ticks < 1:
         raise ValueError("batch size and maximum ticks must be positive")
+    if isinstance(baseline_workers, bool) or not isinstance(baseline_workers, int) or baseline_workers < 1:
+        raise ValueError("baseline_workers must be a positive integer")
     opponents = tuple(opponents)
     sampling_seed = seed if sampling_seed is None else sampling_seed
     started = perf_counter()
@@ -436,45 +458,61 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
     games, timings = [], []
     policy = None
     traces = None
-    for start in range(0, len(schedule), batch_size):
-        specs = schedule[start:start + batch_size]
-        states = [maps[spec.map_index].copy() for spec in specs]
-        if policy is None:
-            # Build feature shapes from the same encoder as deployment. The
-            # temporary CPU environment is closed before the real matches run.
-            with VecEnv.from_states(states, device="cpu", threads=cpu_threads) as example_env:
-                batch = GameBatch.from_backend(example_env, device)
-                pids = torch.tensor([spec.learner_seat for spec in specs], device=device)
-                encoder = make_observation_encoder(training_task)
-                history = ObservationHistory(training_task.history_length)
-                history.reset(encoder.encode(batch, pids))
-                knowledge = _initial_knowledge(batch, pids, training_task)
-                obs = _local_inputs(batch, pids, encoder, history,
-                                    make_action_space(training_task), knowledge)
-                policy = _load_student(checkpoint, config, obs, device)
-            if trace_directory is not None:
-                traces = SelectedGameTraces(trace_directory, max_ticks=max_ticks, opponents=opponents,
-                    metadata={"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
-                              "evaluation_seed": seed, "sampling_seed": sampling_seed if stochastic else None,
-                              "sampling_protocol": "per_game_numpy_uniform_cdf_v1" if stochastic else None,
-                              "stochastic": stochastic, "device": str(device),
-                              "matmul_precision": torch.get_float32_matmul_precision(),
-                              "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
-                              **_inference_metadata(policy, device), "batch_size": batch_size,
-                              "max_ticks": max_ticks})
-        completed, timing = battle_batch(specs, states, policy, training_task,
-                                        max_ticks=max_ticks, device=device,
-                                        stochastic=stochastic, sampling_seed=sampling_seed,
-                                        cpu_threads=cpu_threads,
-                                        recorder=traces if traces is not None and traces.needs_batch(specs) else None)
-        if traces is not None:
-            traces.finish_batch(completed)
-        games.extend(completed)
-        timings.append(timing)
-        print(f"Built-in evaluation: {len(games)}/{len(schedule)} games completed", flush=True)
+    baseline_lifecycle_seconds = 0.0
+    with ExitStack() as worker_lifetime:
+        baseline_pool = None
+        for start in range(0, len(schedule), batch_size):
+            specs = schedule[start:start + batch_size]
+            states = [maps[spec.map_index].copy() for spec in specs]
+            if policy is None:
+                # Build feature shapes from the same encoder as deployment. The
+                # temporary CPU environment is closed before the real matches run.
+                with VecEnv.from_states(states, device="cpu", threads=cpu_threads) as example_env:
+                    batch = GameBatch.from_backend(example_env, device)
+                    pids = torch.tensor([spec.learner_seat for spec in specs], device=device)
+                    encoder = make_observation_encoder(training_task)
+                    history = ObservationHistory(training_task.history_length)
+                    history.reset(encoder.encode(batch, pids))
+                    knowledge = _initial_knowledge(batch, pids, training_task)
+                    obs = _local_inputs(batch, pids, encoder, history,
+                                        make_action_space(training_task), knowledge)
+                    policy = _load_student(checkpoint, config, obs, device)
+                if trace_directory is not None:
+                    traces = SelectedGameTraces(trace_directory, max_ticks=max_ticks, opponents=opponents,
+                        metadata={"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
+                                  "evaluation_seed": seed, "sampling_seed": sampling_seed if stochastic else None,
+                                  "sampling_protocol": "per_game_numpy_uniform_cdf_v1" if stochastic else None,
+                                  "stochastic": stochastic, "device": str(device),
+                                  "matmul_precision": torch.get_float32_matmul_precision(),
+                                  "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+                                  **_inference_metadata(policy, device), "batch_size": batch_size,
+                                  "baseline_workers": baseline_workers, "max_ticks": max_ticks})
+            if baseline_workers > 1:
+                pool_started = perf_counter()
+                if baseline_pool is None:
+                    baseline_pool = worker_lifetime.enter_context(BaselinePool(specs, workers=baseline_workers))
+                else:
+                    baseline_pool.reset(specs)
+                baseline_lifecycle_seconds += perf_counter() - pool_started
+            completed, timing = battle_batch(specs, states, policy, training_task,
+                                            max_ticks=max_ticks, device=device,
+                                            stochastic=stochastic, sampling_seed=sampling_seed,
+                                            cpu_threads=cpu_threads, baseline_workers=baseline_workers,
+                                            _baseline_pool=baseline_pool,
+                                            recorder=traces if traces is not None and traces.needs_batch(specs) else None)
+            if traces is not None:
+                traces.finish_batch(completed)
+            games.extend(completed)
+            timings.append(timing)
+            print(f"Built-in evaluation: {len(games)}/{len(schedule)} games completed", flush=True)
+        before_pool_close = perf_counter()
+    if baseline_pool is not None:
+        baseline_lifecycle_seconds += perf_counter() - before_pool_close
     if len(games) != len(schedule) or {game["game_id"] for game in games} != {spec.game_id for spec in schedule}:
         raise RuntimeError("completed games do not match the fixed schedule")
     totals = {key: sum(timing[key] for timing in timings) for key in timings[0]}
+    totals["baseline_lifecycle_seconds"] = baseline_lifecycle_seconds
+    totals["wall_seconds"] += baseline_lifecycle_seconds
     totals["environment_ticks_per_second"] = totals["environment_ticks"] / totals["wall_seconds"]
     totals["student_decisions_per_second"] = totals["student_decisions"] / totals["wall_seconds"]
     totals["games_per_second"] = len(games) / totals["wall_seconds"]
@@ -492,7 +530,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "matmul_precision": torch.get_float32_matmul_precision(),
         "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         **_inference_metadata(policy, device),
-        "cpu_threads": cpu_threads, "max_ticks": max_ticks,
+        "cpu_threads": cpu_threads, "baseline_workers": baseline_workers, "max_ticks": max_ticks,
         "clock_normalization_ticks": training_task.max_episode_steps,
         "stochastic": stochastic, "map_config": asdict(map_config),
         "sampling_seed": sampling_seed if stochastic else None,
@@ -525,6 +563,8 @@ def main(argv=None):
     parser.add_argument("--max-ticks", type=int, default=2000)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--cpu-threads", type=int, default=1)
+    parser.add_argument("--baseline-workers", type=int, default=1,
+                        help="persistent CPU processes for original baseline controllers; 1 is serial")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stochastic", action="store_true", help="sample categorical actions (default)")
     mode.add_argument("--greedy", dest="stochastic", action="store_false", help="explicit greedy diagnostic")
@@ -539,7 +579,8 @@ def main(argv=None):
                               opponents=args.opponents, batch_size=args.batch_size,
                               max_ticks=args.max_ticks, device=args.device,
                               stochastic=args.stochastic, sampling_seed=args.sampling_seed,
-                              cpu_threads=args.cpu_threads, output=output, trace_directory=args.trace_directory)
+                              cpu_threads=args.cpu_threads, baseline_workers=args.baseline_workers,
+                              output=output, trace_directory=args.trace_directory)
     print(json.dumps({key: value for key, value in report.items() if key != "games"}, indent=2))
     return 0
 
