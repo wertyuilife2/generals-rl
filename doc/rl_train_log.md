@@ -2427,3 +2427,10 @@ v30 return std均值.58193、raw A std.23986、critic EV.82997；最后LR处于f
 it599/snapshot12实际completed0，314,572,800全局转移/76,800tick-env；aggressive335/65/0、expansion378/22/0、defensive397/3/0、random389/11/0，采样胜率83.75%/94.50%/99.25%/97.25%，overall1499/101/0（93.6875%）、mean83.286tick。快照training wall5378.517秒（89.642分钟），异步worker76.299秒单列；report SHA `55c1548e…`、CP `56403f76…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000采样1600局；唯一observer确认完整game/map/AI/双座/RNG、实际配置/hash及26个Perf/Eval TB点。独立aggregate dbb43b exit0重算counts/WLD/rates/selectionscore；root6ec161直接读原1600局report/CP SHA，098a60确认currentindex completed0及两证书hash。[实际第六点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_599_validated_per_panel.json)，SHA `166372f9…`、aggregatecert `784e6229…`。
 
 aggressive较499下降3pp、较399锚点下降4.25pp，expansion也连续两点下降，defensive仍接近99%。**锚点399/88%保持，锚点后未达≥2pp改进点数2/4**，尚未满足预定平台停止条件。两次回落值得观察，但未单独做配对显著性或因果归因；完整终局分析再一起处理，已有99/199配对结果复用。早/中期完整诊断已有，无重复TB扫描、临时奖励/算法改动或训练重启。原43364继续，后续真实699/799等panel动态观察，满足趋势规则再正常STOP并排空eval；完整best开发、八录像/败局行为、样本/wall曲线及后续λ→tick课程→H8范围保持不变。
+
+
+#### v30 第七采样点：第三个锚点后未提升点（训练继续）
+
+it699/snapshot14实际completed0，367,001,600全局转移/89,600tick-env；aggressive333/67/0、expansion376/24/0、defensive398/2/0、random394/6/0，采样胜率83.25%/94.00%/99.50%/98.50%，overall1501/99/0（93.8125%）、mean84.214tick。快照training wall6317.668秒（105.294分钟），异步worker76.148秒单列；report SHA `1a15c738…`、CP `6eef70e1…`。同CPU/highest/FP32/B128/workers1/seed271828/max2000完整1600局，唯一observer验证game/map/AI/双座/RNG、实际配置/CP/report hash及26个Perf/Eval TB点；独立aggregate 863fb6 exit0重算counts/WLD/rates/score，root8682d5 actualindex completed0、069a80直接原report/CP/验证SHA、aa1381 aggregate SHA与真实counts读回。[实际第七点验证](../outputs/moe_cts/iterations/v30/diagnostic/selector_699_validated_per_panel.json)，SHA `8484c852…`、aggregatecert `d2a1995a…`。
+
+aggressive较599下降0.5pp、较399锚点低4.75pp；expansion第三次回落，defensive/random仍较高。**趋势锚点399/88%保持，锚点后未达≥2pp改进点数3/4**。原43364继续，只等待后续真实评测，不补跑对局或新增bootstrap/telemetry。若下一个799仍没有相对88%锚点≥2pp提升，按已声明四后续点/至少1h规则立即正常STOP；最长3h仍优先。停止后必须确认原进程真实terminal/exit0与当前eval队列排空，再捕获best开发、八局录像/失败分析、完整sample/wall曲线与v27对照；随后选择一个λ候选、真实TB0..1000 tick课程与最终200轮、H8最后。此处不把三点回落当作因果或泛化结论。
