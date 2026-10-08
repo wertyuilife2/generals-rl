@@ -2754,3 +2754,25 @@ it399/snapshot8 actualcompleted0，209715200交互/12800tick/env；四AI W/L/D�
 it499/snapshot10评测成功，262144000交互/16000tick/env。随机采样协议保持不变，每AI200地图双座：aggressive 348/52/0（87.00%）、expansion 390/10/0（97.50%）、defensive 397/3/0（99.25%）、random 396/4/0（99.00%）；overall1531/69/0（95.6875%）、mean80.825625tick。快照training wall3695.376221秒（61.590分钟），异步worker82.480281秒单列。同样本v27为88.50%/96.25%/100%/98.75%、overall95.875%，描述性差−1.50/+1.25/−.75/+.25pp、overall−.1875pp；其wall3697.370117秒，本轮少1.993896秒，吞吐仍接近。相对299，aggressive累计低3.25pp，但只有部分baseline同向降低，尚不能确定课程最终效果或退化原因。
 
 原唯一3767认证1600完整赛程、200map双座、逐局RNG、CP字节、WLD/selectionscore和29有限TB点；root486a1d直接回读原report/certificate/CP。report SHA `e3c2ea2e…`、CP `c5a952c3…`；[第五点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_499_validated_per_panel.json) SHA `22ca0fc7…`。实际γ .995000004768、tick_scale .500999987125、tick −.000500999973匹配预期.995/.501/−.000501，尚非最终零tick阶段；没有新bootstrap、重复TB窗口或新评测。趋势锚点保持299/90.25%，后续未达到+2pp计数2/4；原92092继续，最少1200更新及最终阶段评测守卫不变。中段492..541仅在542次更新实际完成后读取一次。遵照用户最新要求，继续跳过ResNet/ViT探索，完整奖励课程分析之后才进行H8。
+
+
+#### v32 中段492..541：更新幅度未明显放大，动作熵高于控制
+
+root45005a实际logged544/545完成后，唯一CPU统计c9ebed exit0读取当前TB一次（读取时最新571仅作ready证据），收据adce92 exit0；71指标/3550选中点、4375全部窗口实际scalar有限，无重复/缺省，EV有效50/50。三项Curriculum各50点逐update匹配γ/PBRSγ .995、tick_scale .508→.459、tick −.000508→−.000459；PBRS资源与终局系数保持，尚不到零tick最终阶段。root17e48b/77c686/4514e2直接核验缓存及收据，没有重读early/旧TB或新增GPU/游戏。
+
+真实491→541边界wall372.691895秒，50更新/26214400交互/12800Adam；collection76.174113、update296.200446秒，compute70397.94、wall70337.99交互/秒。v27同窗口旧缓存wall70515.42，本轮−.2516%，collection1.00655倍、update1.00148倍，速度接近；monitor平均.128576秒/update、占update2.1704%。当前allocated窗口最大13.54031、reserved16.32422GiB，不是全训练峰值。
+
+| 492..541指标均值 | v27固定tick | v32 tick课程 |
+|---|---:|---:|
+| 全轮exact KL | .022236 | .021341 |
+| clip fraction | .127677 | .138848 |
+| entropy | .671313 | .906206 |
+| WAIT | 20.0452% | 14.1025% |
+| backtrack | 12.9005% | 11.8853% |
+| emitted Episode length | 112.165 | 138.506 |
+
+全轮KL最大.049562（v27 .087957）；自适应LR仍启用，final floor6/50、ceiling29/50、396次minibatch改变（v27 6/41/334）。全轮监控KL和调LR使用的minibatch KL不逐点等同。raw return每update均值−.329259/std均值.539715、raw A−.001194/.183832、EV均值.883902/末.882587；v27这几项没有缓存，保留missing，不以不同shaped target下value loss推断critic更好。std均值不是合并窗口分布std，normalized A约1是预处理结果。
+
+Episode批次meanwin67.8432%、return−.103526、trunc.06087%，不是baseline胜率或全局对局加权率。中段没有非有限值、EV恶化或全轮KL相对控制明显放大的证据；较高entropy、较少WAIT/backtrack和更长episode与tick压力降低同时出现，但不足以证明这些变化造成aggressive从90.25%回落。原92092继续，early/middle均已完成不再重读；至少200真实零tick更新和最终阶段评测完成后，才结合全曲线、开发集与录像给出课程结论。
+
+[中段缓存](../outputs/moe_cts/iterations/v32/diagnostic/mid_training_dynamics.json) SHA `0af151bd…`；[实际执行收据](../outputs/moe_cts/iterations/v32/diagnostic/mid_training_dynamics_execution.json) SHA `3a7cfc91…`；复用v27缓存SHA `9a2fc2cd…`，无旧TB重扫。
