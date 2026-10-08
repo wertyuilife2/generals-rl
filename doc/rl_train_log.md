@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v33完整报告已提交2a51c85，v34 H8已从自身冻结源码正式从零启动；H8已完成99/199/299三个采样评估点，终态成绩仍待完整训练。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v33完整报告已提交2a51c85。v34 H8在967更新后意外中断，八个评估点保留，但无正常summary、未进入零tick阶段，不算完整条件；用户重启机器并恢复goal后，以相同设置的v35从零重跑H8。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -3070,3 +3070,14 @@ H8 KL max .174411/p95 .051436，LRfloor14/cap2/800次minibatch变化，监控4.2
 
 
 v34 it599/snapshot12 completed0，四AI49.5/69.75/88.75/80%、overall72%，W/L/D1152/443/5。157,286,400 transitions/19,200tick每环境，快照wall2234.4207秒、worker238.5199秒独立；γ.995/scale.401/tick−.000401仍非零阶段。原68545认证schedule/RNG/WLD/CP/29有限TB/read1，root本次实际回读report与[第六证书](../outputs/moe_cts/iterations/v34/diagnostic/selector_599_validated_per_panel.json) SHAa6da99d7…，report4c485faf…/CPf9ea4d65…。aggressive从499下降2pp，best仍499；单点回落不能替代完整最终课程分析，锚点499/51.5%、未+2pp计数1/4，最少1200/200轮实际零tick及该阶段评测仍未满足，原39578继续。early/mid已完成，不重读TB或重跑统计。
+
+
+#### v34 中断与重启后恢复：不计完整H8实验
+
+2026-10-08 UTC08:46:05原训练日志停在iteration966（967更新/253,493,248 transitions），原PID420967/start432440688消失、原工具39578返回Unknown process id。没有STOP、summary或最后正常checkpoint，原工具退出码未知；不是训练完成证明。最后日志训练clock为3631秒、单轮WAIT78.39%/episode timeout批次mean68.21%，仅是该日志采样，未补算终态窗口。snapshot899的CPU评估尚未完成，用户08:51要求暂停并重启机器，剩余447651评估进程已SIGTERM停止，现场和模型保留。内核日志无读取权限、没有Python traceback，退出原因未确定，不声称OOM或工具超时已证实。
+
+已完成的99..799八个CPU采样点保留原report/certificate，699为44.75/54.25/71.75/70%、overall60.1875%，799为33.5/55/64/68.5%、overall55.25%；最高aggressive为499的51.5%。899的旧index running条目是中断现场，不是重启后活进程，不补造return0、最终零tick或完整开发成绩。early/mid缓存继续保留，但v34从完整H4/H8比较中排除。
+
+goal恢复active后，实际宿主机boot_id f94fc0c0-a19f-427f-a6b4-3ce15744f9cd、uptime315秒，4090可用且GPU仅603MiB占用。新v35仅run_id改v35，所有训练超参数/seed/MDP/self-play和H8条件保持；重新随机初始化、新Adam、新池，不加载v34 model_0、历史快照或中断游戏状态。仍匹配v33 H4的N8192/T32/NT262144/batch4096/256Adam，完整训练至少1h、1200更新和1000..1199实际200轮零tick，最多3h。不恢复ResNet/ViT探索。
+
+[用户暂停现场](../outputs/moe_cts/iterations/v34/diagnostic/user_reboot_pause.json)、[原中断状态与恢复说明](../outputs/moe_cts/iterations/v34/execution_state.json)。v34源码、冻结配置、历史数据不覆盖，原39578/68545及旧只读等待不再轮询或复活；v35建立自己的原始句柄与PID/boot身份。新的训练输出持续tee到日志并由工具读到，避免纯重定向无输出，只有实际验证的终态才用于结论。
