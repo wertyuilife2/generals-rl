@@ -2811,3 +2811,12 @@ it799/snapshot16成功，419430400交互/25600tick/env；同一CPU随机采样�
 it899/snapshot18成功，471859200交互/28800tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive348/52/0（87.00%）、expansion386/14/0（96.50%）、defensive393/7/0（98.25%）、random397/3/0（99.25%），overall1524/76/0（95.25%）、mean98.483125tick。快照training wall6676.351563秒（111.273分钟），异步worker104.993892秒单列。同样本v27为87.75%/95.75%/98.25%/98.50%、overall95.0625%，本轮描述性差−.75/+.75/0/+.75pp、overall+.1875pp；其wall6676.016602秒，差+.334961秒。较799，aggressive低2.75pp、defensive低1pp、overall低1pp；当前best保持699/91.25%，这些波动还不能确定最终零tick阶段效果。
 
 原唯一3767认证1600完整赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；rootf5e674直接回读原report、CP及[第九点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_899_validated_per_panel.json) SHA `540ef092…`。report `f41da0ac…`、CP `a43ea6c1…`；实际γ .995000004768、scale .101000003517、tick −.000100999998匹配预期.995/.101/−.000101，仍非最终零tick。停止锚点299/90.25%、未+2pp计数6/4；1200与最终阶段条件未满足，不写STOP。下一999点按公式仍有−1e−6 tick惩罚，不能作为零tick阶段证据；需实际1000..1199共200更新，并核对1099/1199的零tick评测。原92092继续，early/middle不重读，无中途bootstrap；完整终态分析之前不启动H8。
+
+
+#### v32 第十采样点：90%，训练越过课程边界
+
+it999/snapshot20成功，524288000交互/32000tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive360/40/0（90.00%）、expansion384/15/1（96.00%）、defensive398/2/0（99.50%）、random397/3/0（99.25%），overall1539/60/1（96.1875%）、mean89.45375tick。快照training wall7421.589844秒（123.693分钟），异步worker97.355626秒独立记录。aggressive较899回升3pp，仍低于699最佳91.25%。v27只有930次完整更新，没有999 selector，不补造同样本控制点；共同99..899比较留到终态一次汇总。
+
+唯一原3767认证完整1600赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；root3786eb直接回读report、CP及[第十点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_999_validated_per_panel.json) SHA `84d71b90…`。report `5637046b…`、CP `0970bc79…`；实际γ .995000004768、scale .001000000047、tick −9.999999975e−7匹配预期.995/.001/−1e−6，**这一评测点尚非零tick阶段**。停止锚点299/90.25%、未+2pp计数7/4，最低1200和最终阶段条件仍不成立。
+
+root61e5e3在UTC04:27:59实际logged1008/1009完成，已按预先验证的冻结课程进入从it1000开始的零tick阶段，当时完成9次该阶段更新。这是实际更新计数与固定课程的边界证据，尚未验收完整1000..1199的200个TB点；该验收与终态完整统计一次完成，不重读early/middle。原92092继续，等待真正零tick的1099/1199评测及最低200次最终训练；完整开发/八录像/失败/全samplewall报告之后才决定H8基座，最长3h优先。
