@@ -2599,3 +2599,10 @@ C75.8796/U296.0673/wall372.2627秒，compute70,478.86、wall70,419.09转移/秒�
 v31每更新raw return均值−.284341，其每更新std的均值.570555；raw A均值−.001261、std均值.266578，EV均值.781431。上述std是每更新分布std的平均，不是跨整窗口合并后的分布std；归一化A std≈1由预处理产生。v27没有这些新指标，不补造比较。value loss .066357 vs .041708来自不同λ下的shaped bootstrap targets，不能直接解释为critic更差。更高entropy/较少WAIT描述策略行为，不能代替baseline效果；近期selector499 aggressive86.5%仍低于控制88.5%。EV衡量整体拟合，不能证明低频守将/夺将估值准确。
 
 每轮256Adam；monitor平均.128255秒，占U2.166%。自适应LR final在ceiling47/50、floor0/50，44次minibatch变化；全轮监控KL与调LR使用的minibatch KL不应逐点等同。Episode批次mean return−.000024、length118.778、win72.7467%，不是全局对局加权率或baseline胜率。当前TB allocated窗口最大13.541477GiB/reserved16.322266GiB，是当前allocator观测，不冒充全训练峰值；固定gamma/tick合法未产生Curriculum tags。原60387/唯一selector observer65720继续，锚点399/85.25%、后续未明显提升1/4；不重复此窗口。完整λ终局后决定tick课程基座，TB0..1000且至少200真实零tick更新，再做H8；容量暂缓。
+
+
+#### v31 第六采样点：aggressive89.5%，趋势锚点重置
+
+it599/snapshot12 completed0，314,572,800转移、19200tick/env。四AI胜率89.50%/95.50%/98.50%/98.50%，W/L/D为358/42/0、382/18/0、394/6/0、394/6/0；overall1528/72/0（95.50%），mean78.06875tick。快照training wall4439.533秒，CPU异步worker82.410秒单列。同样本v27已有终局缓存为85.75%/97.00%/99.25%/98.75%、overall95.1875%，本轮点差+3.75/-1.50/-0.75/-0.25pp、overall+0.3125pp；不在中途新增bootstrap，不据一个点决定λ基座。
+
+原唯一65720独立验证1600完整调度/地图双座/逐局RNG、WLD/selectionscore、CP字节与26finite TB点；root直接原report/index和[第六点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_599_validated_per_panel.json)，SHA `33e880e7…`，逐字节核对CP `4605d955…`、report `d23ac972…`。aggressive较趋势锚点399提高4.25pp、较上点499提高3pp，**新趋势锚点599/89.5%，后续四点未提升计数0/4**。2pp阈值是停止启发式，不是统计显著性结论。已训练超过1h且仍提高，原60387固定配置继续，最长3h优先；early/mid已完成不重读。最终独立开发/八录像/行为与全曲线完成后才选择tick0..1000/至少200最终零tick基座，再做H8，容量继续暂缓。
