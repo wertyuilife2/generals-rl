@@ -1,8 +1,8 @@
 # RL 训练迭代日志
 
-当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、可变地图的成熟 ResNet/ViT 1M/10M/100M 比较、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束整个阶段任务。工作分支 `codex_dev`，main 不修改。
+当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22四个信息条件均已正式训练并退出，单seed结果尚不能证明信息改动的最终因果收益。容量阶段采用actor H4+K11、critic S+H4+K11；两种1M完整GPU门禁及v23/v24从零正式训练均已完成。两轮各20更新、10485760新转移，best对aggressive均2%；ViT计算吞吐快约29%，但整体强度未胜出。开发复测、八局录像、失败分析、完整曲线与地图簇配对结果已记录下文。两家实际profiler均已退出并各完成256次Adam更新；trace与GPU ABBA完成，最小mask补丁数值逐位一致且短窗口耗时降低约1.7/2.5%；10M ResNet/ViT两个完整门禁均actual exit0，共同BF16/p256正式设置已依据实测成本选择，v25原86930已从自身commit冻结源从零启动，v26冻结待GPU；实际seed0的328张量与同seed fresh模型逐位一致。短性能诊断不计正式训练或容量门禁。其余10M/100M完整门禁和四轮正式训练、gamma/rollout/lambda、tick penalty 0..1000课程及足够末阶段训练、最后H8仍待完成。** 旧v9–v18阈值与停止规则属于此前阶段，历史greedy标签原样保留；v1–v8有续训或warm start，v6–v8混过少量aggressive对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 四个信息条件消融已完成，后续采用 actor H4+K11、critic S+H4+K11；单训练 seed 不足以证明信息改动的普遍因果收益。v23/v24 两种 1M 网络及 v25 ResNet10M 已完成正式训练和分析；v26 ViT10M 按用户要求中断并暂缓，不计完成，剩余容量探索同样暂缓。v27/v28 固定 gamma、v29 gamma 课程、v30 rollout、v31 lambda 实验及终态分析均已完成。综合结果保留当前 26074 参数小网络、gamma .995、lambda .95、N16384/T32 基座。v32 正在从零验证仅衰减 tick penalty，仍需实际完成至少 200 次零 tick 更新、最终阶段评测及完整终态分析；H4→H8 最后进行，尚未执行。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -1354,6 +1354,8 @@ TensorBoard与正式输出为`outputs/moe_cts/iterations/v22/train/`。早期实
 录像和详细诊断位于`v22/diagnostic/middle_at_499/analysis/`及`failure_analysis.json`；执行记录SHA `a59028a9f0bca60ffbbb0658a7587d7d849c28a13ad7d5a2563e855eb0678b96`。这些评测与录像确实在训练中期执行，最终best仍为同SHA的499，终局复用原证据与原句柄，不声称重新执行。绝对先手身份已经保留在actor的public输入中；静态战斗margin未模拟同tick联合动作的优先顺序，不把上述random个例归为缺少先手信息。
 
 ### v22终局分析与信息阶段结论
+
+缓存范围说明：`v22/final_best/analysis/summary.json` 保留中途生成的 6 个评测点；本节全程结论使用 [终态报告](../outputs/moe_cts/iterations/v22/diagnostic/terminal_training_review.json) 和 [信息条件比较](../outputs/moe_cts/iterations/v22/diagnostic/final_information_comparison.json) 中的 9 个实际 selector 点。历史缓存原样保留，不能用它代表完整终态。
 
 终局按既定最低AI→aggressive→overall规则仍选snapshot10/iteration499，保护权重SHA `fcc73aea76d44913273dd63668fa339968a00206d85eba7b702787296e2ded98`。训练实际exit0后创建`v22/final_best/capture.json`，以硬链接复用中期不可变CP，核验best/中期/终局三个SHA一致、111冻结文件仍匹配；开发和八录像/Core均通过明确reuse索引引用原路径与实际执行时间。新的终局捕获与数值/曲线分析actual CPU session78361 chunk498d9e exit0；原训练PID独立确认已不存在。
 
@@ -2783,3 +2785,15 @@ Episode批次meanwin67.8432%、return−.103526、trunc.06087%，不是baseline�
 it599/snapshot12成功，314572800交互/19200tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive355/45/0（88.75%）、expansion389/8/3（97.25%）、defensive393/6/1（98.25%）、random398/0/2（99.50%），overall1535/59/6（95.9375%）、mean94.424375tick。快照training wall4440.565430秒（74.009分钟），异步worker134.895994秒独立记录。同样本v27为85.75%/97.00%/99.25%/98.75%、overall95.1875%，描述性差+3.00/+.25/−1.00/+.75pp、overall+.75pp；v27快照wall4441.586426秒，本轮少1.020996秒。aggressive较499回升1.75pp，仍低于299最佳90.25%；defensive回落且出现6平局，不用总体最佳分数替代各AI曲线。
 
 唯一原3767认证完整1600赛程/200地图双座/逐局RNG/CP字节/WLD/score及29有限TB点；root230025直接回读原report、CP及[第六点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_599_validated_per_panel.json)，SHA `2e0d130b…`；report `6bb7eaa7…`、CP `b25ec46a…`。实际γ .995000004768、scale .400999993086、tick −.000400999998匹配预期.995/.401/−.000401，仍未零tick；当前panel读一次，early/middle及旧TB不重读、不新增bootstrap。锚点保持299/90.25%，后续未+2pp计数3/4，最低1200和最终阶段条件尚未满足。原92092仍运行，不写STOP；完成实际200轮零tick更新与最终评测后，再结合开发/八录像/失败与完整曲线分析。
+
+
+#### v32 第七采样点：新的选模最佳91.25%，保持课程
+
+it699/snapshot14成功，367001600交互/22400tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive365/35/0（91.25%）、expansion385/15/0（96.25%）、defensive397/3/0（99.25%）、random395/5/0（98.75%），overall1542/58/0（96.375%）、mean91.535625tick。快照training wall5185.703125秒（86.428分钟），异步worker104.940123秒单列。同样本v27为86.00%/96.00%/99.50%/98.50%、overall95.00%，本轮描述性差+5.25/+.25/−.25/+.25pp、overall+1.375pp；v27wall5186.616699秒，差−.913574秒。aggressive较599上升2.5pp、较原最佳299上升1pp，依最弱AI/aggressive/overall规则选模best更新为699，仍不等于课程已带来泛化收益。
+
+原唯一3767认证完整1600赛程、200地图双座/RNG、CP字节、WLD/score及29有限TB点；roota1364e直接核对原report、CP及[第七点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_699_validated_per_panel.json) SHA `b843ff05…`。report `5b0748f3…`、CP `a1c3c940…`；实际γ .995000004768、scale .300999999046、tick −.000300999993匹配预期.995/.301/−.000301，尚非零tick。与训练停止启发式的299锚点相比仅+1pp，未达到重置阈值+2pp，因此计数4/4；**虽然四点平台条件成立，最少1200实际更新与最终阶段条件不成立，不写STOP**。选模最佳和平台锚点有不同用途，保持原预定规则。early/middle完成不重读、没有中途bootstrap；原92092继续，最长3h优先，最终开发/八录像/失败/完整曲线后再判断奖励课程和H8基座。
+
+
+#### 已完成阶段的证据核对
+
+[限定 v19–v31 的证据矩阵](../outputs/moe_cts/iterations/evaluation_preparation/completed_v19_v31_plan_evidence_matrix.json) SHA `f165943c…`：12 轮正常训练/终态产物与 183 个文档链接齐全；v26 中断明确排除。配置和核心冻结源码绑定未发现不一致；本次没有重读 TB、构造模型或增加游戏。v28 原工具句柄退出未直接观察，保留的是绑定精确 PID/start 的 OS exit0、summary 和评测排空证据，不统一称为原工具 exit0。fresh Adam 的已有构造契约与无 load 启动/新 runner/随机快照证据保留，正式 time-zero optimizer 没有另存，矩阵明确该证明范围。开发 seed1001042 已复用，单训练 seed 与条件配对区间不证明跨 seed 泛化或因果收益；v23–25 的低强度也只对应该有限计算预算。头部进度摘要和 v22 缓存范围说明已修正；当前 v32 与 H8 仍待完成，未测世界冠军对战，不能宣称整个任务完成。
