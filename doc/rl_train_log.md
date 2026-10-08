@@ -2579,3 +2579,23 @@ root cdd6bd直接原report/index读取，随后逐字节核对CP/report与唯一
 it499/snapshot10 completed0，262,144,000转移、16000tick/env；四baseline胜率86.50%/94.75%/98.75%/99.25%，W/L/D为346/54/0、379/19/2、395/5/0、397/3/0；overall1517/81/2（94.8125%），mean88.04563tick。快照training wall3695.312秒，CPU异步worker112.330秒单列。同样本v27缓存为88.50%/96.25%/100.00%/98.75%、overall95.8750%，本轮差-2.00/-1.50/-1.25/+0.50pp、overall-1.0625pp；中途仅描述点差，不新增bootstrap，最终比较仍包含best开发与全程曲线。
 
 唯一原65720观察器实际认证1600调度/地图双座/逐局RNG/WLD/CP字节及26finite TB点；root实际读取原report和[第五点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_499_validated_per_panel.json)，SHA `e0d9543f…`，并逐字节核对CP `ae919b6a…`、report `e24c0188…`。aggressive较399只+1.25pp，因此**锚点保持399/85.25%，锚点后未达到≥2pp提升计数1/4**。训练已超过最低1h，但不能仅因此或胜率>80%停止；继续原60387，达到542完成更新后只读一次预声明492..541窗口。没有改λ/奖励/对手/训练source，tick衰减与H8后续范围保持。
+
+
+#### v31 中段492..541：计算成本接近控制，仍需等待终局效果
+
+root467e59实际logged545证明完整窗口已到，再由唯一CPU诊断2cdd64 exit0读取当前TB一次，34941e exit0持久化收据；旧TB/early读取0，没有新对局/GPU/源码或配置变化。69项指标×50=3450点、窗口全部实际scalar4225点均finite，无重复/缺失，EVvalid50/50，Episode四项50/50。真实491→541边界为3635.986816→4008.249512秒，严格50更新/26,214,400转移/12800Adam；不以49个更新的时长配50份样本。[中段诊断](../outputs/moe_cts/iterations/v31/diagnostic/mid_training_dynamics.json)，SHA `b4b7bdf1…`；[实际执行收据](../outputs/moe_cts/iterations/v31/diagnostic/mid_training_dynamics_execution.json)，SHA `2f5a28d9…`；root c94f4e/fcf613回读并核对覆盖/边界。
+
+C75.8796/U296.0673/wall372.2627秒，compute70,478.86、wall70,419.09转移/秒；v27同窗已有缓存C75.6782/U295.7640/wall371.7542、wall70,515.42，因此本轮wall −.1366%，计算成本基本接近。v30 N4096/T128的同窗wall55,806.28，比本轮低约20.75%，但N/T不同只作背景，不隔离λ因果。异步评测worker时长未再次加入training wall。
+
+| 492..541每更新指标均值 | v27 λ.95 | v31 λ.99 |
+|---|---:|---:|
+| 全轮exact KL | .022236 | .015789 |
+| 全轮exact KL窗口最大 | .087957 | .024384 |
+| clip fraction | .127677 | .126141 |
+| entropy | .671313 | 1.048496 |
+| WAIT | 20.0452% | 15.9737% |
+| backtrack | 12.9005% | 11.8243% |
+
+v31每更新raw return均值−.284341，其每更新std的均值.570555；raw A均值−.001261、std均值.266578，EV均值.781431。上述std是每更新分布std的平均，不是跨整窗口合并后的分布std；归一化A std≈1由预处理产生。v27没有这些新指标，不补造比较。value loss .066357 vs .041708来自不同λ下的shaped bootstrap targets，不能直接解释为critic更差。更高entropy/较少WAIT描述策略行为，不能代替baseline效果；近期selector499 aggressive86.5%仍低于控制88.5%。EV衡量整体拟合，不能证明低频守将/夺将估值准确。
+
+每轮256Adam；monitor平均.128255秒，占U2.166%。自适应LR final在ceiling47/50、floor0/50，44次minibatch变化；全轮监控KL与调LR使用的minibatch KL不应逐点等同。Episode批次mean return−.000024、length118.778、win72.7467%，不是全局对局加权率或baseline胜率。当前TB allocated窗口最大13.541477GiB/reserved16.322266GiB，是当前allocator观测，不冒充全训练峰值；固定gamma/tick合法未产生Curriculum tags。原60387/唯一selector observer65720继续，锚点399/85.25%、后续未明显提升1/4；不重复此窗口。完整λ终局后决定tick课程基座，TB0..1000且至少200真实零tick更新，再做H8；容量暂缓。
