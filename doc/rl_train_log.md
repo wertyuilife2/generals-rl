@@ -2924,3 +2924,12 @@ v33配置仅相对v32修改run_id与N16384→8192，代码只变两份history网
 v33源提交577c16a，116纯Git运行文件/配置一次冻结ce2dce；原session19903/62937f、PID377111/start431706788已从零启动，无resume/warm-start参数。实际run_config与frozen仅有明确的默认eval键补全差异，448a57一次现成source_contract核验116份Git/frozen/manifest全同；实际配置SHA `db8edfcd…`。启动已完成前四轮，N8192/T32、学生8192/teacher0、H4、gamma/PBRS .995、lambda .95、tick0..1000课程保持。100000为安全上限，实际预算最多3h且min1200；真实曲线平台与200轮零tick/最终阶段评测满足后再正常STOP。
 
 TensorBoard目录：`outputs/moe_cts/iterations/v33/train`。当前早期自对弈return/win针对随机历史对手，不作为baseline胜率；首个四AI采样panel在iteration99。v34提交5d8a60b、自己的116文件冻结ec79d3，只改history与run_id，当前未启动。main及用户未跟踪文件不修改。
+
+
+#### v33早期30更新与首个采样panel
+
+唯一early755949/6e3f12真实exit0，只读取当前TB0..29一次：30更新/7864320交互/7680Adam，C21.1696/U94.4707秒、原训练clock0→endpoint29共123.9831秒，compute68006.74、含启动wall63430.57/s。71指标/2110有限点，全部实际窗口2574有限点，无重复/非有限；Episode合法缺省更新保留。KL.0159765/clip.203399/entropy4.62068/EV.805417（30valid）、WAIT9.6641%；三Curriculum各30点符合.995、scale1→.971、tick−.001→−.000971。原snapshot0全部22张量与对应冻结新constructor逐位一致，resume/warm-start/poolresume均null；CPU未初始化CUDA。此缓存是未来v34相同NT/窗口的H4控制，不与v32同update假称同样本比较。
+
+首个iteration99/snapshot2已completed0，唯一observer8745认证1600局/200图双座/逐game RNG、WLD与CP SHA、29有限TB标量read1。四AI为**12.25%/35.75%/72.75%/59.50%**、overall45.0625%；WLD为49/351/0、143/250/7、291/108/1、238/161/1，overall721/870/9。真实26214400交互/3200tick每环境，snapshotwall401.5128秒，异步worker300.2850秒单列；tick−.000901仍处课程前段。原训练继续，不能把该早期弱模型当终态或据此认定H8有效。
+
+证据：[early唯一统计](../outputs/moe_cts/iterations/v33/diagnostic/early_training_dynamics.json)、[实际early回执](../outputs/moe_cts/iterations/v33/diagnostic/early_training_dynamics_execution.json)、[首面板证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_99_validated_per_panel.json)、[原首panel report](../outputs/moe_cts/iterations/v33/train/evaluations/snapshot_00000002/report.json)。early SHA `c323b57d…`、回执 `e97300b2…`、面板 `628571e6…`、report `1c21a56d…`、CP `c26d45f9…`；root c91ea2已实际回读report/证书，不重TB或bootstrap。
