@@ -2747,3 +2747,10 @@ CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议保持
 it399/snapshot8 actualcompleted0，209715200交互/12800tick/env；四AI W/L/D为356/44/0、383/17/0、399/1/0、396/4/0，采样胜率**89.00%/95.75%/99.75%/99.00%**，overall1534/66/0（95.875%）、mean83.470625tick。快照真实training wall2950.263428秒（49.171分钟），异步worker90.288014秒单列。同样本v27缓存84.50%/97.00%/99.75%/98.00%、overall94.8125%，描述性差+4.50/−1.25/0/+1.00pp、overall+1.0625pp；不新增中途bootstrap。相对299，aggressive低1.25pp、expansion低1.75pp而defensive提高.75pp，因此不是所有AI同向变化，也不能用一个点确定课程退化。**趋势锚点保持299/90.25%，后续未+2pp计数1/4**，尚未达到最低1h，且本轮最少1200/最终阶段条件尚未满足。
 
 原唯一3767认证1600完整地图双座/逐game RNG/CP bytes/协议/WLD/selectionscore，29实际TB点有限/currentpanel read1/旧TB与早中窗口0，无pending/errors；root b9a4e5直接读取report、[第四点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_399_validated_per_panel.json) SHA `31a34cff…`及CP字节。report `f78c1ecf…`、CP `b8507797…`；实际γ .995000004768、scale .601000010967、tick −.000600999978匹配期望.995/.601/−.000601，仍未到最终零tick。资源7ba9d4实际UTC03:08观察：GPU17896/24564MiB，磁盘剩余893.692GiB，history8/eval最近3+best/training checkpoint1，未见快照累积。原训练92092继续，下一固定492..541中段只在真实542完成后统计一次；完整零tick阶段和终态开发/八录像/失败/全samplewall报告之后再做H8。
+
+
+#### v32 第五采样点：tick减半，aggressive回落至87%
+
+it499/snapshot10评测成功，262144000交互/16000tick/env。随机采样协议保持不变，每AI200地图双座：aggressive 348/52/0（87.00%）、expansion 390/10/0（97.50%）、defensive 397/3/0（99.25%）、random 396/4/0（99.00%）；overall1531/69/0（95.6875%）、mean80.825625tick。快照training wall3695.376221秒（61.590分钟），异步worker82.480281秒单列。同样本v27为88.50%/96.25%/100%/98.75%、overall95.875%，描述性差−1.50/+1.25/−.75/+.25pp、overall−.1875pp；其wall3697.370117秒，本轮少1.993896秒，吞吐仍接近。相对299，aggressive累计低3.25pp，但只有部分baseline同向降低，尚不能确定课程最终效果或退化原因。
+
+原唯一3767认证1600完整赛程、200map双座、逐局RNG、CP字节、WLD/selectionscore和29有限TB点；root486a1d直接回读原report/certificate/CP。report SHA `e3c2ea2e…`、CP `c5a952c3…`；[第五点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_499_validated_per_panel.json) SHA `22ca0fc7…`。实际γ .995000004768、tick_scale .500999987125、tick −.000500999973匹配预期.995/.501/−.000501，尚非最终零tick阶段；没有新bootstrap、重复TB窗口或新评测。趋势锚点保持299/90.25%，后续未达到+2pp计数2/4；原92092继续，最少1200更新及最终阶段评测守卫不变。中段492..541仅在542次更新实际完成后读取一次。遵照用户最新要求，继续跳过ResNet/ViT探索，完整奖励课程分析之后才进行H8。
