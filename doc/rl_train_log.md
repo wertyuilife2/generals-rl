@@ -2797,3 +2797,10 @@ it699/snapshot14成功，367001600交互/22400tick/env；同一CPU随机采样�
 #### 已完成阶段的证据核对
 
 [限定 v19–v31 的证据矩阵](../outputs/moe_cts/iterations/evaluation_preparation/completed_v19_v31_plan_evidence_matrix.json) SHA `f165943c…`：12 轮正常训练/终态产物与 183 个文档链接齐全；v26 中断明确排除。配置和核心冻结源码绑定未发现不一致；本次没有重读 TB、构造模型或增加游戏。v28 原工具句柄退出未直接观察，保留的是绑定精确 PID/start 的 OS exit0、summary 和评测排空证据，不统一称为原工具 exit0。fresh Adam 的已有构造契约与无 load 启动/新 runner/随机快照证据保留，正式 time-zero optimizer 没有另存，矩阵明确该证明范围。开发 seed1001042 已复用，单训练 seed 与条件配对区间不证明跨 seed 泛化或因果收益；v23–25 的低强度也只对应该有限计算预算。头部进度摘要和 v22 缓存范围说明已修正；当前 v32 与 H8 仍待完成，未测世界冠军对战，不能宣称整个任务完成。
+
+
+#### v32 第八采样点：89.75%，课程后半程仍有波动
+
+it799/snapshot16成功，419430400交互/25600tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive359/41/0（89.75%）、expansion387/13/0（96.75%）、defensive397/2/1（99.25%）、random397/2/1（99.25%），overall1540/58/2（96.25%）、mean93.19875tick。快照training wall5931.361328秒（98.856分钟），异步worker112.088224秒单列。同样本v27为87.75%/96.75%/99.50%/99.50%、overall95.875%，本轮描述性差+2/0/−.25/−.25pp、overall+.375pp；其wall5931.462891秒，两者差仅−.101563秒。aggressive较699下降1.5pp，best仍699/91.25%；相邻点波动不能识别退化原因或代替零tick最终阶段效果。
+
+唯一原3767认证完整1600赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；root63a6b3直接回读report、CP及[第八点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_799_validated_per_panel.json) SHA `e042a97f…`。report `331cf403…`、CP `8fd4d394…`；实际γ .995000004768、scale .201000005007、tick −.000201000003匹配预期.995/.201/−.000201，非最终零tick。停止锚点仍299/90.25%，未+2pp计数5/4；最少1200完成和最终阶段条件仍未满足，不写STOP。early/middle不重读，无中途bootstrap。资源fb6e0e实测GPU17900/24564MiB、util98%，磁盘约893.7GiB剩余；实际history_pool8/eval最近3+best/model checkpoint1，保留数量稳定，当前driver显存不是训练Torch峰值。原92092继续，最长3h优先；完整终态之后再做H8。
