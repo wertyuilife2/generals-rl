@@ -16,7 +16,7 @@ v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456�
 
 **v32 tick课程完整结束，后续H8以此为候选基座。** 原92092真实exit0，1206更新/632291328转移/150.067分钟，12次selector均completed0，u1000..1199真实200轮零tick已TB核验。gamma/PBRS gamma .995、lambda .95、N16384/T32、NT524288、小网络与纯历史自对弈固定；只把tick−.001在TB0..1000乘linear1→0。best699开发aggressive/expansion/defensive/random为93.25/96.75/100/99.75%，overall97.4375%；相对v27开发aggressive+3pp与overall+.75pp的地图配对区间含0。早期采样效率较好，最终零tick末段无持续提升，最佳699仍有tick惩罚，不把最佳效果当成零tick收益。wall70223.04/s、GPU真实peak allocated15.26401/reserved16.32617GiB；全程数值有效，完整曲线、1600局独立开发、补充defensive诊断及八录像/Core审计已完成。详细结果见rl_train_log.md。
 
-**H4→H8为当前最后执行项，v33 H4已正式启动，v34 H8已冻结等待。** 原NT的H8缓存增加7.6953GiB，结合GPU余量及1200更新/3h计算预算，选择N8192/T32/NT262144、逻辑batch4096/256Adam的单一匹配候选，完整GPU门禁已actual exit0：各256Adam，H8 peak allocated12.1886/reserved13.0195GiB，额外16局采样入口通过；单轮速度不作稳态结论。v33 fresh H4控制后再做v34 fresh H8，保持其余MDP、课程、网络结构和评测协议一致；H8输入层增13824参数、actor与critic都扩展历史，明确比较整个history条件。使用v32的tick0..1000日程，必须完成至少200轮最终零tick训练与该阶段评测；3h预算优先，不足如实报告。剩余容量探索暂缓，整个迭代目标仍继续。
+**H4→H8为当前最后执行项，v33 H4完整结束，v34 H8待从零训练。** v33真实1297更新/89.355分钟、340000768转移、200轮实际零tick、12selector均completed0；best599 CUDA采样开发86.5/94.5/98.75/99%，完整曲线与8例实际录像/Core审核已完成。best→last aggressive−16.5pp、配对地图95%区间[−21.75,−11.5]pp，后期entropy回升而非塌缩。双方N8192/T32/NT262144、batch4096/256Adam匹配，H8同时扩展actor与critic历史、增加13824输入层参数；其余MDP/K11/课程/评测保持。门禁H8峰值allocated12.1886/reserved13.0195GiB可行，单轮速度不作稳态结论。v34自己5d8a60b提交与冻结、116runtime同v33，正式成绩尚不存在；本报告提交后才启动。后续仅完成H8及matched pair，不恢复用户明确跳过的ResNet/ViT容量探索。baseline表现不能证明世界冠军水平。
 
 ## 实验顺序与完整范围
 

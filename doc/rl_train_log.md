@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22 四个信息条件消融已完成，后续采用 actor H4+K11、critic S+H4+K11；单训练 seed 不足以证明信息改动的普遍因果收益。v23/v24 两种 1M 网络及 v25 ResNet10M 已完成正式训练和分析；v26 ViT10M 按用户要求中断并暂缓，不计完成，剩余容量探索同样暂缓。v27/v28 固定 gamma、v29 gamma 课程、v30 rollout、v31 lambda 实验及终态分析均已完成。综合结果保留当前 26074 参数小网络、gamma .995、lambda .95、N16384/T32 基座。v32 tick penalty 课程已完成1206更新/150.067分钟，真实零tick阶段200轮、12次采样评测、最佳模型独立开发与八例录像分析全部完成；best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4→H8匹配实验已通过完整GPU门禁，v33 H4正从零训练：基于v32课程，双方N8192/T32/NT262144、逻辑batch4096/256Adam。v34 H8配置已提交与冻结，116运行源码和v33完全同hash，待v33完整报告后从零训练；H8正式训练尚未执行。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v34 H8已提交和冻结，待本报告提交后从零训练；H8正式成绩尚不存在。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -2943,3 +2943,87 @@ v33后续399/499两个采样selector已completed0，四AI399为82.75/95/98/99.25
 v33中段492..541唯一当前TB采集f1c720真实exit0，root ac0278回读原结果及真实回执：真实边界491→541，50更新/13,107,200交互/12,800Adam；C50.2432/U158.0020、wall208.5940秒，compute62,941.21、wall62,835.94交互/秒。KL均值.022714/max.074233、clip.154349、entropy.933312、critic EV.897276（50/50有效）；WAIT16.5098%、backtrack10.0568%，监控占U2.93078%。71关键指标3550有限点，实际149 tags/4387有限点、无重复或非有限值，Train/Eval实际稀疏坐标保留；gamma .995、tick scale .508→.459逐点通过。当前allocator采样max allocated6.81745/reserved8.05469GiB并非全程峰值；实际资源检查历史池8、eval snapshot3、regular model1，磁盘free893.58GiB。此中段缓存供v34相同NT/窗口比较，不与v32同update假称同样本。
 
 证据：[399证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_399_validated_per_panel.json)、[499证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_499_validated_per_panel.json)、[中段唯一统计](../outputs/moe_cts/iterations/v33/diagnostic/mid_training_dynamics.json)、[中段真实回执](../outputs/moe_cts/iterations/v33/diagnostic/mid_training_dynamics_execution.json)。mid SHA `1faad608…`、回执 `f1a57d96…`；原训练继续，后续保持小网络H4/H8路线，ResNet/ViT及容量扩展暂缓。
+
+
+#### v33 完整结果：H4 小批量控制，后期确有退化
+
+本轮作为 H8 的匹配 H4 控制，保持 v32 的 MDP、K11、网络结构、纯历史自对弈、gamma/PBRS gamma .995、lambda .95、tick 0..1000 线性课程；只把 N16384 改成8192。源码577c16a、配置SHA64f50ade…、116份冻结manifest261957e4…；正式原session19903在root正常STOP后29815b真实exit0，唯一observer8745/f7deca也exit0，12项eval全部completed0。没有加载门禁、v32或旧模型，初始随机快照的22张量与自身冻结constructor逐位一致。time-zero Adam未单独序列化，证据范围保持此前构造契约和无load启动。
+
+**实际1297更新、41,504 tick/env、340,000,768 transitions，wall5361.314秒（89.355分钟）**。collection1249.880/update4095.288秒，compute63,609.0、含启动wall63,417.4 transitions/s；正式Torch peak allocated7.6743/reserved8.2188GiB。episodes2,285,022，timeout26,670（1.1672%）；teacher0/student8192。history pool容量8个eligible模型，最终满8个[0,20..26]，初始随机模型0永久保留；其余最近7个均匀抽取，已被池淘汰的版本仍可能在未结束的对局中使用。不能称纯“最近8个模型”或把最后active占比当全程样本占比。常规checkpoint1、eval最近3+best，未堆积所有权重。
+
+4epoch×64minibatch、4096 samples/minibatch，每更新256 Adam；全程332,032 Adam。selector每100更新，CPU FP32/highest、stochastic、B128、workers1、seed271828，每AI200张地图双座，共1600局/点。横轴分别使用真实transitions和快照原训练wall，异步eval worker耗时单列，未插值或与v32按相同update假装相同样本。
+
+| update | aggressive | expansion | defensive | random | overall | 快照wall分钟 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 99 |12.25%|35.75%|72.75%|59.50%|45.0625%|6.692|
+|199|55.00%|71.75%|94.75%|91.00%|78.1250%|13.354|
+|299|74.00%|90.25%|97.75%|97.75%|89.9375%|20.085|
+|399|82.75%|95.00%|98.00%|99.25%|93.7500%|26.948|
+|499|85.75%|94.75%|98.50%|97.50%|94.1250%|33.893|
+|599（best）|85.75%|96.25%|99.00%|98.50%|94.8750%|40.833|
+|699|82.50%|92.50%|99.25%|98.75%|93.2500%|47.791|
+|799|82.25%|92.75%|98.50%|98.50%|93.0000%|54.739|
+|899|74.75%|88.00%|96.75%|95.00%|88.6250%|61.700|
+|999|78.50%|90.25%|97.00%|96.50%|90.5625%|68.670|
+|1099（零tick）|78.25%|91.00%|97.25%|95.75%|90.5625%|75.623|
+|1199（零tick）|69.25%|86.75%|94.25%|94.50%|86.1875%|82.585|
+
+best599是aggressive并列峰值中按最弱AI/aggressive/overall选出的模型，CP `c1127265…`，该时刻仍有−.000401 tick penalty。999仍−1e−6，不能当成零阶段；实际1000..1199的200更新三个课程tag逐点通过，52,428,800 transitions/51,200 Adam，wall834.853秒/62,800.0 transitions/s。最低1200、超过1小时、最终零tick评测、预声明平台条件全部满足后正常STOP；不是运行故障或队列取消。
+
+![v33完整采样曲线：样本轴](rl_train_figures/v33_final_samples.png)
+
+![v33完整采样曲线：真实训练wall轴](rl_train_figures/v33_final_wall.png)
+
+**后期退化不是仅凭两点猜测。** best599→last1199的aggressive −16.50pp，按200个地图簇保留双座配对的20,000次bootstrap95%区间[−21.75,−11.50]pp；overall −8.6875pp[−10.6875,−6.75]。expansion/defensive/random分别−9.50/−4.75/−4.00pp，三个配对区间也均低于0。最后6点aggressive描述性OLS为−18.35pp/hour；它不是独立趋势样本检验。区间仅对复用地图和已选模型条件化，不估计跨训练seed的不确定性。
+
+独立于selector的开发评估用CUDA FP32/high、TF32允许、B128/workers4、stochastic per-game NumPy CDF，seed/sampling seed1001042、max2000tick、clock归一1024，200地图×双座×4AI。原33012/f2be9d真实exit0、1600局完整，CP与immutable best一致，draw计入分母。开发seed以前使用过，称开发集，不称未见holdout；它也不是CPU selector协议。
+
+| baseline | W/L/D | 胜率 | 地图簇bootstrap95%区间 |
+|---|---:|---:|---:|
+| aggressive |346/54/0|86.50%|83.00%–89.75%|
+| expansion |378/22/0|94.50%|92.25%–96.75%|
+| defensive |395/5/0|98.75%|97.50%–99.75%|
+| random |396/4/0|99.00%|98.00%–99.75%|
+| overall |1515/85/0|94.6875%|93.4375%–95.8125%|
+
+v33开发点低于v32，但两者NT、样本预算和batch不同，不能把差别归因于history或某个奖励；本轮用于匹配H8控制，不替代v32当前最佳工程候选。
+
+终态只解码一次自身TB，84选中tags/108,912有限点、无重复或非有限值；后续统计审查、曲线与录像工具复用原始标量缓存，没有重读旧run。early/mid缓存保留，各自读取一次。末100真实1197..1296、边界1196→1296，26,214,400 transitions/25,600 Adam；C101.922/U316.109/wall418.662秒，wall62,614.8/s。
+
+| PPO/行为均值 | early0..29 | mid492..541 | last1001197..1296 |
+|---|---:|---:|---:|
+| whole-update exact KL |.015977|.022714|.023004|
+| clipping |.203399|.154349|.144953|
+| entropy |4.62068|.93331|2.11617|
+| critic EV（有效观测）|.80542（30）|.89728（50）|.96415（100）|
+| WAIT |9.6641%|16.5098%|19.5556%|
+| backtrack |.7870%|10.0568%|7.8388%|
+
+末100 KL max .07244，adaptive LR floor13/cap43、944次minibatch改变；监控9.262秒，占U2.93%。raw return mean−1.01257/std均值.86079，raw A−.000829/std均值.16292；这是shaped bootstrap target的统计，不是baseline胜率或合并分布标准差。EV很高也不能证明终局校准良好。**该轮后期entropy上升而非塌缩，KL/clip没有随退化明显持续放大；不能沿用“变得太确定”作为解释。** tick课程、自对弈对手分布、return目标与策略一起变化，只能给出相关证据，尚不能区分课程与历史池非平稳性的因果贡献。
+
+![v33完整PPO、效率和实际课程曲线](rl_train_figures/v33_final_training_dynamics.png)
+
+最佳模型八录像来自该1600局赛程真实joint actions，四AI各首个game-id输赢，没有额外补局；CPU native Core replay全通过，不重新推理以避免采样漂移。原9357/bb9353真实exit0，统计审查32511/59b714 exit0；审查在录像完成前生成，原`demos: not_present`是该时点事实，录像与行为审核由以下后续产物补充，未重跑bootstrap。
+
+| baseline | 输 | 赢 |
+|---|---|---|
+| aggressive |[335tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/aggressive_loss.mp4)|[89tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/aggressive_win.mp4)|
+| expansion |[252tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/expansion_loss.mp4)|[78tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/expansion_win.mp4)|
+| defensive |[276tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/defensive_loss.mp4)|[129tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/defensive_win.mp4)|
+| random |[76tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/random_loss.mp4)|[104tick](../outputs/moe_cts/iterations/v33/final_best/analysis/videos/random_win.mp4)|
+
+CPU审核原16658/2bb9ba exit0：8例、1339 decision ticks，116冻结源码、Core pre/post digest、native执行、独立局部可见性、H4时序、joint mask与report动作统计一致，CUDA未初始化，没有新game/NN。末tick反事实限固定原对手动作、WAIT与合法邻格增援；其结果只解释局部动作后果，不证明全局最优或更早不能防守。长期事实K11不在该独立历史审计内重建，不能把“最后H4没敌王”说成actor已忘记敌王。
+
+
+失败样例（0-based cell，pre_tick→execution_tick）结合原审核与实际关键帧有以下表现：
+
+- aggressive：开局0..26连续WAIT，末段已只有4兵/4地，对手145兵/58地；332..333仍从home2向11送兵，敌堆经13→4→3逼近，334→335夺home2。最终原动作WAIT、没有合法邻接增援，故该例不加重复WAIT反事实。战略劣势与更早的扩张/回防问题不能靠最后一tick修复。
+- expansion：247→248从home2送出兵力、248继续11→20；敌堆随后13→4→3逼近，250仍10→11，home2仅2兵，251→252被夺王。末段敌王仍在H4内，此例不能归因于忘记敌王位置。
+- defensive：末段只有2..4兵、2块地，271/274从home23向24送兵，敌堆25→24再24→23夺王；持续小兵推进未形成有效抵御。最终计划动作被较早座位的夺王跳过，不称mask非法。
+- random：71从home39带主堆到38，随后38→37→46→45移动；敌堆45→46→47→48→39逼近，75→76夺王。最后仍有28兵/18地，兵力没有及时集中到home；敌王当时在H4里，并非该例缺失敌王记忆。
+
+5个允许的末tick替代分支全部仍死亡；双方动作联合决策后按座位执行，P1在P0先夺王时被跳过，不能把未执行当作无效动作。八例是每种结果首个game-id，四赢都P0/map0、四输都P1，存在地图和座位选择混杂；不据此推断总体座位胜率。root实际查看了3张曲线与8例preterminal/terminal联系帧，未声称看完整MP4或穷举防守。问题指向更早的资源积累、军队聚合与威胁响应，既有K11也不保证策略使用它；下一步只完成匹配H8实验，随后按实际胜率/速度结果决定后续方向。尚未测世界冠军对战。
+
+终态证据：[原训练summary](../outputs/moe_cts/iterations/v33/train/summary.json)、[原训练真实退出](../outputs/moe_cts/iterations/v33/diagnostic/training_original_native_terminal_execution.json)、[唯一observer真实退出](../outputs/moe_cts/iterations/v33/diagnostic/selector_observer_execution_receipt.json)、[完整selector认证](../outputs/moe_cts/iterations/v33/diagnostic/selector_current_index_certification.json)、[终态缓存审查与配对区间](../outputs/moe_cts/iterations/v33/diagnostic/terminal_training_review.json)、[唯一完整训练统计](../outputs/moe_cts/iterations/v33/diagnostic/final_training_dynamics.json)、[完整原始标量缓存](../outputs/moe_cts/iterations/v33/diagnostic/full_training_curve_cache.json)、[三图manifest](../outputs/moe_cts/iterations/v33/diagnostic/final_curve_plot_manifest.json)、[原开发report](../outputs/moe_cts/iterations/v33/final_best/development_report.json)、[开发真实退出](../outputs/moe_cts/iterations/v33/diagnostic/development_evaluation_execution.json)、[八录像摘要](../outputs/moe_cts/iterations/v33/final_best/analysis/summary.json)、[录像真实退出](../outputs/moe_cts/iterations/v33/diagnostic/render_terminal_demos_execution.json)、[八例行为审核](../outputs/moe_cts/iterations/v33/diagnostic/recorded_failure_review.json)。开发report SHA `69183227…`、终态统计 `7cce5a62…`、标量缓存 `fa896e60…`，均保持原字节，未重启/重冻结/回灌旧权重。
+
+审核/展示实际回执：[行为审核执行](../outputs/moe_cts/iterations/v33/diagnostic/recorded_failure_review_execution.json)、[关键帧导出执行](../outputs/moe_cts/iterations/v33/diagnostic/behavior_frame_export_execution.json)、[原始帧manifest](../outputs/moe_cts/iterations/v33/diagnostic/behavior_frame_export_manifest.json)。
