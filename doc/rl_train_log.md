@@ -2733,3 +2733,10 @@ it99/snapshot2实际completed0，52428800交互/3200tick/env；完整1600局（�
 it199/snapshot4 actualcompleted0，104857600交互/6400tick/env，四AI W/L/D分别348/52/0、381/18/1、396/4/0、393/7/0；采样胜率**87.00%/95.25%/99.00%/98.25%**，overall1518/81/1（94.875%）、mean93.036875tick。快照真实training wall1471.536377秒（24.526分钟），异步worker103.842431秒单列。同样本v27缓存为81.75%/92.50%/99.25%/99.25%、overall93.1875%，本轮描述性差+5.25/+2.75/−.25/−1.00pp、overall+1.6875pp；其wall1472.755615秒，本轮快1.219238秒。相对第99点aggressive提高35pp，**趋势锚点更新199/87%，后续四点未提升计数归零**；其他AI/overall仍单独观察，不把一个点较好当作最终课程收益。
 
 CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议不变。root a7be16直接核对原report全部1600games/WLD/rate和CP bytes，92b9cb回读原唯一3767的[第二点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_199_validated_per_panel.json) SHA `63d82a28…`；report `77ea796d…`、CP `3fe101e1…`。29个实际TB点均finite/无缺失，当前panel单pass/早中窗及旧TB0，没有中途bootstrap。Curriculum实际γ .995000004768、scale .800999999046、tick −.000800999987匹配期望.995/.801/−.000801，尚未进入最终零tick阶段。原训练92092继续，最低1200更新/200真实最终零tick/至少最终阶段评测和最长3h优先保持；完整开发、八真实录像/失败和全sample/wall分析之后才做H8。
+
+
+#### v32 第三采样点：aggressive90.25%，趋势仍上升
+
+it299/snapshot6 actualcompleted0，157286400交互/9600tick/env；四AI W/L/D为361/39/0、390/10/0、396/4/0、399/1/0，采样胜率**90.25%/97.50%/99.00%/99.75%**，overall1546/54/0（96.625%）、mean81.560625tick。快照真实training wall2208.658936秒（36.811分钟），异步worker82.049260秒另列。同样本v27缓存为84.50%/95.50%/99.25%/99.75%、overall94.75%；本轮描述性差+5.75/+2.00/−.25/0pp、overall+1.875pp。较上一点aggressive提高3.25pp，**趋势锚点更新299/90.25%，后续未达到+2pp提升计数归零**，不是统计显著性判断。
+
+CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议保持。root e6f95a原report/CP bytes/1600games/WLD/rate核验，随后直接回读唯一3767生成的[第三点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_299_validated_per_panel.json) SHA `fef62c4e…`；report `4a97ee77…`、CP `7119a632…`。29 TB点有限、当前panel单pass/旧TB和早中窗0，未新增bootstrap。实际γ .995000004768、scale .700999975204、tick −.000700999983匹配期望.995/.701/−.000701，非最终零tick。前3点aggressive52→87→90.25%，目前支持早期采样效率较好，尚不能代替整个课程终态/开发集泛化结论。原92092继续，最少1200完成更新/it1000..1199真实200零tick更新与最终阶段评测、最长3h优先保持；H8仍在完整奖励课程报告之后。
