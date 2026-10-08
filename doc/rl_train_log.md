@@ -2522,3 +2522,20 @@ C39.133/U177.362秒、完整wall endpoint225.915秒；compute72,651.1、wall69,6
 | self-play episode批次mean win | 62.3880% | 71.9931% |
 
 v31 raw return均值−1.527273/std .324489、raw A均值−.078794/std .108792、critic EV均值.769594/最后.970963；归一化A std≈1由预处理产生。LR最后值floor1/30、ceiling26/30、42次minibatch变化，categorical adaptive仍正常启用。v27缓存没有R/A/EV/backtrack，不补造比较；v30虽有这些新tag但N/T不同，只是背景。当前KL/clip没有出现数值爆炸，尚不说明守将或baseline强度改善。Episode统计是每次日志中已结束对局批次均值，既非全局对局加权胜率，也非baseline胜率；较高EV不足以证明终局价值准确。保持冻结λ.99实验，等待真实selector99，最少1h和四锚点后未提升规则不变；不因早期回报或四baseline单点成绩缩短完整λ→tick→H8范围。
+
+
+#### v31 第一采样点：与λ.95控制接近（正式训练继续）
+
+it99/snapshot2 actualcompleted/return0，52,428,800全局转移、3200tick/env；CP `8a9c5033…`、report `876dc0f1…`。四AI W/L/D依次137/263/0、231/167/2、360/40/0、346/54/0；采样胜率34.25%/57.75%/90.00%/86.50%，overall1074/524/2（67.125%）、mean200.683tick。快照training wall738.131秒（12.302分钟），异步worker214.477秒独立记录；不能把worker时长再加进训练曲线坐标。root1d5219直接读取原report/模型hash，f7f89f读取当前index completed0。单panel observer确认原worker164314/start429694988真实live后正常完成/消失，无长期observer或新对局；CPU882848 exit0完成1600games/200mapclusters/AI双座/逐game采样seed、WLD/count/rate/selectionscore、CP bytes、26个Eval/Perf TB点核验，06690c exit0持久化执行收据。CPU/highest/FP32/B128/workers1/seed271828/max2000与v27一致；本panel TB读一次，旧TB和early窗口未再读取。
+
+| 同52,428,800样本 | v27 λ.95 | v31 λ.99 | v31−v27配对地图95%CI (pp) |
+|---|---:|---:|---|
+| aggressive | 33.75% | 34.25% | +0.50 [−4.25,+5.25] |
+| expansion | 58.50% | 57.75% | −0.75 [−6.00,+4.75] |
+| defensive | 86.75% | 90.00% | +3.25 [−0.50,+7.00] |
+| random | 82.50% | 86.50% | +4.00 [−0.75,+8.50] |
+| overall | 65.375% | 67.125% | +1.75 [−0.5625,+4.00] |
+
+200配对地图簇/20k bootstrap/seed20261007，各AI和overall区间都含0，尚无明确早期λ收益，不能声称等效或泛化。v27缓存真实snapshotwall737.020秒，v31仅多1.112秒，首点时间效率接近；开发最佳模型还未比较。conditional地图CI仅针对这两个已训练快照和复用选模地图，不能估计训练seed随机性。[首点实际验证](../outputs/moe_cts/iterations/v31/diagnostic/selector_99_validated_per_panel.json)，SHA `1ef77329…`；[首点λ配对](../outputs/moe_cts/iterations/v31/diagnostic/first_selector_matched_lambda_comparison.json)，SHA `70c4ff94…`；[实际执行凭据](../outputs/moe_cts/iterations/v31/diagnostic/first_selector_matched_lambda_comparison_execution_receipt.json)，SHA `5977fb57…`。
+
+初始趋势锚点it99/aggressive34.25%，尚不到至少1h，没有平台停止判断。原60387保持冻结配置继续，后续真实199及100更新间隔评测若提升≥2pp则更新锚点，四后续点无该提升且≥1h再正常STOP，最长3h优先。终局仍需完整队列排空、best开发/八真实录像/失败分析、sample/wall全曲线与v27对照，再选择tick TB0..1000课程基座及真实至少200轮最终零tick训练；H8最后，ResNet/ViT暂缓，不能以早期指标或四baseline门槛提前结束。
