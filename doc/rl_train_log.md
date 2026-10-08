@@ -2688,3 +2688,10 @@ root6c0e41直接原report/index读取，随后回读原唯一65720的[第九点�
 工程决策：完整曲线、独立开发、效率和行为均已审阅后，**后续奖励衰减实验采用v27基座（λ.95、γ.995、N16384/T32、H4+K11）**。λ.99计算无明显成本增加、selector局部有优势，但早期效率较差且最佳模型开发aggressive/overall更差，目前不加入更大λ或进一步搜索。下一项仅衰减tick penalty：TB0..1000系数1→0，PBRS/terminal reward和gamma保持不变；必须实际完成u1000..1199至少200次零tick更新并评测最终阶段，1–3h预算/最长3h优先。该决定是本单seed下简洁、已验证的工程选择，不声称λ.95全局最优。之后H8最后；剩余ResNet/ViT容量探索继续暂缓，不能以四baseline超过80%结束整项计划。
 
 可追溯产物：[完整终态报告](../outputs/moe_cts/iterations/v31/diagnostic/terminal_training_review.json) SHA `0cf4e1b0…`；[共同selector配对](../outputs/moe_cts/iterations/v31/diagnostic/selector_paired_comparisons.json) SHA `b44a33da…`；[开发配对](../outputs/moe_cts/iterations/v31/diagnostic/final_lambda_development_comparison.json) SHA `f837dc60…`；[逐帧行为报告](../outputs/moe_cts/iterations/v31/diagnostic/final_behavior_review.json) SHA `6310b926…`；[最终训练统计](../outputs/moe_cts/iterations/v31/diagnostic/final_training_dynamics.json) SHA `88fc1d0b…`；[完整selector认证](../outputs/moe_cts/iterations/v31/diagnostic/remaining_selector_current_index_certification.json) SHA `f23b0c04…`。
+
+
+### v32：仅移除 tick 惩罚的课程（正式配置）
+
+基于完整 v31 λ消融后选出的v27基座，仅加入 `curriculum.tick_decay=true`，每个rollout开始前按其绝对TB iteration设置 `tick_scale=max(0,1−it/1000)`：it0为1、500为.5、999为.001、1000及以后为0。原tick −.001乘该系数；PBRS资源系数、终局±1及PPO/PBRS gamma .995始终不变。λ.95/N16384/T32/NT524288/E4/B64/26074参数/H4+K11/episode1024/每50发布/每100异步采样评测与v27相同，随机权重/Adam/历史池全部重新初始化，没有baseline训练对手或warm start。
+
+现有课程实现和TB记录可直接复用，不需要新增runtime/vendor补丁。配置增加 `training_control.min_completed_updates=1200`；正式安全上限100000更新，至少1h，最长3h优先，手动四后续selector无相对锚点+2pp平台规则同时要求完成至少1200更新且最终阶段评测完成。不会提前写STOP。特别验证真实TB it1000..1199共200次零tick更新/104857600交互和至少一个最终阶段selector（优先1099与1199）；配置值或只刚到1000不能代替实际完成证据。v27训练930更新，后续比较只用已有真实共同点，较长终态预算单独披露，不伪造1000之后的控制曲线；是否需匹配固定tick控制在本轮完整分析后决定。按v27/v31实测约7.4秒/update，1200更新约149分钟，应落在3h内，仍以真实wall/finite训练状态为准。checkpoint3/eval最近3+best/pool8维持，避免大文件累积。ResNet/ViT仍暂缓，H8在这项完整终态报告之后最后进行。
