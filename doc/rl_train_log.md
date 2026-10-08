@@ -2629,3 +2629,62 @@ it899/snapshot18 completed0，471,859,200转移、28800tick/env。四AI胜率86.
 root6c0e41直接原report/index读取，随后回读原唯一65720的[第九点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_899_validated_per_panel.json)，SHA `4e3bd96b…`；完整1600地图双座/逐局RNG/WLD/selectionscore、CP `e63c1564…`、report `26e3635b…` 字节和26finite TB点均核对。**趋势锚点仍599/89.5%，后续未明显提升3/4（699/799/899）**。第999点若仍没有相对锚点≥2pp提升，即满足至少1h与四点平台的正常STOP条件；不会kill或仅凭本点提前终止。原60387/冻结配置继续，最长3h优先；early/mid不重读。
 
 480570实际资源检查（UTC01:44）当前GPU17897/24564MiB、利用率89%，剩余磁盘895.825GiB；实际history8/eval最近3+best/training checkpoint1，保留数正常。当前显存不是全训练Torch峰值。完整λ终局开发/八录像/失败/全samplewall报告后选择tick0..1000且至少200真实最终零tick的基座，H8最后，容量继续暂缓。
+
+
+#### v31 完整终态：λ=0.99 未带来可复现的开发集收益
+
+本轮只把 v27 的 GAE λ 从 .95 改为 .99，保持 gamma/PBRS gamma=.995、N16384/T32、NT524288、4 epochs/64 minibatches（逻辑batch8192、每更新256次Adam）、H4+K11 actor/critic、26074参数、episode1024、tick penalty −.001及uniform历史池8不变。seed20261013，从随机权重、空Adam和全新历史池开始；baseline只用于评测。配置commit `a2d2447`，自有冻结source116文件；本轮不追加ResNet/ViT扩容。原始60387/ac95b8训练工具最终 `fc1dd3 exit0`，PID153382/start429621062已消失。第999点完成后，相对599/89.5%的锚点连续699/799/899/999四点未达到+2pp，root写STOP正常退出；此阈值是停止启发式。1031真实更新（TB0..1030）、32992tick/env、540540928总交互，wall7649.263秒（127.488分钟），不是配置中的安全上限100000更新。唯一后续selector observer65720/0c659d真实exit0，10/10评测成功、队列完全排空，无取消/失败或重复启动。
+
+| selector更新 | 总样本(M) | 快照training分钟 | aggressive | expansion | defensive | random | overall |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 99 | 52.429 | 12.302 | 34.25% | 57.75% | 90.00% | 86.50% | 67.125% |
+| 199 | 104.858 | 24.551 | 75.50% | 92.50% | 98.25% | 98.25% | 91.125% |
+| 299 | 157.286 | 36.821 | 78.50% | 90.75% | 97.75% | 98.25% | 91.3125% |
+| 399 | 209.715 | 49.172 | 85.25% | 95.75% | 98.75% | 98.00% | 94.4375% |
+| 499 | 262.144 | 61.589 | 86.50% | 94.75% | 98.75% | 99.25% | 94.8125% |
+| 599 | 314.573 | 73.992 | 89.50% | 95.50% | 98.50% | 98.50% | 95.50% |
+| **699/best** | **367.002** | **86.401** | **90.75%** | **94.25%** | **99.25%** | **99.00%** | **95.8125%** |
+| 799 | 419.430 | 98.807 | 89.00% | 95.25% | 99.75% | 99.25% | 95.8125% |
+| 899 | 471.859 | 111.219 | 86.75% | 94.75% | 99.25% | 99.25% | 95.00% |
+| 999 | 524.288 | 123.628 | 82.50% | 93.00% | 98.50% | 99.25% | 93.3125% |
+
+全部CPU/highest/FP32/B128/workers1、随机采样，seed271828、每AI200地图×双座/400局、max2000；26个Eval/Perf scalar各panel均核验。快照时间来自实际TB Perf/wall_seconds，异步worker时长没有再次加进曲线坐标。图包含当前全部10点和v27全部9点，直线只连接实测点，无平滑/插值估计；v27仅930更新，因此不伪造999对照。
+
+![v31与v27全部采样胜率/样本](rl_train_figures/v31_final_samples.png)
+
+![v31与v27全部采样胜率/真实时间](rl_train_figures/v31_final_wall.png)
+
+共同样本与时间下，λ.99在199、299较慢，699在重复selector地图上较好，之后回落。200配对地图簇、20k bootstrap/seed20261007：aggressive v31−v27在199为−6.25pp [−10.75,−1.75]、299为−6.00 [−10,−2]、699为+4.75 [.75,8.75]；399/499/599/799/899区间均含0。99/199旧pair缓存复用，剩余七点各算一次；同iteration真实snapshotwall最大差仅3.025秒，因此不是计算吞吐造成的早期落后。逐点区间没有多重比较校正，selector反复参与选模，不能把699单点条件优势解释成普遍λ收益。最佳699→末次999的aggressive差−8.25pp [−12.75,−4.0]，overall−2.50 [−3.9375,−1.0625]，说明这两个固定模型在复用地图上确有退化；不等于识别了退化原因。
+
+终态一次捕获最佳699/snapshot14，CP SHA `5ffbeb98558814552a1b6d9e35bdbd6696494c538f545bfaad64524f7744b94b`。独立开发协议与v27匹配：CUDA logical0/high/TF32true/FP32/B128/workers4，seed及sampling_seed1001042、随机采样、每AI200地图双座、max2000；该seed之前已经用过，只称开发集，不称全新holdout。原74361/6fe756→53cd43真实exit0，report SHA `d45444aa…`，1600局完整、无平局。
+
+| 开发评测 | v27 λ.95 | v31 λ.99 W/L/D | v31胜率 | v31−v27配对95%CI (pp) |
+|---|---:|---|---:|---|
+| aggressive | 90.25% | 343/57/0 | **85.75%** | **−4.50 [−8.50,−.75]** |
+| expansion | 97.75% | 390/10/0 | 97.50% | −.25 [−2.25,+1.75] |
+| defensive | 99.50% | 395/5/0 | 98.75% | −.75 [−2.00,+.50] |
+| random | 99.25% | 395/5/0 | 98.75% | −.50 [−1.75,+.75] |
+| overall | 96.6875% | 1523/77/0 | **95.1875%** | **−1.50 [−2.8125,−.1875]** |
+
+开发mean79.917tick。配对保持地图/双方座位/逐局采样seed，cuda和cuda:0指向同一可见logical0；置信区间仍只反映这两个固定、选出的模型在这些开发地图上的条件差异，不估计训练seed随机性。一个从头训练seed不足以证明λ.95对所有训练更优。
+
+![v31全程实际PPO与动作指标](rl_train_figures/v31_final_training_dynamics.png)
+
+总collection1531.139/update6102.628秒，compute70809.20、完整wall70665.76交互/秒；v27 wall70661.78，基本相同。全训练Torch peak allocated15.24724/reserved16.32227GiB；TB当前allocated最高13.54148不是训练峰值，父进程统计不包含独立评测child的native峰值。4351997结束episode、21895截断（.50310%），历史池末尾磁盘8个快照、22次发布；已被池淘汰而仍在进行中对局使用的旧快照可以暂时驻留。
+
+最终CPU统计一次读取当前TB，81tags/83487有限点；四项Episode仅早期六个step合法缺省、不补点，其余覆盖完整，无重复。last100=931..1030，真实930→1030边界744.310秒/52428800样本/wall70439.51；last300=731..1030，730→1030边界2233.782秒/157286400样本/wall70412.61。last100 entropy1.024316、全轮KL .019209/max.102876、clip.117488、EV.809891、raw return均值−.605087/std均值.644805、raw A均值−.000303/std均值.280880，WAIT19.0717%/backtrack8.5331%；last300 entropy.923355/KL.016560/clip.114069/EV.780569。std均值是各update std的平均，不是整个窗口合并std。自适应categorical LR仍启用，last100 final LR floor11/100、ceiling88/100、minibatch改变496次，监控占update约2.16%。it972 exact全轮KL=.102876，final LR已降到1e−5；调LR看的是minibatch采样动作KL，与全轮监控量不能逐点等同。没有NaN或熵完全崩溃，不能把后期退化只归因熵降低。self-play对手池/策略持续改变导致优化目标分布移动、较长λ的bootstrapped目标差异及偶发更新幅度都是待检验机制，当前曲线仅支持共变描述。last100 Episode批次meanwin55.44%，不是baseline胜率，也不是全局对局加权率；不同λ下value loss不直接比较critic质量。
+
+八段录像使用开发评测记录的真实双方joint actions，原36332/dc5fc1→007dfc exit0；FFmpeg仅展示线程改成1，冻结分析工具不改。Core预后状态/执行valid-moved-capture、公共可见性/local H4、合法mask、report动作统计全部匹配，合计866tick，四输四赢均无训练1024tick之外决策。长期K11已启用，但本行为工具没有独立逐帧验证K11，不能从“敌将不在H4”直接断言策略忘记了敌将。
+
+| baseline | 输局录像 | 赢局录像 |
+|---|---|---|
+| aggressive | [123tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/aggressive_loss.mp4) | [109tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/aggressive_win.mp4) |
+| expansion | [155tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/expansion_loss.mp4) | [52tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/expansion_win.mp4) |
+| defensive | [144tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/defensive_loss.mp4) | [128tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/defensive_win.mp4) |
+| random | [72tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/random_loss.mp4) | [83tick](../outputs/moe_cts/iterations/v31/final_best/analysis/videos/random_win.mp4) |
+
+失败具体证据：aggressive在pre25领土2比11，pre118从将军格导出18兵，敌可见移动兵距离3；119仍可回援21兵却继续把主力向外移动，120/121敌军逼近3→2格，122敌方先手夺将，learner动作因先手终局被跳过，不是非法拒绝。expansion在pre25领土2比12、16..32连WAIT17次；150..153敌主力逼近时learner每步仍搬运外围1兵，154本营8面对可见12兵攻击、单步可回援仅1，最终被夺。defensive在139..143 ownarmy37..39对enemy33..35略多，但主力19兵在31↔22往返，将军仅1..3、敌可见17..20兵已邻接；资源总量优势没有变成守将/夺将。random在pre70从将军格输出5兵，邻接小敌兵和随后逼近的17兵均可见；71半兵向16兵敌格打出1兵仍被反夺。四输局最终固定敌动作的一步WAIT都不能活，三个可合法邻接回援分支也不能活；这只说明最后一个tick已经难救，不证明此前最佳防守或改变后能赢。四个示例按最早game_id选择，不能估计错误频率，也不能把这些行为确定归因λ；赢局说明相同网络能够攻将，但无法保证稳定守将。
+
+工程决策：完整曲线、独立开发、效率和行为均已审阅后，**后续奖励衰减实验采用v27基座（λ.95、γ.995、N16384/T32、H4+K11）**。λ.99计算无明显成本增加、selector局部有优势，但早期效率较差且最佳模型开发aggressive/overall更差，目前不加入更大λ或进一步搜索。下一项仅衰减tick penalty：TB0..1000系数1→0，PBRS/terminal reward和gamma保持不变；必须实际完成u1000..1199至少200次零tick更新并评测最终阶段，1–3h预算/最长3h优先。该决定是本单seed下简洁、已验证的工程选择，不声称λ.95全局最优。之后H8最后；剩余ResNet/ViT容量探索继续暂缓，不能以四baseline超过80%结束整项计划。
+
+可追溯产物：[完整终态报告](../outputs/moe_cts/iterations/v31/diagnostic/terminal_training_review.json) SHA `0cf4e1b0…`；[共同selector配对](../outputs/moe_cts/iterations/v31/diagnostic/selector_paired_comparisons.json) SHA `b44a33da…`；[开发配对](../outputs/moe_cts/iterations/v31/diagnostic/final_lambda_development_comparison.json) SHA `f837dc60…`；[逐帧行为报告](../outputs/moe_cts/iterations/v31/diagnostic/final_behavior_review.json) SHA `6310b926…`；[最终训练统计](../outputs/moe_cts/iterations/v31/diagnostic/final_training_dynamics.json) SHA `88fc1d0b…`；[完整selector认证](../outputs/moe_cts/iterations/v31/diagnostic/remaining_selector_current_index_certification.json) SHA `f23b0c04…`。
