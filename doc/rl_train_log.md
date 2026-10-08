@@ -3034,3 +3034,12 @@ CPU审核原16658/2bb9ba exit0：8例、1339 decision ticks，116冻结源码、
 在v33完整报告2a51c85提交后，原session39578/84aa5d从自身提交5d8a60b和116份冻结源码启动，PID420967/start432440688，fresh权重/新Adam/新历史池、无resume/warm-start。配置d1acb73b…、source manifest f5cdc312…；3cf87e真实exit0一次验证Git/frozen/manifest字节和运行配置，仅补全三个已声明eval默认键，实际run_config SHA3b8e6a1e…、合同a03368b4…。H8的actor+critic同时增加历史，总参数39,898，其他条件保持v33，NT262144/batch4096/256Adam、gamma.995/lambda.95、tick0..1000课程不变。正式已完成前4更新，首个四AI随机采样selector在99。
 
 TensorBoard：`outputs/moe_cts/iterations/v34/train`。保持最低1h/1200真实更新及1000..1199的200轮零tick+该阶段eval守卫，最多3h；当前启动日志的自对弈reward/win不是baseline胜率。唯一CPU selector observer将按自身实际PID与runconfig绑定；终态后用同样的CUDA开发、真实八录像和sample/wall曲线完成配对分析，不重开ResNet/ViT。
+
+
+#### v34 早期 matched 窗口与首个 selector
+
+early唯一7e8030真实exit0，0..29共30更新/7,864,320 transitions/7,680 Adam，自身snapshot0的22张量与独立新CPUconstructor逐位一致，CUDA未初始化；30轮EV有效、2094选中点均有限。root f0a853实际回读统计与执行回执，不重新解码TB。复用v33已存early JSON作相同NT/窗口描述性对比：H4→H8 compute68,006.7→74,796.1/s（+9.98%）、完整早期wall63,430.6→69,348.5/s（+9.33%）；C/update均值.7057/3.1490→.9056/2.5992秒。H8的collection更慢、update更快，只有早期30轮，不能当成熟历史池的稳态速度。KL .01598→.01709、EV .8054→.7877、entropy4.6207→4.5173、WAIT9.664→11.136%；不同随机轨迹不证明强度因果。
+
+首个it99/snapshot2由唯一observer68545认证1600完整赛程、逐局RNG/CP bytes与29有限TB标量/read1，γ.995/scale.901/tick−.000901符合课程。四AI **13.75%/28%/53%/45%**，overall559/1004/37（34.9375%），draw入分母；26,214,400 transitions/3200tick每环境。快照wall366.5565秒，异步worker399.8205秒单列。v33同样本四AI12.25%/35.75%/72.75%/59.5%，H8只有aggressive略高、其他较低，不能据单点推最终收益；原39578继续、最低1200与零阶段守卫未满足。
+
+证据：[early统计](../outputs/moe_cts/iterations/v34/diagnostic/early_training_dynamics.json)、[实际执行回执](../outputs/moe_cts/iterations/v34/diagnostic/early_training_dynamics_execution.json)、[既有缓存匹配对比](../outputs/moe_cts/iterations/v34/diagnostic/early_matched_H4_H8_comparison.json)、[首点完整认证](../outputs/moe_cts/iterations/v34/diagnostic/selector_99_validated_per_panel.json)。SHA依次342349dd…/7a5ea05d…/17560188…/d781d3cc…；首report c5322feb…、CP f26eeda8…，没有旧TB、旧权重、bootstrap或新诊断游戏。唯一observer original68545/77112c、PID421673/start432451097，CPU threads1/CUDA空；root持原training39578，不重启或轮询已关闭v33句柄。
