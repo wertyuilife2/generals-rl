@@ -2804,3 +2804,10 @@ it699/snapshot14成功，367001600交互/22400tick/env；同一CPU随机采样�
 it799/snapshot16成功，419430400交互/25600tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive359/41/0（89.75%）、expansion387/13/0（96.75%）、defensive397/2/1（99.25%）、random397/2/1（99.25%），overall1540/58/2（96.25%）、mean93.19875tick。快照training wall5931.361328秒（98.856分钟），异步worker112.088224秒单列。同样本v27为87.75%/96.75%/99.50%/99.50%、overall95.875%，本轮描述性差+2/0/−.25/−.25pp、overall+.375pp；其wall5931.462891秒，两者差仅−.101563秒。aggressive较699下降1.5pp，best仍699/91.25%；相邻点波动不能识别退化原因或代替零tick最终阶段效果。
 
 唯一原3767认证完整1600赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；root63a6b3直接回读report、CP及[第八点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_799_validated_per_panel.json) SHA `e042a97f…`。report `331cf403…`、CP `8fd4d394…`；实际γ .995000004768、scale .201000005007、tick −.000201000003匹配预期.995/.201/−.000201，非最终零tick。停止锚点仍299/90.25%，未+2pp计数5/4；最少1200完成和最终阶段条件仍未满足，不写STOP。early/middle不重读，无中途bootstrap。资源fb6e0e实测GPU17900/24564MiB、util98%，磁盘约893.7GiB剩余；实际history_pool8/eval最近3+best/model checkpoint1，保留数量稳定，当前driver显存不是训练Torch峰值。原92092继续，最长3h优先；完整终态之后再做H8。
+
+
+#### v32 第九采样点：惩罚接近零，aggressive87%
+
+it899/snapshot18成功，471859200交互/28800tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive348/52/0（87.00%）、expansion386/14/0（96.50%）、defensive393/7/0（98.25%）、random397/3/0（99.25%），overall1524/76/0（95.25%）、mean98.483125tick。快照training wall6676.351563秒（111.273分钟），异步worker104.993892秒单列。同样本v27为87.75%/95.75%/98.25%/98.50%、overall95.0625%，本轮描述性差−.75/+.75/0/+.75pp、overall+.1875pp；其wall6676.016602秒，差+.334961秒。较799，aggressive低2.75pp、defensive低1pp、overall低1pp；当前best保持699/91.25%，这些波动还不能确定最终零tick阶段效果。
+
+原唯一3767认证1600完整赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；rootf5e674直接回读原report、CP及[第九点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_899_validated_per_panel.json) SHA `540ef092…`。report `f41da0ac…`、CP `a43ea6c1…`；实际γ .995000004768、scale .101000003517、tick −.000100999998匹配预期.995/.101/−.000101，仍非最终零tick。停止锚点299/90.25%、未+2pp计数6/4；1200与最终阶段条件未满足，不写STOP。下一999点按公式仍有−1e−6 tick惩罚，不能作为零tick阶段证据；需实际1000..1199共200更新，并核对1099/1199的零tick评测。原92092继续，early/middle不重读，无中途bootstrap；完整终态分析之前不启动H8。
