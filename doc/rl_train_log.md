@@ -3103,7 +3103,7 @@ v36前30轮唯一CPU统计正常完成：7,864,320 transitions、7,680 Adam更�
 
 [early统计](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics.json)、[early执行记录](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics_execution.json)、[同窗口H4/H8缓存比较](../outputs/moe_cts/iterations/v36/diagnostic/early_matched_H4_H8_comparison.json)、[首点评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_99_validated_per_panel.json)、[首点原始report](../outputs/moe_cts/iterations/v36/train/evaluations/snapshot_00000002/report.json)。统计只执行一次；工具审批超时发生于进程创建前，后续展示键名错误仅从已存JSON修正，未重读TB或重跑统计。训练继续，完整曲线和最终成绩待补。
 
-v36已完成前五个采样评估点，每点1600局和29项TB标量通过认证，root直接核对report和证书。各列均为胜/总局数，平局计入分母：
+v36已完成以下采样评估点，每点1600局和29项TB标量通过认证，root核对report和证书及其实际哈希。各列均为胜/总局数，平局计入分母：
 
 | update | aggressive | expansion | defensive | random | overall |
 |---|---:|---:|---:|---:|---:|
@@ -3113,6 +3113,9 @@ v36已完成前五个采样评估点，每点1600局和29项TB标量通过认证
 | 399 |41.75%|55.25%|86.75%|75.5%|64.8125%|
 | 499 |37%|58.5%|87%|79.5%|65.5%|
 | 599 |37%|61.5%|79%|76%|63.375%|
+| 699 |37.5%|63%|79%|73.25%|63.1875%|
+| 799 |12.75%|38.25%|32.75%|30.75%|28.625%|
+| 899 |0%|0.75%|0.5%|0.25%|0.375%|
 
 aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台结论。H4同样本399/499为82.75%/85.75%，H8迄今没有学习效率优势；正式训练继续到至少1200轮和真实200轮零tick及其评估，不能用仍有tick惩罚的中段代替最终阶段。
 
@@ -3121,3 +3124,9 @@ aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台�
 [中段统计](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics.json)、[真实中段执行](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics_execution.json)、[H4/H8同窗口比较](../outputs/moe_cts/iterations/v36/diagnostic/mid_matched_H4_H8_comparison.json)、[499评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_499_validated_per_panel.json)。后续完整曲线、开发评估和录像仍待终态。
 
 第六点599已completed0并认证，aggressive仍37%，其余61.5%/79%/76%，overall63.375%，1014胜/577负/9平。快照wall2226.984秒、worker273.149秒独立；真实tick−.000401。root直接核对report、CP及[599证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_599_validated_per_panel.json)，没有新TB解码。最高aggressive仍399的41.75%，之后两点没有超过锚点2pp；最低1200轮、实际零tick200轮和目标阶段评估尚未完成，原训练继续。
+
+后期699/799/899均真实completed0并认证。799出现225平局，899仅6胜/844负/750平，总体胜率.375%；两轮worker耗时731.798和1231.181秒。后期单次训练日志还出现WAIT约91%与高timeout，不能当窗口平均或归因证据；源码/缓存审核用于排查具体实现问题，终态曲线和行为分析待完成。
+
+在至少一小时、u1000..1199完整训练窗口已覆盖且五个后续评估点均未超过399锚点2pp后，root正常STOP：实际请求时1357已logged，最后1358，共1359更新约85分钟，checkpoint已写入。异步CPU评估因长对局明显慢于发布；为防继续收集引入更多队列，本轮明确将“目标阶段评估完成”作为正式验收门槛，在停止收集后交由已有evaluator.finish正常排空。该运行层处理不改MDP、PPO、源码、评估采样或已有赛程，不取消任何评估；最终精确200轮zero/gamma验收仍待原进程真实退出后的唯一TB统计。停止时999running、1099/1199/1299queued，尚无summary或正常终态证明，不把checkpoint当整轮完成。
+
+[正常采集STOP记录](../outputs/moe_cts/iterations/v36/diagnostic/normal_collection_stop.json)、[699证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_699_validated_per_panel.json)、[799证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_799_validated_per_panel.json)、[899证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_899_validated_per_panel.json)、[逐项待完成验收表](../outputs/moe_cts/iterations/v36/diagnostic/goal_completion_audit_pending_v36.json)。评估排空后再进行完整统计、最佳模型开发评估与录像、三图、H4/H8配对报告。
