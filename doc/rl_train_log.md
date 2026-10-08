@@ -2572,3 +2572,10 @@ aggressive较199提高3pp，**趋势锚点更新299/78.5%，后续四点无≥2p
 it399/snapshot8 completed0，209,715,200全局转移、12800tick/env。四baseline采样胜率85.25%/95.75%/98.75%/98.00%，W/L/D为341/59/0、383/16/1、395/5/0、392/8/0；overall1511/88/1（94.4375%），mean91.53125tick。快照training wall2950.300秒，异步worker112.598秒另列。v27已有终局缓存的同点为84.50%/97.00%/99.75%/98.00%，overall94.8125%，wall2951.062秒；本轮差+0.75/−1.25/−1.00/0pp、overall−.375pp。该点已追近控制，尚不能据单点判断λ最终收益；不新增中途bootstrap或旧TB扫描。
 
 root cdd6bd直接原report/index读取，随后逐字节核对CP/report与唯一原65720生成的[第四点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_399_validated_per_panel.json)，SHA `c98a4ac3…`；1600games/地图双座/逐局RNG/WLD/selectionscore及26个实际finite TB点均一致，没有新增游戏或模型推理。趋势锚点由299/78.5%更新为399/85.25%（+6.75pp），后续四点观察计数归零；训练尚不到最低1h，继续原60387。剩余次序为完整λ终局评估后选择tick0..1000/至少200轮零tick训练基座、最后H8，容量探索继续暂缓。
+
+
+#### v31 第五采样点：86.5%，尚未达到平台停止条件
+
+it499/snapshot10 completed0，262,144,000转移、16000tick/env；四baseline胜率86.50%/94.75%/98.75%/99.25%，W/L/D为346/54/0、379/19/2、395/5/0、397/3/0；overall1517/81/2（94.8125%），mean88.04563tick。快照training wall3695.312秒，CPU异步worker112.330秒单列。同样本v27缓存为88.50%/96.25%/100.00%/98.75%、overall95.8750%，本轮差-2.00/-1.50/-1.25/+0.50pp、overall-1.0625pp；中途仅描述点差，不新增bootstrap，最终比较仍包含best开发与全程曲线。
+
+唯一原65720观察器实际认证1600调度/地图双座/逐局RNG/WLD/CP字节及26finite TB点；root实际读取原report和[第五点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_499_validated_per_panel.json)，SHA `e0d9543f…`，并逐字节核对CP `ae919b6a…`、report `e24c0188…`。aggressive较399只+1.25pp，因此**锚点保持399/85.25%，锚点后未达到≥2pp提升计数1/4**。训练已超过最低1h，但不能仅因此或胜率>80%停止；继续原60387，达到542完成更新后只读一次预声明492..541窗口。没有改λ/奖励/对手/训练source，tick衰减与H8后续范围保持。
