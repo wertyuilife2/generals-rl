@@ -2556,3 +2556,12 @@ it199/snapshot4 actualcompleted0，104,857,600全局转移、6400tick/env；CP `
 200配对地图簇、20k bootstrap/seed20261007，本点aggressive/overall的条件CI均低于0，显示这个阶段落后，不能外推最终性能、归为训练随机性显著或说明所有任务λ.99无效。v27实际缓存snapshotwall1472.756秒，v31多.307秒，采样/时间开销接近；这是学习效果差异，不是本点计算变慢。[第二点实际验证](../outputs/moe_cts/iterations/v31/diagnostic/selector_199_validated_per_panel.json)，SHA `aa9b8fda…`；[第二点λ配对](../outputs/moe_cts/iterations/v31/diagnostic/second_selector_matched_lambda_comparison.json)，SHA `41d6acca…`；[真实执行凭据](../outputs/moe_cts/iterations/v31/diagnostic/second_selector_matched_lambda_comparison_execution_receipt.json)，SHA `b6bb7462…`。
 
 相对it99 aggressive提高41.25pp，学习仍显著上升，**趋势锚点更新it199/75.5%，锚点后四点观察重新计数**。这里≥2pp是趋势启发式，不等于统计显著性判断。尚未到最低1h，原60387固定λ.99配置继续，不因落后中途换奖励/学习率或停止。最终仍从完整sample/wall曲线和best开发/八真实录像/行为诊断选择tick课程基座；TB0..1000衰减和真实200轮最终零tick、H8最后、剩余容量暂缓的完整范围保持。
+
+
+#### v31 第三采样点：aggressive继续提高，尚落后于控制
+
+it299/snapshot6 completed0，157,286,400全局转移、9600tick/env。aggressive/expansion/defensive/random分别78.50%/90.75%/97.75%/98.25%，W/L/D为314/86/0、363/37/0、391/9/0、393/7/0；overall1461/139/0（91.3125%），mean103.835tick。快照真实training wall2209.241秒（36.821分钟），CPU异步worker111.504秒另列。相同样本v27 λ.95为84.50%/95.50%/99.25%/99.75%、overall94.75%，本轮点差−6.00/−4.75/−1.50/−1.50pp、overall−3.4375pp；此处仅描述真实同坐标，不新增中途bootstrap或据此下最终结论。
+
+root df0375 exit0直接核验原report和CP；97121d exit0回读独立证书，1600完整调度、逐局RNG、地图双座、WLD/selectionscore、CP字节和26个实际finite Eval/Perf TB点全部通过。CP SHA `523a1e40…`、report `84f93f2b…`、[第三点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_299_validated_per_panel.json) SHA `67840020…`。后续仅保留一个CPU只读观察器original65720/5d6dc8，PID188097/start429870940，复用已完成99/199证书，逐个核验后续实际panel，不启动新对局/推理/旧TB扫描/中途bootstrap。299 worker已在观察器启动前结束，不能声称观察器见过其live进程；root之前实际index观察与completed0凭据保留。[观察器实际启动收据](../outputs/moe_cts/iterations/v31/diagnostic/remaining_selector_observer_launch_execution.json)，feac42 exit0、SHA `10532b31…`。
+
+aggressive较199提高3pp，**趋势锚点更新299/78.5%，后续四点无≥2pp提升计数重置**；expansion则回落1.75pp，不能只观察最弱AI而忽略其他表现。最低1h尚未满足，原60387/冻结配置继续。用户再次明确跳过耗时ResNet/ViT扩容，当前小网络λ→tick衰减→H8顺序保持；完整终局曲线/开发/录像/行为分析后才选择tick基座。
