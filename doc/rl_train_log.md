@@ -3112,9 +3112,12 @@ v36已完成前五个采样评估点，每点1600局和29项TB标量通过认证
 | 299 |38%|52.75%|86.5%|80.75%|64.5%|
 | 399 |41.75%|55.25%|86.75%|75.5%|64.8125%|
 | 499 |37%|58.5%|87%|79.5%|65.5%|
+| 599 |37%|61.5%|79%|76%|63.375%|
 
 aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台结论。H4同样本399/499为82.75%/85.75%，H8迄今没有学习效率优势；正式训练继续到至少1200轮和真实200轮零tick及其评估，不能用仍有tick惩罚的中段代替最终阶段。
 
 中段492..541唯一统计正常exit0：50更新/13,107,200 transitions/12,800 Adam，实际491→541 wall189.004秒，C58.036/U130.675秒，wall69,348.70/s。相对v33同窗口wall62,835.94/s增加10.36%，但collection增加、update减少且只有单训练轨迹，不能据此说明H8更强或纯history导致速度提高。KL.02780、clip.10796、entropy1.70812、critic EV.94696（50次有效）；WAIT15.51%、backtrack4.78%。有限值/缺失检查及gamma/tick课程均通过，当前allocator最大11.266GiB/reserved13.355GiB属于窗口观测，不作全程峰值。高EV不能证明终局价值更准，前五点评估仍较弱；保留方案以完成公平比较。
 
 [中段统计](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics.json)、[真实中段执行](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics_execution.json)、[H4/H8同窗口比较](../outputs/moe_cts/iterations/v36/diagnostic/mid_matched_H4_H8_comparison.json)、[499评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_499_validated_per_panel.json)。后续完整曲线、开发评估和录像仍待终态。
+
+第六点599已completed0并认证，aggressive仍37%，其余61.5%/79%/76%，overall63.375%，1014胜/577负/9平。快照wall2226.984秒、worker273.149秒独立；真实tick−.000401。root直接核对report、CP及[599证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_599_validated_per_panel.json)，没有新TB解码。最高aggressive仍399的41.75%，之后两点没有超过锚点2pp；最低1200轮、实际零tick200轮和目标阶段评估尚未完成，原训练继续。
