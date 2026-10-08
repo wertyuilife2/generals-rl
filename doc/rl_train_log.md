@@ -2936,3 +2936,10 @@ TensorBoard目录：`outputs/moe_cts/iterations/v33/train`。当前早期自对�
 
 
 v33后续199/299两个actual采样panel均completed0，原observer8745分别通过1600schedule/RNG/WLD/CP及29TB有限/read1。四AI199为55/71.75/94.75/91%、overall78.125%，299为74/90.25/97.75/97.75%、overall89.9375%；实际52,428,800/78,643,200交互，快照训练时钟801.2659/1205.1216秒，worker189.1418/106.6990秒单列。aggressive仍明显上升，平台锚点更新299/74%，min1200及最终零tick尚未达，原训练继续。root57044f与本次实际回读证书/report，不做bootstrap或旧TB比较。
+
+
+v33后续399/499两个采样selector已completed0，四AI399为82.75/95/98/99.25%、overall93.75%，499为85.75/94.75/98.5/97.5%、overall94.125%。对应104,857,600/131,072,000交互，快照训练wall1616.8939/2033.5665秒，worker100.7430/109.1997秒单列；tick分别−.000601/−.000501，仍在课程中。aggressive从299的74%继续上升，锚点499/85.75%，200轮最终零tick及独立开发尚未完成，不能把训练选模评测当终局验证。root0f3bcf/0f6f56分别实际回读证书/report；原19903保持运行。
+
+v33中段492..541唯一当前TB采集f1c720真实exit0，root ac0278回读原结果及真实回执：真实边界491→541，50更新/13,107,200交互/12,800Adam；C50.2432/U158.0020、wall208.5940秒，compute62,941.21、wall62,835.94交互/秒。KL均值.022714/max.074233、clip.154349、entropy.933312、critic EV.897276（50/50有效）；WAIT16.5098%、backtrack10.0568%，监控占U2.93078%。71关键指标3550有限点，实际149 tags/4387有限点、无重复或非有限值，Train/Eval实际稀疏坐标保留；gamma .995、tick scale .508→.459逐点通过。当前allocator采样max allocated6.81745/reserved8.05469GiB并非全程峰值；实际资源检查历史池8、eval snapshot3、regular model1，磁盘free893.58GiB。此中段缓存供v34相同NT/窗口比较，不与v32同update假称同样本。
+
+证据：[399证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_399_validated_per_panel.json)、[499证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_499_validated_per_panel.json)、[中段唯一统计](../outputs/moe_cts/iterations/v33/diagnostic/mid_training_dynamics.json)、[中段真实回执](../outputs/moe_cts/iterations/v33/diagnostic/mid_training_dynamics_execution.json)。mid SHA `1faad608…`、回执 `f1a57d96…`；原训练继续，后续保持小网络H4/H8路线，ResNet/ViT及容量扩展暂缓。
