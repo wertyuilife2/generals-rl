@@ -3102,3 +3102,19 @@ v36前30轮唯一CPU统计正常完成：7,864,320 transitions、7,680 Adam更�
 首个iteration99采样评估已完成：每AI400局、总体438胜/1105负/57平，aggressive/expansion/defensive/random为8%/21.25%/46.5%/33.75%，overall27.375%。快照对应26,214,400 transitions、wall364.498秒；异步worker436.002秒独立记录，不与快照wall相加。真实report、checkpoint和29个有限TB评估标量均已核验；此时tick仍−.000901，尚未进入最终阶段。该点低于H4对照的早期成绩，但不凭单点停止或推断H8上限，继续预设正式预算与最终课程。
 
 [early统计](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics.json)、[early执行记录](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics_execution.json)、[同窗口H4/H8缓存比较](../outputs/moe_cts/iterations/v36/diagnostic/early_matched_H4_H8_comparison.json)、[首点评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_99_validated_per_panel.json)、[首点原始report](../outputs/moe_cts/iterations/v36/train/evaluations/snapshot_00000002/report.json)。统计只执行一次；工具审批超时发生于进程创建前，后续展示键名错误仅从已存JSON修正，未重读TB或重跑统计。训练继续，完整曲线和最终成绩待补。
+
+v36已完成前五个采样评估点，每点1600局和29项TB标量通过认证，root直接核对report和证书。各列均为胜/总局数，平局计入分母：
+
+| update | aggressive | expansion | defensive | random | overall |
+|---|---:|---:|---:|---:|---:|
+| 99 |8%|21.25%|46.5%|33.75%|27.375%|
+| 199 |36.25%|50.25%|84.5%|75.5%|61.625%|
+| 299 |38%|52.75%|86.5%|80.75%|64.5%|
+| 399 |41.75%|55.25%|86.75%|75.5%|64.8125%|
+| 499 |37%|58.5%|87%|79.5%|65.5%|
+
+aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台结论。H4同样本399/499为82.75%/85.75%，H8迄今没有学习效率优势；正式训练继续到至少1200轮和真实200轮零tick及其评估，不能用仍有tick惩罚的中段代替最终阶段。
+
+中段492..541唯一统计正常exit0：50更新/13,107,200 transitions/12,800 Adam，实际491→541 wall189.004秒，C58.036/U130.675秒，wall69,348.70/s。相对v33同窗口wall62,835.94/s增加10.36%，但collection增加、update减少且只有单训练轨迹，不能据此说明H8更强或纯history导致速度提高。KL.02780、clip.10796、entropy1.70812、critic EV.94696（50次有效）；WAIT15.51%、backtrack4.78%。有限值/缺失检查及gamma/tick课程均通过，当前allocator最大11.266GiB/reserved13.355GiB属于窗口观测，不作全程峰值。高EV不能证明终局价值更准，前五点评估仍较弱；保留方案以完成公平比较。
+
+[中段统计](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics.json)、[真实中段执行](../outputs/moe_cts/iterations/v36/diagnostic/mid_training_dynamics_execution.json)、[H4/H8同窗口比较](../outputs/moe_cts/iterations/v36/diagnostic/mid_matched_H4_H8_comparison.json)、[499评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_499_validated_per_panel.json)。后续完整曲线、开发评估和录像仍待终态。
