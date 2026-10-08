@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v33完整报告已提交2a51c85。v34 H8在967更新后意外中断，八个评估点保留，但无正常summary、未进入零tick阶段，不算完整条件；用户重启机器并恢复goal后，以相同设置的v35从零重跑H8。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v33完整报告已提交2a51c85。v34 H8在967更新后意外中断，八个评估点保留，但无正常summary、未进入零tick阶段，不算完整条件；v35按用户再次暂停请求正常停止于127更新/7.804分钟，保存checkpoint与summary，但不足正式预算，不计完整H8条件。用户恢复goal后，以相同设置的v36从零重跑H8。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -3081,3 +3081,14 @@ v34 it599/snapshot12 completed0，四AI49.5/69.75/88.75/80%、overall72%，W/L/D
 goal恢复active后，实际宿主机boot_id f94fc0c0-a19f-427f-a6b4-3ce15744f9cd、uptime315秒，4090可用且GPU仅603MiB占用。新v35仅run_id改v35，所有训练超参数/seed/MDP/self-play和H8条件保持；重新随机初始化、新Adam、新池，不加载v34 model_0、历史快照或中断游戏状态。仍匹配v33 H4的N8192/T32/NT262144/batch4096/256Adam，完整训练至少1h、1200更新和1000..1199实际200轮零tick，最多3h。不恢复ResNet/ViT探索。
 
 [用户暂停现场](../outputs/moe_cts/iterations/v34/diagnostic/user_reboot_pause.json)、[原中断状态与恢复说明](../outputs/moe_cts/iterations/v34/execution_state.json)。v34源码、冻结配置、历史数据不覆盖，原39578/68545及旧只读等待不再轮询或复活；v35建立自己的原始句柄与PID/boot身份。新的训练输出持续tee到日志并由工具读到，避免纯重定向无输出，只有实际验证的终态才用于结论。
+
+
+#### v35 用户暂停；v36 重新开展完整 H8 对照
+
+用户要求重启前暂停，v35通过STOP正常保存并退出，原训练39818/eb803f exit0。共127更新、4064 tick/环境、33,292,288 transitions，wall468.239秒；CPU评估及observer已停止，唯一评估因用户停机SIGTERM返回−15，未产生完整评估点。checkpoint、TensorBoard、summary和暂停记录保留；短训练不计完整H8条件，不补造最终课程或胜率。
+
+用户明确“继续执行goal”后，确认goal active、无残留训练、4090空闲，RAM可用49GiB、磁盘可用951GiB。以新run_id v36从零训练，配置相对v35仅run_id不同，随机权重/新Adam/新历史池，无resume或warm start；沿用已验证的同一116份运行源码，不重复已有训练门禁。H8同时输入actor与critic，保持K11、N8192/T32（262144 samples/update）、4 epoch×64 minibatch（4096/batch、256 Adam/update）、gamma/PBRS gamma .995、lambda .95、episode1024。纯历史self-play池8，快照0保留，其余最近7、uniform抽取、整局固定对手；pub50/eval100，四baseline各200地图×双座、采样评估。只衰减tick惩罚，TB0..1000乘linear1→0，保留PBRS与胜负奖励。
+
+正式至少1h且1200更新，完成u1000..1199的200轮真实零tick及目标阶段评估，最多3h；在满足最低要求后，沿用四个后续评估点未超过aggressive锚点2pp的人工平台规则。监控KL/clip/entropy/EV、动作、self-play、吞吐和内存，保持checkpoint3、历史池8、eval最近3+best。终局再选最佳模型做开发评估、四AI各输赢录像、曲线和失败分析，与已完成v33 H4比较同样本和实际wall；v34/v35不作为完整配对条件。ResNet/ViT继续暂缓，世界冠军强度未测。
+
+暂停证据：[v35停训记录](../outputs/moe_cts/iterations/v35/diagnostic/user_reboot_pause.json)、[v35正常summary](../outputs/moe_cts/iterations/v35/train/summary.json)、[v35已保存checkpoint](../outputs/moe_cts/iterations/v35/train/checkpoint.pt)；新配置：[v36.json](../rl/configs/v36.json)。v35数据保留，不覆盖、不自动恢复。

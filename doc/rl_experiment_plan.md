@@ -16,7 +16,7 @@ v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456�
 
 **v32 tick课程完整结束，后续H8以此为候选基座。** 原92092真实exit0，1206更新/632291328转移/150.067分钟，12次selector均completed0，u1000..1199真实200轮零tick已TB核验。gamma/PBRS gamma .995、lambda .95、N16384/T32、NT524288、小网络与纯历史自对弈固定；只把tick−.001在TB0..1000乘linear1→0。best699开发aggressive/expansion/defensive/random为93.25/96.75/100/99.75%，overall97.4375%；相对v27开发aggressive+3pp与overall+.75pp的地图配对区间含0。早期采样效率较好，最终零tick末段无持续提升，最佳699仍有tick惩罚，不把最佳效果当成零tick收益。wall70223.04/s、GPU真实peak allocated15.26401/reserved16.32617GiB；全程数值有效，完整曲线、1600局独立开发、补充defensive诊断及八录像/Core审计已完成。详细结果见rl_train_log.md。
 
-**H4→H8为最后执行项，v33 H4完整结束，v34 H8中断排除，v35重跑相同H8条件。** v34在967更新中断，没有正常summary/原native退出码，未到零tick；用户暂停重启后的现场保留，旧899评估已停止，不把其旧running元数据当活进程。恢复goal后仅新run_id=v35，其余设置和116runtime保持；fresh权重/Adam/历史池、N8192/T32/NT262144、batch4096/256Adam、H8同时扩展actor/critic、gamma.995/lambda.95/tick0..1000课程。以v33完整H4报告为对照，完成v35完整终态及真正配对分析后再判断；v34不补造课程完成或泛化结论，ResNet/ViT继续暂缓，世界冠军水平未测。
+**H4→H8为最后执行项，v33 H4完整结束，v34意外中断、v35按用户暂停后预算不足，二者均不计完整条件；v36从零重跑相同H8条件。** v34在967更新中断，没有正常summary/原native退出码，未到零tick；用户暂停重启后的现场保留，旧899评估已停止，不把其旧running元数据当活进程。本次恢复goal后仅新run_id=v36，其余设置和116runtime保持；fresh权重/Adam/历史池、N8192/T32/NT262144、batch4096/256Adam、H8同时扩展actor/critic、gamma.995/lambda.95/tick0..1000课程。以v33完整H4报告为对照，完成v36完整终态及与v33的真正配对分析后再判断；v34不补造课程完成或泛化结论，ResNet/ViT继续暂缓，世界冠军水平未测。
 
 ## 实验顺序与完整范围
 
