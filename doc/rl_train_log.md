@@ -2620,3 +2620,12 @@ root57c720原report/index直接读取，随后回读唯一原65720生成的[第�
 it799/snapshot16 completed0，419,430,400转移、25600tick/env。四AI胜率89.00%/95.25%/99.75%/99.25%，W/L/D为356/44/0、381/19/0、399/1/0、397/3/0；overall1533/67/0（95.8125%），mean86.726875tick。快照training wall5928.438秒，CPU异步worker97.294秒单列。同样本v27已有终局缓存为87.75%/96.75%/99.50%/99.50%、overall95.8750%，本轮点差+1.25/-1.50/+0.25/-0.25pp、overall-0.0625pp；中途不新增bootstrap，不据单点选择λ。
 
 root3edc6e直接原report/index读取，随后回读原唯一65720生成的[第八点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_799_validated_per_panel.json)，SHA `81a759e9…`；完整1600地图双座/逐局RNG/WLD/selectionscore、CP `4560c932…`、report `22215850…` 字节和26finite TB点均核对。aggressive相对699回落1.75pp、相对趋势锚599低.5pp；其他三AI均提高，overall与699相同，不能把aggressive下降描述为所有AI退化。**趋势锚点仍599/89.5%，后续未明显提升2/4（699/799）**。已经超过最低1h，尚未满足四点平台，原60387继续、最长3h优先；early/mid不重读。完整终局独立开发、八录像/失败、全sample/wall报告后再选择tick0..1000且至少200最终零tick的基座，最后H8，容量继续暂缓。
+
+
+#### v31 第九采样点：aggressive86.75%，平台计数3/4
+
+it899/snapshot18 completed0，471,859,200转移、28800tick/env。四AI胜率86.75%/94.75%/99.25%/99.25%，W/L/D为347/53/0、379/21/0、397/3/0、397/3/0；overall1520/80/0（95.00%），mean90.413125tick。快照training wall6673.152秒，CPU异步worker90.054秒单列。同样本v27终局缓存为87.75%/95.75%/98.25%/98.50%、overall95.0625%，本轮点差-1.00/-1.00/+1.00/+0.75pp、overall-0.0625pp；中途不新增bootstrap。aggressive从699的90.75%经89%降至86.75%，不把这段下降立即归因λ；最终会结合完整PPO/entropy曲线、独立开发和失败录像分析。
+
+root6c0e41直接原report/index读取，随后回读原唯一65720的[第九点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_899_validated_per_panel.json)，SHA `4e3bd96b…`；完整1600地图双座/逐局RNG/WLD/selectionscore、CP `e63c1564…`、report `26e3635b…` 字节和26finite TB点均核对。**趋势锚点仍599/89.5%，后续未明显提升3/4（699/799/899）**。第999点若仍没有相对锚点≥2pp提升，即满足至少1h与四点平台的正常STOP条件；不会kill或仅凭本点提前终止。原60387/冻结配置继续，最长3h优先；early/mid不重读。
+
+480570实际资源检查（UTC01:44）当前GPU17897/24564MiB、利用率89%，剩余磁盘895.825GiB；实际history8/eval最近3+best/training checkpoint1，保留数正常。当前显存不是全训练Torch峰值。完整λ终局开发/八录像/失败/全samplewall报告后选择tick0..1000且至少200真实最终零tick的基座，H8最后，容量继续暂缓。
