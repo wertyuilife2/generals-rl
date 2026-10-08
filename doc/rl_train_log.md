@@ -2933,3 +2933,6 @@ TensorBoard目录：`outputs/moe_cts/iterations/v33/train`。当前早期自对�
 首个iteration99/snapshot2已completed0，唯一observer8745认证1600局/200图双座/逐game RNG、WLD与CP SHA、29有限TB标量read1。四AI为**12.25%/35.75%/72.75%/59.50%**、overall45.0625%；WLD为49/351/0、143/250/7、291/108/1、238/161/1，overall721/870/9。真实26214400交互/3200tick每环境，snapshotwall401.5128秒，异步worker300.2850秒单列；tick−.000901仍处课程前段。原训练继续，不能把该早期弱模型当终态或据此认定H8有效。
 
 证据：[early唯一统计](../outputs/moe_cts/iterations/v33/diagnostic/early_training_dynamics.json)、[实际early回执](../outputs/moe_cts/iterations/v33/diagnostic/early_training_dynamics_execution.json)、[首面板证书](../outputs/moe_cts/iterations/v33/diagnostic/selector_99_validated_per_panel.json)、[原首panel report](../outputs/moe_cts/iterations/v33/train/evaluations/snapshot_00000002/report.json)。early SHA `c323b57d…`、回执 `e97300b2…`、面板 `628571e6…`、report `1c21a56d…`、CP `c26d45f9…`；root c91ea2已实际回读report/证书，不重TB或bootstrap。
+
+
+v33后续199/299两个actual采样panel均completed0，原observer8745分别通过1600schedule/RNG/WLD/CP及29TB有限/read1。四AI199为55/71.75/94.75/91%、overall78.125%，299为74/90.25/97.75/97.75%、overall89.9375%；实际52,428,800/78,643,200交互，快照训练时钟801.2659/1205.1216秒，worker189.1418/106.6990秒单列。aggressive仍明显上升，平台锚点更新299/74%，min1200及最终零tick尚未达，原训练继续。root57044f与本次实际回读证书/report，不做bootstrap或旧TB比较。
