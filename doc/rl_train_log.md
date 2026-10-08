@@ -3048,3 +3048,22 @@ early唯一7e8030真实exit0，0..29共30更新/7,864,320 transitions/7,680 Adam
 v34后续199/299两个采样selector全部completed0、1600完整赛程/RNG/CP及29有限TB/read1通过，root256b80/本次实际回读报告和证书。四AI199为31/53/82.25/79.25%、overall61.375%；299为46.25/69.75/91.75/85.5%、overall73.3125%。真实52,428,800/78,643,200 transitions，快照wall733.1928/1100.6011秒，异步worker256.9839/212.8397秒单列；tick−.000801/−.000701、gamma.995。aggressive仍上升，平台锚点299/46.25%，原39578继续；同样本H4 aggressive55%/74%，H8早期尚未追平，终态与配对区间仍待完整训练。中段492..541只在真实542更新完成后解码一次，自身rawlog/PID身份只读守卫原73264，不提前读TB或增加游戏。
 
 [199认证](../outputs/moe_cts/iterations/v34/diagnostic/selector_199_validated_per_panel.json) SHA aa68a9f1…；[299认证](../outputs/moe_cts/iterations/v34/diagnostic/selector_299_validated_per_panel.json) SHA afb58354…。ResNet/ViT及更大容量继续按用户要求跳过。
+
+
+v34后续399/499采样selector均completed0，四AI为48.5/65.75/90.75/86.25%、overall72.8125%，以及51.5/67.75/87.5/82.25%、overall72.25%。分别104,857,600/131,072,000 transitions，快照wall1474.4500/1853.3793秒，异步worker205.0771/255.5624秒单列；γ.995、tick−.000601/−.000501匹配。原唯一68545认证1600schedule/RNG/CP/WLD/29有限TB仅读1；rootc4ecf5/fb61c4实际回读report/cert。aggressive小幅上升、其他AI波动回落，锚点499/51.5%；原39578继续，min1200与真实200轮零tick仍未满足。H4同样本aggressive82.75/85.75%，当前H8尚无sample-efficiency优势。
+
+v34中段492..541唯一c21c96真实exit0，rawlog/PID守卫73264/60cb93真实exit0在549logged后放行，没有提前读TB。实际491→541边界wall189.84375秒、50更新/13,107,200 transitions/12,800 Adam；C58.552001/U130.995234秒、wall69,042.04/s。相同H4缓存C50.24317598/U158.0019598/wall208.593994，H8 collection增加16.54%、update减少17.09%、整体吞吐增加9.8767%，只是两个实际轨迹的窗口对比。GPU driver中段实测14,825/24,564MiB，属于当前进程使用而非Torch峰值；窗口当前allocated最大11.26588/reserved13.35156GiB，也不作最终peak。
+
+| 中段同窗口指标 | v33 H4 | v34 H8 |
+|---|---:|---:|
+| whole-update exact KL |.022714|.027998|
+| clip fraction |.154349|.124946|
+| entropy |.933312|1.408205|
+| critic EV（50次有效）|.897276|.967123|
+| WAIT |16.5098%|37.2148%|
+| backtrack |10.0568%|3.6260%|
+| emitted episode length |124.279|188.227|
+
+H8 KL max .174411/p95 .051436，LRfloor14/cap2/800次minibatch变化，监控4.275137秒占U3.26358%；raw return mean−.659218/std均值.895674，raw A−.000513803/std均值.162302。71关键指标3550点、全部实际88tags/4328点有限无重复，EV50/50；Episode四tag均50实测点，课程三个tag各50逐点通过γ.995/scale.508→.459/tick对应。Episode win66.2042%与timeout批次mean1.04045%只针对历史自对弈，不等于baseline胜率或全程加权率。H8当前WAIT更多、对局更长、EV更高，不能说明终局价值更准或据此断定退化机制；固定配置继续到课程最终阶段和正式终态。
+
+[399认证](../outputs/moe_cts/iterations/v34/diagnostic/selector_399_validated_per_panel.json) SHAeee9b3aa…；[499认证](../outputs/moe_cts/iterations/v34/diagnostic/selector_499_validated_per_panel.json) SHAa4ab9647…；[唯一mid缓存](../outputs/moe_cts/iterations/v34/diagnostic/mid_training_dynamics.json) SHA52ee19ae…；[真实mid执行回执](../outputs/moe_cts/iterations/v34/diagnostic/mid_training_dynamics_execution.json) SHA82e36faa…。postwrite缓存摘要展示de6b7d曾exit1（键名误写），84fb9e仅从已存JSON修正展示，回执保留；原采集和artifact正常，没有重跑TB窗口或bootstrap。
