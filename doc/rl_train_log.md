@@ -3096,3 +3096,9 @@ goal恢复active后，实际宿主机boot_id f94fc0c0-a19f-427f-a6b4-3ce15744f9c
 v36已从自身提交 `3a5c653` 的116份冻结运行源码启动，配置与v35仅run_id不同，冻结源码与已完成v33完全一致。启动来源和实际配置合同通过，原训练句柄32723保持运行；唯一CPU observer只认证本轮真实完成的评估点。初始历史快照0来自本轮随机初始化；独立构造模型的early检查待执行，短窗口吞吐和self-play胜率不当作baseline成绩。完整课程、终局开发、录像和H4/H8结果仍待训练结束。
 
 [冻结manifest](../outputs/moe_cts/iterations/v36/source_manifest.json)、[实际启动检查](../outputs/moe_cts/iterations/v36/diagnostic/startup_source_config_contract.json)、[执行状态](../outputs/moe_cts/iterations/v36/execution_state.json)、[唯一observer启动](../outputs/moe_cts/iterations/v36/diagnostic/selector_observer_launch_execution.json)。
+
+v36前30轮唯一CPU统计正常完成：7,864,320 transitions、7,680 Adam更新，collection26.951秒/update77.888秒、wall113.175秒，compute75,013.62/s、wall69,488.07/s。相对v33同窗口wall吞吐+9.55%，仅作早期单轨迹比较，不外推全程或归因纯history收益。KL均值.01716、clip.21290、entropy4.54363、critic EV.80200（30次有效），WAIT10.99%、backtrack.7847%；所选指标2082点有限且无重复，30轮gamma/tick课程逐点匹配。实际快照0的22张量与独立CPU新构造逐位一致，未复用权重、未声称独立序列化了t0 optimizer。
+
+首个iteration99采样评估已完成：每AI400局、总体438胜/1105负/57平，aggressive/expansion/defensive/random为8%/21.25%/46.5%/33.75%，overall27.375%。快照对应26,214,400 transitions、wall364.498秒；异步worker436.002秒独立记录，不与快照wall相加。真实report、checkpoint和29个有限TB评估标量均已核验；此时tick仍−.000901，尚未进入最终阶段。该点低于H4对照的早期成绩，但不凭单点停止或推断H8上限，继续预设正式预算与最终课程。
+
+[early统计](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics.json)、[early执行记录](../outputs/moe_cts/iterations/v36/diagnostic/early_training_dynamics_execution.json)、[同窗口H4/H8缓存比较](../outputs/moe_cts/iterations/v36/diagnostic/early_matched_H4_H8_comparison.json)、[首点评估认证](../outputs/moe_cts/iterations/v36/diagnostic/selector_99_validated_per_panel.json)、[首点原始report](../outputs/moe_cts/iterations/v36/train/evaluations/snapshot_00000002/report.json)。统计只执行一次；工具审批超时发生于进程创建前，后续展示键名错误仅从已存JSON修正，未重读TB或重跑统计。训练继续，完整曲线和最终成绩待补。
