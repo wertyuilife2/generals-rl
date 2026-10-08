@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22 四个信息条件消融已完成，后续采用 actor H4+K11、critic S+H4+K11；单训练 seed 不足以证明信息改动的普遍因果收益。v23/v24 两种 1M 网络及 v25 ResNet10M 已完成正式训练和分析；v26 ViT10M 按用户要求中断并暂缓，不计完成，剩余容量探索同样暂缓。v27/v28 固定 gamma、v29 gamma 课程、v30 rollout、v31 lambda 实验及终态分析均已完成。综合结果保留当前 26074 参数小网络、gamma .995、lambda .95、N16384/T32 基座。v32 tick penalty 课程已完成1206更新/150.067分钟，真实零tick阶段200轮、12次采样评测、最佳模型独立开发与八例录像分析全部完成；best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4→H8正准备v33/v34匹配实验：基于v32课程，双方N8192/T32/NT262144、逻辑batch4096/256Adam，先做GPU完整更新门禁，再依次fresh H4和H8。H8正式训练尚未执行。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 四个信息条件消融已完成，后续采用 actor H4+K11、critic S+H4+K11；单训练 seed 不足以证明信息改动的普遍因果收益。v23/v24 两种 1M 网络及 v25 ResNet10M 已完成正式训练和分析；v26 ViT10M 按用户要求中断并暂缓，不计完成，剩余容量探索同样暂缓。v27/v28 固定 gamma、v29 gamma 课程、v30 rollout、v31 lambda 实验及终态分析均已完成。综合结果保留当前 26074 参数小网络、gamma .995、lambda .95、N16384/T32 基座。v32 tick penalty 课程已完成1206更新/150.067分钟，真实零tick阶段200轮、12次采样评测、最佳模型独立开发与八例录像分析全部完成；best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4→H8匹配实验已通过完整GPU门禁，v33 H4正从零训练：基于v32课程，双方N8192/T32/NT262144、逻辑batch4096/256Adam。v34 H8配置已提交与冻结，116运行源码和v33完全同hash，待v33完整报告后从零训练；H8正式训练尚未执行。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -2917,3 +2917,10 @@ v32完整报告已提交8932e47。最后一项保留其tick0..1000课程、gamma
 v33配置仅相对v32修改run_id与N16384→8192，代码只变两份history网络文件；v34配置仅相对v33修改run_id和task/policy的4→8。两者分别从自身commit冻结相同实现，各自fresh训练，保留其他全部参数。接下来先v33再v34。
 
 实测证据：[完整CUDA验收](../outputs/moe_cts/iterations/history_preparation/full_cuda_update_gate.json)、[真实native执行回执](../outputs/moe_cts/iterations/history_preparation/history_gate_execution.json)、[H8采样入口smoke](../outputs/moe_cts/iterations/history_preparation/h8_eval_smoke/report.json)。
+
+
+#### v33正式启动
+
+v33源提交577c16a，116纯Git运行文件/配置一次冻结ce2dce；原session19903/62937f、PID377111/start431706788已从零启动，无resume/warm-start参数。实际run_config与frozen仅有明确的默认eval键补全差异，448a57一次现成source_contract核验116份Git/frozen/manifest全同；实际配置SHA `db8edfcd…`。启动已完成前四轮，N8192/T32、学生8192/teacher0、H4、gamma/PBRS .995、lambda .95、tick0..1000课程保持。100000为安全上限，实际预算最多3h且min1200；真实曲线平台与200轮零tick/最终阶段评测满足后再正常STOP。
+
+TensorBoard目录：`outputs/moe_cts/iterations/v33/train`。当前早期自对弈return/win针对随机历史对手，不作为baseline胜率；首个四AI采样panel在iteration99。v34提交5d8a60b、自己的116文件冻结ec79d3，只改history与run_id，当前未启动。main及用户未跟踪文件不修改。
