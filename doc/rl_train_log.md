@@ -2565,3 +2565,10 @@ it299/snapshot6 completed0，157,286,400全局转移、9600tick/env。aggressive
 root df0375 exit0直接核验原report和CP；97121d exit0回读独立证书，1600完整调度、逐局RNG、地图双座、WLD/selectionscore、CP字节和26个实际finite Eval/Perf TB点全部通过。CP SHA `523a1e40…`、report `84f93f2b…`、[第三点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_299_validated_per_panel.json) SHA `67840020…`。后续仅保留一个CPU只读观察器original65720/5d6dc8，PID188097/start429870940，复用已完成99/199证书，逐个核验后续实际panel，不启动新对局/推理/旧TB扫描/中途bootstrap。299 worker已在观察器启动前结束，不能声称观察器见过其live进程；root之前实际index观察与completed0凭据保留。[观察器实际启动收据](../outputs/moe_cts/iterations/v31/diagnostic/remaining_selector_observer_launch_execution.json)，feac42 exit0、SHA `10532b31…`。
 
 aggressive较199提高3pp，**趋势锚点更新299/78.5%，后续四点无≥2pp提升计数重置**；expansion则回落1.75pp，不能只观察最弱AI而忽略其他表现。最低1h尚未满足，原60387/冻结配置继续。用户再次明确跳过耗时ResNet/ViT扩容，当前小网络λ→tick衰减→H8顺序保持；完整终局曲线/开发/录像/行为分析后才选择tick基座。
+
+
+#### v31 第四采样点：aggressive提高到85.25%（正式训练继续）
+
+it399/snapshot8 completed0，209,715,200全局转移、12800tick/env。四baseline采样胜率85.25%/95.75%/98.75%/98.00%，W/L/D为341/59/0、383/16/1、395/5/0、392/8/0；overall1511/88/1（94.4375%），mean91.53125tick。快照training wall2950.300秒，异步worker112.598秒另列。v27已有终局缓存的同点为84.50%/97.00%/99.75%/98.00%，overall94.8125%，wall2951.062秒；本轮差+0.75/−1.25/−1.00/0pp、overall−.375pp。该点已追近控制，尚不能据单点判断λ最终收益；不新增中途bootstrap或旧TB扫描。
+
+root cdd6bd直接原report/index读取，随后逐字节核对CP/report与唯一原65720生成的[第四点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_399_validated_per_panel.json)，SHA `c98a4ac3…`；1600games/地图双座/逐局RNG/WLD/selectionscore及26个实际finite TB点均一致，没有新增游戏或模型推理。趋势锚点由299/78.5%更新为399/85.25%（+6.75pp），后续四点观察计数归零；训练尚不到最低1h，继续原60387。剩余次序为完整λ终局评估后选择tick0..1000/至少200轮零tick训练基座、最后H8，容量探索继续暂缓。
