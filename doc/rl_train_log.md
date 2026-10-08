@@ -2,7 +2,7 @@
 
 当前任务：按 2026-10-07 用户补充，从 v19 继续逐项开展事实记忆 × critic 信息输入消融、gamma/rollout/lambda、tick penalty 0..1000 衰减，最后 H4/H8。ResNet/ViT 容量比较已按用户最新要求暂缓后续探索。每轮随机初始化、新 Adam、新历史池，正式预算 1..3h；全部评测默认采样，逐版记录配置、胜率曲线、效率与最佳模型失败分析。完整范围见 [实验计划](rl_experiment_plan.md)；不因局部实验完成或 baseline 达标提前结束其余明确实验。工作分支 `codex_dev`，main 不修改。
 
-**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v34 H8已提交和冻结，待本报告提交后从零训练；H8正式成绩尚不存在。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
+**当前状态：v19–v22 信息消融、v23/v24 的 1M 网络与 v25 ResNet10M、v27–v31 的 gamma/rollout/lambda、v32 tick 课程均已完成报告。按用户最新指示跳过后续 ResNet/ViT 和容量探索，v26 中断不计完成。保留小网络、gamma .995、lambda .95。v32 best699开发四AI为93.25%/96.75%/100%/99.75%，相对v27的aggressive/overall区间含0。最后的H4/H8匹配实验采用N8192/T32/NT262144、batch4096/256Adam；v33 H4已完成1297更新/89.355分钟，best599开发四AI为86.5%/94.5%/98.75%/99%，完整曲线、200轮真实零tick、1600局开发与八例录像审核已完成，详见文末。v33完整报告已提交2a51c85，v34 H8已从自身冻结源码正式从零启动；H8正式评估成绩尚不存在。** 旧 v9–v18 阈值与停止规则属于此前阶段，历史 greedy 标签原样保留；v1–v8 有续训或 warm start，v6–v8 混过少量 aggressive 对手，不能作为本轮从零纯历史自对弈的公平对照。
 
 ## v9 起：从零训练的纯自对弈比较约定
 
@@ -3027,3 +3027,10 @@ CPU审核原16658/2bb9ba exit0：8例、1339 decision ticks，116冻结源码、
 终态证据：[原训练summary](../outputs/moe_cts/iterations/v33/train/summary.json)、[原训练真实退出](../outputs/moe_cts/iterations/v33/diagnostic/training_original_native_terminal_execution.json)、[唯一observer真实退出](../outputs/moe_cts/iterations/v33/diagnostic/selector_observer_execution_receipt.json)、[完整selector认证](../outputs/moe_cts/iterations/v33/diagnostic/selector_current_index_certification.json)、[终态缓存审查与配对区间](../outputs/moe_cts/iterations/v33/diagnostic/terminal_training_review.json)、[唯一完整训练统计](../outputs/moe_cts/iterations/v33/diagnostic/final_training_dynamics.json)、[完整原始标量缓存](../outputs/moe_cts/iterations/v33/diagnostic/full_training_curve_cache.json)、[三图manifest](../outputs/moe_cts/iterations/v33/diagnostic/final_curve_plot_manifest.json)、[原开发report](../outputs/moe_cts/iterations/v33/final_best/development_report.json)、[开发真实退出](../outputs/moe_cts/iterations/v33/diagnostic/development_evaluation_execution.json)、[八录像摘要](../outputs/moe_cts/iterations/v33/final_best/analysis/summary.json)、[录像真实退出](../outputs/moe_cts/iterations/v33/diagnostic/render_terminal_demos_execution.json)、[八例行为审核](../outputs/moe_cts/iterations/v33/diagnostic/recorded_failure_review.json)。开发report SHA `69183227…`、终态统计 `7cce5a62…`、标量缓存 `fa896e60…`，均保持原字节，未重启/重冻结/回灌旧权重。
 
 审核/展示实际回执：[行为审核执行](../outputs/moe_cts/iterations/v33/diagnostic/recorded_failure_review_execution.json)、[关键帧导出执行](../outputs/moe_cts/iterations/v33/diagnostic/behavior_frame_export_execution.json)、[原始帧manifest](../outputs/moe_cts/iterations/v33/diagnostic/behavior_frame_export_manifest.json)。
+
+
+#### v34 H8 正式启动
+
+在v33完整报告2a51c85提交后，原session39578/84aa5d从自身提交5d8a60b和116份冻结源码启动，PID420967/start432440688，fresh权重/新Adam/新历史池、无resume/warm-start。配置d1acb73b…、source manifest f5cdc312…；3cf87e真实exit0一次验证Git/frozen/manifest字节和运行配置，仅补全三个已声明eval默认键，实际run_config SHA3b8e6a1e…、合同a03368b4…。H8的actor+critic同时增加历史，总参数39,898，其他条件保持v33，NT262144/batch4096/256Adam、gamma.995/lambda.95、tick0..1000课程不变。正式已完成前4更新，首个四AI随机采样selector在99。
+
+TensorBoard：`outputs/moe_cts/iterations/v34/train`。保持最低1h/1200真实更新及1000..1199的200轮零tick+该阶段eval守卫，最多3h；当前启动日志的自对弈reward/win不是baseline胜率。唯一CPU selector observer将按自身实际PID与runconfig绑定；终态后用同样的CUDA开发、真实八录像和sample/wall曲线完成配对分析，不重开ResNet/ViT。
