@@ -16,7 +16,9 @@ v29真实u1000..1199共200轮γ.999/tick_scale1，104,857,600转移、1492.456�
 
 **v32 tick课程完整结束，后续H8以此为候选基座。** 原92092真实exit0，1206更新/632291328转移/150.067分钟，12次selector均completed0，u1000..1199真实200轮零tick已TB核验。gamma/PBRS gamma .995、lambda .95、N16384/T32、NT524288、小网络与纯历史自对弈固定；只把tick−.001在TB0..1000乘linear1→0。best699开发aggressive/expansion/defensive/random为93.25/96.75/100/99.75%，overall97.4375%；相对v27开发aggressive+3pp与overall+.75pp的地图配对区间含0。早期采样效率较好，最终零tick末段无持续提升，最佳699仍有tick惩罚，不把最佳效果当成零tick收益。wall70223.04/s、GPU真实peak allocated15.26401/reserved16.32617GiB；全程数值有效，完整曲线、1600局独立开发、补充defensive诊断及八录像/Core审计已完成。详细结果见rl_train_log.md。
 
-**H4→H8为最后执行项，v33 H4完整结束，v34意外中断、v35按用户暂停后预算不足，二者均不计完整条件；v36从零重跑相同H8条件。** v34在967更新中断，没有正常summary/原native退出码，未到零tick；用户暂停重启后的现场保留，旧899评估已停止，不把其旧running元数据当活进程。本次恢复goal后仅新run_id=v36，其余设置和116runtime保持；fresh权重/Adam/历史池、N8192/T32/NT262144、batch4096/256Adam、H8同时扩展actor/critic、gamma.995/lambda.95/tick0..1000课程。以v33完整H4报告为对照，完成v36完整终态及与v33的真正配对分析后再判断；v34不补造课程完成或泛化结论，ResNet/ViT继续暂缓，世界冠军水平未测。
+**最后的H4→H8对照已完整结束，保留H4。** v34意外中断、v35用户暂停后的短训练均保留并排除完整条件；v36重新从零训练，116运行源码与完整v33 H4相同，仅run_id和actor/critic的H4→H8不同，N8192/T32/NT262144/batch4096/256Adam匹配。v36原训练与唯一observer真实exit0：1359更新、356253696转移、165.086分钟含CPU评估排空，13点评估全部completed0；u1000..1199真实200轮及总359轮零tick已核验。best399 CUDA开发37.5/56.75/83.25/77.25%，overall63.6875%；v33为86.5/94.5/98.75/99%。aggressive配对差−49pp，地图簇95%CI[−54.5,−43.5]。8局真实录像、1887tick Core审查、三张完整曲线和实际H4/H8配对全部完成。H8计算吞吐约70k/s但含排空仅36k/s，peak allocated12.682GiB；没有性能或总成本优势。单training seed、复用开发图、actor/critic同时变化及参数增加限制因果结论。
+
+**本阶段非暂缓路线已完成。** 保留H4K11/SH4K11、小CNN、纯历史池、categorical adaptive PPO及监控；工程候选采用gamma/PBRS gamma .995、lambda .95、N16384/T32。v32 tick课程best699的CUDA开发93.25/96.75/100/99.75%为当前同协议最高aggressive候选，但相对固定tick v27的+3pp区间含0，且best时tick尚未归零，固定tick仍保留为对照。信息消融未证明K11/组合critic稳定提高胜率，保留其信息语义不冒称胜出。详细报告/截图/录像和来源在rl_train_log.md；剩余ViT10M/100M及容量探索按用户要求继续暂缓，世界冠军强度与可变地图泛化未测。后文容量执行记录属于当时安排，不代表当前仍有自动训练进程。
 
 ## 实验顺序与完整范围
 
