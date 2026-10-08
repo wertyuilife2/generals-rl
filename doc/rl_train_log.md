@@ -3092,3 +3092,7 @@ goal恢复active后，实际宿主机boot_id f94fc0c0-a19f-427f-a6b4-3ce15744f9c
 正式至少1h且1200更新，完成u1000..1199的200轮真实零tick及目标阶段评估，最多3h；在满足最低要求后，沿用四个后续评估点未超过aggressive锚点2pp的人工平台规则。监控KL/clip/entropy/EV、动作、self-play、吞吐和内存，保持checkpoint3、历史池8、eval最近3+best。终局再选最佳模型做开发评估、四AI各输赢录像、曲线和失败分析，与已完成v33 H4比较同样本和实际wall；v34/v35不作为完整配对条件。ResNet/ViT继续暂缓，世界冠军强度未测。
 
 暂停证据：[v35停训记录](../outputs/moe_cts/iterations/v35/diagnostic/user_reboot_pause.json)、[v35正常summary](../outputs/moe_cts/iterations/v35/train/summary.json)、[v35已保存checkpoint](../outputs/moe_cts/iterations/v35/train/checkpoint.pt)；新配置：[v36.json](../rl/configs/v36.json)。v35数据保留，不覆盖、不自动恢复。
+
+v36已从自身提交 `3a5c653` 的116份冻结运行源码启动，配置与v35仅run_id不同，冻结源码与已完成v33完全一致。启动来源和实际配置合同通过，原训练句柄32723保持运行；唯一CPU observer只认证本轮真实完成的评估点。初始历史快照0来自本轮随机初始化；独立构造模型的early检查待执行，短窗口吞吐和self-play胜率不当作baseline成绩。完整课程、终局开发、录像和H4/H8结果仍待训练结束。
+
+[冻结manifest](../outputs/moe_cts/iterations/v36/source_manifest.json)、[实际启动检查](../outputs/moe_cts/iterations/v36/diagnostic/startup_source_config_contract.json)、[执行状态](../outputs/moe_cts/iterations/v36/execution_state.json)、[唯一observer启动](../outputs/moe_cts/iterations/v36/diagnostic/selector_observer_launch_execution.json)。
