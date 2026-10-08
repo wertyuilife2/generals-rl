@@ -3116,6 +3116,7 @@ v36已完成以下采样评估点，每点1600局和29项TB标量通过认证，
 | 699 |37.5%|63%|79%|73.25%|63.1875%|
 | 799 |12.75%|38.25%|32.75%|30.75%|28.625%|
 | 899 |0%|0.75%|0.5%|0.25%|0.375%|
+| 999 |0%|0%|0%|0%|0%|
 
 aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台结论。H4同样本399/499为82.75%/85.75%，H8迄今没有学习效率优势；正式训练继续到至少1200轮和真实200轮零tick及其评估，不能用仍有tick惩罚的中段代替最终阶段。
 
@@ -3130,3 +3131,9 @@ aggressive最高仍399的41.75%，第五点下降4.75pp，尚不做最终平台�
 在至少一小时、u1000..1199完整训练窗口已覆盖且五个后续评估点均未超过399锚点2pp后，root正常STOP：实际请求时1357已logged，最后1358，共1359更新约85分钟，checkpoint已写入。异步CPU评估因长对局明显慢于发布；为防继续收集引入更多队列，本轮明确将“目标阶段评估完成”作为正式验收门槛，在停止收集后交由已有evaluator.finish正常排空。该运行层处理不改MDP、PPO、源码、评估采样或已有赛程，不取消任何评估；最终精确200轮zero/gamma验收仍待原进程真实退出后的唯一TB统计。停止时999running、1099/1199/1299queued，尚无summary或正常终态证明，不把checkpoint当整轮完成。
 
 [正常采集STOP记录](../outputs/moe_cts/iterations/v36/diagnostic/normal_collection_stop.json)、[699证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_699_validated_per_panel.json)、[799证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_799_validated_per_panel.json)、[899证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_899_validated_per_panel.json)、[逐项待完成验收表](../outputs/moe_cts/iterations/v36/diagnostic/goal_completion_audit_pending_v36.json)。评估排空后再进行完整统计、最佳模型开发评估与录像、三图、H4/H8配对报告。
+
+999评估已completed0、四AI均0%，0胜/840负/760平，worker1219.658秒；999仍有tick−1e−6，不能当zero阶段结果。原训练32723在停止采样后继续正常排空，1099running、1199/1299queued。root实际核对[999证书](../outputs/moe_cts/iterations/v36/diagnostic/selector_999_validated_per_panel.json)与report哈希，未重复TB读取或新建对战。
+
+针对后期退化的[源码边界审查](../outputs/moe_cts/iterations/v36/diagnostic/h8_collapse_source_review.json)已完成：13个相关冻结文件与v33同字节，未发现明确H8切片、terminal/reset别名、timeout bootstrap、奖励或模型池错误。ObservationHistory.flattened显式clone，CTS storage复制至自有slot；真实StudentPPO委托已适配MoECTS，从terminal-next-state计算超时γV并加reward一次，done截断GAE。PBRS在非终局timeout保留Phi，tick课程每次从原系数重建；历史对手reset-only冻结分配，保留快照0和最近7，正在对局的已淘汰模型可继续。这里是源码与既有测试断言/缓存检查，未声称重跑测试或证明全部运行时正确。
+
+等待吸引子、tick减弱与持续任务bootstrap、自对弈近期池分布、相同16通道压缩更多历史及PPO非平稳性仍是假设。shaped critic拟合Phi相关变化可能得到高EV，不代表战略价值正确；本次未追加超参搜索或源码补丁，终局实际曲线和最佳模型录像再验证观察到的行为。
