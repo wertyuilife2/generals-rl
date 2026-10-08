@@ -11,7 +11,8 @@ import torch
 from torch import nn
 
 from .spatial_ppo import (FRAME_DIM, HISTORY, MAP_PLANES, MAP_SIZE, PUBLIC_DIM,
-                          LightSpatialPPOPolicy, OwnKingRelativeGeometry)
+                          LightSpatialPPOPolicy, OwnKingRelativeGeometry,
+                          _validate_history_length)
 
 
 def _extend_conv(old, extra_channels, trailing_channels=0):
@@ -35,12 +36,14 @@ def _extend_conv(old, extra_channels, trailing_channels=0):
 
 
 class HistoryStateCritic(nn.Module):
-    """Fuse privileged maps, local H4 maps and optional player memory per cell."""
-    def __init__(self, baseline, knowledge_channels):
+    """Fuse privileged maps, local history and optional player memory per cell."""
+    def __init__(self, baseline, knowledge_channels, *, history_length=HISTORY):
         super().__init__()
+        _validate_history_length(history_length)
+        self.history_length = history_length
         self.knowledge_channels = knowledge_channels
         self.trunk = baseline.trunk
-        self.trunk[0] = _extend_conv(self.trunk[0], HISTORY * MAP_PLANES + knowledge_channels)
+        self.trunk[0] = _extend_conv(self.trunk[0], history_length * MAP_PLANES + knowledge_channels)
         old = baseline.context[0]
         devices = [old.weight.device.index] if old.weight.is_cuda else []
         with torch.random.fork_rng(devices=devices):
@@ -56,9 +59,13 @@ class HistoryStateCritic(nn.Module):
         self.value_head = baseline.value_head
 
     def forward(self, privileged, history, knowledge=None):
-        frames = history.reshape(-1, HISTORY, FRAME_DIM)
+        if history.ndim != 2 or history.shape[-1] != self.history_length * FRAME_DIM:
+            raise ValueError("critic history shape does not match history_length")
+        if privileged.shape != (history.shape[0], FRAME_DIM):
+            raise ValueError("critic privileged observation shape does not match history batch")
+        frames = history.reshape(-1, self.history_length, FRAME_DIM)
         maps = privileged[:, :-PUBLIC_DIM].reshape(-1, MAP_PLANES, MAP_SIZE, MAP_SIZE)
-        local = frames[..., :-PUBLIC_DIM].reshape(-1, HISTORY * MAP_PLANES, MAP_SIZE, MAP_SIZE)
+        local = frames[..., :-PUBLIC_DIM].reshape(-1, self.history_length * MAP_PLANES, MAP_SIZE, MAP_SIZE)
         inputs = [maps, local]
         if self.knowledge_channels:
             if knowledge is None or knowledge.shape != (history.shape[0], self.knowledge_channels * MAP_SIZE * MAP_SIZE):
@@ -101,8 +108,8 @@ class InformationSpatialPPOPolicy(LightSpatialPPOPolicy):
                 self.actor.trunk[0].knowledge_channels = knowledge_channels
             self.num_actor_obs += knowledge_channels * MAP_SIZE * MAP_SIZE
         if critic_actor_information:
-            self.critic = HistoryStateCritic(self.critic, knowledge_channels)
-            self.num_critic_obs += HISTORY * FRAME_DIM + knowledge_channels * MAP_SIZE * MAP_SIZE
+            self.critic = HistoryStateCritic(self.critic, knowledge_channels, history_length=self.history_length)
+            self.num_critic_obs += self.history_length * FRAME_DIM + knowledge_channels * MAP_SIZE * MAP_SIZE
         self.semantics += f"_knowledge{knowledge_channels}_critic_actor_info{int(critic_actor_information)}_v1"
 
     def evaluate(self, obs, is_teacher=False, **kwargs):
