@@ -2726,3 +2726,10 @@ it99/snapshot2实际completed0，52428800交互/3200tick/env；完整1600局（�
 | overall | 65.375% | 1241/359/0 | 77.5625% | +12.1875 |
 
 同点v27真实snapshotwall737.019592秒，仅差.07489秒，优势不是多花计算时间得到。当前实际Curriculum gamma .995000004768/tick_scale .901000022888/tick −.000900999992，与期望.995/.901/−.000901在float32误差内一致；未到最终零tick阶段。首点所有AI高于控制，但重复selector地图、单个训练seed与单个早期快照不能证明最终课程收益或泛化，完整共同曲线与独立开发pair在终态一起分析，不在中途反复bootstrap。趋势初始锚点99/aggressive52%，后续若≥2pp提升再重置；最低1200完成更新/200真实最终零tick/最终阶段评测及最长3h优先条件保持，原92092继续，不启动H8。
+
+
+#### v32 第二采样点：aggressive87%，学习继续
+
+it199/snapshot4 actualcompleted0，104857600交互/6400tick/env，四AI W/L/D分别348/52/0、381/18/1、396/4/0、393/7/0；采样胜率**87.00%/95.25%/99.00%/98.25%**，overall1518/81/1（94.875%）、mean93.036875tick。快照真实training wall1471.536377秒（24.526分钟），异步worker103.842431秒单列。同样本v27缓存为81.75%/92.50%/99.25%/99.25%、overall93.1875%，本轮描述性差+5.25/+2.75/−.25/−1.00pp、overall+1.6875pp；其wall1472.755615秒，本轮快1.219238秒。相对第99点aggressive提高35pp，**趋势锚点更新199/87%，后续四点未提升计数归零**；其他AI/overall仍单独观察，不把一个点较好当作最终课程收益。
+
+CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议不变。root a7be16直接核对原report全部1600games/WLD/rate和CP bytes，92b9cb回读原唯一3767的[第二点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_199_validated_per_panel.json) SHA `63d82a28…`；report `77ea796d…`、CP `3fe101e1…`。29个实际TB点均finite/无缺失，当前panel单pass/早中窗及旧TB0，没有中途bootstrap。Curriculum实际γ .995000004768、scale .800999999046、tick −.000800999987匹配期望.995/.801/−.000801，尚未进入最终零tick阶段。原训练92092继续，最低1200更新/200真实最终零tick/至少最终阶段评测和最长3h优先保持；完整开发、八真实录像/失败和全sample/wall分析之后才做H8。
