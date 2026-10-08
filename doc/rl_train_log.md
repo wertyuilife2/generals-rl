@@ -2606,3 +2606,10 @@ v31每更新raw return均值−.284341，其每更新std的均值.570555；raw A
 it599/snapshot12 completed0，314,572,800转移、19200tick/env。四AI胜率89.50%/95.50%/98.50%/98.50%，W/L/D为358/42/0、382/18/0、394/6/0、394/6/0；overall1528/72/0（95.50%），mean78.06875tick。快照training wall4439.533秒，CPU异步worker82.410秒单列。同样本v27已有终局缓存为85.75%/97.00%/99.25%/98.75%、overall95.1875%，本轮点差+3.75/-1.50/-0.75/-0.25pp、overall+0.3125pp；不在中途新增bootstrap，不据一个点决定λ基座。
 
 原唯一65720独立验证1600完整调度/地图双座/逐局RNG、WLD/selectionscore、CP字节与26finite TB点；root直接原report/index和[第六点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_599_validated_per_panel.json)，SHA `33e880e7…`，逐字节核对CP `4605d955…`、report `d23ac972…`。aggressive较趋势锚点399提高4.25pp、较上点499提高3pp，**新趋势锚点599/89.5%，后续四点未提升计数0/4**。2pp阈值是停止启发式，不是统计显著性结论。已训练超过1h且仍提高，原60387固定配置继续，最长3h优先；early/mid已完成不重读。最终独立开发/八录像/行为与全曲线完成后才选择tick0..1000/至少200最终零tick基座，再做H8，容量继续暂缓。
+
+
+#### v31 第七采样点：aggressive90.75%，expansion回落
+
+it699/snapshot14 completed0，367,001,600转移、22400tick/env。四AI胜率90.75%/94.25%/99.25%/99.00%，W/L/D为363/37/0、377/23/0、397/3/0、396/4/0；overall1533/67/0（95.8125%），mean81.741875tick。快照training wall5184.036秒，CPU异步worker82.358秒单列。同样本v27已有终局缓存为86.00%/96.00%/99.50%/98.50%、overall95.0000%，本轮点差+4.75/-1.75/-0.25/+0.50pp、overall+0.8125pp；仍只描述真实采样点，不新增中途bootstrap或据单点选择λ。
+
+root57c720原report/index直接读取，随后回读唯一原65720生成的[第七点证书](../outputs/moe_cts/iterations/v31/diagnostic/selector_699_validated_per_panel.json)，SHA `83e67ddd…`；1600完整地图双座/逐局RNG/WLD/selectionscore、CP `5ffbeb98…`、report `6e81533f…` 字节和26finite TB点均核对。aggressive较599/89.5%只+1.25pp，**趋势锚点仍599、后续未明显提升1/4**；expansion相对上一点低1.25pp，不能只用最弱AI的best score概括全部表现。超过最低1h但平台停止未满足，原60387配置继续、最长3h优先；early/mid不重读。完整终局开发/八录像/失败/全samplewall分析后才决定tick0..1000且至少200最终零tick的基座，最后H8，容量继续暂缓。
