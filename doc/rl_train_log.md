@@ -2740,3 +2740,10 @@ CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议不变
 it299/snapshot6 actualcompleted0，157286400交互/9600tick/env；四AI W/L/D为361/39/0、390/10/0、396/4/0、399/1/0，采样胜率**90.25%/97.50%/99.00%/99.75%**，overall1546/54/0（96.625%）、mean81.560625tick。快照真实training wall2208.658936秒（36.811分钟），异步worker82.049260秒另列。同样本v27缓存为84.50%/95.50%/99.25%/99.75%、overall94.75%；本轮描述性差+5.75/+2.00/−.25/0pp、overall+1.875pp。较上一点aggressive提高3.25pp，**趋势锚点更新299/90.25%，后续未达到+2pp提升计数归零**，不是统计显著性判断。
 
 CPU/highest/FP32/B128/workers1/seed271828/200maps双座/随机采样协议保持。root e6f95a原report/CP bytes/1600games/WLD/rate核验，随后直接回读唯一3767生成的[第三点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_299_validated_per_panel.json) SHA `fef62c4e…`；report `4a97ee77…`、CP `7119a632…`。29 TB点有限、当前panel单pass/旧TB和早中窗0，未新增bootstrap。实际γ .995000004768、scale .700999975204、tick −.000700999983匹配期望.995/.701/−.000701，非最终零tick。前3点aggressive52→87→90.25%，目前支持早期采样效率较好，尚不能代替整个课程终态/开发集泛化结论。原92092继续，最少1200完成更新/it1000..1199真实200零tick更新与最终阶段评测、最长3h优先保持；H8仍在完整奖励课程报告之后。
+
+
+#### v32 第四采样点：89%，阶段性回落
+
+it399/snapshot8 actualcompleted0，209715200交互/12800tick/env；四AI W/L/D为356/44/0、383/17/0、399/1/0、396/4/0，采样胜率**89.00%/95.75%/99.75%/99.00%**，overall1534/66/0（95.875%）、mean83.470625tick。快照真实training wall2950.263428秒（49.171分钟），异步worker90.288014秒单列。同样本v27缓存84.50%/97.00%/99.75%/98.00%、overall94.8125%，描述性差+4.50/−1.25/0/+1.00pp、overall+1.0625pp；不新增中途bootstrap。相对299，aggressive低1.25pp、expansion低1.75pp而defensive提高.75pp，因此不是所有AI同向变化，也不能用一个点确定课程退化。**趋势锚点保持299/90.25%，后续未+2pp计数1/4**，尚未达到最低1h，且本轮最少1200/最终阶段条件尚未满足。
+
+原唯一3767认证1600完整地图双座/逐game RNG/CP bytes/协议/WLD/selectionscore，29实际TB点有限/currentpanel read1/旧TB与早中窗口0，无pending/errors；root b9a4e5直接读取report、[第四点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_399_validated_per_panel.json) SHA `31a34cff…`及CP字节。report `f78c1ecf…`、CP `b8507797…`；实际γ .995000004768、scale .601000010967、tick −.000600999978匹配期望.995/.601/−.000601，仍未到最终零tick。资源7ba9d4实际UTC03:08观察：GPU17896/24564MiB，磁盘剩余893.692GiB，history8/eval最近3+best/training checkpoint1，未见快照累积。原训练92092继续，下一固定492..541中段只在真实542完成后统计一次；完整零tick阶段和终态开发/八录像/失败/全samplewall报告之后再做H8。
