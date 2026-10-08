@@ -2901,3 +2901,19 @@ v32完整报告已提交8932e47。最后一项保留其tick0..1000课程、gamma
 源码只参数化spatial_ppo与information_ppo中的history_length，固定P2/9x9/12地图平面/13public语义；vendor、MDP和算法未修改。CPU原版对照已实际通过：32组H4默认/显式构造的state_dict、RNG、动作概率、value、采样、entropy、梯度均与v32冻结源码逐位一致。H8契约检查最新帧/own-king geometry、actor隐私与actor/critic独立梯度、错误维度及真实PPO超时/reset；相关CPU测试最终23项实际exit0：information8、spatial3、light5、geometry4、context3，包含H8+K11的3次真实PPO更新和24次timeout/reset；没有GPU初始化。GPU完整更新门禁随后执行。当前未开始正式训练，也未把单次门禁当学习曲线。
 
 准备证据：[原版网络合同](../outputs/moe_cts/iterations/history_preparation/network_history_contract.json)、[实际CPU执行回执](../outputs/moe_cts/iterations/history_preparation/network_history_contract_execution.json)、[实际资源与缓存推导](../outputs/moe_cts/iterations/history_preparation/memory_feasibility_preflight.json)、[匹配候选选择](../outputs/moe_cts/iterations/history_preparation/matched_pair_candidate_selection.json)。
+
+
+#### H4/H8正式前GPU门禁通过
+
+两组都从577c16a的116份纯Git源码启动，N8192/T32/NT262144，实际完整256次Adam、22个optimizer state的step均256、权重与loss finite；seed0的22张量均与对应的新随机constructor逐位一致，不序列化或伪称已独立检查time-zero optimizer。H4原14446/a01e96 exit0，H8原65331/739922 exit0；CPU验收3642/eb2056 exit0，没有CUDA初始化。双方只各做1更新，不续用门禁权重。
+
+| 一轮CUDA smoke | collection/update秒 | allocated / reserved GiB | compute交互/秒 | 含启动wall秒 |
+|---|---|---|---:|---:|
+| H4 | .7100 / 3.2487 | 7.3550 / 7.7188 | 66219.45 | 12.1693 |
+| H8 | .9169 / 2.7061 | 12.1886 / 13.0195 | 72355.67 | 11.8343 |
+
+单轮耗时包含首次kernel/allocator等影响，H8这一点update更快不证明稳态更快；正式曲线再比较整体及共同窗口速度。H8额外16局CPU采样入口63572/578f40真实exit0、CP SHA匹配，验证配置重建和四baseline加载，不当作强度成绩。没有N12288 GPU试验、实际OOM或capacity搜索。
+
+v33配置仅相对v32修改run_id与N16384→8192，代码只变两份history网络文件；v34配置仅相对v33修改run_id和task/policy的4→8。两者分别从自身commit冻结相同实现，各自fresh训练，保留其他全部参数。接下来先v33再v34。
+
+实测证据：[完整CUDA验收](../outputs/moe_cts/iterations/history_preparation/full_cuda_update_gate.json)、[真实native执行回执](../outputs/moe_cts/iterations/history_preparation/history_gate_execution.json)、[H8采样入口smoke](../outputs/moe_cts/iterations/history_preparation/h8_eval_smoke/report.json)。
