@@ -2711,3 +2711,18 @@ root2ee750实际logged50（至少51更新）后，唯一CPU读取fe7cb1 exit0/�
 唯一selector观察器3767/14a349、PID276248/start430548619绑定原训练92092，实际每panel只读同TB一次并核验26EvalPerf+3Curriculum。首次it99/snapshot2已实际running（root856b82），CP `db7cbe30…`，尚不报告未完成胜率。原训练继续；不因早期回报或中途平台提前STOP，最低1200完成/最终阶段评测和最长3h优先不变，完整终态后再进入H8。
 
 [早期真实诊断](../outputs/moe_cts/iterations/v32/diagnostic/early_training_dynamics.json) SHA `990cfb1d…`；[执行收据](../outputs/moe_cts/iterations/v32/diagnostic/early_training_dynamics_execution.json) SHA `dfbc54aa…`；[唯一observer启动收据](../outputs/moe_cts/iterations/v32/diagnostic/selector_observer_launch_execution.json) SHA `d271e731…`。observer准备时错误文件名1aebf2和receipt datetime命名40626c在读TB前失败，实际修复收据11b3ac保留，observer只启动一次，无训练重启或配置变化。
+
+
+#### v32 第一采样点：早期胜率高于固定tick控制（训练继续）
+
+it99/snapshot2实际completed0，52428800交互/3200tick/env；完整1600局（每AI200地图双座）、seed271828、随机采样、CPU/highest/FP32/B128/workers1/max2000。快照真实training wall737.094482秒（12.285分钟），异步worker170.380202秒独立记录。唯一3767观察器认证完整schedule/逐game RNG/WLD/selectionscore、CP bytes及29个有限TB scalar（26EvalPerf+3Curriculum），root20b470直接回读原report/index/证书并核对模型字节，未重扫TB或新增bootstrap。CP `db7cbe30…`、report `ab0a033e…`；[首点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_99_validated_per_panel.json) SHA `e83426f2…`。
+
+| 同52428800样本 | v27固定tick | v32 tick课程 W/L/D | v32胜率 | 描述性差(pp) |
+|---|---:|---|---:|---:|
+| aggressive | 33.75% | 208/192/0 | **52.00%** | +18.25 |
+| expansion | 58.50% | 301/99/0 | 75.25% | +16.75 |
+| defensive | 86.75% | 367/33/0 | 91.75% | +5.00 |
+| random | 82.50% | 365/35/0 | 91.25% | +8.75 |
+| overall | 65.375% | 1241/359/0 | 77.5625% | +12.1875 |
+
+同点v27真实snapshotwall737.019592秒，仅差.07489秒，优势不是多花计算时间得到。当前实际Curriculum gamma .995000004768/tick_scale .901000022888/tick −.000900999992，与期望.995/.901/−.000901在float32误差内一致；未到最终零tick阶段。首点所有AI高于控制，但重复selector地图、单个训练seed与单个早期快照不能证明最终课程收益或泛化，完整共同曲线与独立开发pair在终态一起分析，不在中途反复bootstrap。趋势初始锚点99/aggressive52%，后续若≥2pp提升再重置；最低1200完成更新/200真实最终零tick/最终阶段评测及最长3h优先条件保持，原92092继续，不启动H8。
