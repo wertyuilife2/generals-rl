@@ -2504,3 +2504,21 @@ v30完整报告与三曲线已提交1c6ddb1：较长N4096/T128没有持续样本
 v31实际启动记录：配置commit `a2d2447e0a4a8b923c5f2a58c1c9630a7f9e6ca0`，仅run_id/λ两叶变化，CPU配置验证2c9041 exit0且未初始化GPU；280ee2从commit冻结116运行文件/774804bytes一次，config SHA `f0b02e2c…`、manifest `1969d2c0…`。首次44727/e57435在首个GPU step因设置NVCC而加载器要求GENERALS_NVCC失败，真实4d3176 exit1、PID消失，没有成功环境转移或PPO update；已经构造的初始模型/历史池/第一次采样动作被舍弃。失败目录与日志保留于diagnostic/failed_initialization，未改源/配置/重新冻结或加载失败权重。
 
 仅将启动环境改为GENERALS_NVCC绝对路径，重新从零启动独立train输出：original60387/launchac95b8，PID153382/start429621062，2026-10-07T23:55:26.367747 UTC（上海10月8日07:55）。99e4f8回读原PID/start/live及compiler环境，run_config相对raw仅加入相同workers1/devicecpu/timeout_secondsnull默认值；λ.99/γ.995/N16384/T32确认。自身历史池只有seed0，source=random_initial_policy、resume_source=null、22张量，没有warm-start。原60387实际28e963仍运行；启动确认时已记录it3、2,097,152全局转移（4个完整更新），C1.300/U5.888秒、约72,933 compute transitions/s。没有已完成selector，不把初始化日志/self-play episode win当baseline胜率。100000更新ETA是安全iteration ceiling，实际max_seconds10800约束3h。后续继续原job观察每100update真实panel，早期0..29/中段492..541各只读一次实际诊断窗口，终局完成分析；不因丢失观察而重复启动。
+
+
+#### v31 早期0..29：λ.99的数值与速度检查（正式训练继续）
+
+确认原60387 exactPID/start真实运行且已logged36后执行固定0..29的30更新、15,728,640转移窗口诊断。首次CPU8243c6在已读取窗口后引用v27缓存时误用metrics（实际metric_summary），写产物前KeyError；12c329 exit0修正并进行一次必要恢复读取，4e46b7 exit0持久化完整收据。明确当前v31 TB总读2次、旧TB0次；失败和恢复均记录，没有改训练/配置/RNG或重复启动。最终45tags/1330points全finite、必需更新指标完整、无重复；EVvalid30/30。四Episode标签实际25次，未记录u0/1/23/24/29属于没有完成episode，不填零。无课程配置，因此Curriculum指标合法缺省，不伪造gamma/tick TB点。[真实早期指标](../outputs/moe_cts/iterations/v31/diagnostic/early_training_dynamics.json)，SHA `ca7c722f…`；[实际失败/恢复执行凭据](../outputs/moe_cts/iterations/v31/diagnostic/early_training_dynamics_execution.json)，SHA `fb6cf7d4…`。
+
+C39.133/U177.362秒、完整wall endpoint225.915秒；compute72,651.1、wall69,622.0转移/秒。v27已有同0..29缓存为72,815.2/69,773.1，相对wall−0.217%，本早期阶段速度接近控制。每轮256Adam，PPO监控平均.127806秒。TB当前allocated最大13.535265GiB/reserved16.318359GiB，仅窗口观察，不是整个训练峰值；继续按原3h/保留数量约束运行。
+
+| 0..29共同指标均值 | v27 λ.95 | v31 λ.99 |
+|---|---:|---:|
+| whole-update exact KL | .013472 | .012201 |
+| clip fraction | .177572 | .144728 |
+| entropy | 4.618808 | 4.531571 |
+| WAIT | 9.9671% | 11.4854% |
+| self-play episode批次mean length | 496.255 | 465.199 |
+| self-play episode批次mean win | 62.3880% | 71.9931% |
+
+v31 raw return均值−1.527273/std .324489、raw A均值−.078794/std .108792、critic EV均值.769594/最后.970963；归一化A std≈1由预处理产生。LR最后值floor1/30、ceiling26/30、42次minibatch变化，categorical adaptive仍正常启用。v27缓存没有R/A/EV/backtrack，不补造比较；v30虽有这些新tag但N/T不同，只是背景。当前KL/clip没有出现数值爆炸，尚不说明守将或baseline强度改善。Episode统计是每次日志中已结束对局批次均值，既非全局对局加权胜率，也非baseline胜率；较高EV不足以证明终局价值准确。保持冻结λ.99实验，等待真实selector99，最少1h和四锚点后未提升规则不变；不因早期回报或四baseline单点成绩缩短完整λ→tick→H8范围。
