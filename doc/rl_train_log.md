@@ -2776,3 +2776,10 @@ root45005a实际logged544/545完成后，唯一CPU统计c9ebed exit0读取当前
 Episode批次meanwin67.8432%、return−.103526、trunc.06087%，不是baseline胜率或全局对局加权率。中段没有非有限值、EV恶化或全轮KL相对控制明显放大的证据；较高entropy、较少WAIT/backtrack和更长episode与tick压力降低同时出现，但不足以证明这些变化造成aggressive从90.25%回落。原92092继续，early/middle均已完成不再重读；至少200真实零tick更新和最终阶段评测完成后，才结合全曲线、开发集与录像给出课程结论。
 
 [中段缓存](../outputs/moe_cts/iterations/v32/diagnostic/mid_training_dynamics.json) SHA `0af151bd…`；[实际执行收据](../outputs/moe_cts/iterations/v32/diagnostic/mid_training_dynamics_execution.json) SHA `3a7cfc91…`；复用v27缓存SHA `9a2fc2cd…`，无旧TB重扫。
+
+
+#### v32 第六采样点：aggressive回升至88.75%，继续完成课程
+
+it599/snapshot12成功，314572800交互/19200tick/env；同一CPU随机采样协议/每AI200地图双座，aggressive355/45/0（88.75%）、expansion389/8/3（97.25%）、defensive393/6/1（98.25%）、random398/0/2（99.50%），overall1535/59/6（95.9375%）、mean94.424375tick。快照training wall4440.565430秒（74.009分钟），异步worker134.895994秒独立记录。同样本v27为85.75%/97.00%/99.25%/98.75%、overall95.1875%，描述性差+3.00/+.25/−1.00/+.75pp、overall+.75pp；v27快照wall4441.586426秒，本轮少1.020996秒。aggressive较499回升1.75pp，仍低于299最佳90.25%；defensive回落且出现6平局，不用总体最佳分数替代各AI曲线。
+
+唯一原3767认证完整1600赛程/200地图双座/逐局RNG/CP字节/WLD/score及29有限TB点；root230025直接回读原report、CP及[第六点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_599_validated_per_panel.json)，SHA `2e0d130b…`；report `6bb7eaa7…`、CP `b25ec46a…`。实际γ .995000004768、scale .400999993086、tick −.000400999998匹配预期.995/.401/−.000401，仍未零tick；当前panel读一次，early/middle及旧TB不重读、不新增bootstrap。锚点保持299/90.25%，后续未+2pp计数3/4，最低1200和最终阶段条件尚未满足。原92092仍运行，不写STOP；完成实际200轮零tick更新与最终评测后，再结合开发/八录像/失败与完整曲线分析。
