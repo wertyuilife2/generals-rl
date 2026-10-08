@@ -2539,3 +2539,20 @@ it99/snapshot2 actualcompleted/return0，52,428,800全局转移、3200tick/env�
 200配对地图簇/20k bootstrap/seed20261007，各AI和overall区间都含0，尚无明确早期λ收益，不能声称等效或泛化。v27缓存真实snapshotwall737.020秒，v31仅多1.112秒，首点时间效率接近；开发最佳模型还未比较。conditional地图CI仅针对这两个已训练快照和复用选模地图，不能估计训练seed随机性。[首点实际验证](../outputs/moe_cts/iterations/v31/diagnostic/selector_99_validated_per_panel.json)，SHA `1ef77329…`；[首点λ配对](../outputs/moe_cts/iterations/v31/diagnostic/first_selector_matched_lambda_comparison.json)，SHA `70c4ff94…`；[实际执行凭据](../outputs/moe_cts/iterations/v31/diagnostic/first_selector_matched_lambda_comparison_execution_receipt.json)，SHA `5977fb57…`。
 
 初始趋势锚点it99/aggressive34.25%，尚不到至少1h，没有平台停止判断。原60387保持冻结配置继续，后续真实199及100更新间隔评测若提升≥2pp则更新锚点，四后续点无该提升且≥1h再正常STOP，最长3h优先。终局仍需完整队列排空、best开发/八真实录像/失败分析、sample/wall全曲线与v27对照，再选择tick TB0..1000课程基座及真实至少200轮最终零tick训练；H8最后，ResNet/ViT暂缓，不能以早期指标或四baseline门槛提前结束。
+
+
+#### v31 第二采样点：继续学习，但慢于λ.95控制（正式训练继续）
+
+it199/snapshot4 actualcompleted0，104,857,600全局转移、6400tick/env；CP `3944c17d…`。W/L/D依次302/98/0、370/30/0、393/7/0、393/7/0，采样75.50%/92.50%/98.25%/98.25%，overall1458/142/0（91.125%）、mean113.624tick。快照training wall1473.063秒（24.551分钟），异步worker111.098秒单列。root771912直接原report/index读回，随后核对report/CP字节hash和全部诊断产物。单job临时观察器只绑定真实worker174273/start429768481，index完成return0且worker消失；original3483/e1f609 exit0，分析bbb4dc exit0、收据1ee417 exit0。1600games/200maps/逐game RNG/AI双座、WLD/count/rate/selectionscore、CP和26个TB Eval/Perf点全部通过；旧TB/early/未来panel未读，首点pair未重算。首次b4c795因误断言CLI为--checkpoint（实际位置参数）在读TB前失败，修复后实际90dbbd确认身份，失败保留，无训练或源码影响。
+
+| 同104,857,600样本 | v27 λ.95 | v31 λ.99 | v31−v27配对地图95%CI (pp) |
+|---|---:|---:|---|
+| aggressive | 81.75% | 75.50% | −6.25 [−10.75,−1.75] |
+| expansion | 92.50% | 92.50% | 0.00 [−3.50,+3.50] |
+| defensive | 99.25% | 98.25% | −1.00 [−2.50,+0.25] |
+| random | 99.25% | 98.25% | −1.00 [−2.50,+0.50] |
+| overall | 93.1875% | 91.125% | −2.0625 [−3.6875,−0.4375] |
+
+200配对地图簇、20k bootstrap/seed20261007，本点aggressive/overall的条件CI均低于0，显示这个阶段落后，不能外推最终性能、归为训练随机性显著或说明所有任务λ.99无效。v27实际缓存snapshotwall1472.756秒，v31多.307秒，采样/时间开销接近；这是学习效果差异，不是本点计算变慢。[第二点实际验证](../outputs/moe_cts/iterations/v31/diagnostic/selector_199_validated_per_panel.json)，SHA `aa9b8fda…`；[第二点λ配对](../outputs/moe_cts/iterations/v31/diagnostic/second_selector_matched_lambda_comparison.json)，SHA `41d6acca…`；[真实执行凭据](../outputs/moe_cts/iterations/v31/diagnostic/second_selector_matched_lambda_comparison_execution_receipt.json)，SHA `b6bb7462…`。
+
+相对it99 aggressive提高41.25pp，学习仍显著上升，**趋势锚点更新it199/75.5%，锚点后四点观察重新计数**。这里≥2pp是趋势启发式，不等于统计显著性判断。尚未到最低1h，原60387固定λ.99配置继续，不因落后中途换奖励/学习率或停止。最终仍从完整sample/wall曲线和best开发/八真实录像/行为诊断选择tick课程基座；TB0..1000衰减和真实200轮最终零tick、H8最后、剩余容量暂缓的完整范围保持。
