@@ -2698,3 +2698,16 @@ root6c0e41直接原report/index读取，随后回读原唯一65720的[第九点�
 
 
 v32 已正式启动：配置commit `817cb47`，raw配置SHA `d4d43bf2…`，自有source_manifest SHA `f52f1ee1…`，116个运行Git blobs/774804bytes与已验证runtime逐文件相同，一次冻结完成（125a8a exit0），无生产代码patch。a53fed CPU检查通过tick0/500/999/1000/1199、非tick系数/γ/RNG保持和controller1199/1200守卫、3h上限优先。另只读审计确认首rollout前设置课程、完成本rollout returns/update后才设置下一轮，没有混用discount/reward。原始正式工具92092/c8c221，PID272808/start430507020，使用自有冻结source和正确 `GENERALS_NVCC`，无resume/warm start；a5107e实际已logged7（至少8次完整更新），无异常。实际run_config与raw只相差明确的默认评测deviceCPU/workers1/timeoutnull（2d015c核验），随机历史seed snapshot0已生成。训练正在进行，尚没有baseline评测结果，不把启动检查当作终态完成。
+
+
+#### v32 早期0..29：tick课程生效，吞吐接近控制
+
+root2ee750实际logged50（至少51更新）后，唯一CPU读取fe7cb1 exit0/收据4c2a42 exit0统计0..29；读取时最新79仅作ready证据，不进入窗口。当前TB1次/旧TB0，无额外train/GPU/games或源码变化。71项选中指标2102有限点、全部实际scalar2560有限，duplicate0、EVvalid30/30；四项Episode各23点，0/1/16/19/22/24/27合法没有结束批次，保留缺省。root89c172/0c26ff直接回读字节hash及真实缓存。
+
+三项Curriculum各30个实际TB点全部与绝对iteration一致：gamma .995，tick_scale1→.971，tick −.001→−.000971；最大float32记录误差分别4.77e−9/2.91e−8/5.73e−11。现有课程源将相同gamma写回PBRS且只缩放原tick，资源与终局系数保留。早期尚不到最终零惩罚阶段，不能替代it1000..1199至少200次更新证据。
+
+30更新/15728640交互/7680Adam，真实training clock0→29 wall225.587402秒，C38.854996/U177.289624秒，compute72769.06、wall69723.04交互/秒；v27旧早期缓存wall69773.09，本轮−.0717%，效率接近。KL .0145833 vs v27 .0134721、clip .1888319 vs .1775718、entropy4.52451 vs4.61881、WAIT9.88295% vs9.96713%；backtrack .75018%，v27早期缺该指标不补造。raw return每update均值−1.370916/std均值.283187，raw A−.071254/.084897、EV均值.805431/末.974227；v27R/A/EV未缓存。std均值不等于跨整个窗口分布std，归一化A约1是预处理结果。monitor平均.128014秒，占U2.1662%。Episode批次meanlength456.435/meanwin70.4291%/meanreturn−5.5132不是baseline胜率或全局加权率；当前allocated最大13.53537/reserved16.31836GiB不是全训练峰值。早期指标有限且adaptive PPO仍启用，不能仅据这些指标推断baseline能力改善。
+
+唯一selector观察器3767/14a349、PID276248/start430548619绑定原训练92092，实际每panel只读同TB一次并核验26EvalPerf+3Curriculum。首次it99/snapshot2已实际running（root856b82），CP `db7cbe30…`，尚不报告未完成胜率。原训练继续；不因早期回报或中途平台提前STOP，最低1200完成/最终阶段评测和最长3h优先不变，完整终态后再进入H8。
+
+[早期真实诊断](../outputs/moe_cts/iterations/v32/diagnostic/early_training_dynamics.json) SHA `990cfb1d…`；[执行收据](../outputs/moe_cts/iterations/v32/diagnostic/early_training_dynamics_execution.json) SHA `dfbc54aa…`；[唯一observer启动收据](../outputs/moe_cts/iterations/v32/diagnostic/selector_observer_launch_execution.json) SHA `d271e731…`。observer准备时错误文件名1aebf2和receipt datetime命名40626c在读TB前失败，实际修复收据11b3ac保留，observer只启动一次，无训练重启或配置变化。
