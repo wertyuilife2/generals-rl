@@ -2798,6 +2798,8 @@ it699/snapshot14成功，367001600交互/22400tick/env；同一CPU随机采样�
 
 [限定 v19–v31 的证据矩阵](../outputs/moe_cts/iterations/evaluation_preparation/completed_v19_v31_plan_evidence_matrix.json) SHA `f165943c…`：12 轮正常训练/终态产物与 183 个文档链接齐全；v26 中断明确排除。配置和核心冻结源码绑定未发现不一致；本次没有重读 TB、构造模型或增加游戏。v28 原工具句柄退出未直接观察，保留的是绑定精确 PID/start 的 OS exit0、summary 和评测排空证据，不统一称为原工具 exit0。fresh Adam 的已有构造契约与无 load 启动/新 runner/随机快照证据保留，正式 time-zero optimizer 没有另存，矩阵明确该证明范围。开发 seed1001042 已复用，单训练 seed 与条件配对区间不证明跨 seed 泛化或因果收益；v23–25 的低强度也只对应该有限计算预算。头部进度摘要和 v22 缓存范围说明已修正；当前 v32 与 H8 仍待完成，未测世界冠军对战，不能宣称整个任务完成。
 
+审计矩阵的 `development_protocol_common.CPU_only` 概括有误：[独立勘误](../outputs/moe_cts/iterations/evaluation_preparation/completed_v19_v31_plan_evidence_matrix.erratum.json) SHA `c1922a10…` 按各版已有原始报告纠正为 v19–22 开发评测用CPU、v23–25及v27–31用CUDA。训练中的CPU selector是另一协议。原矩阵字节与历史结果保留；v32与v27的终态开发比较继续使用相同CUDA协议。
+
 
 #### v32 第八采样点：89.75%，课程后半程仍有波动
 
@@ -2820,3 +2822,9 @@ it999/snapshot20成功，524288000交互/32000tick/env；同一CPU随机采样�
 唯一原3767认证完整1600赛程/200地图双座/RNG/CP字节/WLD/score和29有限TB点；root3786eb直接回读report、CP及[第十点证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_999_validated_per_panel.json) SHA `84d71b90…`。report `5637046b…`、CP `0970bc79…`；实际γ .995000004768、scale .001000000047、tick −9.999999975e−7匹配预期.995/.001/−1e−6，**这一评测点尚非零tick阶段**。停止锚点299/90.25%、未+2pp计数7/4，最低1200和最终阶段条件仍不成立。
 
 root61e5e3在UTC04:27:59实际logged1008/1009完成，已按预先验证的冻结课程进入从it1000开始的零tick阶段，当时完成9次该阶段更新。这是实际更新计数与固定课程的边界证据，尚未验收完整1000..1199的200个TB点；该验收与终态完整统计一次完成，不重读early/middle。原92092继续，等待真正零tick的1099/1199评测及最低200次最终训练；完整开发/八录像/失败/全samplewall报告之后才决定H8基座，最长3h优先。
+
+#### v32 第十一个采样点：首次零tick评测，aggressive89.25%
+
+it1099/snapshot22评测成功，576716800交互/35200tick/env。每AI200地图双座、CPU随机采样协议保持：aggressive357/43/0（89.25%）、expansion380/15/5（95.00%）、defensive392/7/1（98.00%）、random399/1/0（99.75%）；overall1528/66/6（95.50%）、mean106.015625tick。快照training wall8167.129883秒（136.119分钟），异步worker142.363726秒另列。较999，aggressive低.75pp、overall低.6875pp；当前选模最佳仍699/91.25%，这个点没有显示零tick阶段提升，也不单独证明课程退化。v27没有同更新点，不外推控制曲线。
+
+原唯一3767生成的[1099证书](../outputs/moe_cts/iterations/v32/diagnostic/selector_1099_validated_per_panel.json) SHA `507f294e…`，root861689/f78a80直接核验原report和CP字节：report `499a54b8…`、CP `e0ffa7b0…`。完整1600赛程/200地图双座/RNG/WLD/协议与29个有限TB点通过；实际γ .995000004768、scale0、tick−0.0，**首个真正零tick阶段评测已完成**。这是该快照的实测课程值，完整1000..1199的200次更新仍待终态一次统计验证。root实际logged1127/1128完成；停止锚点299/90.25%、未+2pp计数8/4，最低1200仍未满足，不写STOP。early/middle不重读，没有中途bootstrap；之后正常停止并排空1199评测，再完成开发、八录像、失败和全曲线报告。
