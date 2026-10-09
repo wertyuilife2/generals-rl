@@ -20,7 +20,7 @@ import numpy as np
 import torch
 
 from generals import MapConfig, VecEnv
-from generals.controllers import AI_KINDS, make_controllers
+from generals_baselines import AI_KINDS, make_controllers
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.recording import RULES_VERSION, state_digest, state_to_dict

@@ -1,25 +1,20 @@
-"""Built-in controller factory. Importing this module never imports the GUI."""
+"""Interactive controller assembly; baseline implementations are optional."""
 
 import numpy as np
 
-from generals.controllers.base import Controller
-from generals.controllers.aggressive import AggressiveAI
-from generals.controllers.expansion import ExpansionAI
-from generals.controllers.defensive import DefensiveAI
-from generals.controllers.random_policy import RandomAI
+from generals.protocol.controller import Controller
 from generals.controllers.human import HumanController
 
-AI_KINDS = ("aggressive", "expansion", "defensive", "random")
-CONTROLLER_KINDS = (*AI_KINDS, "human")
-
-
 def create_controller(kind: str, player_id: int = 0, seed: int = 0) -> Controller:
-    types = dict(zip(CONTROLLER_KINDS, (AggressiveAI, ExpansionAI, DefensiveAI, RandomAI, HumanController)))
+    if kind.lower() == "human":
+        return HumanController(player_id=player_id, seed=seed)
     try:
-        controller_type = types[kind.lower()]
-    except KeyError:
-        raise ValueError(f"Unknown controller {kind!r}; choose from {', '.join(CONTROLLER_KINDS)}") from None
-    return controller_type(player_id=player_id, seed=seed)
+        from generals_baselines import create_controller as create_baseline
+    except ModuleNotFoundError as exc:
+        if exc.name != "generals_baselines":
+            raise
+        raise ImportError("AI play requires generals-baselines; install with: pip install -e ./baselines") from exc
+    return create_baseline(kind, player_id=player_id, seed=seed)
 
 
 def make_controllers(kinds: list[str] | tuple[str, ...], seed: int = 0) -> list[Controller]:
@@ -29,4 +24,4 @@ def make_controllers(kinds: list[str] | tuple[str, ...], seed: int = 0) -> list[
             for pid, (kind, stream) in enumerate(zip(kinds, streams))]
 
 
-__all__ = ["Controller", "AggressiveAI", "ExpansionAI", "DefensiveAI", "RandomAI", "HumanController", "create_controller", "make_controllers", "AI_KINDS", "CONTROLLER_KINDS"]
+__all__ = ["Controller", "HumanController", "create_controller", "make_controllers"]

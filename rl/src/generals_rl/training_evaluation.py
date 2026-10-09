@@ -19,7 +19,7 @@ from time import perf_counter
 
 import torch
 
-from generals.controllers import AI_KINDS
+from generals_baselines import AI_KINDS
 
 
 @dataclass(frozen=True)

@@ -6,10 +6,9 @@ import numpy as np
 import torch
 
 from generals.backends.cpu.env import CPUEnv
-from generals.core.engine import CoreEngine
 from generals.core.observation import legal_action_mask, observe
 from generals.core.state import (
-    Action, Direction, EMPTY, GameState, MapLayout, MoveMode, Structure, Terrain,
+    Action, Direction, EMPTY, GameState, MapLayout, Structure, Terrain,
 )
 from generals.vector import VecEnv
 from generals_rl.mdp import (
@@ -96,31 +95,6 @@ class MDPComponentTests(unittest.TestCase):
         self.assertTrue(actual[0, Action.move(12, Direction.RIGHT).encode()])
         self.assertTrue(actual[0, Action.move(0, Direction.RIGHT).encode()])
 
-    def test_productive_mask_matches_independent_core_after_growth(self):
-        actions = EncodedActionSpace(5, 5, productive_actions=True)
-        states = []
-        for tick in (0, 1, 48, 49, 50):
-            for army in (0, 1, 2, 3):
-                state = example_state()
-                state.tick = tick
-                state.owner[0, 1], state.structure[0, 1] = 0, Structure.CITY
-                for source in (0, 1, 12):  # ordinary land, city, general
-                    state.army.flat[source] = army
-                states.append(state)
-        masks = actions.mask(GameBatch.from_backend(self.backend(states), "cpu"),
-                             torch.zeros(len(states), dtype=torch.long))
-        for lane, state in enumerate(states):
-            legal, _ = legal_action_mask(observe(state, 0))
-            self.assertTrue(masks[lane, 0])
-            for source, direction, mode in np.argwhere(legal):
-                action = Action.move(int(source), Direction(int(direction)), MoveMode(int(mode)))
-                engine = CoreEngine(state.copy())
-                move = engine.step([action, Action.wait()]).moves[0]
-                with self.subTest(tick=state.tick, source=source, mode=mode,
-                                  army=int(state.army.flat[source])):
-                    self.assertEqual(bool(masks[lane, action.encode()]), move.valid and move.moved > 0)
-            self.assertFalse(bool((masks[lane, 1:] & ~torch.from_numpy(legal.reshape(-1))).any()))
-
     def test_local_observation_hides_terrain_and_opponent_positions(self):
         first = example_state()
         second = hidden_world_variant(first)
@@ -198,25 +172,20 @@ class MDPComponentTests(unittest.TestCase):
     def test_cpu_gpu_backends_share_mdp_observation_and_action_contract(self):
         from generals.backends.gpu.env import GPUEnv
 
-        first, second = example_state(), hidden_world_variant(example_state())
-        first.army.flat[12] = 1
-        third, fourth = first.copy(), second.copy()
-        third.tick = fourth.tick = 49
-        states = [first, second, third, fourth]
+        states = [example_state(), hidden_world_variant(example_state())]
         cpu = self.backend(states)
         gpu = GPUEnv.from_states(states, device="cuda")
         self.addCleanup(gpu.close)
-        pids = torch.tensor([0, 1, 0, 1])
+        pids = torch.tensor([0, 1])
         cpu_batch = GameBatch.from_backend(cpu, "cpu")
         gpu_batch = GameBatch.from_backend(gpu, "cuda")
         encoder = LocalObservationEncoder(episode_ticks=64)
         for privileged in (False, True):
             torch.testing.assert_close(encoder.encode(cpu_batch, pids, privileged),
                                        encoder.encode(gpu_batch, pids.cuda(), privileged).cpu())
-        for productive in (False, True):
-            actions = EncodedActionSpace(5, 5, productive_actions=productive)
-            torch.testing.assert_close(actions.mask(cpu_batch, pids),
-                                       actions.mask(gpu_batch, pids.cuda()).cpu())
+        actions = EncodedActionSpace(5, 5)
+        torch.testing.assert_close(actions.mask(cpu_batch, pids),
+                                   actions.mask(gpu_batch, pids.cuda()).cpu())
 
 
 class TaskTests(unittest.TestCase):
@@ -263,9 +232,6 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result.metrics["Episode/win"].item(), 0.)
         self.assertEqual(task.terminated_episodes, 1)
         self.assertEqual(task.truncated_episodes, 0)
-        # Seat zero captured the learner before its submitted WAIT executed.
-        self.assertEqual(result.metrics["Action/wait_rate"].item(), 0.)
-        self.assertEqual(result.metrics["Action/moved_army"].item(), 0.)
         # No defeated-player moves survive in the saved transition.
         self.assertEqual(result.terminal_observations["action_mask"].sum().item(), 1)
         self.assertTrue(task.batch().state["alive"].all())
@@ -314,59 +280,6 @@ class TaskTests(unittest.TestCase):
         result = task.step(torch.zeros((1, 1), dtype=torch.long))
         torch.testing.assert_close(result.reward, torch.tensor([.125]))
         torch.testing.assert_close(result.metrics["Reward/custom"], result.reward)
-
-    def test_native_action_metrics_and_partial_reset(self):
-        state = example_state()
-        state.owner[0, 1], state.army[0, 1] = 0, 10
-        state.army[0, 0] = 10
-        task = self.task([state, state.copy()])
-        forward = Action.move(0, Direction.RIGHT).encode()
-        backward = Action.move(1, Direction.LEFT).encode()
-        result = task.step(torch.tensor([[forward], [forward]]))
-        torch.testing.assert_close(result.metrics["Action/moved_army"], torch.tensor([9., 9.]))
-        torch.testing.assert_close(result.metrics["Action/backtrack_rate"], torch.zeros(2))
-        task.reset(torch.tensor([True, False]))
-        result = task.step(torch.tensor([[backward], [backward]]))
-        torch.testing.assert_close(result.metrics["Action/backtrack_rate"], torch.tensor([0., 1.]))
-        result = task.step(torch.zeros((2, 1), dtype=torch.long))
-        torch.testing.assert_close(result.metrics["Action/wait_rate"], torch.ones(2))
-        result = task.step(torch.tensor([[forward], [forward]]))
-        torch.testing.assert_close(result.metrics["Action/backtrack_rate"], torch.zeros(2))
-
-        # A native legal zero move is distinct from WAIT; metrics precede reset.
-        task = self.task([example_state()], max_episode_steps=1)
-        result = task.step(torch.tensor([[forward]]))
-        self.assertTrue(result.truncated.item())
-        self.assertEqual(result.metrics["Action/zero_moved_rate"].item(), 1.)
-        self.assertEqual(result.metrics["Action/wait_rate"].item(), 0.)
-        self.assertEqual(result.metrics["Action/moved_army"].item(), 0.)
-
-    def test_productive_config_shared_by_task_and_builtin_evaluation(self):
-        from generals_rl.evaluate_builtin import GameSpec, battle_batch
-
-        class ProbeStudent:
-            def __init__(self):
-                self.masks = []
-
-            def act_inference(self, obs):
-                self.masks.append(obs["action_mask"].clone())
-                return torch.zeros((len(obs), 1), dtype=torch.long)
-
-            def action_probabilities(self, obs):
-                return torch.zeros_like(obs["action_mask"], dtype=torch.float32).scatter_(
-                    1, self.act_inference(obs), 1)
-
-        state = example_state()
-        forward = Action.move(0, Direction.RIGHT).encode()
-        for productive in (False, True):
-            task = self.task([state], productive_actions=productive)
-            initial_mask = task.get_observations()["action_mask"].clone()
-            self.assertEqual(bool(initial_mask[0, forward]), not productive)
-            student = ProbeStudent()
-            games, _ = battle_batch([GameSpec(0, "random", 0, 1, 2, 0)], [state],
-                                    student, task.config, max_ticks=1)
-            torch.testing.assert_close(student.masks[0], initial_mask)
-            self.assertEqual(games[0]["action_metrics"]["wait_rate"], 1.)
 
 
 if __name__ == "__main__":

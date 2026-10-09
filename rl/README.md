@@ -7,7 +7,7 @@
 在仓库根目录激活 generals-rl 环境，安装本地包：
 
 ```bash
-python -m pip install -e ./env -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
+python -m pip install -e ./env -e ./baselines -e ./arena -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
 python -m generals_rl.train --config rl/configs/v32-opt.json --output outputs/current
 ```
 

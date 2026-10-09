@@ -29,20 +29,19 @@
 在仓库根目录安装到现有 conda 环境：
 
 ```bash
-conda run -n generals-rl python -m pip install -e ./env --no-deps --no-build-isolation
+conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
 `--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
 
-不安装包时，从仓库根目录进入源码目录运行，Windows/Linux 均适用：
+不安装包时，可在仓库根目录设置源码路径运行（Windows 的路径分隔符用 `;`）：
 
 ```bash
-cd env/src
-conda run -n generals-rl python -m generals play --players 4 --seed 42
+PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-也可在 Linux 仓库根目录使用 `PYTHONPATH=env/src conda run -n generals-rl python -m generals ...`。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。
+也可在 Linux 仓库根目录使用 `PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals ...`。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。
 
 ### 常用命令
 
@@ -124,23 +123,24 @@ GUI 使用 Tk、参考引擎和 `Runner`，支持一个人类对抗其余 AI，�
 env/
   src/generals/
     api.py / vector.py       统一创建入口与 VecEnv
-    protocol/                配置、动作、数组字段、BatchStep/VectorBackend
+    protocol/                配置、动作、Controller、数组字段、BatchStep/VectorBackend
     core/                    独立参考规则、状态、地图、观测、路径、记录
       batch.py               CPU/GPU 共用的冷初始化和状态转换
     backends/cpu/            C++/OpenMP 单 tick 执行、NumPy/ctypes 缓冲区
     backends/gpu/            CUDA 单 tick 内核、Torch 状态与原生启动桥
-    controllers/             四种 AI、人类队列、Controller 协议
+    controllers/             人类队列及按需加载 baseline 的交互工厂
     runtime/                 Runner 与 PlaySession
     gui/                     Tk 展示与输入
     benchmarks/              workload、step 计时、CPU/CUDA profiling
   benchmarks/                benchmark_step.py、profile_step.py 两个入口
   tests/                     规则、设备、接口、GUI 和工具测试
-rl/                          后续算法、模型、训练与模型专用特征
+baselines/                   独立的手写策略包 generals_baselines
+rl/                          算法、模型、训练与模型专用特征
 outputs/                     运行结果与本地历史归档
 doc/README.md                本文，统一文档入口
 ```
 
-依赖方向是 `rl → generals`；环境不反向导入训练代码。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
+依赖方向是 `baselines → generals`、`rl → generals + baselines`；环境不反向导入训练代码。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
 
 CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部仍按玩家顺序行动。增量维护统计及城市/主城增长索引，周期性全图增长、继承、重置和缓存重建保留必要扫描。
 
@@ -256,7 +256,7 @@ controllers = make_controllers(["aggressive", "expansion", "defensive", "random"
 summary = Runner(state, controllers, seed=42, visibility="local", max_ticks=20000).run()
 ```
 
-外部控制器实现 `generals.controllers.base.Controller` 的 `reset/act/on_result` 协议。`Runner` 不隐式重置调用者传入的控制器；新局创建新状态和控制器。更低层的 `CoreEngine` 在 `generals.core.engine`，支持 `step(actions)` 或 `begin_tick → next_player/observe/apply_action → finish_tick`。
+外部控制器实现 `generals.protocol.controller.Controller` 的 `reset/act/on_result` 协议。`Runner` 不隐式重置调用者传入的控制器；新局创建新状态和控制器。更低层的 `CoreEngine` 在 `generals.core.engine`，支持 `step(actions)` 或 `begin_tick → next_player/observe/apply_action → finish_tick`。
 
 <a id="benchmark"></a>
 ## 7. 逐 step benchmark 与 profiling

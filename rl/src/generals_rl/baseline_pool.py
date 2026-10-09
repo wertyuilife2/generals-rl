@@ -6,7 +6,7 @@ import os
 import time
 import traceback
 
-from generals.controllers import AI_KINDS, make_controllers
+from generals_baselines import AI_KINDS, make_controllers
 from generals.core.observation import Observation
 from generals.core.state import Action, MoveResult
 

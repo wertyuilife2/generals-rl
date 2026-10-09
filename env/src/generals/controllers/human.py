@@ -6,7 +6,7 @@ from collections import deque
 
 from generals.core.observation import Observation
 from generals.core.state import Action, Direction, MoveMode, MoveResult, Terrain
-from generals.controllers.base import adjacent, direction_between
+from generals.core.grid import adjacent, direction_between
 
 
 class HumanController:
