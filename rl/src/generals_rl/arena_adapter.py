@@ -21,12 +21,11 @@ class CTSController:
         config_path = Path(config_path) if config_path else self.checkpoint.with_name("run_config.json")
         self.config = json.loads(config_path.read_text())
         self.task = task_config(self.config["task"])
-        if self.task.players != 2:
-            raise ValueError("arena CTS checkpoints must be trained for two players")
         self.device = torch.device(device)
         self.encoder = LocalObservationEncoder(self.task.max_episode_steps)
         self.action_space = EncodedActionSpace(self.task.width, self.task.height)
-        example = observe(generate_map(MapConfig(self.task.width, self.task.height, 2), seed=0), 0)
+        example = observe(generate_map(MapConfig(self.task.width, self.task.height, self.task.players,
+                                                self.task.mountain_density, self.task.city_density), seed=0), 0)
         batch = GameBatch.from_observation(example, self.device)
         seats = torch.zeros(1, dtype=torch.long, device=self.device)
         history = ObservationHistory(self.task.history_length)
@@ -46,7 +45,7 @@ class CTSController:
             raise ValueError("CTS student evaluation requires local visibility")
 
     def reset(self, player_id, seed):
-        if player_id not in (0, 1):
+        if type(player_id) is not int or not 0 <= player_id < self.task.players:
             raise ValueError("invalid CTS player seat")
         self.player_id = player_id
         self.history = ObservationHistory(self.task.history_length)
@@ -55,8 +54,8 @@ class CTSController:
     def act(self, observation):
         if observation.player_id != self.player_id:
             raise ValueError("observation belongs to another player")
-        if observation.visibility != "local" or (observation.width, observation.height) != (
-                self.task.width, self.task.height):
+        if observation.visibility != "local" or (observation.width, observation.height, len(observation.alive)) != (
+                self.task.width, self.task.height, self.task.players):
             raise ValueError("observation does not match the CTS local input contract")
         if observation.terminated or not observation.alive[self.player_id]:
             return Action.wait()

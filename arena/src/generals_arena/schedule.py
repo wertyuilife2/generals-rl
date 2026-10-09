@@ -1,4 +1,4 @@
-"""Reproducible round robins with shared maps and both seat assignments."""
+"""Reproducible group round robins with shared maps and cyclic seat rotations."""
 from dataclasses import asdict, dataclass
 from itertools import combinations
 
@@ -16,10 +16,10 @@ def paired_seeds(seed, map_index):
 @dataclass(frozen=True)
 class MatchSpec:
     game_id: str
-    entrant_ids: tuple[str, str]
+    entrant_ids: tuple[str, ...]
     map_index: int
     map_seed: int
-    controller_seeds: tuple[int, int]
+    controller_seeds: tuple[int, ...]
 
     def to_dict(self):
         result = asdict(self)
@@ -28,17 +28,32 @@ class MatchSpec:
         return result
 
 
-def make_schedule(entrant_ids, *, rules_id, maps_per_pair=50, seed=1000042):
-    integer("maps_per_pair", maps_per_pair, 1)
+def map_count(settings):
+    """Read the group budget, accepting the original pair-budget spelling."""
+    if "maps_per_group" in settings and "maps_per_pair" in settings:
+        raise ValueError("specify maps_per_group or maps_per_pair, not both")
+    value = settings.get("maps_per_group", settings.get("maps_per_pair", 50))
+    return integer("maps_per_group", value, 1)
+
+
+def make_schedule(entrant_ids, *, rules_id, players=2, maps_per_group=None,
+                  maps_per_pair=None, seed=1000042):
+    settings = {name: value for name, value in (("maps_per_group", maps_per_group),
+                                               ("maps_per_pair", maps_per_pair)) if value is not None}
+    count = map_count(settings)
+    integer("players", players, 2)
+    if players > 8:
+        raise ValueError("arena supports at most eight players per match")
     integer("seed", seed)
     ids = sorted(entrant_ids)
-    if len(ids) < 2 or len(set(ids)) != len(ids):
-        raise ValueError("a tournament needs at least two distinct entrants")
+    if len(ids) < players or len(set(ids)) != len(ids):
+        raise ValueError("a tournament needs at least players distinct entrants")
     schedule = []
-    for index in range(maps_per_pair):
+    for index in range(count):
         map_seed, _ = paired_seeds(seed, index)
-        for pair in combinations(ids, 2):
-            for seats in (pair, pair[::-1]):
+        for group in combinations(ids, players):
+            for rotation in range(players):
+                seats = group[rotation:] + group[:rotation]
                 seeds = tuple(int(np.random.SeedSequence(
                     [seed, index, int(digest(entrant)[:16], 16)]).generate_state(1, dtype=np.uint64)[0])
                               for entrant in seats)

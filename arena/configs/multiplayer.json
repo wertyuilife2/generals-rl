@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "map": {"width": 9, "height": 9, "players": 4, "mountain_density": 0.1, "city_density": 0.05},
+    "max_ticks": 2000,
+    "visibility": "local",
+    "seed": 1000042
+  },
+  "maps_per_group": 10,
+  "elo": {"initial": 1500, "k_factor": 32, "scale": 400},
+  "entrants": [
+    {"name": "aggressive", "kind": "baseline", "policy": "aggressive"},
+    {"name": "expansion", "kind": "baseline", "policy": "expansion"},
+    {"name": "defensive", "kind": "baseline", "policy": "defensive"},
+    {"name": "random-heuristic", "kind": "baseline", "policy": "random"}
+  ]
+}

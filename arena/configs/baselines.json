@@ -5,7 +5,7 @@
     "visibility": "local",
     "seed": 1000042
   },
-  "maps_per_pair": 10,
+  "maps_per_group": 10,
   "elo": {"initial": 1500, "k_factor": 32, "scale": 400},
   "entrants": [
     {"name": "aggressive", "kind": "baseline", "policy": "aggressive"},

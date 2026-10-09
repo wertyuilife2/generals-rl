@@ -33,11 +33,11 @@ def full_batch(state):
                      width, height)
 
 
-def make_checkpoint(directory, seed=7, filename="checkpoint.pt"):
-    config = {"task": asdict(TaskConfig(width=3, height=3, num_envs=4, max_episode_steps=32,
+def make_checkpoint(directory, seed=7, filename="checkpoint.pt", players=2):
+    config = {"task": asdict(TaskConfig(width=3, height=3, players=players, num_envs=4, max_episode_steps=32,
                                         history_length=2, mountain_density=0, city_density=0)),
               "runner": runner_config(hidden_dim=16, expert_num=2), "torch_threads": 1}
-    state = generate_map(MapConfig(3, 3, 2, 0, 0), 0)
+    state = generate_map(MapConfig(3, 3, players, 0, 0), 0)
     batch, seats = full_batch(state), torch.tensor([0])
     encoder, history = LocalObservationEncoder(32), ObservationHistory(2)
     history.reset(encoder.encode(batch, seats))
@@ -61,19 +61,19 @@ class ArenaAdapterTests(unittest.TestCase):
 
     def test_observation_only_features_and_masks_equal_training_inputs(self):
         encoder = LocalObservationEncoder(512)
-        for width, height in ((3, 3), (9, 7)):
+        for width, height, players in ((3, 3, 2), (9, 7, 2), (9, 7, 4), (9, 7, 8)):
             action_space = EncodedActionSpace(width, height)
-            state = generate_map(MapConfig(width, height, 2, 0.1, 0.1), seed=25)
+            state = generate_map(MapConfig(width, height, players, 0.1, 0.1), seed=25)
             for tick in range(4):
                 full = full_batch(state)
-                for seat in (0, 1):
+                for seat in range(players):
                     ids = torch.tensor([seat])
                     restricted = GameBatch.from_observation(observe(state, seat), "cpu")
                     actual = encoder.encode(restricted, ids)
                     torch.testing.assert_close(actual, encoder.encode(full, ids), rtol=0, atol=0)
                     torch.testing.assert_close(action_space.mask(restricted, ids), action_space.mask(full, ids))
                     self.assertTrue(torch.isfinite(actual).all())
-                CoreEngine(state).step([Action.wait(), Action.wait()])
+                CoreEngine(state).step([Action.wait()] * players)
 
     def test_checkpoint_controller_resets_history_preserves_rng_and_never_receives_critic(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +140,25 @@ class ArenaAdapterTests(unittest.TestCase):
             first.write_bytes(second.read_bytes())
             with self.assertRaisesRegex(ValueError, "existing entrants"):
                 run_tournament(config, root / "arena", resume=True)
+
+    def test_four_and_eight_player_checkpoints_compete_from_every_seat(self):
+        for players in (4, 8):
+            with self.subTest(players=players), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                checkpoint, _ = make_checkpoint(root, players=players)
+                config = {"rules": {"map": {"width": 3, "height": 3, "players": players,
+                                            "mountain_density": 0, "city_density": 0}, "max_ticks": 4},
+                          "maps_per_group": 1,
+                          "entrants": [{"name": "cts", "kind": "rl", "checkpoint": str(checkpoint)}] +
+                                      [{"name": f"random-{index}", "kind": "baseline", "policy": "random"}
+                                       for index in range(players - 1)]}
+                result = run_tournament(config, root / "arena")
+                self.assertEqual(result["completed_games"], players)
+                self.assertTrue(all(row["games"] == players for row in result["ranking"]))
+                self.assertEqual(result, rebuild(root / "arena"))
+                controller = CTSController(checkpoint=checkpoint)
+                with self.assertRaises(ValueError):
+                    controller.validate_rules(MapConfig(3, 3, 2, 0, 0), "local")
 
 
 if __name__ == "__main__":

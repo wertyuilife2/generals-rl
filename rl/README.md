@@ -122,4 +122,5 @@ Vendor 回归对照旧缓存流程，验证 Normal/Categorical 的损失、参�
 
 不同 checkpoint、baseline 和其他算法的统一 Elo 比较使用顶层 [arena](../arena/README.md)。
 在参赛配置中设置 `kind: "rl"` 和 checkpoint 路径；每个版本使用独立名称。
+Arena 支持 2–8 人对战，参赛 checkpoint 的训练人数必须与比赛人数一致。
 Arena 的参考比赛可在 macOS 上执行，无需 Linux 原生 CPU 后端。

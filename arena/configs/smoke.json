@@ -4,7 +4,7 @@
     "max_ticks": 96,
     "seed": 42
   },
-  "maps_per_pair": 2,
+  "maps_per_group": 2,
   "entrants": [
     {"name": "aggressive", "kind": "baseline", "policy": "aggressive"},
     {"name": "expansion", "kind": "baseline", "policy": "expansion"},
