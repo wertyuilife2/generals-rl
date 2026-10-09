@@ -10,7 +10,7 @@ CPU/GPU 使用同一组 observation、action 和 reward；训练、对手池、�
 ```bash
 python -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -r rl/requirements-train.txt
-.venv/bin/python -m pip install -e ./env -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
+.venv/bin/python -m pip install -e ./env -e ./baselines -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
 ```
 
 GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `GENERALS_NVCC` 指定编译器路径。

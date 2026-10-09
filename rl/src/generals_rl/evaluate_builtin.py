@@ -3,7 +3,7 @@
 Both players choose from LOCAL observations before growth, then native CPUEnv
 executes the joint tick in absolute seat order. This matches training; the GUI's
 Runner instead observes/chooses separately after growth at each player's turn.
-The original controllers from generals.controllers.make_controllers are used.
+The original controllers from generals_baselines.make_controllers are used.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import torch
 from tensordict import TensorDict
 
 from generals import MapConfig, VecEnv
-from generals.controllers import AI_KINDS, make_controllers
+from generals_baselines import AI_KINDS, make_controllers
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.state import Action, MoveResult
@@ -300,7 +300,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
     totals["total_seconds_including_setup"] = perf_counter() - started
     report = {
         "checkpoint": str(checkpoint), "checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
-        "policy": "student_local", "opponent_implementation": "generals.controllers.make_controllers",
+        "policy": "student_local", "opponent_implementation": "generals_baselines.make_controllers",
         "decision_timing": "joint_pre_growth_then_absolute_seat_order",
         "training_opponent": training_task.opponent,
         "seed": seed, "maps_per_ai": maps_per_ai, "scheduled_games": len(schedule),

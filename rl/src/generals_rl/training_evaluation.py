@@ -15,7 +15,7 @@ import subprocess
 import sys
 from time import perf_counter
 
-from generals.controllers import AI_KINDS
+from generals_baselines import AI_KINDS
 
 
 @dataclass(frozen=True)

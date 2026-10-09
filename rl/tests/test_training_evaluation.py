@@ -14,7 +14,7 @@ import torch
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch.utils.tensorboard import SummaryWriter
 
-from generals.controllers import AI_KINDS
+from generals_baselines import AI_KINDS
 from generals_rl.train import train
 from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from rl_test_utils import assert_nested_equal, small_training_config

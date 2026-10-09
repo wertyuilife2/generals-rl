@@ -5,11 +5,12 @@
 从仓库根目录安装和启动：
 
 ```bash
-conda run -n generals-rl python -m pip install -e ./env --no-deps --no-build-isolation
+conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-不安装时，从仓库根目录进入 `env/src` 再运行同一模块命令。
+不安装时，在仓库根目录使用 `PYTHONPATH=env/src:baselines/src python -m generals ...`。
+纯规则与批量环境只需要 `generals-env`；AI 游玩和模拟还需要 `generals-baselines`。
 
 规则、操作、依赖和开发说明统一维护在 [doc/README.md](../doc/README.md)：
 

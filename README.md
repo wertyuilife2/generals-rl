@@ -1,11 +1,11 @@
 # Generals 游戏环境
 
-2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，后续强化学习代码独立放在 `rl/`。
+2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`。
 
 从仓库根目录，在已有 `generals-rl` conda 环境中安装和启动：
 
 ```bash
-conda run -n generals-rl python -m pip install -e ./env --no-deps --no-build-isolation
+conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
@@ -29,3 +29,5 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
 
 强化学习 baseline 已在 `rl/` 实现：直接复制指定版本的 rsl_rl，以最小补丁支持离散 MoE CTS，解耦 MDP 的观测、动作、奖励与对手，并提供后续 MCTS 的整 tick 分支模拟接口。安装、训练、补丁说明和测试见 [RL 使用说明](rl/README.md)。
+
+手写策略的接口、安装和测试见 [Baseline 使用说明](baselines/README.md)。

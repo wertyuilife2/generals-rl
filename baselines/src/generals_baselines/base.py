@@ -1,4 +1,4 @@
-"""Controller protocol and bounded, observation-only heuristic planning.
+"""Bounded, observation-only heuristic planning.
 
 The planners deliberately receive no engine or map layout.  Their terrain map
 contains only facts seen by that player; unexplored cells are optimistic paths
@@ -8,40 +8,16 @@ that are rechecked as the army approaches them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from generals.core.grid import adjacent, direction_between
 from generals.core.observation import Observation
 from generals.core.pathfinding import shortest_path
 from generals.core.state import (
     EMPTY, UNKNOWN, UNKNOWN_OWNER, Action, Direction,
     MoveMode, MoveResult, Structure, Terrain,
 )
-
-
-@runtime_checkable
-class Controller(Protocol):
-    def reset(self, player_id: int, seed: int) -> None: ...
-    def act(self, observation: Observation) -> Action: ...
-    def on_result(self, result: MoveResult) -> None: ...
-
-
-def adjacent(cell: int, direction: int, height: int, width: int) -> int | None:
-    """Return a four-neighbor without allowing row wraparound."""
-    if not 0 <= cell < height * width or not 0 <= direction < 4:
-        return None
-    y, x = divmod(int(cell), width)
-    dy, dx = ((-1, 0), (0, 1), (1, 0), (0, -1))[int(direction)]
-    y, x = y + dy, x + dx
-    return y * width + x if 0 <= y < height and 0 <= x < width else None
-
-
-def direction_between(source: int, target: int, height: int, width: int) -> int | None:
-    for direction in range(4):
-        if adjacent(source, direction, height, width) == target:
-            return direction
-    return None
 
 
 def movable_army(army: int, mode: MoveMode = MoveMode.ALL_BUT_ONE) -> int:

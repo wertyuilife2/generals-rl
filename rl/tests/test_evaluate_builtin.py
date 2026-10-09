@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from generals import VecEnv
-from generals.controllers import AI_KINDS, make_controllers
+from generals_baselines import AI_KINDS, make_controllers
 from generals.core.engine import CoreEngine
 from generals.core.state import Action, Direction, GameState, MapLayout, MoveResult
 from generals_rl.evaluate_builtin import (

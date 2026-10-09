@@ -3,7 +3,7 @@
 import numpy as np
 
 from generals.core.state import EMPTY, Action, Direction, MoveMode, Structure
-from generals.controllers.base import BaseAI, movable_army
+from generals_baselines.base import BaseAI, movable_army
 
 
 class RandomAI(BaseAI):

@@ -1,7 +1,7 @@
 """Expansion-oriented baseline with opportunistic city capture."""
 
 from generals.core.state import EMPTY, MoveMode
-from generals.controllers.base import BaseAI
+from generals_baselines.base import BaseAI
 
 
 class ExpansionAI(BaseAI):

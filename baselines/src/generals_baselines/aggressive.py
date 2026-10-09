@@ -1,6 +1,6 @@
 """Attack-oriented baseline."""
 
-from generals.controllers.base import BaseAI
+from generals_baselines.base import BaseAI
 
 
 class AggressiveAI(BaseAI):
