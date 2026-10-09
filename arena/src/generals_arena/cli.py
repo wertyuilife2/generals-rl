@@ -17,6 +17,10 @@ def league_command(args):
         print(f"League initialized: {store.directory} (random = 0 Elo)")
         return
     store = LeagueStore(args.directory)
+    if args.action == "resize":
+        ranges = store.resize_maps(args.min_side, args.max_side, args.side_cap)
+        print(f"Map ranges updated for future games: {json.dumps(ranges)}. Existing results and ratings retained.")
+        return
     if args.action == "add":
         spec = json.loads(args.entrant.read_text(encoding="utf-8"))
         entrant, job = store.add(spec, base_dir=args.entrant.resolve().parent, games=args.games)
@@ -64,6 +68,11 @@ def main(argv=None):
     ranking.add_argument("--json", action="store_true")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
+    resize = actions.add_parser("resize", help="revise future map sizes, preserving accounts and recorded matches (stop server/workers first)")
+    resize.add_argument("directory", type=Path)
+    resize.add_argument("--min-side", type=int, required=True)
+    resize.add_argument("--max-side", type=int, required=True)
+    resize.add_argument("--side-cap", type=int, required=True)
     web = commands.add_parser("serve", help="serve rankings, verified replays, human games, and the job queue")
     web.add_argument("directory", type=Path)
     web.add_argument("--host", default="127.0.0.1")

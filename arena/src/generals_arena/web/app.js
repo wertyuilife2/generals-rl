@@ -122,6 +122,7 @@ async function restorePlayer() {
 }
 function showDialog(mode) {
   pauseReplay(); dialogMode = mode;
+  $('board-dialog').classList.toggle('human-game', mode === 'live');
   $('board-error').textContent = '';
   $('live-controls').hidden = mode !== 'live'; $('replay-controls').hidden = mode !== 'replay';
   $('board-mode').textContent = mode === 'live' ? 'LIVE / RANKED' : 'MATCH ARCHIVE';

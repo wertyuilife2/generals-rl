@@ -12,8 +12,9 @@ from ..util import digest, file_digest, integer, source_digest
 @dataclass(frozen=True)
 class LeagueConfig:
     player_counts: tuple = (2, 3, 4, 5, 6, 7, 8)
-    min_side: int = 18
-    max_side: int = 23
+    min_side: int = 15
+    max_side: int = 20
+    side_cap: int = 35
     mountain_min: float = 0.15
     mountain_max: float = 0.22
     city_min: float = 0.02
@@ -36,6 +37,9 @@ class LeagueConfig:
         integer("max_side", self.max_side, self.min_side)
         if self.max_side > 64:
             raise ValueError("max_side must be <= 64 (before player-count scaling)")
+        integer("side_cap", self.side_cap, self.max_side)
+        if self.side_cap > 128:
+            raise ValueError("side_cap must be <= 128")
         integer("max_ticks", self.max_ticks, 1)
         integer("seed", self.seed)
         for low, high, maximum in ((self.mountain_min, self.mountain_max, .4),
@@ -49,7 +53,8 @@ class LeagueConfig:
 
     def side_range(self, players):
         factor = math.sqrt(players / 2)
-        return math.ceil(self.min_side * factor), math.ceil(self.max_side * factor)
+        return (min(self.side_cap, math.ceil(self.min_side * factor)),
+                min(self.side_cap, math.ceil(self.max_side * factor)))
 
     def sample_map(self, players, seed):
         if players not in self.player_counts:
@@ -63,10 +68,11 @@ class LeagueConfig:
 
     def manifest(self):
         # Freeze simulation, distribution, scheduling, and scoring, not presentation code.
-        files = ("config.py", "game.py", "rating.py", "scheduler.py")
+        files = ("config.py", "game.py", "rating.py", "scheduler.py", "views.py")
         value = {"schema": 3, "config": asdict(self),
                  "engine_sha256": source_digest("generals"),
                  "implementation": {name: file_digest(Path(__file__).with_name(name)) for name in files},
                  "rating": "unified-anchored-rank-performance-v3",
+                 "human_observation": "local-with-indistinguishable-fog-obstacles-v1",
                  "decision_timing": "joint_pre_growth_then_absolute_seat_order"}
         return {**value, "rules_id": digest(value)}

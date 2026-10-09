@@ -17,6 +17,7 @@ from ..registry import load_controller
 from ..util import integer, source_digest
 from .game import RecordedGame
 from .scheduler import make_block
+from .views import human_board
 
 
 @contextmanager
@@ -224,7 +225,7 @@ class LiveArena:
     def _view(self, game_id, value):
         game = value["game"]
         if value["board"] is None:
-            value["board"] = game.view(value["seat"])
+            value["board"] = human_board(game.state, value["seat"])
         if "entrants" not in value:
             names = self.store.entrants()
             value["entrants"] = [{"name": names[key]["name"], "entrant_id": key} for key in game.plan["entrant_ids"]]

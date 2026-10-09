@@ -1,5 +1,6 @@
 """SQLite transactions keep results, compressed traces, and ratings consistent."""
 from contextlib import contextmanager
+from dataclasses import replace
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -89,6 +90,40 @@ class LeagueStore:
             # JSON arrays vs tuples are normalized by canonical serialization.
             if canonical(self.config.manifest()) != canonical(self.manifest):
                 raise ValueError("league rules/source changed; use its original code or initialize a new league")
+
+    def resize_maps(self, min_side, max_side, side_cap):
+        """Explicit map revision; preserve accounts, results, and rating history.
+
+        Only distribution/presentation may change here. A different engine,
+        scoring algorithm or scheduler still requires its own league.
+        """
+        from .service import process_lock
+        config = replace(self.config, min_side=min_side, max_side=max_side, side_cap=side_cap)
+        manifest = config.manifest()
+        previous = self.manifest
+        for key in ("schema", "engine_sha256", "rating", "decision_timing"):
+            if previous.get(key) != manifest[key]:
+                raise ValueError("map resize cannot change the engine or rating rules")
+        for name in ("game.py", "rating.py", "scheduler.py"):
+            if previous["implementation"].get(name) != manifest["implementation"][name]:
+                raise ValueError("map resize cannot change simulation, scoring or scheduling code")
+        with process_lock(self, ".server.lock"), process_lock(self, ".worker.lock"):
+            with self.connect(write=True) as db:
+                current = json.loads(db.execute("SELECT value FROM meta WHERE key='manifest'").fetchone()[0])
+                if canonical(current) != canonical(previous):
+                    raise ValueError("league changed; reopen it before resizing")
+                if db.execute("SELECT 1 FROM games WHERE status IN ('live','pending') LIMIT 1").fetchone():
+                    raise ValueError("finish active and pending games before resizing maps")
+                if canonical(previous) != canonical(manifest):
+                    row = db.execute("SELECT value FROM meta WHERE key='rules_history'").fetchone()
+                    history = json.loads(row[0]) if row else []
+                    history.append({"manifest": previous, "replaced_at": time.time(),
+                                    "next_sequence": db.execute("SELECT COALESCE(MAX(sequence),-1)+1 FROM games").fetchone()[0],
+                                    "reason": "map bounds and human fog presentation updated"})
+                    db.execute("INSERT OR REPLACE INTO meta VALUES ('rules_history',?)", (canonical(history),))
+                    db.execute("UPDATE meta SET value=? WHERE key='manifest'", (canonical(manifest),))
+        self.config, self.manifest = config, manifest
+        return {p: config.side_range(p) for p in config.player_counts}
 
     def entrants(self):
         with self.connect() as db:
