@@ -36,6 +36,11 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 
 ```bash
 python -m pip install -e ./env -e ./baselines -e ./arena
-generals-arena run --config arena/configs/smoke.json --output outputs/arena/smoke
-generals-arena leaderboard outputs/arena/smoke
+generals-arena league init outputs/arena/main --config arena/configs/league.json
+generals-arena league add outputs/arena/main --entrant arena/configs/aggressive.json --games 1000 --queue-only
+generals-arena serve outputs/arena/main --port 8000
 ```
+
+打开 http://127.0.0.1:8000 查看随机地图联赛的榜单、录像，或作为人类玩家参赛。
+新算法默认增量评测 1000 局，random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
+当前不评测固定尺寸的 RL 模型；RL 训练部分保持独立。

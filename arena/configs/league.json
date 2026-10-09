@@ -1,0 +1,13 @@
+{
+  "player_counts": [2, 4, 8],
+  "min_side": 18,
+  "max_side": 23,
+  "mountain_min": 0.15,
+  "mountain_max": 0.22,
+  "city_min": 0.02,
+  "city_max": 0.035,
+  "max_ticks": 3000,
+  "seed": 1000042,
+  "k_factor": 32,
+  "tick_seconds": 0.5
+}
