@@ -10,7 +10,7 @@ CPU/GPU 使用同一组 observation、action 和 reward；训练、对手池、�
 ```bash
 python -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -r rl/requirements-train.txt
-.venv/bin/python -m pip install -e ./env -e ./baselines -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
+.venv/bin/python -m pip install -e ./env -e ./baselines -e ./arena -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
 ```
 
 GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `GENERALS_NVCC` 指定编译器路径。
@@ -63,6 +63,7 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 | `mdp/actions.py` | 动作编码、合法 mask |
 | `mdp/rewards.py` | 奖励项与权重 |
 | `task.py` | 联合 tick、终止/截断、重置、座位轮换；支持注入上述组件和对手 |
+| `arena_adapter.py`、`inference.py` | 局部 student 推理与独立 arena 的 Controller 适配 |
 | `cts.py` | RSL VecEnv/TensorDict 适配与算法配置 |
 | `opponents.py`、`self_play.py` | 冻结历史 student、采样及局内对手生命周期 |
 | `self_play_training.py` | CTS 模型工厂和快照发布 |
@@ -118,3 +119,7 @@ CPU 默认 4 minibatch，GPU 配置 64；两阶段复用同一批采样数据及
 真实两阶段更新、精确采样预算、固定赛程评估与子进程 RNG 隔离。
 Vendor 回归对照旧缓存流程，验证 Normal/Categorical 的损失、参数、两个 Adam 状态和 RNG 一致。
 基线支持单设备训练。
+
+不同 checkpoint、baseline 和其他算法的统一 Elo 比较使用顶层 [arena](../arena/README.md)。
+在参赛配置中设置 `kind: "rl"` 和 checkpoint 路径；每个版本使用独立名称。
+Arena 的参考比赛可在 macOS 上执行，无需 Linux 原生 CPU 后端。

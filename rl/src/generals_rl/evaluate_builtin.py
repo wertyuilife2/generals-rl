@@ -8,27 +8,26 @@ The original controllers from generals_baselines.make_controllers are used.
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
-import math
 from pathlib import Path
 from time import perf_counter
 
 import numpy as np
 import torch
-from tensordict import TensorDict
 
 from generals import MapConfig, VecEnv
 from generals_baselines import AI_KINDS, make_controllers
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.state import Action, MoveResult
-from rsl_rl.modules import ActorCriticMoECTS
+from generals_arena.metrics import aggregate_games, wilson_interval
+from generals_arena.schedule import paired_seeds
 
 from .mdp import EncodedActionSpace, GameBatch, LocalObservationEncoder, ObservationHistory
 from .config import seed_everything, task_config
+from .inference import local_inputs as _local_inputs, load_student as _load_student
 
 
 @dataclass(frozen=True)
@@ -51,8 +50,7 @@ def make_schedule(*, maps_per_ai=50, seed=1000042, opponents=AI_KINDS):
     schedule = []
     for kind in opponents:
         for index in range(maps_per_ai):
-            map_seed = int(np.random.SeedSequence([seed, index, 0]).generate_state(1, dtype=np.uint64)[0])
-            controller_seed = int(np.random.SeedSequence([seed, index, 1]).generate_state(1, dtype=np.uint64)[0])
+            map_seed, controller_seed = paired_seeds(seed, index)
             for seat in (0, 1):
                 schedule.append(GameSpec(len(schedule), kind, index, map_seed, controller_seed, seat))
     return schedule
@@ -69,66 +67,6 @@ def decode_move(row, player_id, action):
         moved=int(row[4]), captured=bool(row[5]),
         eliminated=None if row[6] < 0 else int(row[6]), target_owned=bool(row[7]),
     )
-
-
-def wilson_interval(wins, games):
-    """Two-sided 95% Wilson interval; an empty decisive sample is undefined."""
-    if not 0 <= wins <= games:
-        raise ValueError("wins must be between zero and the number of games")
-    if games == 0:
-        return None
-    z = 1.959963984540054
-    fraction = wins / games
-    denominator = 1 + z * z / games
-    center = (fraction + z * z / (2 * games)) / denominator
-    radius = z * math.sqrt(fraction * (1 - fraction) / games + z * z / (4 * games * games)) / denominator
-    return [max(0.0, center - radius), min(1.0, center + radius)]
-
-
-def aggregate_games(games):
-    wins = sum(game["outcome"] == "win" for game in games)
-    losses = sum(game["outcome"] == "loss" for game in games)
-    draws = sum(game["outcome"] == "draw" for game in games)
-    count, decisive = len(games), wins + losses
-    return {
-        "games": count, "wins": wins, "losses": losses, "draws": draws,
-        "win_rate": wins / count if count else None,
-        "decisive_win_rate": wins / decisive if decisive else None,
-        "draw_rate": draws / count if count else None,
-        "win_rate_wilson95": wilson_interval(wins, count),
-        "decisive_win_rate_wilson95": wilson_interval(wins, decisive),
-        "mean_ticks": sum(game["ticks"] for game in games) / count if count else None,
-    }
-
-
-def _local_inputs(batch, player_ids, encoder, history, action_space):
-    # No privileged critic key is ever passed into the deployed student.
-    return TensorDict({
-        "policy": history.flattened(),
-        "single_obs": encoder.encode(batch, player_ids),
-        "action_mask": action_space.mask(batch, player_ids),
-    }, batch_size=[batch.num_envs], device=batch.device)
-
-
-def _load_student(checkpoint, config, example_obs, device):
-    policy_config = deepcopy(config["runner"]["policy"])
-    class_name = policy_config.pop("class_name")
-    if class_name not in ("ActorCriticMoECTS", "rsl_rl.modules.ActorCriticMoECTS"):
-        raise ValueError("built-in evaluation currently requires ActorCriticMoECTS")
-    if policy_config.get("action_distribution") != "categorical":
-        raise ValueError("Generals built-in evaluation requires categorical encoded actions")
-    # Construction only inspects feature dimensions. Use an all-zero placeholder
-    # for the critic shape; no true privileged map is needed to load the student.
-    shape_obs = example_obs.clone()
-    shape_obs["critic"] = torch.zeros_like(example_obs["single_obs"])
-    policy = ActorCriticMoECTS(
-        shape_obs, deepcopy(config["runner"]["obs_groups"]),
-        example_obs["action_mask"].shape[-1], **policy_config,
-    ).to(device)
-    saved = torch.load(checkpoint, weights_only=False, map_location=device)
-    policy.load_state_dict(saved["model_state_dict"])
-    policy.eval()
-    return policy
 
 
 def battle_batch(specs, states, policy, training_task, *, max_ticks=2000,

@@ -135,12 +135,13 @@ env/
   benchmarks/                benchmark_step.py、profile_step.py 两个入口
   tests/                     规则、设备、接口、GUI 和工具测试
 baselines/                   独立的手写策略包 generals_baselines
+arena/                       统一对战、版本登记、结果记录与 Elo 排名
 rl/                          算法、模型、训练与模型专用特征
 outputs/                     运行结果与本地历史归档
 doc/README.md                本文，统一文档入口
 ```
 
-依赖方向是 `baselines → generals`、`rl → generals + baselines`；环境不反向导入训练代码。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
+依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；环境不反向导入训练代码。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
 
 CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部仍按玩家顺序行动。增量维护统计及城市/主城增长索引，周期性全图增长、继承、重置和缓存重建保留必要扫描。
 
@@ -348,3 +349,5 @@ conda run -n generals-rl python -m unittest discover -s env/tests -v
 GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。本轮 163 项环境测试（含 Linux GUI 和 CUDA）通过；独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。规则覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
 
 本次清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证结论。恢复历史实现时应解压到独立目录。
+
+跨算法与模型版本的统一评测见 [Arena 使用说明](../arena/README.md)。
