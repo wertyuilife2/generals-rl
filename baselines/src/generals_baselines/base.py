@@ -8,6 +8,7 @@ that are rechecked as the army approaches them.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
@@ -18,6 +19,19 @@ from generals.core.state import (
     EMPTY, UNKNOWN, UNKNOWN_OWNER, Action, Direction,
     MoveMode, MoveResult, Structure, Terrain,
 )
+
+
+@lru_cache(maxsize=32)
+def grid_neighbors(height: int, width: int) -> np.ndarray:
+    """Geometry only: no hidden terrain or shared mutable policy state."""
+    cells = np.arange(height * width).reshape(height, width)
+    graph = np.full((height * width, 4), -1, dtype=np.intp)
+    graph[cells[1:].ravel(), 0] = cells[:-1].ravel()
+    graph[cells[:, :-1].ravel(), 1] = cells[:, 1:].ravel()
+    graph[cells[:-1].ravel(), 2] = cells[1:].ravel()
+    graph[cells[:, 1:].ravel(), 3] = cells[:, :-1].ravel()
+    graph.flags.writeable = False
+    return graph
 
 
 def movable_army(army: int, mode: MoveMode = MoveMode.ALL_BUT_ONE) -> int:
@@ -144,82 +158,68 @@ class BaseAI:
     def _candidates(self, obs: Observation) -> list[Candidate]:
         owner, army = obs.owner.ravel(), obs.army.ravel()
         memory_owner, structures = self.owner.ravel(), self.structure.ravel()
-        terrain = self.terrain.ravel()
-        sources = [int(i) for i in np.flatnonzero((owner == self.player_id) & (army > 1))]
-        if not sources:
+        terrain, remembered_army = self.terrain.ravel(), self.army.ravel()
+        sources = np.flatnonzero((owner == self.player_id) & (army > 1))
+        if not sources.size:
             return []
-        frontiers: dict[int, int] = {}
-        threats: dict[int, int] = {}
-        for cell in np.flatnonzero(owner == self.player_id):
-            neighbors = list(self._neighbors(int(cell), obs))
-            frontiers[int(cell)] = sum(memory_owner[t] != self.player_id for _, t in neighbors)
-            threats[int(cell)] = sum(max(0, int(army[t])) for _, t in neighbors if owner[t] >= 0 and owner[t] != self.player_id)
-        source_scores = [float(army[s]) * (1.0 + 0.25 * bool(frontiers[s])) for s in sources]
-        # The high-temperature source selection still favors stronger stacks;
-        # a stable sorted tail gives a hard limit on the amount of planning.
-        ordered = sorted(zip(sources, source_scores), key=lambda pair: (-pair[1], pair[0]))
-        sources = [s for s, _ in ordered[: self.max_sources]]
+        owned = np.flatnonzero(owner == self.player_id)
+        graph = grid_neighbors(obs.height, obs.width)
+        nearby = graph[owned]
+        valid = (nearby >= 0) & (terrain[nearby] != Terrain.MOUNTAIN)
+        frontiers = np.zeros(obs.size, dtype=np.int64)
+        threats = np.zeros(obs.size, dtype=np.int64)
+        frontiers[owned] = np.sum(valid & (memory_owner[nearby] != self.player_id), axis=1)
+        hostile = valid & (owner[nearby] >= 0) & (owner[nearby] != self.player_id)
+        threats[owned] = np.sum(np.where(hostile, np.maximum(army[nearby], 0), 0), axis=1)
+        source_scores = army[sources].astype(float) * (1.0 + .25 * (frontiers[sources] != 0))
+        sources = sources[np.lexsort((sources, -source_scores))[:self.max_sources]].tolist()
         if len(sources) > 1:
             chosen = softmax_choice(self.rng, [np.log1p(float(army[s])) for s in sources], self.temperature)
             sources.insert(0, sources.pop(chosen))
 
         attacks = np.flatnonzero((memory_owner >= 0) & (memory_owner != self.player_id))
         cities = np.flatnonzero((structures == Structure.CITY) & (memory_owner != self.player_id))
-        expansion = np.flatnonzero(np.isin(memory_owner, [EMPTY, UNKNOWN_OWNER]) & (terrain != Terrain.MOUNTAIN))
-        owned = np.flatnonzero(owner == self.player_id)
+        expansion = np.flatnonzero(((memory_owner == EMPTY) | (memory_owner == UNKNOWN_OWNER)) & (terrain != Terrain.MOUNTAIN))
+        ys, xs = np.divmod(np.arange(obs.size), obs.width)
         result: list[Candidate] = []
-
         for source in sources:
             sy, sx = divmod(source, obs.width)
-            distance = lambda target: abs(int(target) // obs.width - sy) + abs(int(target) % obs.width - sx)
-            local: dict[str, list[Candidate]] = {strategy: [] for strategy in self.weights}
+            distance = np.abs(ys - sy) + np.abs(xs - sx)
             for strategy in self.weights:
                 if strategy in ("attack", "capture"):
                     pool = attacks if strategy == "attack" else cities
-                    for raw_target in pool:
-                        target = int(raw_target)
-                        d = distance(target)
-                        defending = max(0, int(self.army.ravel()[target]))
-                        if int(army[source]) - d <= defending:
-                            continue
-                        value = 50.0 if structures[target] == Structure.GENERAL else (18.0 if structures[target] == Structure.CITY else 8.0)
-                        score = value / (d + 1) + min(float(army[source] - defending), 100.0) * 0.01
-                        local[strategy].append(Candidate(source, target, strategy, score))
+                    defending = np.maximum(remembered_army[pool], 0)
+                    keep = int(army[source]) - distance[pool] > defending
+                    targets, defending = pool[keep], defending[keep]
+                    values = np.where(structures[targets] == Structure.GENERAL, 50.0,
+                                      np.where(structures[targets] == Structure.CITY, 18.0, 8.0))
+                    values = values / (distance[targets] + 1) + np.minimum((army[source] - defending).astype(float), 100.0) * .01
                 elif strategy in ("explore", "expand"):
-                    # Nearest candidates bound ranking work and encourage
-                    # taking frontier cells before marching through owned land.
-                    nearest = sorted(expansion, key=lambda t: (distance(t), int(t)))[:16]
-                    for raw_target in nearest:
-                        target = int(raw_target)
-                        d = distance(target)
-                        if d >= int(army[source]):
-                            continue
-                        unknown_neighbors = sum(terrain[t] == UNKNOWN for _, t in self._neighbors(target, obs))
-                        score = (5.0 + 0.4 * unknown_neighbors) / (d + 1)
-                        local[strategy].append(Candidate(source, target, strategy, score))
-                else:  # merge / gather / fortify
-                    for raw_target in owned:
-                        target = int(raw_target)
-                        if target == source:
-                            continue
-                        d = distance(target)
-                        threat = threats[target]
-                        # Monotone merging prevents stacks from oscillating
-                        # between two similarly useful friendly squares.
-                        if strategy != "fortify" and (army[target], -target) <= (army[source], -source):
-                            continue
-                        if strategy == "fortify" and threat == 0:
-                            continue
-                        if structures[source] == Structure.GENERAL and threats[source] > int(army[source]) // 2:
-                            continue
-                        value = 3.0 + min(float(army[target]), 100) * 0.06 + frontiers[target]
-                        if threat:
-                            value += min(threat, 100) * 0.15
-                            if structures[target] == Structure.GENERAL:
-                                value += 20.0
-                        local[strategy].append(Candidate(source, target, strategy, value / (d + 1)))
-                local[strategy].sort(key=lambda c: (-c.score, c.target))
-                result.extend(local[strategy][:4])
+                    # expansion is ascending, so stable sorting also preserves
+                    # the reference planner's cell-index tie break.
+                    nearest = expansion[np.argsort(distance[expansion], kind="stable")[:16]]
+                    targets = nearest[distance[nearest] < int(army[source])]
+                    neighbors = graph[targets]
+                    unknown = np.sum((neighbors >= 0) & (terrain[neighbors] == UNKNOWN), axis=1)
+                    values = (5.0 + .4 * unknown) / (distance[targets] + 1)
+                else:
+                    if structures[source] == Structure.GENERAL and threats[source] > int(army[source]) // 2:
+                        continue
+                    keep = owned != source
+                    if strategy == "fortify":
+                        keep &= threats[owned] != 0
+                    else:
+                        keep &= (army[owned] > army[source]) | ((army[owned] == army[source]) & (owned < source))
+                    targets = owned[keep]
+                    threat = threats[targets]
+                    values = 3.0 + np.minimum(army[targets].astype(float), 100) * .06 + frontiers[targets]
+                    values += np.minimum(threat, 100) * .15
+                    values += ((threat != 0) & (structures[targets] == Structure.GENERAL)) * 20.0
+                    values /= distance[targets] + 1
+                # Only the four best candidates of a strategy are consumed.
+                # Construct objects after ranking, preserving RNG and tie order.
+                best = np.lexsort((targets, -values))[:4]
+                result.extend(Candidate(source, int(targets[i]), strategy, float(values[i])) for i in best)
         return result
 
     def _plan(self, candidate: Candidate, obs: Observation) -> list[int] | None:
