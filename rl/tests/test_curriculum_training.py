@@ -27,9 +27,17 @@ class CurriculumTrainingTests(unittest.TestCase):
         return config
 
     def test_real_rollouts_returns_and_updates_share_settings_and_resume_absolute_step(self):
+        for tick_end_iteration in (None, 4):
+            with self.subTest(tick_end_iteration=tick_end_iteration):
+                self._assert_real_rollouts_and_resume(tick_end_iteration)
+
+    def _assert_real_rollouts_and_resume(self, tick_end_iteration):
         config = self.config()
         config["curriculum"] = {"tick_decay": True, "gamma_final": .999,
                                 "gamma_end_iteration": 2}
+        if tick_end_iteration is not None:
+            config["curriculum"]["tick_end_iteration"] = tick_end_iteration
+        endpoint = 1000 if tick_end_iteration is None else tick_end_iteration
         records = []
 
         def capture(task, runner, *args, **kwargs):
@@ -64,13 +72,14 @@ class CurriculumTrainingTests(unittest.TestCase):
                     values = events.Scalars(f"Curriculum/{tag}")
                     self.assertEqual([value.step for value in values], list(steps))
                     for value in values:
+                        tick_scale = max(0., 1 - value.step / endpoint)
                         expected = {"gamma": .995 + .004 * min(value.step / 2, 1),
-                                    "tick_scale": 1 - value.step / 1000,
-                                    "tick": -.001 * (1 - value.step / 1000)}[tag]
+                                    "tick_scale": tick_scale,
+                                    "tick": -.001 * tick_scale}[tag]
                         self.assertAlmostEqual(value.value, expected, places=7)
         for stage, steps in zip(records, (range(3), range(3, 5)), strict=True):
             expected = [(.999 if step >= 2 else .995 + .004 * step / 2,
-                         -.001 * (1 - step / 1000)) for step in steps]
+                         -.001 * max(0., 1 - step / endpoint)) for step in steps]
             self.assertEqual(stage["returns"], expected)
             self.assertEqual(stage["update"], expected)
             self.assertEqual(stage["act"], [value for value in expected for _ in range(4)])
@@ -82,11 +91,17 @@ class CurriculumTrainingTests(unittest.TestCase):
             train(config, output, iterations=1)
             tags = EventAccumulator(str(output)).Reload().Tags()["scalars"]
             self.assertFalse(any(tag.startswith("Curriculum/") for tag in tags))
-            config["curriculum"] = {"gamma_final": .999}
-            invalid = Path(directory) / "invalid"
-            with self.assertRaises(ValueError):
-                train(config, invalid, iterations=1)
-            self.assertFalse(invalid.exists())
+            config["curriculum"] = {"tick_end_iteration": 4}
+            disabled = Path(directory) / "disabled"
+            train(config, disabled, iterations=1)
+            tags = EventAccumulator(str(disabled)).Reload().Tags()["scalars"]
+            self.assertFalse(any(tag.startswith("Curriculum/") for tag in tags))
+            for index, settings in enumerate(({"gamma_final": .999}, {"tick_end_iteration": 0})):
+                config["curriculum"] = settings
+                invalid = Path(directory) / f"invalid_{index}"
+                with self.assertRaises(ValueError):
+                    train(config, invalid, iterations=1)
+                self.assertFalse(invalid.exists())
 
 
 if __name__ == "__main__":

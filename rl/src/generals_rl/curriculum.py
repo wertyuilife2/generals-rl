@@ -15,10 +15,14 @@ class CurriculumConfig:
     tick_decay: bool = False
     gamma_final: float | None = None
     gamma_end_iteration: int | None = None
+    tick_end_iteration: int = 1000
 
     def __post_init__(self):
         if not isinstance(self.tick_decay, bool):
             raise TypeError("curriculum.tick_decay must be boolean")
+        if (isinstance(self.tick_end_iteration, bool) or not isinstance(self.tick_end_iteration, int)
+                or self.tick_end_iteration < 1):
+            raise ValueError("curriculum.tick_end_iteration must be a positive integer")
         if (self.gamma_final is None) != (self.gamma_end_iteration is None):
             raise ValueError("gamma_final and gamma_end_iteration must be configured together")
         if self.gamma_final is not None:
@@ -69,7 +73,8 @@ end iteration is deliberately required, not chosen by this module.
             progress = min(iteration / self.settings.gamma_end_iteration, 1.0)
             gamma = (float(self.settings.gamma_final) if progress == 1.0 else
                      self.initial_gamma + (self.settings.gamma_final - self.initial_gamma) * progress)
-        tick_scale = max(0.0, 1.0 - iteration / 1000) if self.settings.tick_decay else 1.0
+        tick_scale = (max(0.0, 1.0 - iteration / self.settings.tick_end_iteration)
+                      if self.settings.tick_decay else 1.0)
         # Rebuild from the original coefficients, never from the last scaled
         # configuration. PBRS resource and terminal coefficients stay intact.
         self.reward_model.config = replace(self.base_reward, potential_gamma=gamma,

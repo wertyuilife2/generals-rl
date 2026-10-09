@@ -18,7 +18,7 @@ where = ["src"]
 include = ["generals", "generals.*"]
 
 [project.optional-dependencies]
-gpu = ["torch>=2.13"]
+gpu = ["torch>=2.6"]
 
 [tool.setuptools.package-data]
 "generals.backends.cpu" = ["step.cpp"]

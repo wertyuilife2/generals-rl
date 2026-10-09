@@ -115,6 +115,7 @@ class BuiltinEvaluationTests(unittest.TestCase):
             for critic_information in (False, True):
                 with self.subTest(critic_information=critic_information):
                     config = deepcopy(baseline)
+                    config["cudnn_benchmark"] = not torch.backends.cudnn.benchmark
                     config["runner"]["policy"]["critic_actor_information"] = critic_information
                     config["runner"]["obs_groups"] = {
                         "policy": ["policy", "knowledge"],
@@ -138,6 +139,8 @@ class BuiltinEvaluationTests(unittest.TestCase):
                         repeated = evaluate_builtin(checkpoint, maps_per_ai=2, seed=73, sampling_seed=419,
                                                     opponents=("aggressive",), batch_size=1, max_ticks=192)
                         self.assertTrue(report["persistent_knowledge"])
+                        self.assertEqual(report["cudnn_benchmark"], torch.backends.cudnn.benchmark)
+                        self.assertNotEqual(report["cudnn_benchmark"], config["cudnn_benchmark"])
                         self.assertTrue(report["stochastic"])
                         self.assertEqual(report["sampling_protocol"], "per_game_numpy_uniform_cdf_v1")
                         self.assertEqual(report["games"], repeated["games"])
@@ -148,6 +151,16 @@ class BuiltinEvaluationTests(unittest.TestCase):
                         self.assertTrue(case["native_core_replay_verified"])
                         original = next(game for game in report["games"] if game["game_id"] == case["game_id"])
                         self.assertEqual(case["match"], original)
+
+    def test_invalid_cudnn_benchmark_rejected_before_evaluation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "snapshot.pt"
+            config_path = Path(directory) / "run_config.json"
+            for value in (1, "true", []):
+                with self.subTest(value=value):
+                    config_path.write_text(json.dumps({"cudnn_benchmark": value}))
+                    with self.assertRaisesRegex(TypeError, "cudnn_benchmark"):
+                        evaluate_builtin(checkpoint, maps_per_ai=1, max_ticks=1)
 
     def test_local_memory_is_player_specific_private_and_fresh_per_game(self):
         config = TaskConfig(width=5, height=5, num_envs=2, history_length=2,

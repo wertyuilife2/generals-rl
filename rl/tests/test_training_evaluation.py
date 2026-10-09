@@ -42,7 +42,7 @@ def completion_fixture(evaluator):
     report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
               "completed_games": 8, "scheduled_games": 8, "policy": "student_local",
               "device": evaluator.settings.device, "stochastic": True,
-              "matmul_precision": "highest", "cudnn_allow_tf32": False,
+              "matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": False,
               "parameter_dtype": "float32", "inference_dtype": "float32",
               "overall": {"win_rate": 0.0},
               "by_ai": {kind: {"games": 2, "win_rate": 0.0} for kind in AI_KINDS},
@@ -110,6 +110,22 @@ class TrainingEvaluationTests(unittest.TestCase):
                 self.assertIsNone(evaluator.best_completed)
                 self.assertFalse((evaluator.directory / "best.pt").exists())
 
+    def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_benchmark(self):
+        for actual in (None, False):
+            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
+                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+                                              {"cudnn_benchmark": True}, directory, None)
+                path, report, job = completion_fixture(evaluator)
+                if actual is None:
+                    report.pop("cudnn_benchmark")
+                else:
+                    report["cudnn_benchmark"] = actual
+                path.write_text(json.dumps(report))
+                with self.assertRaisesRegex(RuntimeError, "cuDNN benchmark"):
+                    evaluator._complete(job)
+                self.assertIsNone(evaluator.best_completed)
+                self.assertFalse((evaluator.directory / "best.pt").exists())
+
     def test_cuda_report_rejects_missing_or_wrong_policy_inference_dtype(self):
         for amp, actual in ((False, None), (False, "bfloat16"), (True, None), (True, "float32")):
             with self.subTest(amp=amp, actual=actual), tempfile.TemporaryDirectory() as directory:
@@ -131,7 +147,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                  ({"matmul_precision": None}, "medium", "float32"),
                  ({"matmul_precision": "highest", "cudnn_allow_tf32": False,
                    "runner": {"policy": {"amp_bfloat16": False}}}, "highest", "float32"),
-                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False,
+                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": True,
                    "runner": {"policy": {"amp_bfloat16": True}}}, "highest", "bfloat16"))
         for config, matmul, dtype in cases:
             with self.subTest(config=config), tempfile.TemporaryDirectory() as directory, \
@@ -139,21 +155,23 @@ class TrainingEvaluationTests(unittest.TestCase):
                 evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
                                               config, directory, None)
                 path, report, job = completion_fixture(evaluator)
-                report.update(matmul_precision=matmul, inference_dtype=dtype)
+                report.update(matmul_precision=matmul, inference_dtype=dtype,
+                              cudnn_benchmark=config.get("cudnn_benchmark", False))
                 path.write_text(json.dumps(report))
                 evaluator._complete(job)
                 self.assertEqual(job["status"], "completed")
                 self.assertEqual(evaluator.latest_completed["matmul_precision"], matmul)
                 self.assertEqual(evaluator.latest_completed["inference_dtype"], dtype)
+                self.assertEqual(evaluator.latest_completed["cudnn_benchmark"], report["cudnn_benchmark"])
                 self.assertEqual((evaluator.directory / "best.pt").read_bytes(), b"immutable stub weights")
 
     def test_cpu_report_keeps_precision_validation_disabled(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1),
-                {"matmul_precision": "highest", "cudnn_allow_tf32": False,
+                {"matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": True,
                  "runner": {"policy": {"amp_bfloat16": True}}}, directory, None)
             path, report, job = completion_fixture(evaluator)
-            for key in ("matmul_precision", "cudnn_allow_tf32", "inference_dtype"):
+            for key in ("matmul_precision", "cudnn_allow_tf32", "cudnn_benchmark", "inference_dtype"):
                 report.pop(key)
             path.write_text(json.dumps(report))
             evaluator._complete(job)

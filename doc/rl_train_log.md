@@ -3297,3 +3297,16 @@ final 的总体差 **−2.85pp**、配对 95% CI **[−3.5,−2.2]pp**、单侧�
 多卡、大模型和 H200 工具独立准备，未进入本轮冻结训练代码或本次单卡提交；其 CPU 开发证据不混为本机训练和验收结果，八卡 CUDA/BF16 正确性、利用率及规模吞吐尚未验证。
 
 首次单卡提交的候选另在独立 Git 导出目录验证：六个修改的运行文件均与历史回退冻结源码相同，保留的 117 个运行文件逐项匹配，未导入未来多卡或大模型模块；CPU 完整测试 **241 passed、2 CUDA parity skipped、1,821 subtests passed**，原生退出码 0。纯模式测试显式设置自己的对手与池大小，避免依赖最终主配置。测试启动器的多进程入口保护修正后重新运行，原无效运行及退出码保留；没有改动冻结运行源码、Git index 或未来工作区文件。此项验证的是候选预览树，实际暂存树另行核验。[候选预览结果](../outputs/analysis/v32_opt/local_commit_preview/summary.json)。
+
+
+### H200 八卡扩展：运行正确性已验证，吞吐与训练扫描待测（2026-10-09）
+
+从本机已接纳的历史回退 v32-opt/commit `699817b` 开始，保留 H4/K11、完整 critic 信息、八历史快照、gamma=.995、lambda=.95、E4 及按全局 fresh transitions 推进的 tick 课程。仓库已复制到 `/DATA/disk2/yuhangwang/code/generals-rl`，分支 `codex_dev`；根目录 `.venv` 使用 Python3.11.15、Torch2.6.0+cu124、TensorDict0.7.2、timm1.0.30、GitPython3.2.0，复用主机既有 Torch，不修改外部 conda 环境或驱动。编译器为 CUDA12.4，GPU 为八张 NVIDIA H200，每卡实际 CUDA 可见总容量 150,021,734,400 bytes。
+
+多卡实现保持简单的同步 PPO：每 rank 独立模拟一份环境和随机流，同步初始模型；按全局样本统计 advantage 与 KL，每个 logical minibatch 完成梯度平均后再裁剪及 Adam，F32 参数和 Adam 状态保留。rank0 单独发布、剪枝和评估，其他 rank 刷新只读历史池，停止控制和文件写入只由 rank0 决定。物理 PPO 与推理 chunk 只限制激活内存，不改变 logical PPO batch。新增 ResNet/ViT 的 actor 与 critic 独立训练，总预算为1M/10M/100M，history/knowledge 不投影缩减，BF16 只用于网络计算，动作分布及 loss 使用 F32。
+
+实际回归：CUDA 环境与 CPU 的状态、2–8 人规则、操作、知识和重置一致性 **29 passed、1,372 subtests、无跳过**；Torch2.6 的全 RL CPU 回归与完整训练计时工具为 **278 passed、2 CUDA tests skipped、1,880 subtests**，对应 CUDA 检查已在上述设备测试中实际执行。首次跨目录测试收集缺少同级导入路径，原生 exit2 和三个 collection errors 原样保留，修正启动路径后的实际回归 exit0；没有修改环境实现。八卡真实 `torchrun`/NCCL 又分别验证原26,074参数网络和1M ResNet，各两次真实 PPO 更新、全局 **1,024 fresh learner transitions**；所有 rank 的模型、Adam 和学习率逐阶段 SHA 一致，master 参数和 Adam 保持 F32。scaled case 的 actor 与 critic 在 collection 和 update 均由实际 forward hooks 观察到 CUDA BF16，而非仅凭配置声明。
+
+历史池运行中也已实际检查：第一次更新后 rank0 发布新快照ID8、裁剪旧候选ID1，所有 reader 候选ID及冻结权重SHA一致，权重等于更新后的同步 learner；随后各 rank 再执行4 tick、64 transitions 的真实采样。这些行包含在第二次更新的计数中，不重复累加。manifest 写入次数为 `[10,0,0,0,0,0,0,0]`。八个 GPU UUID、LOCAL_RANK 和独立随机种子均匹配，进程退出码0、各 rank 通信组关闭。初始烟测池是同一初始权重的八份副本，明确不代表成熟历史策略；小 N、E1、两次更新仅验证正确性，不作为吞吐、学习能力或80%利用率证据。[八卡 runtime](../outputs/analysis/v32_opt/h200_eight_rank_runtime/runtime/receipt.json)、[原生运行记录](../outputs/analysis/v32_opt/h200_eight_rank_runtime/recipe.json)、[CUDA 回归](../outputs/analysis/v32_opt/h200_initial_gpu_parity_attempt2/recipe.json)、[CPU兼容性](../outputs/analysis/v32_opt/h200_torch26_cpu_regression/recipe.json)、[分布式前置验收](../outputs/analysis/v32_opt/h200_runtime_acceptance.json)。
+
+后续正式门槛使用完整采样＋GAE＋E4的 fresh global N×T/s，含 learner/历史对手决策与梯度同步，排除初始化、评估、存盘和 profile；wall TPS 与全流程八卡利用率单独记录。先测四档 **global N=16,384/32,768/65,536/131,072**，再按实际结果绑定 T32/64/128、logical global batch 与执行 chunk 扫描。每个通过门槛的独立算法配置均训练1–3h；只对 physical/inference chunk 的重复算法选择最快执行方式。尚无实际大规模吞吐、80%长期利用率或长训练结果，不用烟测的瞬时采样值代替这些要求。

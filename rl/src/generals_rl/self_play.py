@@ -59,20 +59,29 @@ class HistoricalPolicyPool:
 
     def __init__(self, directory, *, policy_factory: Callable[[], nn.Module],
                  policy_spec: Mapping[str, Any], device="cpu", max_size=8,
-                 resume_from=None, resume_iteration=None):
+                 resume_from=None, resume_iteration=None, read_only=False):
         if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < 2:
             raise ValueError("max_size must be at least 2 to retain seed and newest policy")
         if resume_iteration is not None and resume_from is None:
             raise ValueError("resume_iteration requires resume_from")
+        if not isinstance(read_only, bool):
+            raise TypeError("read_only must be boolean")
+        if read_only and resume_from is not None:
+            raise ValueError("read-only pools open the writer's destination; only the writer resumes")
         self.directory = Path(directory).resolve()
         self.policy_factory = policy_factory
         self.policy_spec = _json_copy(dict(policy_spec))
         self.policy_spec_sha256 = _json_hash(self.policy_spec)
         self.device = torch.device(device)
         self.max_size = max_size
+        self.read_only = read_only
         self._snapshots: dict[int, PolicySnapshot] = {}
         self._next_id = 0
         self._resume_source = None
+
+        if read_only:
+            self.refresh()
+            return
 
         manifest_path = self.directory / "manifest.json"
         if resume_from is not None:
@@ -130,6 +139,24 @@ class HistoricalPolicyPool:
     def get(self, snapshot_id):
         return self._snapshots[int(snapshot_id)]
 
+    def refresh(self):
+        """Read a completed publication, retaining unchanged frozen handles.
+
+        Distributed callers synchronize with the writer before refreshing, so
+        checkpoint pruning cannot race these reads. Active episodes keep their
+        own references to handles no longer present in the candidate manifest.
+        """
+        if not self.read_only:
+            raise RuntimeError("refresh requires a read-only pool")
+        manifest, snapshots = self._read_pool(self.directory, reuse=self._snapshots)
+        capacity = manifest.get("max_size")
+        if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 2:
+            raise ValueError("invalid shared historical pool capacity")
+        self._snapshots = {snapshot.snapshot_id: snapshot for snapshot in snapshots}
+        self.max_size = capacity
+        self._next_id = manifest["next_id"]
+        self._resume_source = manifest.get("resume_source")
+
     def sample(self, count, *, generator: torch.Generator):
         """Return shared immutable handles; sampling only happens on reset."""
         if count < 0:
@@ -150,6 +177,8 @@ class HistoricalPolicyPool:
         The first snapshot is always the retained seed. ``source`` is arbitrary
         JSON provenance, for example the checkpoint path and SHA256.
         """
+        if self.read_only:
+            raise PermissionError("cannot publish to a read-only historical pool")
         if not isinstance(iteration, int) or isinstance(iteration, bool) or iteration < -1:
             raise ValueError("iteration must be an integer >= -1")
         if seed and self._snapshots:
@@ -243,7 +272,7 @@ class HistoricalPolicyPool:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _read_pool(self, directory):
+    def _read_pool(self, directory, *, reuse=None):
         manifest = json.loads((directory / "manifest.json").read_text())
         if manifest.get("schema_version") != SCHEMA_VERSION or manifest.get("format") != "torch_state_dict":
             raise ValueError("unsupported historical pool version or format")
@@ -266,6 +295,12 @@ class HistoricalPolicyPool:
             if seen and snapshot_id <= max(seen):
                 raise ValueError("snapshot IDs must be strictly increasing")
             seen.add(snapshot_id)
+            cached = None if reuse is None else reuse.get(snapshot_id)
+            if cached is not None:
+                if dict(cached.metadata) != metadata:
+                    raise ValueError("published historical snapshot metadata changed")
+                snapshots.append(cached)
+                continue
             path = directory / filename
             if _file_hash(path) != metadata.get("sha256"):
                 raise ValueError(f"historical snapshot SHA256 mismatch: {filename}")

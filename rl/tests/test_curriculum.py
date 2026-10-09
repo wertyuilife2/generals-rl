@@ -38,6 +38,40 @@ class CurriculumTests(unittest.TestCase):
             def __getattr__(self, name):
                 raise AssertionError(f"disabled curriculum accessed {name}")
         self.assertEqual(RolloutCurriculum(CurriculumConfig(), Untouched(), Untouched()).apply(0), {})
+        self.assertEqual(RolloutCurriculum(CurriculumConfig(tick_end_iteration=4),
+                                          Untouched(), Untouched()).apply(4), {})
+
+    def test_default_tick_schedule_matches_legacy_at_every_iteration(self):
+        course, _, reward = self.make(tick_decay=True)
+        self.assertEqual(course.settings.tick_end_iteration, 1000)
+        for iteration in range(2001):
+            scale = max(0.0, 1.0 - iteration / 1000)
+            self.assertEqual(course.apply(iteration)["tick_scale"], scale)
+            self.assertEqual(reward.config.tick, -.02 * scale)
+
+    def test_custom_tick_endpoint_is_independent_and_reconstructs_on_resume(self):
+        settings = dict(tick_decay=True, tick_end_iteration=4,
+                        gamma_final=.999, gamma_end_iteration=8)
+        course, algorithm, reward = self.make(**settings)
+        for iteration, scale in ((0, 1.), (2, .5), (3, .25), (4, 0.),
+                                 (9, 0.), (2, .5)):
+            with self.subTest(iteration=iteration):
+                metrics = course.apply(iteration)
+                self.assertEqual(metrics["tick_scale"], scale)
+                self.assertEqual(reward.config.tick, -.02 * scale)
+                self.assertEqual(algorithm.gamma, .995 + .004 * min(iteration / 8, 1))
+                resumed, resumed_algorithm, resumed_reward = self.make(**settings)
+                self.assertEqual(metrics, resumed.apply(iteration))
+                self.assertEqual(algorithm.gamma, resumed_algorithm.gamma)
+                self.assertEqual(reward.config, resumed_reward.config)
+        self.assertEqual(course.base_reward.tick, -.02)
+
+    def test_tick_endpoint_requires_a_positive_integer_even_when_disabled(self):
+        for enabled in (False, True):
+            for endpoint in (0, -1, True, False, 1., "1000", None, float("inf")):
+                with self.subTest(enabled=enabled, endpoint=endpoint), \
+                        self.assertRaisesRegex(ValueError, "tick_end_iteration must be a positive integer"):
+                    CurriculumConfig(tick_decay=enabled, tick_end_iteration=endpoint)
 
     def test_tick_boundaries_preserve_all_pbrs_and_terminal_coefficients(self):
         course, algorithm, reward = self.make(tick_decay=True)

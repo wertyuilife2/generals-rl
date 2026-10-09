@@ -339,7 +339,7 @@ class OnPolicyRunnerCTS:
         }
 
         # Check if user has device specified for local rank
-        if self.device != f"cuda:{self.gpu_local_rank}":
+        if self.device != f"cuda:{self.gpu_local_rank}" and self.device != "cpu":
             raise ValueError(
                 f"Device '{self.device}' does not match expected device for local rank '{self.gpu_local_rank}'."
             )
@@ -354,9 +354,16 @@ class OnPolicyRunnerCTS:
             )
 
         # Initialize torch distributed
-        torch.distributed.init_process_group(backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size)
+        if torch.distributed.is_initialized():
+            if (torch.distributed.get_rank() != self.gpu_global_rank
+                    or torch.distributed.get_world_size() != self.gpu_world_size):
+                raise ValueError("existing process group does not match torchrun rank/world size")
+        else:
+            backend = "gloo" if self.device == "cpu" else "nccl"
+            torch.distributed.init_process_group(backend=backend, rank=self.gpu_global_rank, world_size=self.gpu_world_size)
         # Set device to the local rank
-        torch.cuda.set_device(self.gpu_local_rank)
+        if self.device != "cpu":
+            torch.cuda.set_device(self.gpu_local_rank)
 
     def _construct_algorithm(self, obs: TensorDict) -> MoECTS:
         """Construct the actor-critic algorithm."""

@@ -307,8 +307,11 @@ class StudentMicrobatchTests(unittest.TestCase):
             algorithm(obs, amp_bfloat16=1)
         with self.assertRaisesRegex(ValueError, "CUDA"):
             algorithm(obs, physical_minibatch_size=2, amp_bfloat16=True)
-        with self.assertRaisesRegex(ValueError, "single-device"):
-            algorithm(obs, physical_minibatch_size=2, multi_gpu_cfg={"global_rank": 0, "world_size": 1})
+        distributed = algorithm(obs, physical_minibatch_size=2,
+                                multi_gpu_cfg={"global_rank": 0, "world_size": 2})
+        self.assertTrue(distributed.is_multi_gpu)
+        self.assertEqual(distributed.gpu_world_size, 2)
+        self.assertEqual(distributed.physical_minibatch_size, 2)
         with self.assertRaisesRegex(ValueError, "RND or symmetry"):
             algorithm(obs, physical_minibatch_size=2, symmetry_cfg={})
         recurrent = policy(obs)

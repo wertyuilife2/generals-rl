@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch import nn
@@ -108,6 +109,72 @@ class HistoricalPoolTests(unittest.TestCase):
             self.assertEqual(history.sample(0, generator=torch.Generator()), [])
             with self.assertRaises(ValueError):
                 history.sample(-1, generator=torch.Generator())
+
+    def test_read_only_refresh_reuses_models_without_writes_and_retains_active_handles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            writer = pool(directory, max_size=3)
+            source = TinyPolicy()
+            for iteration in (-1, 0, 1):
+                writer.publish(source, iteration=iteration)
+            before = file_hashes(directory)
+            with patch.object(HistoricalPolicyPool, "_write_manifest", side_effect=AssertionError("reader wrote")), \
+                    patch.object(Path, "mkdir", side_effect=AssertionError("reader created directory")):
+                reader = pool(directory, read_only=True, max_size=2)
+            self.assertEqual(file_hashes(directory), before)
+            self.assertEqual(reader.ids, writer.ids)  # Readers never prune the shared pool.
+            seed, active, kept = (reader.get(snapshot_id) for snapshot_id in reader.ids)
+            frozen = active.model.actor.weight.clone()
+            with torch.no_grad():
+                source.actor.weight.add_(1)
+            writer.publish(source, iteration=2)
+            self.assertEqual(reader.ids, (0, 1, 2))  # Refresh only after publication synchronization.
+            before = file_hashes(directory)
+            rng = torch.get_rng_state().clone()
+            with patch.object(reader, "_make_model", wraps=reader._make_model) as construct:
+                reader.refresh()
+                self.assertEqual(construct.call_count, 1)
+                reader.refresh()
+                self.assertEqual(construct.call_count, 1)
+            self.assertTrue(torch.equal(torch.get_rng_state(), rng))
+            self.assertEqual(file_hashes(directory), before)
+            self.assertEqual(reader.ids, (0, 2, 3))
+            self.assertIs(reader.get(0), seed)
+            self.assertIs(reader.get(2), kept)
+            self.assertTrue(torch.equal(active.model.actor.weight, frozen))
+            self.assertFalse((Path(directory) / active.metadata["filename"]).exists())
+            self.assertEqual(reader.describe(), writer.describe())
+            sampled = reader.sample(100, generator=torch.Generator().manual_seed(99))
+            self.assertEqual({snapshot.snapshot_id for snapshot in sampled}, {0, 2, 3})
+            with self.assertRaisesRegex(PermissionError, "read-only"):
+                reader.publish(source, iteration=3)
+            with self.assertRaisesRegex(RuntimeError, "read-only"):
+                writer.refresh()
+            self.assertEqual(file_hashes(directory), before)
+
+    def test_read_only_open_and_failed_refresh_do_not_mutate_existing_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing"
+            with self.assertRaises(FileNotFoundError):
+                pool(missing, read_only=True)
+            self.assertFalse(missing.exists())
+            writer = pool(Path(directory) / "writer")
+            writer.publish(TinyPolicy(), iteration=-1)
+            with self.assertRaisesRegex(ValueError, "only the writer resumes"):
+                pool(missing, read_only=True, resume_from=writer.directory)
+            with self.assertRaisesRegex(TypeError, "boolean"):
+                pool(missing, read_only=1)
+            reader = pool(writer.directory, read_only=True)
+            original = reader.get(0)
+            manifest_path = writer.directory / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["snapshots"][0]["iteration"] = 8
+            manifest_path.write_text(json.dumps(manifest))
+            before = file_hashes(writer.directory)
+            with self.assertRaisesRegex(ValueError, "metadata changed"):
+                reader.refresh()
+            self.assertEqual(reader.ids, (0,))
+            self.assertIs(reader.get(0), original)
+            self.assertEqual(file_hashes(writer.directory), before)
 
     def test_resume_copies_hash_identical_weights_and_filters_future_snapshots(self):
         with tempfile.TemporaryDirectory() as directory:

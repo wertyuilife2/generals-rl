@@ -440,11 +440,16 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
     cudnn_allow_tf32 = config.get("cudnn_allow_tf32")
     if cudnn_allow_tf32 is not None and not isinstance(cudnn_allow_tf32, bool):
         raise TypeError("cudnn_allow_tf32 must be boolean or null")
+    cudnn_benchmark = config.get("cudnn_benchmark")
+    if cudnn_benchmark is not None and not isinstance(cudnn_benchmark, bool):
+        raise TypeError("cudnn_benchmark must be boolean or null")
     device = torch.device(device)
     if device.type == "cuda":
         torch.set_float32_matmul_precision(config.get("matmul_precision") or "highest")
         if cudnn_allow_tf32 is not None:
             torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+        if cudnn_benchmark is not None:
+            torch.backends.cudnn.benchmark = cudnn_benchmark
     training_task = task_config(config["task"])
     if training_task.players != 2:
         raise ValueError("1v1 evaluation requires a checkpoint trained with players=2")
@@ -485,6 +490,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
                                   "stochastic": stochastic, "device": str(device),
                                   "matmul_precision": torch.get_float32_matmul_precision(),
                                   "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+                                  "cudnn_benchmark": torch.backends.cudnn.benchmark,
                                   **_inference_metadata(policy, device), "batch_size": batch_size,
                                   "baseline_workers": baseline_workers, "max_ticks": max_ticks})
             if baseline_workers > 1:
@@ -529,6 +535,7 @@ def evaluate_builtin(checkpoint, *, maps_per_ai=50, seed=1000042, opponents=AI_K
         "completed_games": len(games), "batch_size": batch_size, "device": str(device),
         "matmul_precision": torch.get_float32_matmul_precision(),
         "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
+        "cudnn_benchmark": torch.backends.cudnn.benchmark,
         **_inference_metadata(policy, device),
         "cpu_threads": cpu_threads, "baseline_workers": baseline_workers, "max_ticks": max_ticks,
         "clock_normalization_ticks": training_task.max_episode_steps,

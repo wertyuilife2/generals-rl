@@ -108,8 +108,8 @@ class StudentPPO(PPO):
         self._chunked_update = physical_minibatch_size is not None or amp_bfloat16
         if self._chunked_update:
             if (getattr(policy, "action_distribution", None) != "categorical"
-                    or policy.is_recurrent or kwargs.get("multi_gpu_cfg") is not None):
-                raise ValueError("microbatch/AMP requires feedforward categorical single-device student PPO")
+                    or policy.is_recurrent):
+                raise ValueError("microbatch/AMP requires feedforward categorical student PPO")
             if any(isinstance(module, torch.nn.modules.batchnorm._BatchNorm)
                    or isinstance(module, torch.nn.modules.dropout._DropoutNd) and module.p > 0
                    or type(module).__name__ == "DropPath" and getattr(module, "drop_prob", 0) > 0
@@ -145,7 +145,11 @@ class StudentPPO(PPO):
             self.monitor.begin(self)
             # The disabled path remains upstream PPO.update, including its RNG
             # draws, reduction order and observer lifecycle.
-            losses = self._update_microbatched() if self._chunked_update else super().update()
+            # Distributed minibatch normalization uses the same adapter with
+            # one physical chunk when memory splitting is disabled. Upstream
+            # PPO would otherwise normalize each rank's advantages locally.
+            use_adapter = self._chunked_update or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch)
+            losses = self._update_microbatched() if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
             if self._chunked_update:
                 self.update_metrics.update(self.microbatch_metrics)
@@ -173,9 +177,9 @@ class StudentPPO(PPO):
             logical_batch_size = count
             if self.normalize_advantage_per_mini_batch:
                 # Normalize the full logical minibatch, never each physical
-                # chunk. Global normalization already happens in CTS GAE.
+                # chunk, including all ranks in a distributed logical batch.
                 with torch.no_grad():
-                    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                    advantages = self._normalize_advantages(advantages)
             chunk_size = self.physical_minibatch_size or count
             if mask_validator is not None:
                 # The full logical batch must be valid before any physical
@@ -236,14 +240,24 @@ class StudentPPO(PPO):
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
                     kl_mean = (torch.expm1(log_ratio) - log_ratio).clamp_min(0).mean()
-                    if kl_mean > self.desired_kl * 2.0:
-                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                    elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                    if self.is_multi_gpu:
+                        torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
+                        kl_mean /= self.gpu_world_size
+                    if self.gpu_global_rank == 0:
+                        if kl_mean > self.desired_kl * 2.0:
+                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                    if self.is_multi_gpu:
+                        lr_tensor = torch.tensor(self.learning_rate, device=self.device)
+                        torch.distributed.broadcast(lr_tensor, src=0)
+                        self.learning_rate = lr_tensor.item()
                     for group in self.optimizer.param_groups:
                         group["lr"] = self.learning_rate
             # bf16 keeps float32 master weights/gradients and needs no fp16
             # scaler. Clip and Adam step only after the complete logical batch.
+            if self.is_multi_gpu:
+                self.reduce_parameters()
             grad_norm = torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
             self._on_ppo_minibatch(log_ratio, entropy, grad_norm.detach())
@@ -279,4 +293,27 @@ class StudentPPO(PPO):
         # Recheck after the runner shortens the final active rollout. Its GAE
         # uses only the active prefix; no return or normalization formula is copied.
         self._check_sample_count()
-        return MoECTS.compute_returns(self, obs)
+        if not self.is_multi_gpu or self.normalize_advantage_per_mini_batch:
+            return MoECTS.compute_returns(self, obs)
+        # Let CTS compute unchanged GAE, then normalize the active advantages
+        # using moments from every rank rather than separate local populations.
+        self.normalize_advantage_per_mini_batch = True
+        try:
+            MoECTS.compute_returns(self, obs)
+        finally:
+            self.normalize_advantage_per_mini_batch = False
+        self.storage.advantages = self._normalize_advantages(self.storage.advantages)
+
+    @torch.no_grad()
+    def _normalize_advantages(self, advantages):
+        if not self.is_multi_gpu:
+            return (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        # Float64 moments avoid cancellation from summing large rollouts. Count
+        # is reduced too, so the variance uses the global unbiased denominator.
+        values = advantages.double()
+        moments = torch.stack((values.sum(), values.square().sum(), values.new_tensor(values.numel())))
+        torch.distributed.all_reduce(moments, op=torch.distributed.ReduceOp.SUM)
+        total, squares, count = moments.unbind()
+        mean = total / count
+        variance = ((squares - total * mean) / (count - 1)).clamp_min(0)
+        return (advantages - mean.to(advantages.dtype)) / (variance.sqrt().to(advantages.dtype) + 1e-8)

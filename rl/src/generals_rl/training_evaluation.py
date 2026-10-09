@@ -270,6 +270,9 @@ class PeriodicEvaluator:
             requested_cudnn = self.run_config.get("cudnn_allow_tf32")
             if requested_cudnn is not None and report.get("cudnn_allow_tf32") != requested_cudnn:
                 raise RuntimeError("evaluation cuDNN TF32 setting differs from the requested run")
+            requested_benchmark = self.run_config.get("cudnn_benchmark")
+            if requested_benchmark is not None and report.get("cudnn_benchmark") != requested_benchmark:
+                raise RuntimeError("evaluation cuDNN benchmark setting differs from the requested run")
             requested_matmul = self.run_config.get("matmul_precision")
             if requested_matmul is not None and report.get("matmul_precision") != requested_matmul:
                 raise RuntimeError("evaluation matmul precision differs from the requested run")
@@ -308,7 +311,8 @@ class PeriodicEvaluator:
                  report["by_ai"]["aggressive"]["win_rate"], report["overall"]["win_rate"])
         point["selection_score"] = list(score)
         point["stochastic"] = report["stochastic"]
-        for key in ("device", "matmul_precision", "cudnn_allow_tf32", "parameter_dtype", "inference_dtype", "baseline_workers"):
+        for key in ("device", "matmul_precision", "cudnn_allow_tf32", "cudnn_benchmark",
+                    "parameter_dtype", "inference_dtype", "baseline_workers"):
             if key in report:
                 point[key] = job[key] = report[key]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):
