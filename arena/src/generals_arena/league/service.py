@@ -116,6 +116,13 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1):
     integer("workers", workers, 1)
     if workers > 32:
         raise ValueError("workers must be <= 32")
+    # Compile native libraries once before spawning, avoiding concurrent builds
+    # on a cold cache. Workers still load their own library and RNG instances.
+    from generals.backends.cpu.env import _library as cpu_library
+    cpu_library()
+    if any(e['kind'] == 'baseline' for e in store.entrants().values()):
+        from generals_baselines.base import _library as baseline_library
+        baseline_library()
     completed = 0
     with process_lock(store, ".worker.lock"):
         if retry:

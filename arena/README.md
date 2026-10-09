@@ -8,6 +8,9 @@ random baseline 为零点的 Elo。浏览器提供榜单、对局历史、回放
 
 在仓库根目录运行（已有 `.venv` 时先 `source .venv/bin/activate`）：
 
+需要 Linux/macOS、C++17 编译器和 OpenMP。macOS 使用 clang 与已安装的 libomp，
+非标准位置可设置 `GENERALS_LIBOMP_PREFIX`；编译器可用 `CXX` 指定。首次运行自动编译并缓存。
+
 ```bash
 python -m pip install -e ./env -e ./baselines -e ./arena
 
@@ -161,7 +164,7 @@ RA' = RA + alpha(n) * (performanceA - RA)
 可选 `validate_rules(map_config,visibility)` 在每局开赛前检查实际规则。
 `artifacts` 路径相对于 entrant JSON，哈希后以同名关键字传入工厂。
 
-名称、版本、参数、baseline 源码和工件哈希参与选手身份。自定义算法的代码版本由实现者明确声明，
+名称、版本、参数、baseline 的 Python/C++ 源码和工件哈希参与选手身份。自定义算法的代码版本由实现者明确声明，
 运行过程中须保持登记版本；不要在同一名字下替换实现。RL 注册目前明确拒绝，后续单独考虑兼容。
 
 ## 保存与恢复
@@ -195,12 +198,16 @@ generals-arena serve outputs/arena/rank_1000 --no-worker
 
 模块划分：`league/config.py` 地图分布，`scheduler.py` 增量赛程，`rating.py` 锚定评分，
 `game.py` 对局与录像，`observation.py` 算法观测，`views.py` 人类迷雾显示，`store.py` 数据事务，`service.py` worker 与真人时钟；
-`server.py` 提供 API，`web/` 存放前端。联赛逻辑位于 `arena/`；`baselines/` 的候选排序和随机动作评估使用数组计算，保留 RNG 顺序及动作轨迹。前端复用 `../bzy-nya.github.io/gen` 的全屏布局、地形 SVG 图标、
+`server.py` 提供 API，`web/` 存放前端。联赛逻辑位于 `arena/`；模拟统一调用 `generals.make_engine()`，
+由 `env/backends/cpu` 的单局适配器执行已有的 `step.cpp`，Arena 不维护独立规则后端。
+`baselines/` 的四种策略在 `policy.cpp` 中执行记忆、候选评分、BFS、路径跟踪和随机动作评估，
+Python 只负责绑定和控制器生命周期，保留 RNG 顺序及动作轨迹。前端复用 `../bzy-nya.github.io/gen` 的全屏布局、地形 SVG 图标、
 玩家颜色、浮动统计面板和底部控制设计；`board.js` 适配服务器观测，不复制客户端游戏规则或 AI。
 
 模拟复用引擎每 tick 已计算的全局统计，算法观测用两次轴向扩张计算视野，减少重复扫描和数组复制。
 每个玩家的棋盘仍是独立的只读副本，敌方城市数仍隐藏；与环境的原始观测逐字段比较保持一致。
-这些优化位于 Arena 与 baseline，不修改环境或 RL，也不省略录像 tick。
+单局使用一个 OpenMP 线程，批量评测用多个 worker 并行处理不同形状的地图；小批次开更多
+OpenMP 线程反而增加同步开销。此轮扩展环境的公共适配与编译支持，复用原 CPU 内核，未修改 RL，也不省略录像 tick。
 
 新版存储为 schema 3。旧的按人数分榜或普通 Elo 数据库保留为历史实验，不能直接续跑；请创建新的名次评分联赛目录，
 避免把旧赛程分布与新实验混合。
@@ -219,13 +226,21 @@ python arena/benchmarks/verify_league.py outputs/arena/rank_1000 --workers 8
 
 ## 本次 1000 局试运行
 
-新尺寸地图与第二轮性能优化的运行目录为 `outputs/arena/optimized_1000`，报告见
-[TRIAL-OPTIMIZED.md](TRIAL-OPTIMIZED.md)。使用以下命令查看：
+CPU 原生后端与 C++ baseline 的运行目录为 `outputs/arena/native_1000`，报告见
+[TRIAL-NATIVE.md](TRIAL-NATIVE.md)。1000 局沿用上一轮地图、席位、种子和顺序，
+逐 tick 动作、状态及最终分数均一致。使用以下命令查看：
 
 ```bash
-generals-arena serve outputs/arena/optimized_1000 --port 8001 --no-worker
-generals-arena league leaderboard outputs/arena/optimized_1000
-python arena/benchmarks/verify_league.py outputs/arena/optimized_1000 --workers 8
+generals-arena serve outputs/arena/native_1000 --port 8002 --no-worker
+generals-arena league leaderboard outputs/arena/native_1000
+python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 8
+```
+
+前一轮 Python 版本保留在 `outputs/arena/optimized_1000`，历史报告见
+[TRIAL-OPTIMIZED.md](TRIAL-OPTIMIZED.md)。旧实现已保存，可独立查看和游玩：
+
+```bash
+PYTHONPATH=outputs/arena/runtime-e8b9ec8 python -m generals_arena serve outputs/arena/optimized_1000 --port 8001 --no-worker
 ```
 
 上一轮 1000 局和随后的人类账号、对局、分数保留在 `outputs/arena/rank_1000`，历史报告见
@@ -235,14 +250,14 @@ python arena/benchmarks/verify_league.py outputs/arena/optimized_1000 --workers 
 PYTHONPATH=outputs/arena/runtime-a73a024 python -m generals_arena serve outputs/arena/rank_1000 --no-worker
 ```
 
-新联赛的算法身份包含新源码哈希，评分从零重新估计；没有把新地图的成绩混入旧实验。
+新联赛的算法身份包含新源码哈希，评分从零按原顺序重新计算；未覆盖旧实验或人类账号。
 早先普通 Elo 的 433 局也继续保留在 `outputs/arena/unified_1000`。
 
-固定地图、种子和动作轨迹的性能对照（重复三次，输出中位数）：
+固定地图、种子和动作轨迹的性能对照（重复五次，输出中位数）：
 
 ```bash
-python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --repeat 3
-python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --reference a73a024 --reference-arena a73a024 --repeat 3
+python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --repeat 5
+python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --reference e8b9ec8 --reference-arena e8b9ec8 --repeat 5
 ```
 
 `--reference` 加载指定 Git 版本的 baseline；`--reference-arena` 同时固定 Arena 模拟实现。

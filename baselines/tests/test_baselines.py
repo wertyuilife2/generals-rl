@@ -2,7 +2,6 @@
 
 from dataclasses import replace
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
@@ -49,9 +48,10 @@ class ControllerTests(unittest.TestCase):
         for ai_type in AI_TYPES[:3]:
             with self.subTest(ai=ai_type.__name__):
                 controller = ai_type(seed=7)
-                with patch("generals_baselines.base.shortest_known_path", return_value=None) as search:
+                for limit in (0, 1, 2, 12):
+                    controller.max_path_attempts = limit
                     controller.act(observe(state, 0, "full"))
-                    self.assertLessEqual(search.call_count, controller.max_path_attempts)
+                    self.assertLessEqual(controller.last_search_attempts, limit)
 
     def test_same_seed_reproduces_decisions(self):
         obs = observe(board(), 0)

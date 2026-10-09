@@ -27,12 +27,13 @@ def sha256_file(stream):
 
 
 def source_digest(package):
-    """Hash installed Python sources, including local uncommitted changes."""
+    """Hash installed Python/native sources, including local uncommitted changes."""
     spec = find_spec(package)
     if spec is None or not spec.submodule_search_locations:
         raise ImportError(f"install the {package} package before registering this entrant")
     root = Path(next(iter(spec.submodule_search_locations)))
-    files = {str(path.relative_to(root)): file_digest(path) for path in sorted(root.rglob("*.py"))}
+    files = {str(path.relative_to(root)): file_digest(path) for path in sorted(root.rglob("*"))
+             if path.suffix in ('.py', '.cpp', '.h', '.hpp', '.cu') and path.is_file()}
     if not files:
         raise ValueError(f"no source files found for {package}")
     return digest(files)

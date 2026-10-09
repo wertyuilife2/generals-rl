@@ -3,12 +3,11 @@ import gzip
 import json
 import numpy as np
 
-from generals.core.engine import CoreEngine
 from generals.core.mapgen import generate_map
 from generals.core.observation import snapshot
 from generals.core.recording import state_digest, state_from_dict, state_to_dict
 from generals.core.state import Action, compute_stats
-from generals import MapConfig
+from generals import MapConfig, make_engine
 
 from .observation import local_observation
 
@@ -35,7 +34,7 @@ class RecordedGame:
             raise ValueError("each seat requires an independent controller and RNG stream")
         self.map_config = MapConfig(**plan["map"])
         self.state = generate_map(self.map_config, plan["map_seed"])
-        self.engine = CoreEngine(self.state)
+        self.engine = make_engine(self.state)
         self.stats = compute_stats(self.state)
         self.initial = state_to_dict(self.state)
         self.initial_digest = state_digest(self.state)
@@ -103,7 +102,7 @@ def replay_frames(blob, result, stride=1, compact=False):
     state = state_from_dict(trace["initial"])
     if state_digest(state) != result["initial_digest"]:
         raise ValueError("replay initial digest mismatch")
-    engine = CoreEngine(state)
+    engine = make_engine(state)
     frames = [board_view(snapshot(state))]
     previous = np.stack([state.owner.ravel(), state.army.ravel(), state.structure.ravel()], axis=1).copy()
     if len(trace["digests"]) != len(trace["actions"]):

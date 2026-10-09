@@ -34,7 +34,7 @@ def run():
                 continue
             names=subprocess.check_output(['git','ls-tree','-r','--name-only',revision,'--',prefix],cwd=root,text=True).splitlines()
             for name in names:
-                if not name.endswith('.py'):continue
+                if Path(name).suffix not in ('.py', '.cpp', '.h', '.hpp'):continue
                 target=Path(temporary)/Path(name).relative_to(prefix)
                 target.parent.mkdir(parents=True,exist_ok=True)
                 target.write_bytes(subprocess.check_output(['git','show',f'{revision}:{name}'],cwd=root))

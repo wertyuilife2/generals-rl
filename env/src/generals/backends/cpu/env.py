@@ -1,20 +1,15 @@
 """Native, synchronous, batched env.step(actions) with NumPy-owned storage."""
 import ctypes
 from functools import lru_cache
-from hashlib import sha256
 import os
 from pathlib import Path
-import shutil
-import stat
-import sys
-import subprocess
-import tempfile
 
 import numpy as np
 
 from generals.protocol import STATE_DTYPES
 from generals.protocol.config import _integer
 from generals.protocol.vector import BatchStep
+from generals.backends._build import build_shared, openmp_flags
 class _Batch(ctypes.Structure):
     _fields_ = [(name, ctypes.c_void_p) for name in STATE_DTYPES]
 
@@ -31,38 +26,14 @@ class _Outputs(ctypes.Structure):
 
 @lru_cache(maxsize=1)
 def _library():
-    if sys.platform != "linux":
-        raise RuntimeError("CPUEnv native OpenMP loader currently supports Linux")
-    compiler = shutil.which(os.environ.get("CXX", "c++"))
-    if compiler is None:
-        raise RuntimeError("CPUEnv requires a C++ compiler with OpenMP")
-    version = subprocess.run([compiler, "--version"], check=True, capture_output=True,
-                             text=True, timeout=15).stdout.splitlines()[0]
-    source = Path(__file__).with_name("step.cpp")
-    flags = ["-std=c++17", "-O3", "-march=native", "-fopenmp", "-fPIC", "-shared"]
-    digest = sha256(source.read_bytes() + repr((compiler, version, flags)).encode()).hexdigest()
-    root = Path(tempfile.gettempdir()) / f"generals-cpu-step-{os.getuid()}"
-    root.mkdir(mode=0o700, exist_ok=True)
-    info = root.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise RuntimeError("CPU compilation cache must be a private owned directory")
-    target = root / f"{digest}.so"
-    if not target.exists():
-        with tempfile.TemporaryDirectory(dir=root) as scratch:
-            output = Path(scratch) / "step.so"
-            result = subprocess.run([compiler, *flags, str(source), "-o", str(output)],
-                                    capture_output=True, text=True, timeout=120)
-            if result.returncode:
-                raise RuntimeError(f"CPU step compilation failed:\n{result.stderr}")
-            os.replace(output, target)
-    lib = ctypes.CDLL(str(target))
+    lib, metadata = build_shared(Path(__file__).with_name("step.cpp"),
+                                 name="cpu-step", flags=openmp_flags())
     lib.generals_step.argtypes = [ctypes.POINTER(_Batch), ctypes.POINTER(_Batch),
         ctypes.POINTER(_Outputs), ctypes.c_void_p, *([ctypes.c_int] * 6), ctypes.c_int64]
     lib.generals_step.restype = None
     lib.omp_get_num_procs.argtypes = []
     lib.omp_get_num_procs.restype = ctypes.c_int
-    return lib, {"compiler": version, "compiler_flags": flags,
-                 "source_sha256": sha256(source.read_bytes()).hexdigest()}
+    return lib, metadata
 
 
 class CPUEnv:

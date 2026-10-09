@@ -1,6 +1,6 @@
 # Generals 环境开发与使用说明
 
-更新日期：2026-10-03。本文说明当前唯一的 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法。
+更新日期：2026-10-10。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。
 
 项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则源自原 JS 游戏，交互参考 generals.io；不保证与官网或原 JS 的随机决策逐步相同。强化学习算法独立放在 `rl/`，本文说明环境本身及其接口。
 
@@ -21,9 +21,10 @@
 
 | 用途 | 依赖与支持情况 |
 |---|---|
-| 参考引擎、无界面 AI 模拟 | Python ≥3.11、NumPy ≥1.24；不需要 PyTorch/CUDA |
-| GUI | 额外需要 Tk 和图形桌面；源码兼容 Windows/Linux，Linux/X11 已实测，Windows 尚未实机验收 |
-| CPU 批量模拟 | 当前原生加载器支持 Linux，需要 C++17/OpenMP 编译器，可用 `CXX` 指定 |
+| 参考引擎 | Python ≥3.11、NumPy ≥1.24；不需要 PyTorch/CUDA |
+| AI 策略 / 无界面 AI 模拟 | 额外需要 Linux/macOS 与 C++17 编译器，baseline 在 C++ 中执行 |
+| GUI | 额外需要 Tk 和图形桌面；Linux/X11 已实测，内置 AI 目前要求 Linux/macOS |
+| CPU 单局 / 批量模拟 | 支持 Linux/macOS；需要 C++17/OpenMP，macOS 需 clang 与 libomp；编译器可用 `CXX` 指定 |
 | GPU 批量模拟 | Linux、PyTorch ≥2.13、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件 |
 
 在仓库根目录安装到现有 conda 环境：
@@ -149,10 +150,31 @@ GPU 使用 CUDA 单 tick 内核：棋盘常驻设备张量，统计和增长索�
 
 `VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只接受默认配置或兼容参数 `kernel_backend="cuda"`。
 
-公开根包只有 `make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
+公开根包为 `make_engine, make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
 
 <a id="api"></a>
 ## 5. 批量环境 API
+
+### 单局 Arena 接口
+
+```python
+from generals import Action, MapConfig, make_engine
+from generals.core.mapgen import generate_map
+
+state = generate_map(MapConfig(25, 25, 4), seed=42)
+engine = make_engine(state)  # CPUEnv 的单环境适配，共用 step.cpp
+try:
+    result = engine.step([Action.wait()] * 4)
+    print(state.tick, result.stats.army)
+finally:
+    engine.close()
+```
+
+该入口默认使用 CPU 原生后端、一个 OpenMP 线程，适用于不同尺寸对局分别运行。
+`state` 的动态数组借用后端存储，tick 之间不复制整张棋盘；直接编辑后须调用
+`engine.invalidate_cache()`，不要替换数组存储。返回的 `TickResult` 与统计可安全保存。
+适配器只提供联合动作 `step()`；需要分玩家事务接口时使用 `make_engine(state, backend="reference")`
+返回的 Python `CoreEngine`。Arena 的算法局、真人局和录像重演统一使用默认原生入口，RL 的批量入口不变。
 
 ### 创建与推进
 
