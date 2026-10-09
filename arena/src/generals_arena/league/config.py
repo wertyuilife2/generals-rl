@@ -11,7 +11,7 @@ from ..util import digest, file_digest, integer, source_digest
 
 @dataclass(frozen=True)
 class LeagueConfig:
-    player_counts: tuple = (2, 4, 8)
+    player_counts: tuple = (2, 3, 4, 5, 6, 7, 8)
     min_side: int = 18
     max_side: int = 23
     mountain_min: float = 0.15
@@ -64,9 +64,9 @@ class LeagueConfig:
     def manifest(self):
         # Freeze simulation, distribution, scheduling, and scoring, not presentation code.
         files = ("config.py", "game.py", "rating.py", "scheduler.py")
-        value = {"schema": 1, "config": asdict(self),
+        value = {"schema": 3, "config": asdict(self),
                  "engine_sha256": source_digest("generals"),
                  "implementation": {name: file_digest(Path(__file__).with_name(name)) for name in files},
-                 "rating": "anchored-random-pairwise-survival-v1",
+                 "rating": "unified-anchored-rank-performance-v3",
                  "decision_timing": "joint_pre_growth_then_absolute_seat_order"}
         return {**value, "rules_id": digest(value)}

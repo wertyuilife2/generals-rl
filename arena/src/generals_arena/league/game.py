@@ -26,8 +26,11 @@ class RecordedGame:
         self.plan, self.config = plan, config
         self.controllers = controllers  # None denotes a human seat.
         count = len(plan["entrant_ids"])
-        if len(controllers) != count or len(set(plan["entrant_ids"])) != count:
-            raise ValueError("each seat requires a distinct entrant")
+        bots = [controller for controller in controllers if controller is not None]
+        if (len(controllers) != count or not 2 <= count <= 8 or
+                len({id(controller) for controller in bots}) != len(bots) or
+                len(plan["controller_seeds"]) != count):
+            raise ValueError("each seat requires an independent controller and RNG stream")
         self.map_config = MapConfig(**plan["map"])
         self.state = generate_map(self.map_config, plan["map_seed"])
         self.engine = CoreEngine(self.state)

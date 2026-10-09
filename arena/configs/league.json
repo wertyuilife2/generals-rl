@@ -1,5 +1,5 @@
 {
-  "player_counts": [2, 4, 8],
+  "player_counts": [2, 3, 4, 5, 6, 7, 8],
   "min_side": 18,
   "max_side": 23,
   "mountain_min": 0.15,
