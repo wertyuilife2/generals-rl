@@ -5,10 +5,12 @@ import numpy as np
 
 from generals.core.engine import CoreEngine
 from generals.core.mapgen import generate_map
-from generals.core.observation import observe, snapshot
+from generals.core.observation import snapshot
 from generals.core.recording import state_digest, state_from_dict, state_to_dict
 from generals.core.state import Action, compute_stats
 from generals import MapConfig
+
+from .observation import local_observation
 
 
 def board_view(observation):
@@ -34,6 +36,7 @@ class RecordedGame:
         self.map_config = MapConfig(**plan["map"])
         self.state = generate_map(self.map_config, plan["map_seed"])
         self.engine = CoreEngine(self.state)
+        self.stats = compute_stats(self.state)
         self.initial = state_to_dict(self.state)
         self.initial_digest = state_digest(self.state)
         self.actions, self.digests = [], []
@@ -53,11 +56,12 @@ class RecordedGame:
         human_actions = human_actions or {}
         actions = [Action.wait() if not self.state.alive[seat] else
                    human_actions.get(seat, Action.wait()) if controller is None else
-                   controller.act(observe(self.state, seat, "local"))
+                   controller.act(local_observation(self.state, seat, self.stats))
                    for seat, controller in enumerate(self.controllers)]
         if not all(isinstance(action, Action) for action in actions):
             raise TypeError("controller must return an Action")
         result = self.engine.step(actions)
+        self.stats = result.stats
         self.actions.append([[int(a.kind), a.source, int(a.direction), int(a.mode)] for a in actions])
         self.digests.append(state_digest(self.state))
         for move in result.moves:
@@ -74,7 +78,7 @@ class RecordedGame:
     def result(self):
         if not self.done:
             raise ValueError("cannot score an unfinished game")
-        stats = compute_stats(self.state)
+        stats = self.stats
         return {**self.plan, "winner_seat": self.state.winner_id,
                 "ticks": self.state.tick, "reason": "capture" if self.state.terminated else "tick_limit",
                 "elimination_ticks": self.eliminations, "invalid_actions": self.invalid,

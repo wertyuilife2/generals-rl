@@ -14,7 +14,7 @@ import numpy as np
 
 from generals.core.grid import adjacent, direction_between
 from generals.core.observation import Observation
-from generals.core.pathfinding import shortest_path
+from generals_baselines.planning import geometry, nearest_cells, shortest_known_path
 from generals.core.state import (
     EMPTY, UNKNOWN, UNKNOWN_OWNER, Action, Direction,
     MoveMode, MoveResult, Structure, Terrain,
@@ -89,10 +89,10 @@ class BaseAI:
             self.last_seen = np.full(obs.terrain.shape, -1, dtype=np.int64)
             self.path = []
         visible = obs.visible
-        self.terrain[visible] = obs.terrain[visible]
-        self.structure[visible] = obs.structure[visible]
-        self.owner[visible] = obs.owner[visible]
-        self.army[visible] = obs.army[visible]
+        np.copyto(self.terrain, obs.terrain, where=visible)
+        np.copyto(self.structure, obs.structure, where=visible)
+        np.copyto(self.owner, obs.owner, where=visible)
+        np.copyto(self.army, obs.army, where=visible)
         self.last_seen[visible] = obs.tick
 
         # A remembered general is a location, never a claim about current army.
@@ -180,7 +180,7 @@ class BaseAI:
         attacks = np.flatnonzero((memory_owner >= 0) & (memory_owner != self.player_id))
         cities = np.flatnonzero((structures == Structure.CITY) & (memory_owner != self.player_id))
         expansion = np.flatnonzero(((memory_owner == EMPTY) | (memory_owner == UNKNOWN_OWNER)) & (terrain != Terrain.MOUNTAIN))
-        ys, xs = np.divmod(np.arange(obs.size), obs.width)
+        _, ys, xs = geometry(obs.height, obs.width)
         result: list[Candidate] = []
         for source in sources:
             sy, sx = divmod(source, obs.width)
@@ -197,7 +197,7 @@ class BaseAI:
                 elif strategy in ("explore", "expand"):
                     # expansion is ascending, so stable sorting also preserves
                     # the reference planner's cell-index tie break.
-                    nearest = expansion[np.argsort(distance[expansion], kind="stable")[:16]]
+                    nearest = nearest_cells(expansion, distance, obs.size)
                     targets = nearest[distance[nearest] < int(army[source])]
                     neighbors = graph[targets]
                     unknown = np.sum((neighbors >= 0) & (terrain[neighbors] == UNKNOWN), axis=1)
@@ -223,13 +223,12 @@ class BaseAI:
         return result
 
     def _plan(self, candidate: Candidate, obs: Observation) -> list[int] | None:
-        terrain = self.terrain.copy()
         # Do not plot a route through a known garrison that this stack cannot
         # beat, even if its destination is an attractive square beyond it.
         hostile = (self.owner != self.player_id) & (self.owner != EMPTY) & (self.owner != UNKNOWN_OWNER)
         too_strong = hostile & (self.army >= int(obs.army.ravel()[candidate.source]) - 1)
-        terrain[too_strong] = Terrain.MOUNTAIN
-        path = shortest_path(terrain, candidate.source, candidate.target, unknown_passable=True)
+        blocked = (self.terrain == Terrain.MOUNTAIN) | too_strong
+        path = shortest_known_path(blocked, candidate.source, candidate.target)
         if not path or len(path) < 2:
             return None
         # Account for leave-one costs and visible garrisons along the route.

@@ -104,7 +104,7 @@ class LeagueStore:
         for key in ("schema", "engine_sha256", "rating", "decision_timing"):
             if previous.get(key) != manifest[key]:
                 raise ValueError("map resize cannot change the engine or rating rules")
-        for name in ("game.py", "rating.py", "scheduler.py"):
+        for name in ("game.py", "observation.py", "rating.py", "scheduler.py"):
             if previous["implementation"].get(name) != manifest["implementation"][name]:
                 raise ValueError("map resize cannot change simulation, scoring or scheduling code")
         with process_lock(self, ".server.lock"), process_lock(self, ".worker.lock"):
