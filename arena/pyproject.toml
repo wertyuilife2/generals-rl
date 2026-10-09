@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "generals-arena"
+version = "0.1.0"
+description = "Versioned Generals tournaments, match records, and Elo rankings"
+requires-python = ">=3.11"
+dependencies = ["generals-env", "numpy>=1.24"]
+
+[project.optional-dependencies]
+baselines = ["generals-baselines"]
+
+[project.scripts]
+generals-arena = "generals_arena.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["generals_arena*"]
