@@ -169,3 +169,6 @@ footer span {letter-spacing:0;}
 header nav {align-self:stretch;align-items:stretch;white-space:nowrap;}
 header .tab {padding:0 4px;}
 @media(max-width:600px) {header {height:auto;min-height:62px;gap:12px;padding:10px 14px;flex-wrap:wrap;}header .brand {font-size:11px;gap:6px;}header nav {gap:14px;order:3;width:100%;height:38px;}header .tab {font-size:13px;}main {padding-top:18px;}}
+
+#board-dialog.human-game .bottom-controls {display:none;}
+#board-dialog.human-game .zoom-controls {bottom:24px;}

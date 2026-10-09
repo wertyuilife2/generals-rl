@@ -75,3 +75,17 @@ test('selection and queue arrows erase their old cells without a full redraw',()
   r.reset();assert.equal(r.lastPaintedCells,0); // Same transform needs no repaint.
   r.adjustZoom(1.1);assert.ok(r.lastPaintedCells>50);
 });
+
+test('hidden cities and mountains use the same mountain icon without troop labels',()=>{
+  const f=fixture(),r=f.renderer,b=r.board;
+  b.fog_obstacles=Array.from({length:10},()=>Array(10).fill(false));
+  for(const x of [2,3]){b.owner[4][x]=-3;b.terrain[4][x]=255;b.structure[4][x]=255;b.army[4][x]=-1;b.fog_obstacles[4][x]=true;}
+  r.render(b);
+  assert.equal(f.images.length,2);
+  assert.equal(f.images[0][0],r.icons.mountain);assert.equal(f.images[1][0],r.icons.mountain);
+  assert.equal(f.texts.length,0);
+  // The API mask changing alone still invalidates the dirty-cell cache.
+  b.fog_obstacles[4][2]=false;r.render(b);assert.equal(r.lastPaintedCells,1);
+  b.owner[4][3]=-2;b.terrain[4][3]=0;b.structure[4][3]=1;b.army[4][3]=40;b.fog_obstacles[4][3]=false;
+  r.render(b);assert.equal(f.images.at(-1)[0],r.icons.city);assert.equal(f.texts.at(-1)[0],'40');
+});

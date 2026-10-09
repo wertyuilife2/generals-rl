@@ -38,3 +38,9 @@ test('known mountains and wrapping over a board edge cannot be queued',()=>{
   assert.equal(input.move(1),false);assert.equal(input.selected,12);
   input.selected=4;board.owner[0][4]=0;assert.equal(input.move(1),false);
 });
+
+test('a mountain-shaped fog marker may be a city, so movement into it remains possible',()=>{
+  const {input,board,sent}=fixture();
+  board.terrain[2][3]=255;board.fog_obstacles=Array.from({length:5},()=>Array(5).fill(false));board.fog_obstacles[2][3]=true;
+  assert.equal(input.move(1),true);assert.equal(sent.length,1);
+});

@@ -37,16 +37,17 @@ def add(store, policy='aggressive', games=6):
 
 def test_variable_map_distribution_is_seeded_and_scales_with_players():
     rules = LeagueConfig(player_counts=tuple(range(2, 9)))
-    assert rules.side_range(2) == (18, 23)
-    assert rules.side_range(4) == (26, 33)
-    assert rules.side_range(8) == (36, 46)
+    assert rules.side_range(2) == (15, 20)
+    assert rules.side_range(4) == (22, 29)
+    assert rules.side_range(8) == (30, 35)
     shapes = set()
     for players in range(2, 9):
         for seed in range(5):
             map_config = rules.sample_map(players, seed)
             assert map_config == rules.sample_map(players, seed)
             low, high = rules.side_range(players)
-            assert low <= map_config.width <= high and low <= map_config.height <= high
+            assert 15 <= low <= map_config.width <= high <= 35
+            assert low <= map_config.height <= high
             assert .15 <= map_config.mountain_density <= .22
             state = generate_map(map_config, seed)
             state.validate()
@@ -487,3 +488,74 @@ def test_human_queue_is_idempotent_ordered_and_clock_driven(tmp_path):
             assert state.tick==2 and len(value['queue'])==8
     finally:
         arena.stop.set();arena.thread.join(1)
+
+
+def test_human_fog_merges_cities_and_mountains_without_changing_policy_observations():
+    from generals.core.state import GameState, MapLayout, Terrain, Structure, EMPTY, NEUTRAL, UNKNOWN, UNKNOWN_OWNER
+    from generals.core.observation import observe
+    from generals_arena.league.views import human_board
+    terrain=np.zeros((7,7),dtype=np.uint8);terrain[4,4]=Terrain.MOUNTAIN
+    structure=np.zeros((7,7),dtype=np.uint8);structure[0,0]=structure[6,6]=Structure.GENERAL
+    structure[4,5]=Structure.CITY
+    owner=np.full((7,7),EMPTY,dtype=np.int16);owner[0,0]=0;owner[6,6]=1;owner[4,5]=NEUTRAL
+    army=np.zeros((7,7),dtype=np.int64);army[0,0]=army[6,6]=1;army[4,5]=40
+    state=GameState(MapLayout(terrain),structure,owner,army,np.ones(2,dtype=bool),np.array([0,48],dtype=np.int32))
+    state.validate()
+    before=observe(state,0)
+    view=human_board(state,0)
+    assert view['fog_obstacles'][4][4] and view['fog_obstacles'][4][5]
+    assert not view['fog_obstacles'][6][6]  # Enemy general cannot be inferred.
+    assert not view['fog_obstacles'][3][3]  # Ordinary fog stays empty.
+    for y,x in [(4,4),(4,5),(6,6)]:
+        assert view['terrain'][y][x]==view['structure'][y][x]==UNKNOWN
+        assert view['owner'][y][x]==UNKNOWN_OWNER and view['army'][y][x]==-1
+    after=observe(state,0)
+    for key in ('terrain','structure','owner','army','visible'):
+        np.testing.assert_array_equal(getattr(before,key),getattr(after,key))
+    # Moving into vision reveals the real types, and leaving hides them again.
+    state.owner[3,4]=0;state.army[3,4]=1
+    visible=human_board(state,0)
+    assert not visible['fog_obstacles'][4][4] and not visible['fog_obstacles'][4][5]
+    assert visible['terrain'][4][4]==Terrain.MOUNTAIN
+    assert visible['structure'][4][5]==Structure.CITY and visible['army'][4][5]==40
+    state.owner[3,4]=EMPTY;state.army[3,4]=0
+    assert human_board(state,0)==view
+
+
+def test_map_revision_preserves_players_results_scores_and_legacy_manifest(tmp_path):
+    store=league(tmp_path)
+    add(store,games=2);run_jobs(store)
+    human=store.account('keep-my-rating')
+    before=store.leaderboard();records=store.matches();previous=store.manifest
+    store.resize_maps(15,20,35)
+    assert store.config.side_range(8)==(30,35)
+    assert store.manifest['rules_id']!=previous['rules_id']
+    assert store.authenticate(human['token'])==human['entrant']['entrant_id']
+    assert store.leaderboard()==before and store.matches()==records
+    with store.connect() as db:
+        history=json.loads(db.execute("SELECT value FROM meta WHERE key='rules_history'").fetchone()[0])
+    assert history[0]['manifest']==json.loads(json.dumps(previous))
+    assert history[0]['next_sequence']==2
+    store=LeagueStore(store.directory);store.verify_execution()
+    assert store.rebuild()==before
+    for record in records['matches']:
+        result,blob=store.replay(record['game_id'])
+        assert result['rules_id']==previous['rules_id']
+        assert replay_frames(blob,result)[-1]['tick']==result['ticks']
+    add(store,'defensive',games=1);run_jobs(store)
+    latest=store.matches()['matches'][0]
+    assert latest['rules_id']==store.manifest['rules_id']
+    assert 15<=latest['map']['width']<=35 and 15<=latest['map']['height']<=35
+
+
+def test_map_revision_rejects_pending_games_and_non_map_code_changes(tmp_path):
+    store=league(tmp_path);add(store,games=2)
+    from generals_arena.league.service import prepare_batch
+    prepare_batch(store,store.jobs()[0])
+    before=store.manifest
+    with pytest.raises(ValueError,match='active and pending'):
+        store.resize_maps(15,20,35)
+    assert store.manifest==before
+    store.manifest={**before,'rating':'different-algorithm'}
+    with pytest.raises(ValueError,match='engine or rating'):
+        store.resize_maps(15,20,35)
