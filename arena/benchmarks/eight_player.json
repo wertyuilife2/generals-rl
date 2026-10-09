@@ -1,0 +1,45 @@
+{
+  "reference_revision": "870e764",
+  "plan": {
+    "map": {
+      "city_density": 0.03313755058748124,
+      "height": 41,
+      "mountain_density": 0.16752268497339792,
+      "players": 8,
+      "width": 45
+    },
+    "map_seed": 1471516971320334962,
+    "controller_seeds": [
+      3757397852790274699,
+      8375230116170430728,
+      1139836826520230880,
+      2085621660972822226,
+      5383477055865625829,
+      3223877784273772584,
+      1414790706605476704,
+      5193163264132603255
+    ],
+    "entrant_ids": [
+      "random",
+      "expansion",
+      "expansion",
+      "defensive",
+      "defensive",
+      "aggressive",
+      "defensive",
+      "aggressive"
+    ]
+  },
+  "policies": [
+    "random",
+    "expansion",
+    "expansion",
+    "defensive",
+    "defensive",
+    "aggressive",
+    "defensive",
+    "aggressive"
+  ],
+  "ticks": 3000,
+  "trace_sha256": "f18f05e86f129994d37d1d95cc33e6029669eabdde90ba2c48adcfb82587cac5"
+}

@@ -1,5 +1,6 @@
 """League persistence, rating calibration, scheduling, replays and human privacy."""
 import json
+import math
 import gzip
 import threading
 import time
@@ -13,7 +14,7 @@ import pytest
 from generals.core.mapgen import generate_map
 from generals_arena.league.config import LeagueConfig
 from generals_arena.league.game import RecordedGame, replay_frames
-from generals_arena.league.rating import expected, update
+from generals_arena.league.rating import expected, update, ranks, rate, learning_rate
 from generals_arena.league.scheduler import make_block
 from generals_arena.league.service import LiveArena, controllers_for, process_lock, run_jobs
 from generals_arena.league.store import LeagueStore
@@ -61,15 +62,15 @@ def test_exact_rating_scale_anchor_and_multiplayer_outcomes():
     result = {'entrant_ids': ['random', 'a', 'b', 'c'], 'elimination_ticks': [2, 4, 4, None]}
     rated = update(dict.fromkeys(result['entrant_ids'], 0), result, 'random')
     assert rated['random'] == 0
-    assert rated['c'] == pytest.approx(16)
+    assert rated['c'] == pytest.approx(500 / math.log(9))
     assert rated['a'] == rated['b']
     assert rated['a'] == 0  # One win, one tie, one loss at equal pre-match ratings.
     reverse = {'entrant_ids': list(reversed(result['entrant_ids'])), 'elimination_ticks': list(reversed(result['elimination_ticks']))}
     assert update(dict.fromkeys(result['entrant_ids'], 0), reverse, 'random') == rated
     lose = {'entrant_ids': ['random', 'a'], 'elimination_ticks': [None, 10]}
-    assert update({'random': 0, 'a': 0}, lose, 'random')['a'] == -16
+    assert update({'random': 0, 'a': 0}, lose, 'random')['a'] == pytest.approx(-500 / math.log(9))
     timeout = {'entrant_ids': ['random', 'a', 'b'], 'elimination_ticks': [10, None, None]}
-    assert update({}, timeout, 'random')['a'] == 8
+    assert update({}, timeout, 'random')['a'] == pytest.approx(250 / math.log(9))
 
 
 def test_seat_rotations_keep_map_and_rng_streams(tmp_path):
@@ -81,12 +82,12 @@ def test_seat_rotations_keep_map_and_rng_streams(tmp_path):
     assert len(plans) == 4
     assert len({p['game_id'] for p in plans}) == 4
     assert {p['map_seed'] for p in plans} == {plans[0]['map_seed']}
-    streams = dict(zip(plans[0]['entrant_ids'], plans[0]['controller_seeds']))
+    streams = dict(zip(plans[0]['instance_ids'], plans[0]['controller_seeds']))
     for plan in plans:
         assert plan['map'] == plans[0]['map']
-        assert dict(zip(plan['entrant_ids'], plan['controller_seeds'])) == streams
+        assert dict(zip(plan['instance_ids'], plan['controller_seeds'])) == streams
         assert job['entrant_id'] in plan['entrant_ids']
-    assert sorted(p['entrant_ids'].index(job['entrant_id']) for p in plans) == [0,1,2,3]
+    assert sorted(p['instance_ids'].index(0) for p in plans) == [0,1,2,3]
     assert make_block(store, job) == plans
 
 
@@ -104,11 +105,11 @@ def test_queue_budget_idempotency_resume_rebuild_and_replay(tmp_path):
     assert reopened.jobs()[0]['done'] == reopened.jobs()[0]['budget'] == 7
     assert reopened.jobs()[0]['status'] == 'complete'
     assert run_jobs(reopened) == 0
-    report = reopened.leaderboard(2)
+    report = reopened.leaderboard()
     assert report['completed_games'] == 7
     assert next(r for r in report['ranking'] if r['anchor'])['elo'] == 0
-    assert reopened.rebuild()[2] == report
-    matches = reopened.matches(players=2)
+    assert reopened.rebuild() == report
+    matches = reopened.matches()
     assert matches['total'] == 7
     assert len({m['sequence'] for m in matches['matches']}) == 7
     for record in matches['matches']:
@@ -152,7 +153,7 @@ def test_all_supported_seat_counts_can_finish_and_replay(tmp_path, players):
     assert len(record['elimination_ticks']) == players
     result, blob = store.replay(record['game_id'])
     assert len(replay_frames(blob, result)[-1]['alive']) == players
-    assert store.leaderboard(players)['completed_games'] == 1
+    assert store.leaderboard()['completed_games'] == 1
     corrupted = json.loads(gzip.decompress(blob))
     corrupted['digests'][-1] = 'wrong'
     with pytest.raises(ValueError, match='diverged'):
@@ -176,7 +177,7 @@ def test_failure_is_unrated_and_retryable_and_workers_exclusive(tmp_path):
         with pytest.raises(RuntimeError, match='bad policy'):
             run_jobs(store)
     assert store.jobs()[0]['status'] == 'failed'
-    assert store.leaderboard(2)['completed_games'] == 0
+    assert store.leaderboard()['completed_games'] == 0
     assert store.matches()['total'] == 0
     assert run_jobs(store, retry=True) == 2
     assert store.jobs()[0]['status'] == 'complete'
@@ -242,10 +243,10 @@ def test_human_clock_authorization_fog_and_rated_completion(tmp_path):
             time.sleep(.02)
         final = arena.view(game_id, human)
         assert final['done'] and not final['error']
-        assert store.leaderboard(2)['completed_games'] == 1
-        row = next(r for r in store.leaderboard(2)['ranking'] if r['entrant_id'] == human)
+        assert store.leaderboard()['completed_games'] == 1
+        row = next(r for r in store.leaderboard()['ranking'] if r['entrant_id'] == human)
         assert row['games'] == 1
-        assert store.rebuild()[2] == store.leaderboard(2)
+        assert store.rebuild() == store.leaderboard()
         assert replay_frames(*reversed(store.replay(game_id)))[-1]['tick'] == 4
     finally:
         arena.stop.set()
@@ -258,7 +259,7 @@ def test_abandoned_server_game_is_visible_but_unrated(tmp_path):
     arena = LiveArena(store)
     game = arena.create_game(user, 2)
     store.abort_live()
-    assert store.leaderboard(2)['completed_games'] == 0
+    assert store.leaderboard()['completed_games'] == 0
     assert store.matches()['matches'][0]['status'] == 'aborted'
     with pytest.raises(ValueError, match='not found'):
         store.replay(game['game_id'])
@@ -334,3 +335,155 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
         server.arena.close()
         server.server_close()
         server_thread.join(2)
+
+
+def test_duplicate_instances_average_cross_policy_scores_only():
+    result = {'entrant_ids':['a','a','random'], 'elimination_ticks':[None,2,1]}
+    rated = update({'a':0, 'random':0}, result, 'random')
+    assert rated == pytest.approx({'a':500 / math.log(9), 'random':0})
+    # A winning copy and a losing copy average to a draw against the reference.
+    result['elimination_ticks'] = [None,1,2]
+    assert update({'a':0,'random':0}, result, 'random')['a'] == 0
+    only_self = {'entrant_ids':['a']*8, 'elimination_ticks':[1,2,3,4,5,6,7,None]}
+    assert update({'a':137}, only_self, 'random')['a'] == 137
+    permutation = [2,0,1]
+    permuted = {key:[result[key][i] for i in permutation] for key in result}
+    assert update({'a':80,'random':0}, result, 'random') == update({'a':80,'random':0}, permuted, 'random')
+
+
+def test_single_bot_can_fill_eight_independent_seats(tmp_path):
+    store = league(tmp_path, player_counts=(8,))
+    human = store.account('solo')['entrant']['entrant_id']
+    job = {'id':'human','entrant_id':human,'done':0,'budget':1}
+    plan = make_block(store, job, human=True)[0]
+    assert plan['entrant_ids'].count(store.anchor) == 7
+    assert plan['entrant_ids'].count(human) == 1
+    controllers = controllers_for(store, plan)
+    bots = [c for c in controllers if c is not None]
+    assert len(set(map(id, bots))) == 7
+    assert len(set(plan['controller_seeds'])) == 8
+    game = RecordedGame(plan, store.config, controllers)
+    assert all(c.player_id == seat for seat,c in enumerate(controllers) if c is not None)
+    assert not game.done
+
+
+def test_mixed_player_counts_share_one_rating_and_duplicate_accounting(tmp_path):
+    store = league(tmp_path, player_counts=(2,3))
+    entrant,_ = add(store, games=3)
+    target = entrant['entrant_id']
+    expected_ratings = {}
+    for index, count in enumerate((2,3)):
+        job = {'id':str(index),'entrant_id':target,'done':0,'budget':1}
+        plan = make_block(store, job, players=count)[0]
+        plan['entrant_ids'] = [target] * (count-1) + [store.anchor]
+        store.insert_plans([plan])
+        game = RecordedGame(plan, store.config, controllers_for(store, plan))
+        while not game.done:
+            game.advance()
+        expected_ratings = update(expected_ratings, game.result(), store.anchor, games={target:index, store.anchor:index})
+        store.complete(game)
+    report = store.leaderboard()
+    assert report['completed_games'] == 2
+    row = next(row for row in report['ranking'] if row['entrant_id'] == target)
+    assert row['elo'] == expected_ratings[target]
+    assert row['games'] == 2 and row['appearances'] == 3
+    assert row['wins']+row['losses']+row['draws'] == 3
+    assert store.rebuild() == report
+
+
+def test_parallel_and_sequential_execution_have_identical_ratings(tmp_path):
+    import shutil
+    store = league(tmp_path, player_counts=(4,))
+    add(store, games=7)
+    for policy in ('expansion','defensive'):
+        add(store, policy, games=1)
+    # Copy before execution so job IDs, schedules and algorithm versions match.
+    shutil.copytree(store.directory, tmp_path/'parallel')
+    other = LeagueStore(tmp_path/'parallel')
+    assert run_jobs(store, limit=5) == run_jobs(other, limit=5, workers=2) == 5
+    assert store.leaderboard() == other.leaderboard()
+    left = store.matches()['matches']
+    right = other.matches()['matches']
+    for a,b in zip(left,right):
+        assert a['game_id'] == b['game_id'] and a['sequence'] == b['sequence']
+        assert a['final_digest'] == b['final_digest']
+    assert run_jobs(other, workers=2) == 4
+    assert other.leaderboard()['completed_games'] == 9
+
+
+def test_rating_uses_all_ranks_and_ties_not_just_winner():
+    result = {'entrant_ids':['random','a','b','c'], 'elimination_ticks':[None,30,20,10]}
+    changes = rate({}, result, 'random')
+    assert ranks(result) == [1,2,3,4]
+    assert changes['a']['after'] > 0 > changes['b']['after'] > changes['c']['after']
+    assert changes['a']['rank'] == 2 and changes['a']['expected_rank'] == 2.5
+    # The winner stays the same; swapping two losing players swaps their gain.
+    other = {**result, 'elimination_ticks':[None,20,30,10]}
+    assert rate({},other,'random')['a']['after'] == changes['b']['after']
+    result['elimination_ticks'] = [None,None,10,10]
+    assert ranks(result) == [1.5,1.5,3.5,3.5]
+
+
+def test_fast_provisional_convergence_and_no_self_play_aging():
+    result = {'entrant_ids':['random','a'], 'elimination_ticks':[1,None]}
+    ratings = {}
+    old_elo = 0
+    for game in range(6):
+        ratings = update(ratings,result,'random',games={'a':game})
+        old_elo += 32 * (1-expected(old_elo,0))
+    assert ratings['a'] > 500 and old_elo < 100
+    assert learning_rate(0) > learning_rate(5) > learning_rate(30) > learning_rate(300)
+    changes=rate({'a':300},{'entrant_ids':['a']*8,'elimination_ticks':list(range(8))},'random',games={'a':2})
+    assert changes['a']['after'] == 300 and changes['a']['rated_games'] == 2
+
+
+def test_probability_calibration_has_zero_expected_rating_drift():
+    for rating in (-1000,-500,0,500,1000):
+        for count in (2,4,8):
+            ids=['a']+['random']*(count-1)
+            win={'entrant_ids':ids,'elimination_ticks':[None]+[1]*(count-1)}
+            lose={'entrant_ids':ids,'elimination_ticks':[1]+[None]*(count-1)}
+            dw=rate({'a':rating},win,'random',games={'a':100})['a']['delta']
+            dl=rate({'a':rating},lose,'random',games={'a':100})['a']['delta']
+            assert expected(rating,0)*dw+(1-expected(rating,0))*dl == pytest.approx(0,abs=1e-9)
+
+
+def test_human_queue_is_idempotent_ordered_and_clock_driven(tmp_path):
+    from generals.core.state import Action, Direction
+    store=league(tmp_path, min_side=8,max_side=8,max_ticks=10,tick_seconds=.1)
+    human=store.account('queue')['entrant']['entrant_id']
+    arena=LiveArena(store);view=arena.create_game(human,2);gid=view['game_id']
+    value=arena.games[gid];state=value['game'].state
+    source=view['board']['general_pos'];y,x=divmod(source,state.layout.width)
+    direction=Direction.RIGHT if x+2<state.layout.width else Direction.LEFT
+    target=source+(1 if direction==Direction.RIGHT else -1)
+    # Future territory is intentionally not owned at submission time.
+    commands=[{'id':1,'op':'append','action':Action.move(source,direction).encode()},
+              {'id':2,'op':'append','action':Action.move(target,direction).encode()}]
+    for command in commands: view=arena.command(gid,human,command)
+    assert len(view['queue'])==2 and view['board']['tick']==0
+    assert arena.command(gid,human,commands[1])==view
+    assert len(value['queue'])==2
+    with pytest.raises(ValueError,match='conflict'):
+        arena.command(gid,human,{'id':2,'op':'clear'})
+    with pytest.raises(ValueError,match='order'):
+        arena.command(gid,human,{'id':4,'op':'clear'})
+    # Long polling sleeps without holding the lock; commands wake it immediately.
+    received=[]
+    listener=threading.Thread(target=lambda:received.append(arena.view(gid,human,after=2)))
+    listener.start()
+    undone=arena.command(gid,human,{'id':3,'op':'undo'})
+    listener.join(1)
+    assert received and received[0]['revision']==3 and len(undone['queue'])==1
+    assert arena.command(gid,human,{'id':4,'op':'clear'})['queue']==[]
+    # Rapid input must never advance the game faster than the authoritative clock.
+    for i in range(5,15):arena.command(gid,human,{'id':i,'op':'append','action':0})
+    assert state.tick==0 and len(value['queue'])==10
+    arena.thread.start()
+    try:
+        deadline=time.monotonic()+2
+        while state.tick<2 and time.monotonic()<deadline:time.sleep(.01)
+        with arena.lock:
+            assert state.tick==2 and len(value['queue'])==8
+    finally:
+        arena.stop.set();arena.thread.join(1)

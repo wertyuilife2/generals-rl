@@ -25,18 +25,18 @@ def league_command(args):
             return
     if args.action in ("add", "run"):
         count = run_jobs(store, limit=getattr(args, "limit", None), retry=getattr(args, "retry", False),
+                         workers=getattr(args, "workers", 1),
                          progress=lambda done: print(f"League: {done} new games completed", file=sys.stderr))
         print(f"Completed {count} new games. Jobs: {json.dumps(store.jobs(), ensure_ascii=False)}")
     elif args.action == "rebuild":
         store.rebuild()
         print("Ratings rebuilt from completed matches.")
     else:
-        players = args.players or store.config.player_counts[0]
-        report = store.leaderboard(players)
+        report = store.leaderboard()
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
-            print(f"{players} players / {report['completed_games']} games / random = 0")
+            print(f"Unified rating / {report['completed_games']} games / random = 0")
             for row in report["ranking"]:
                 print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
 
@@ -58,9 +58,9 @@ def main(argv=None):
     worker.add_argument("directory", type=Path)
     worker.add_argument("--limit", type=int)
     worker.add_argument("--retry", action="store_true", help="retry failed jobs after fixing their cause")
+    worker.add_argument("--workers", type=int, default=1, help="parallel simulations within each persistent schedule window")
     ranking = actions.add_parser("leaderboard")
     ranking.add_argument("directory", type=Path)
-    ranking.add_argument("--players", type=int)
     ranking.add_argument("--json", action="store_true")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
@@ -68,6 +68,7 @@ def main(argv=None):
     web.add_argument("directory", type=Path)
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8000)
+    web.add_argument("--no-worker", action="store_true", help="view/play while a separate league run handles evaluation")
     run = commands.add_parser("run", help="run, resume, or extend a tournament")
     run.add_argument("--config", type=Path, required=True)
     run.add_argument("--output", type=Path, required=True)
@@ -83,7 +84,7 @@ def main(argv=None):
             return 0
         if args.command == "serve":
             from .server import serve
-            serve(args.directory, args.host, args.port)
+            serve(args.directory, args.host, args.port, run_worker=not args.no_worker)
             return 0
         if args.command == "run":
             config = json.loads(args.config.read_text(encoding="utf-8"))

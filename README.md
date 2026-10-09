@@ -42,5 +42,6 @@ generals-arena serve outputs/arena/main --port 8000
 ```
 
 打开 http://127.0.0.1:8000 查看随机地图联赛的榜单、录像，或作为人类玩家参赛。
-新算法默认增量评测 1000 局，random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
+2–8 人共用一个 rating，允许重复 AI 实例。新算法默认增量评测 1000 局，支持 `league run --workers 8` 并行运行。
+random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
 当前不评测固定尺寸的 RL 模型；RL 训练部分保持独立。

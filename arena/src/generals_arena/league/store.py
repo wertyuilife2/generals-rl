@@ -11,7 +11,7 @@ import uuid
 from ..entrants import prepare_entrant
 from ..util import canonical, integer
 from .config import LeagueConfig
-from .rating import SCALE, update
+from .rating import SCALE, PROVISIONAL_GAMES, ranks, rate
 
 SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -22,9 +22,8 @@ CREATE TABLE jobs(id TEXT PRIMARY KEY, entrant_id TEXT NOT NULL REFERENCES entra
  error TEXT, created REAL NOT NULL);
 CREATE TABLE games(id TEXT PRIMARY KEY, job_id TEXT REFERENCES jobs(id), status TEXT NOT NULL,
  plan TEXT NOT NULL, result TEXT, replay BLOB, sequence INTEGER UNIQUE, created REAL NOT NULL, finished REAL);
-CREATE TABLE ratings(players INTEGER, entrant_id TEXT REFERENCES entrants(id), elo REAL NOT NULL,
- games INTEGER NOT NULL, wins INTEGER NOT NULL, losses INTEGER NOT NULL, draws INTEGER NOT NULL,
- PRIMARY KEY(players, entrant_id));
+CREATE TABLE ratings(entrant_id TEXT PRIMARY KEY REFERENCES entrants(id), elo REAL NOT NULL,
+ games INTEGER NOT NULL, rated_games INTEGER NOT NULL, appearances INTEGER NOT NULL, wins INTEGER NOT NULL, losses INTEGER NOT NULL, draws INTEGER NOT NULL);
 CREATE INDEX games_status ON games(status, created);
 """
 
@@ -38,6 +37,8 @@ class LeagueStore:
         with self.connect() as db:
             meta = {row["key"]: json.loads(row["value"]) for row in db.execute("SELECT * FROM meta")}
         self.manifest = meta["manifest"]
+        if self.manifest.get("schema") != 3:
+            raise ValueError("this is an archived league schema; initialize a new rank-rated league directory")
         self.config = LeagueConfig(**self.manifest["config"])
         self.anchor = meta["anchor"]
 
@@ -160,48 +161,59 @@ class LeagueStore:
             row = db.execute("SELECT plan FROM games WHERE job_id=? AND status='pending' ORDER BY rowid LIMIT 1", (job_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def ratings(self, players):
+    def ratings(self):
         with self.connect() as db:
-            return {r["entrant_id"]: r["elo"] for r in db.execute("SELECT * FROM ratings WHERE players=?", (players,))}
+            return {r["entrant_id"]: r["elo"] for r in db.execute("SELECT * FROM ratings")}
 
-    def pair_counts(self, target, players):
+    def pair_counts(self, target):
         counts = {}
         with self.connect() as db:
             for row in db.execute("SELECT plan FROM games WHERE status='complete'"):
                 ids = json.loads(row[0])["entrant_ids"]
-                if len(ids) == players and target in ids:
-                    for key in ids:
+                if target in ids:
+                    for key in set(ids):
                         if key != target:
                             counts[key] = counts.get(key, 0) + 1
         return counts
 
     def _score(self, db, result):
-        players = len(result["entrant_ids"])
-        old = {r["entrant_id"]: r["elo"] for r in db.execute("SELECT * FROM ratings WHERE players=?", (players,))}
-        changed = update(old, result, self.anchor, self.config.k_factor)
-        for seat, key in enumerate(result["entrant_ids"]):
+        ids = result["entrant_ids"]
+        rows = list(db.execute("SELECT * FROM ratings"))
+        old = {r["entrant_id"]: r["elo"] for r in rows}
+        games = {r["entrant_id"]: r["rated_games"] for r in rows}
+        changes = rate(old, result, self.anchor, self.config.k_factor, games)
+        result["ranks"] = ranks(result)
+        result["rating_changes"] = changes
+        for key in dict.fromkeys(ids):
+            seats = [seat for seat, entrant in enumerate(ids) if entrant == key]
             winner = result["winner_seat"]
-            win, loss, draw = int(winner == seat), int(winner is not None and winner != seat), int(winner is None)
-            db.execute("""INSERT INTO ratings VALUES (?,?,?,?,?,?,?) ON CONFLICT(players,entrant_id)
-                DO UPDATE SET elo=excluded.elo,games=games+1,wins=wins+excluded.wins,
-                losses=losses+excluded.losses,draws=draws+excluded.draws""",
-                       (players, key, changed[key], 1, win, loss, draw))
+            appearances = len(seats)
+            win = int(winner is not None and winner in seats)
+            loss = appearances - win if winner is not None else 0
+            draw = appearances if winner is None else 0
+            db.execute("""INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(entrant_id)
+                DO UPDATE SET elo=excluded.elo,games=games+1,rated_games=excluded.rated_games,appearances=appearances+excluded.appearances,
+                wins=wins+excluded.wins,losses=losses+excluded.losses,draws=draws+excluded.draws""",
+                       (key, changes[key]["after"], 1, changes[key]["rated_games"], appearances, win, loss, draw))
 
     def complete(self, game):
-        result, blob = game.result(), game.replay_blob()
+        return self.complete_result(game.result(), game.replay_blob())
+
+    def complete_result(self, result, blob):
         with self.connect(write=True) as db:
             row = db.execute("SELECT * FROM games WHERE id=?", (result["game_id"],)).fetchone()
             if row is None:
                 raise ValueError("game was never scheduled")
             if row["status"] == "complete":
                 return json.loads(row["result"])
-            if row["status"] not in ("pending", "live") or json.loads(row["plan"]) != game.plan:
+            plan = json.loads(row["plan"])
+            if row["status"] not in ("pending", "live") or any(result.get(key) != value for key, value in plan.items()):
                 raise ValueError("game plan/status mismatch")
             sequence = db.execute("SELECT COALESCE(MAX(sequence),-1)+1 FROM games").fetchone()[0]
-            result["sequence"] = sequence
+            result = {**result, "sequence": sequence}
+            self._score(db, result)
             db.execute("UPDATE games SET status='complete',result=?,replay=?,sequence=?,finished=? WHERE id=?",
                        (canonical(result), blob, sequence, time.time(), result["game_id"]))
-            self._score(db, result)
             if row["job_id"]:
                 db.execute("UPDATE jobs SET done=done+1,status=CASE WHEN done+1>=budget THEN 'complete' ELSE 'queued' END WHERE id=?", (row["job_id"],))
         return result
@@ -213,19 +225,18 @@ class LeagueStore:
             else:
                 db.execute("UPDATE games SET status='aborted',finished=? WHERE status='live' AND id=?", (time.time(), game_id))
 
-    def leaderboard(self, players):
-        if players not in self.config.player_counts:
-            raise ValueError("player count is not enabled")
+    def leaderboard(self):
         with self.connect() as db:
             rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,
-                COALESCE(r.elo,0) elo,COALESCE(r.games,0) games,COALESCE(r.wins,0) wins,
-                COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
-                LEFT JOIN ratings r ON r.entrant_id=e.id AND r.players=? ORDER BY elo DESC,e.name""", (players,))]
+                COALESCE(r.elo,0) elo,COALESCE(r.games,0) games,COALESCE(r.rated_games,0) rated_games,COALESCE(r.appearances,0) appearances,
+                COALESCE(r.wins,0) wins,COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
+                LEFT JOIN ratings r ON r.entrant_id=e.id ORDER BY elo DESC,e.name""")]
+            completed = db.execute("SELECT count(*) FROM games WHERE status='complete'").fetchone()[0]
         for row in rows:
             row["anchor"] = row["entrant_id"] == self.anchor
-            row["provisional"] = row["games"] < 30
-        return {"players": players, "ranking": rows, "anchor": self.anchor, "scale": SCALE,
-                "completed_games": sum(row["games"] for row in rows) // players}
+            row["provisional"] = row["rated_games"] < PROVISIONAL_GAMES
+        return {"player_counts": self.config.player_counts, "ranking": rows, "anchor": self.anchor,
+                "scale": SCALE, "completed_games": completed}
 
     def matches(self, limit=50, offset=0, players=None):
         integer("limit", limit, 1)
@@ -249,8 +260,11 @@ class LeagueStore:
         return json.loads(row[0]), row[1]
 
     def rebuild(self):
+        self.verify_execution()
         with self.connect(write=True) as db:
             db.execute("DELETE FROM ratings")
             for row in db.execute("SELECT result FROM games WHERE status='complete' ORDER BY sequence").fetchall():
-                self._score(db, json.loads(row[0]))
-        return {p: self.leaderboard(p) for p in self.config.player_counts}
+                result = json.loads(row[0])
+                self._score(db, result)
+                db.execute("UPDATE games SET result=? WHERE id=?", (canonical(result), result["game_id"]))
+        return self.leaderboard()
