@@ -16,8 +16,8 @@ class ArenaRules:
     seed: int = 1000042
 
     def __post_init__(self):
-        if not isinstance(self.map, MapConfig) or self.map.players != 2:
-            raise ValueError("arena currently requires a two-player MapConfig")
+        if not isinstance(self.map, MapConfig):
+            raise ValueError("arena requires a MapConfig with 2–8 players")
         integer("max_ticks", self.max_ticks, 1)
         integer("seed", self.seed)
         if self.visibility not in ("local", "full"):

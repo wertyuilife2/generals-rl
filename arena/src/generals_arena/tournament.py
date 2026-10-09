@@ -12,8 +12,8 @@ from .match import play_match
 from .ratings.elo import EloConfig
 from .registry import load_controller
 from .results import append_match, read_matches, validate_matches
-from .schedule import make_schedule
-from .util import digest, integer, write_json
+from .schedule import make_schedule, map_count
+from .util import digest, write_json
 
 
 @contextmanager
@@ -48,7 +48,8 @@ def _schedule(config, entrants):
         names.add(entrant["name"])
     return make_schedule([entry["entrant_id"] for entry in entrants],
                          rules_id=config["rules"]["rules_id"],
-                         maps_per_pair=config["maps_per_pair"], seed=config["rules"]["seed"])
+                         players=config["rules"]["map"]["players"],
+                         maps_per_group=map_count(config), seed=config["rules"]["seed"])
 
 
 def _report(directory, config, entrants, matches, schedule):
@@ -76,16 +77,16 @@ def run_tournament(config, output_dir, *, base_dir=Path("."), resume=False, prog
     memory and randomness. Matches run sequentially, and Elo follows log order.
     Controller failures abort the run and never become losses or draws.
     """
-    if set(config) - {"rules", "maps_per_pair", "elo", "entrants"}:
+    if set(config) - {"rules", "maps_per_group", "maps_per_pair", "elo", "entrants"}:
         raise ValueError("unknown tournament configuration fields")
     rules = ArenaRules.from_dict(config.get("rules", {}))
     elo = EloConfig(**config.get("elo", {}))
-    maps_per_pair = integer("maps_per_pair", config.get("maps_per_pair", 50), 1)
+    maps_per_group = map_count(config)
     entrants = [prepare_entrant(spec, base_dir=base_dir) for spec in config["entrants"]]
     names = [entry["name"] for entry in entrants]
-    if len(names) < 2 or len(set(names)) != len(names):
-        raise ValueError("provide at least two uniquely named entrants")
-    effective = {"rules": rules.manifest(), "maps_per_pair": maps_per_pair, "elo": asdict(elo)}
+    if len(names) < rules.map.players or len(set(names)) != len(names):
+        raise ValueError("provide at least players uniquely named entrants")
+    effective = {"rules": rules.manifest(), "maps_per_group": maps_per_group, "elo": asdict(elo)}
     schedule = _schedule(effective, entrants)
     directory = Path(output_dir).resolve()
     if not resume:
@@ -98,8 +99,8 @@ def run_tournament(config, output_dir, *, base_dir=Path("."), resume=False, prog
             old_entrants = _read(directory / "entrants.json")
             if previous["rules"] != effective["rules"] or previous["elo"] != effective["elo"]:
                 raise ValueError("rules, engine implementation, and Elo settings must remain fixed; start a new arena")
-            if maps_per_pair < previous["maps_per_pair"]:
-                raise ValueError("resume cannot reduce maps_per_pair")
+            if maps_per_group < map_count(previous):
+                raise ValueError("resume cannot reduce maps_per_group")
             current = {entry["name"]: entry["entrant_id"] for entry in entrants}
             if any(current.get(entry["name"]) != entry["entrant_id"] for entry in old_entrants):
                 raise ValueError("existing entrants cannot be removed or changed; give new versions new names")
