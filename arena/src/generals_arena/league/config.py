@@ -68,7 +68,7 @@ class LeagueConfig:
 
     def manifest(self):
         # Freeze simulation, distribution, scheduling, and scoring, not presentation code.
-        files = ("config.py", "game.py", "rating.py", "scheduler.py", "views.py")
+        files = ("config.py", "game.py", "observation.py", "rating.py", "scheduler.py", "views.py")
         value = {"schema": 3, "config": asdict(self),
                  "engine_sha256": source_digest("generals"),
                  "implementation": {name: file_digest(Path(__file__).with_name(name)) for name in files},

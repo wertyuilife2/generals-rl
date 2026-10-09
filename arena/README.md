@@ -194,9 +194,13 @@ generals-arena serve outputs/arena/rank_1000 --no-worker
 存在进行中 / 待执行对局，或仍有服务持锁时，修订操作会拒绝执行。
 
 模块划分：`league/config.py` 地图分布，`scheduler.py` 增量赛程，`rating.py` 锚定评分，
-`game.py` 对局与录像，`views.py` 人类迷雾显示，`store.py` 数据事务，`service.py` worker 与真人时钟；
+`game.py` 对局与录像，`observation.py` 算法观测，`views.py` 人类迷雾显示，`store.py` 数据事务，`service.py` worker 与真人时钟；
 `server.py` 提供 API，`web/` 存放前端。联赛逻辑位于 `arena/`；`baselines/` 的候选排序和随机动作评估使用数组计算，保留 RNG 顺序及动作轨迹。前端复用 `../bzy-nya.github.io/gen` 的全屏布局、地形 SVG 图标、
 玩家颜色、浮动统计面板和底部控制设计；`board.js` 适配服务器观测，不复制客户端游戏规则或 AI。
+
+模拟复用引擎每 tick 已计算的全局统计，算法观测用两次轴向扩张计算视野，减少重复扫描和数组复制。
+每个玩家的棋盘仍是独立的只读副本，敌方城市数仍隐藏；与环境的原始观测逐字段比较保持一致。
+这些优化位于 Arena 与 baseline，不修改环境或 RL，也不省略录像 tick。
 
 新版存储为 schema 3。旧的按人数分榜或普通 Elo 数据库保留为历史实验，不能直接续跑；请创建新的名次评分联赛目录，
 避免把旧赛程分布与新实验混合。
@@ -215,14 +219,31 @@ python arena/benchmarks/verify_league.py outputs/arena/rank_1000 --workers 8
 
 ## 本次 1000 局试运行
 
-运行目录：`outputs/arena/rank_1000`。报告见 [TRIAL.md](TRIAL.md)。使用以下命令查看：
+新尺寸地图与第二轮性能优化的运行目录为 `outputs/arena/optimized_1000`，报告见
+[TRIAL-OPTIMIZED.md](TRIAL-OPTIMIZED.md)。使用以下命令查看：
 
 ```bash
-generals-arena serve outputs/arena/rank_1000 --no-worker
-generals-arena league leaderboard outputs/arena/rank_1000
+generals-arena serve outputs/arena/optimized_1000 --port 8001 --no-worker
+generals-arena league leaderboard outputs/arena/optimized_1000
+python arena/benchmarks/verify_league.py outputs/arena/optimized_1000 --workers 8
 ```
 
-早先普通 Elo 的 433 局保留在 `outputs/arena/unified_1000`，没有覆盖或混入新榜单。
-对固定 8 人、45×41、3000 tick 的完整对局，优化前约 48.0 秒，优化后约 6.5 秒；
-所有动作与逐 tick 状态摘要相同。可用 `python arena/benchmarks/simulation.py --reference 870e764`
-加载 Git 中的原 baseline 作同场对照；该命令仅导出代码到临时目录，不切换或修改工作区。
+上一轮 1000 局和随后的人类账号、对局、分数保留在 `outputs/arena/rank_1000`，历史报告见
+[TRIAL.md](TRIAL.md)。当前旧服务使用 `outputs/arena/runtime-a73a024` 中保存的原代码，继续运行于 8000 端口：
+
+```bash
+PYTHONPATH=outputs/arena/runtime-a73a024 python -m generals_arena serve outputs/arena/rank_1000 --no-worker
+```
+
+新联赛的算法身份包含新源码哈希，评分从零重新估计；没有把新地图的成绩混入旧实验。
+早先普通 Elo 的 433 局也继续保留在 `outputs/arena/unified_1000`。
+
+固定地图、种子和动作轨迹的性能对照（重复三次，输出中位数）：
+
+```bash
+python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --repeat 3
+python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --reference a73a024 --reference-arena a73a024 --repeat 3
+```
+
+`--reference` 加载指定 Git 版本的 baseline；`--reference-arena` 同时固定 Arena 模拟实现。
+两者均只导出到临时目录，不切换工作区。默认 fixture 仍是上一轮的 45×41、3000 tick 对局，便于持续比较。

@@ -49,7 +49,7 @@ class ControllerTests(unittest.TestCase):
         for ai_type in AI_TYPES[:3]:
             with self.subTest(ai=ai_type.__name__):
                 controller = ai_type(seed=7)
-                with patch("generals_baselines.base.shortest_path", return_value=None) as search:
+                with patch("generals_baselines.base.shortest_known_path", return_value=None) as search:
                     controller.act(observe(state, 0, "full"))
                     self.assertLessEqual(search.call_count, controller.max_path_attempts)
 
