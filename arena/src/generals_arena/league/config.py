@@ -73,6 +73,7 @@ class LeagueConfig:
                  "engine_sha256": source_digest("generals"),
                  "implementation": {name: file_digest(Path(__file__).with_name(name)) for name in files},
                  "rating": "unified-anchored-rank-performance-v3",
+                 "simulation_backend": "generals-native-cpu-v1",
                  "human_observation": "local-with-indistinguishable-fog-obstacles-v1",
                  "decision_timing": "joint_pre_growth_then_absolute_seat_order"}
         return {**value, "rules_id": digest(value)}

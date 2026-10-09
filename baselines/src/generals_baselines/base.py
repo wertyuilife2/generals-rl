@@ -1,305 +1,170 @@
-"""Bounded, observation-only heuristic planning.
-
-The planners deliberately receive no engine or map layout.  Their terrain map
-contains only facts seen by that player; unexplored cells are optimistic paths
-that are rechecked as the army approaches them.
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
+"""Thin Python lifecycle/array binding for the C++ observation-only policies."""
 from functools import lru_cache
+import ctypes
+from pathlib import Path
+import weakref
 
 import numpy as np
 
-from generals.core.grid import adjacent, direction_between
-from generals.core.observation import Observation
-from generals_baselines.planning import geometry, nearest_cells, shortest_known_path
-from generals.core.state import (
-    EMPTY, UNKNOWN, UNKNOWN_OWNER, Action, Direction,
-    MoveMode, MoveResult, Structure, Terrain,
-)
+from generals.backends._build import build_shared
+from generals.core.state import Action
 
 
-@lru_cache(maxsize=32)
-def grid_neighbors(height: int, width: int) -> np.ndarray:
-    """Geometry only: no hidden terrain or shared mutable policy state."""
-    cells = np.arange(height * width).reshape(height, width)
-    graph = np.full((height * width, 4), -1, dtype=np.intp)
-    graph[cells[1:].ravel(), 0] = cells[:-1].ravel()
-    graph[cells[:, :-1].ravel(), 1] = cells[:, 1:].ravel()
-    graph[cells[:-1].ravel(), 2] = cells[1:].ravel()
-    graph[cells[:, 1:].ravel(), 3] = cells[:, :-1].ravel()
-    graph.flags.writeable = False
-    return graph
+class _Observation(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_void_p) for name in
+                ('terrain', 'structure', 'owner', 'army', 'visible', 'alive')] + [
+        ('height', ctypes.c_int), ('width', ctypes.c_int), ('players', ctypes.c_int),
+        ('player', ctypes.c_int), ('tick', ctypes.c_int64), ('terminated', ctypes.c_int)]
 
 
-def movable_army(army: int, mode: MoveMode = MoveMode.ALL_BUT_ONE) -> int:
-    return max(0, int(army) // 2 if mode == MoveMode.HALF else int(army) - 1)
+class _Random(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_void_p) for name in ('state', 'next64', 'next32', 'next_double')]
 
 
-def softmax_choice(rng: np.random.Generator, scores: list[float], temperature: float) -> int:
-    """Stable softmax; callers give finite scores and at least one candidate."""
-    values = np.asarray(scores, dtype=np.float64)
-    values = (values - values.max()) / max(temperature, 1e-6)
-    weights = np.exp(np.clip(values, -700.0, 0.0))
-    return int(rng.choice(len(scores), p=weights / weights.sum()))
+class _Options(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_int) for name in
+                ('max_sources', 'max_attempts', 'lifetime', 'memory_ttl')] + [
+        ('temperature', ctypes.c_double), ('weights', ctypes.c_double * 3)]
 
 
-@dataclass(frozen=True)
-class Candidate:
-    source: int
-    target: int
-    strategy: str
-    score: float
+@lru_cache(maxsize=1)
+def _library():
+    lib, metadata = build_shared(Path(__file__).with_name('policy.cpp'), name='baselines')
+    signatures = {
+        'baseline_error': ([], ctypes.c_char_p),
+        'baseline_create': ([ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
+        'baseline_destroy': ([ctypes.c_void_p], None),
+        'baseline_act': ([ctypes.c_void_p, ctypes.POINTER(_Observation), ctypes.POINTER(_Options), ctypes.POINTER(_Random)], ctypes.c_int64),
+        'baseline_result': ([ctypes.c_void_p, ctypes.c_int, ctypes.c_int64, *([ctypes.c_int]*4)], None),
+        'baseline_info': ([ctypes.c_void_p, ctypes.c_int], ctypes.c_int64),
+        'baseline_copy': ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p], ctypes.c_int),
+        'baseline_set_path': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int], ctypes.c_int),
+        'baseline_set_pending': ([ctypes.c_void_p, ctypes.c_int64], None),
+    }
+    for name, (args, result) in signatures.items():
+        function = getattr(lib, name)
+        function.argtypes, function.restype = args, result
+    return lib, metadata
 
 
 class BaseAI:
-    """A small shared planner with bounded retries and result-driven paths."""
-
-    weights = {"merge": 0.5, "explore": 0.8, "attack": 1.5}
-    temperature = 0.5
+    """Native policy; owns its C++ memory/path and independent NumPy RNG state."""
+    kind = 0
+    weights = {'merge': .5, 'explore': .8, 'attack': 1.5}
+    temperature = .5
     path_lifetime = 20
     max_sources = 6
     max_path_attempts = 12
     memory_ttl = 50
 
-    def __init__(self, player_id: int = 0, seed: int = 0):
+    def __init__(self, player_id=0, seed=0):
         self.reset(player_id, seed)
 
-    def reset(self, player_id: int, seed: int) -> None:
+    def reset(self, player_id, seed):
+        self.close()
         self.player_id = int(player_id)
         self.rng = np.random.default_rng(seed)
-        self.terrain: np.ndarray | None = None
-        self.structure: np.ndarray | None = None
-        self.owner: np.ndarray | None = None
-        self.army: np.ndarray | None = None
-        self.last_seen: np.ndarray | None = None
-        self.path: list[int] = []
-        self.path_strategy = ""
-        self.path_tick = 0
-        self._pending: Action | None = None
+        self._lib, self.native_metadata = _library()
+        self._handle = self._lib.baseline_create(self.kind, self.player_id)
+        if not self._handle:
+            raise ValueError(self._lib.baseline_error().decode())
+        self._finalizer = weakref.finalize(self, self._lib.baseline_destroy, self._handle)
+        # Keep the bit generator and its ctypes interface alive for native calls.
+        bits = self.rng.bit_generator.ctypes
+        self._bits = bits
+        self._random = _Random(bits.state, *[ctypes.cast(function, ctypes.c_void_p) for function in
+                                          (bits.next_uint64, bits.next_uint32, bits.next_double)])
 
-    def _remember(self, obs: Observation) -> None:
-        if self.terrain is None or self.terrain.shape != obs.terrain.shape:
-            self.terrain = np.full(obs.terrain.shape, UNKNOWN, dtype=np.uint8)
-            self.structure = np.full(obs.terrain.shape, UNKNOWN, dtype=np.uint8)
-            self.owner = np.full(obs.terrain.shape, UNKNOWN_OWNER, dtype=np.int16)
-            self.army = np.full(obs.terrain.shape, -1, dtype=np.int64)
-            self.last_seen = np.full(obs.terrain.shape, -1, dtype=np.int64)
-            self.path = []
-        visible = obs.visible
-        np.copyto(self.terrain, obs.terrain, where=visible)
-        np.copyto(self.structure, obs.structure, where=visible)
-        np.copyto(self.owner, obs.owner, where=visible)
-        np.copyto(self.army, obs.army, where=visible)
-        self.last_seen[visible] = obs.tick
+    def close(self):
+        finalizer = getattr(self, '_finalizer', None)
+        if finalizer is not None:
+            finalizer()
+        self._handle = None
 
-        # A remembered general is a location, never a claim about current army.
-        hidden = ~visible
-        stale = hidden & (obs.tick - self.last_seen > self.memory_ttl)
-        ordinary = self.structure != Structure.GENERAL
-        lost_own = hidden & (self.owner == self.player_id)
-        forget = (stale & ordinary) | lost_own
-        self.owner[forget] = UNKNOWN_OWNER
-        self.army[hidden] = -1
-        for pid, alive in enumerate(obs.alive):
-            if not alive:
-                defeated = hidden & (self.owner == pid)
-                self.owner[defeated] = UNKNOWN_OWNER
-                self.structure[defeated & (self.structure == Structure.GENERAL)] = Structure.CITY
-
-    def _neighbors(self, cell: int, obs: Observation):
-        terrain = self.terrain.ravel()
-        for direction in range(4):
-            target = adjacent(cell, direction, obs.height, obs.width)
-            if target is not None and terrain[target] != Terrain.MOUNTAIN:
-                yield direction, target
-
-    def _mode(self, strategy: str, source: int, target: int, obs: Observation) -> MoveMode:
-        return MoveMode.ALL_BUT_ONE
-
-    def _safe_action(self, source: int, target: int, strategy: str, obs: Observation) -> Action | None:
-        direction = direction_between(source, target, obs.height, obs.width)
-        owner, army = obs.owner.ravel(), obs.army.ravel()
-        if direction is None or owner[source] != self.player_id or army[source] < 2:
-            return None
-        if obs.terrain.ravel()[target] == Terrain.MOUNTAIN:
-            return None
-        mode = self._mode(strategy, source, target, obs)
-        moved = movable_army(army[source], mode)
-        # Attacks remain legal in the engine; heuristic AIs avoid knowingly
-        # spending a stack on an attack that cannot take its next square.
-        if owner[target] not in (self.player_id, EMPTY, UNKNOWN_OWNER) and moved <= army[target]:
-            return None
-        return Action.move(source, Direction(direction), mode)
-
-    def _follow_path(self, obs: Observation) -> Action | None:
-        if len(self.path) < 2 or obs.tick - self.path_tick >= self.path_lifetime:
-            self.path = []
-            return None
-        destination_owner = int(self.owner.ravel()[self.path[-1]])
-        strategy = self.path_strategy
-        target = self.path[-1]
-        invalid_target = (
-            (strategy == "attack" and (destination_owner < 0 or destination_owner == self.player_id))
-            or (strategy == "capture" and (destination_owner == self.player_id or self.structure.ravel()[target] != Structure.CITY))
-            or (strategy in ("explore", "expand") and destination_owner not in (EMPTY, UNKNOWN_OWNER))
-            or (strategy in ("merge", "gather", "fortify") and destination_owner != self.player_id)
-        )
-        if invalid_target:
-            self.path = []
-            return None
-        action = self._safe_action(self.path[0], self.path[1], self.path_strategy, obs)
-        if action is None:
-            self.path = []
-        return action
-
-    def _candidates(self, obs: Observation) -> list[Candidate]:
-        owner, army = obs.owner.ravel(), obs.army.ravel()
-        memory_owner, structures = self.owner.ravel(), self.structure.ravel()
-        terrain, remembered_army = self.terrain.ravel(), self.army.ravel()
-        sources = np.flatnonzero((owner == self.player_id) & (army > 1))
-        if not sources.size:
-            return []
-        owned = np.flatnonzero(owner == self.player_id)
-        graph = grid_neighbors(obs.height, obs.width)
-        nearby = graph[owned]
-        valid = (nearby >= 0) & (terrain[nearby] != Terrain.MOUNTAIN)
-        frontiers = np.zeros(obs.size, dtype=np.int64)
-        threats = np.zeros(obs.size, dtype=np.int64)
-        frontiers[owned] = np.sum(valid & (memory_owner[nearby] != self.player_id), axis=1)
-        hostile = valid & (owner[nearby] >= 0) & (owner[nearby] != self.player_id)
-        threats[owned] = np.sum(np.where(hostile, np.maximum(army[nearby], 0), 0), axis=1)
-        source_scores = army[sources].astype(float) * (1.0 + .25 * (frontiers[sources] != 0))
-        sources = sources[np.lexsort((sources, -source_scores))[:self.max_sources]].tolist()
-        if len(sources) > 1:
-            chosen = softmax_choice(self.rng, [np.log1p(float(army[s])) for s in sources], self.temperature)
-            sources.insert(0, sources.pop(chosen))
-
-        attacks = np.flatnonzero((memory_owner >= 0) & (memory_owner != self.player_id))
-        cities = np.flatnonzero((structures == Structure.CITY) & (memory_owner != self.player_id))
-        expansion = np.flatnonzero(((memory_owner == EMPTY) | (memory_owner == UNKNOWN_OWNER)) & (terrain != Terrain.MOUNTAIN))
-        _, ys, xs = geometry(obs.height, obs.width)
-        result: list[Candidate] = []
-        for source in sources:
-            sy, sx = divmod(source, obs.width)
-            distance = np.abs(ys - sy) + np.abs(xs - sx)
-            for strategy in self.weights:
-                if strategy in ("attack", "capture"):
-                    pool = attacks if strategy == "attack" else cities
-                    defending = np.maximum(remembered_army[pool], 0)
-                    keep = int(army[source]) - distance[pool] > defending
-                    targets, defending = pool[keep], defending[keep]
-                    values = np.where(structures[targets] == Structure.GENERAL, 50.0,
-                                      np.where(structures[targets] == Structure.CITY, 18.0, 8.0))
-                    values = values / (distance[targets] + 1) + np.minimum((army[source] - defending).astype(float), 100.0) * .01
-                elif strategy in ("explore", "expand"):
-                    # expansion is ascending, so stable sorting also preserves
-                    # the reference planner's cell-index tie break.
-                    nearest = nearest_cells(expansion, distance, obs.size)
-                    targets = nearest[distance[nearest] < int(army[source])]
-                    neighbors = graph[targets]
-                    unknown = np.sum((neighbors >= 0) & (terrain[neighbors] == UNKNOWN), axis=1)
-                    values = (5.0 + .4 * unknown) / (distance[targets] + 1)
-                else:
-                    if structures[source] == Structure.GENERAL and threats[source] > int(army[source]) // 2:
-                        continue
-                    keep = owned != source
-                    if strategy == "fortify":
-                        keep &= threats[owned] != 0
-                    else:
-                        keep &= (army[owned] > army[source]) | ((army[owned] == army[source]) & (owned < source))
-                    targets = owned[keep]
-                    threat = threats[targets]
-                    values = 3.0 + np.minimum(army[targets].astype(float), 100) * .06 + frontiers[targets]
-                    values += np.minimum(threat, 100) * .15
-                    values += ((threat != 0) & (structures[targets] == Structure.GENERAL)) * 20.0
-                    values /= distance[targets] + 1
-                # Only the four best candidates of a strategy are consumed.
-                # Construct objects after ranking, preserving RNG and tie order.
-                best = np.lexsort((targets, -values))[:4]
-                result.extend(Candidate(source, int(targets[i]), strategy, float(values[i])) for i in best)
-        return result
-
-    def _plan(self, candidate: Candidate, obs: Observation) -> list[int] | None:
-        # Do not plot a route through a known garrison that this stack cannot
-        # beat, even if its destination is an attractive square beyond it.
-        hostile = (self.owner != self.player_id) & (self.owner != EMPTY) & (self.owner != UNKNOWN_OWNER)
-        too_strong = hostile & (self.army >= int(obs.army.ravel()[candidate.source]) - 1)
-        blocked = (self.terrain == Terrain.MOUNTAIN) | too_strong
-        path = shortest_known_path(blocked, candidate.source, candidate.target)
-        if not path or len(path) < 2:
-            return None
-        # Account for leave-one costs and visible garrisons along the route.
-        # Future enemy moves are unknowable, so every step is rechecked later.
-        strength = int(obs.army.ravel()[candidate.source])
-        for source, target in zip(path, path[1:]):
-            mode = self._mode(candidate.strategy, source, target, obs)
-            strength = movable_army(strength, mode)
-            if self.owner.ravel()[target] == self.player_id:
-                strength += max(0, int(obs.army.ravel()[target]))
-            else:
-                strength -= max(0, int(self.army.ravel()[target]))
-            if strength <= 0:
-                return None
-        return path
-
-    def act(self, observation: Observation) -> Action:
+    def act(self, observation):
+        if not self._handle:
+            raise RuntimeError('controller is closed; reset it before acting')
         obs = observation
-        self._pending = None
-        if obs.player_id != self.player_id or obs.terminated or not obs.alive[self.player_id]:
-            self.path = []
-            return Action.wait()
-        self._remember(obs)
-        action = self._follow_path(obs)
-        if action is not None:
-            self._pending = action
-            return action
-        candidates = self._candidates(obs)
-        for _ in range(min(self.max_path_attempts, len(candidates))):
-            strategies = [s for s in self.weights if any(c.strategy == s for c in candidates)]
-            if not strategies:
-                break
-            strategy = strategies[softmax_choice(self.rng, [self.weights[s] for s in strategies], self.temperature)]
-            group = [c for c in candidates if c.strategy == strategy]
-            candidate = max(group, key=lambda c: c.score)
-            candidates.remove(candidate)
-            path = self._plan(candidate, obs)
-            if path is None:
-                continue
-            self.path = path
-            self.path_strategy = strategy
-            self.path_tick = obs.tick
-            action = self._follow_path(obs)
-            if action is not None:
-                self._pending = action
-                return action
-        # One-step fallback is bounded and prevents an unreachable distant
-        # objective from suppressing useful expansion next to the player.
-        fallback: list[tuple[float, Action]] = []
-        for source in np.flatnonzero((obs.owner.ravel() == self.player_id) & (obs.army.ravel() > 1)):
-            for _, target in self._neighbors(int(source), obs):
-                if obs.owner.ravel()[target] == self.player_id:
-                    continue
-                action = self._safe_action(int(source), target, "expand", obs)
-                if action is not None:
-                    value = 20.0 if obs.structure.ravel()[target] == Structure.GENERAL else 1.0
-                    fallback.append((value, action))
-        if fallback:
-            self._pending = max(fallback, key=lambda pair: pair[0])[1]
-            return self._pending
-        return Action.wait()
+        if not 2 <= len(obs.alive) <= 8 or not 0 <= self.player_id < len(obs.alive):
+            raise ValueError('invalid observation player count')
+        arrays = []
+        for name, dtype in [('terrain', np.uint8), ('structure', np.uint8), ('owner', np.int16),
+                            ('army', np.int64), ('visible', np.bool_), ('alive', np.bool_)]:
+            value = getattr(obs, name)
+            shape = (len(obs.alive),) if name == 'alive' else (obs.height, obs.width)
+            if value.dtype != dtype or value.shape != shape:
+                raise ValueError(f'invalid observation array: {name}')
+            arrays.append(np.ascontiguousarray(value))
+        if obs.height < 1 or obs.width < 1 or obs.size > 1024*1024:
+            raise ValueError('unsupported observation dimensions')
+        if min(self.max_sources, self.max_path_attempts, self.path_lifetime, self.memory_ttl) < 0:
+            raise ValueError('planning limits cannot be negative')
+        native = _Observation(*(value.ctypes.data for value in arrays), obs.height, obs.width,
+                              len(obs.alive), obs.player_id, obs.tick, bool(obs.terminated))
+        options = _Options(self.max_sources, self.max_path_attempts, self.path_lifetime,
+                           self.memory_ttl, self.temperature, (ctypes.c_double*3)(*self.weights.values()))
+        with self.rng.bit_generator.lock:
+            encoded = self._lib.baseline_act(self._handle, ctypes.byref(native), ctypes.byref(options), ctypes.byref(self._random))
+        if encoded < 0:
+            raise RuntimeError(self._lib.baseline_error().decode())
+        return Action.decode(encoded)
 
-    def on_result(self, result: MoveResult) -> None:
-        if result.player_id != self.player_id or self._pending is None:
+    def on_result(self, result):
+        if not self._handle:
             return
-        if result.action != self._pending:
+        if result.action.source < 0 and int(result.action.kind) != 0:
             return
-        if result.valid and result.target_owned and len(self.path) >= 2 and self.path[:2] == [result.source, result.target]:
-            self.path.pop(0)
-            if len(self.path) < 2:
-                self.path = []
-        else:
-            self.path = []
-        self._pending = None
+        code = result.action.encode()
+        if code > np.iinfo(np.int64).max:
+            return
+        self._lib.baseline_result(self._handle, result.player_id, code, result.valid,
+                                  result.target_owned, result.source, result.target)
+
+    def _info(self, field):
+        return int(self._lib.baseline_info(self._handle, field)) if self._handle else 0
+
+    def _memory(self, field, dtype):
+        height, width = self._info(0), self._info(1)
+        if not height:
+            return None
+        values = np.empty(height*width, np.int64)
+        self._lib.baseline_copy(self._handle, field, values.ctypes.data)
+        return values.astype(dtype).reshape(height, width)
+
+    # Diagnostic snapshots never alias the native planner or another seat.
+    terrain = property(lambda self: self._memory(0, np.uint8))
+    structure = property(lambda self: self._memory(1, np.uint8))
+    owner = property(lambda self: self._memory(2, np.int16))
+    army = property(lambda self: self._memory(3, np.int64))
+    last_seen = property(lambda self: self._memory(4, np.int64))
+    last_search_attempts = property(lambda self: self._info(3))
+
+    @property
+    def path(self):
+        if not self._handle:
+            return []
+        values = np.empty(self._info(4), np.int64)
+        self._lib.baseline_copy(self._handle, 6, values.ctypes.data)
+        return values.tolist()
+
+    @path.setter
+    def path(self, cells):
+        if not self._handle:
+            raise RuntimeError('controller is closed; reset it before editing a path')
+        values = np.asarray(cells, dtype=np.int64)
+        limit = self._info(0)*self._info(1) or 1024*1024
+        if values.ndim != 1 or np.any(values < 0) or np.any(values >= limit):
+            raise ValueError('path cells must be in bounds')
+        if self._lib.baseline_set_path(self._handle, values.ctypes.data, len(values)):
+            raise RuntimeError(self._lib.baseline_error().decode())
+
+    @property
+    def _pending(self):
+        code = self._info(2)
+        return Action.decode(code) if code else None
+
+    @_pending.setter
+    def _pending(self, action):
+        if not self._handle:
+            raise RuntimeError('controller is closed; reset it before editing an action')
+        self._lib.baseline_set_pending(self._handle, 0 if action is None else action.encode())

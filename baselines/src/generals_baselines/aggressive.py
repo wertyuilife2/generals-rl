@@ -1,9 +1,9 @@
-"""Attack-oriented baseline."""
-
-from generals_baselines.base import BaseAI
+"""AggressiveAI configuration; implementation lives in policy.cpp."""
+from .base import BaseAI
 
 
 class AggressiveAI(BaseAI):
-    weights = {"merge": 0.5, "explore": 0.8, "attack": 1.5}
-    temperature = 0.5
+    kind = 0
+    weights = {'merge': .5, 'explore': .8, 'attack': 1.5}
+    temperature = .5
     path_lifetime = 20

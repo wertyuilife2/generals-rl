@@ -1,5 +1,5 @@
-"""Portable reference matches at the same joint decision boundary as training."""
-from generals.core.engine import CoreEngine
+"""Matches using the environment's native CPU backend and joint decisions."""
+from generals import make_engine
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.recording import state_digest
@@ -16,7 +16,7 @@ def play_match(spec, rules, controllers, *, state=None):
     if (state.player_count != players or state.tick != 0 or state.terminated or not state.alive.all() or
             state.owner.shape != (rules.map.height, rules.map.width)):
         raise ValueError("matches require fresh states matching the rules with every player alive")
-    engine = CoreEngine(state)
+    engine = make_engine(state)
     for seat, controller in enumerate(controllers):
         controller.reset(player_id=seat, seed=spec.controller_seeds[seat])
     initial_digest = state_digest(state)

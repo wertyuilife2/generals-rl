@@ -1,6 +1,8 @@
 # Generals baselines
 
-独立的 NumPy 手写策略包 `generals_baselines`，依赖游戏环境，不依赖 Torch、训练或 GUI。
+独立的 C++ 手写策略包 `generals_baselines`，Python 负责控制器接口与 NumPy 随机数状态，
+依赖游戏环境，不依赖 Torch、训练或 GUI。需要 Linux/macOS 和 C++17 编译器（可用 `CXX` 指定）；
+首次创建控制器时编译，之后按源码与编译参数哈希复用本地缓存。
 
 ```bash
 python -m pip install -e ./env -e ./baselines
@@ -23,10 +25,15 @@ players = make_controllers(["expansion", "defensive"], seed=42)
 策略只接收该玩家可见的观测。人类输入和混合人类/AI 工厂仍在 `generals.controllers`；
 该工厂在需要 AI 时加载本包。
 
-候选评估使用数组运算；最近 16 个目标用部分选择代替全图排序，并保持距离、格子编号的破同分顺序。
-`planning.py` 缓存与地形无关的网格邻接关系，寻路仍只使用各玩家自己的记忆，按上、右、下、左执行 BFS。
-可见记忆使用掩码复制，避免重复构造临时数组。优化前后的完整动作、RNG 顺序和逐 tick 状态通过黄金轨迹校验。
+四种策略的记忆、候选评估、最近目标选择、BFS、路径生命周期、半兵规则和随机动作评分都在
+`src/generals_baselines/policy.cpp` 中实现；`base.py` 是生命周期与数组绑定，不保留另一套 Python 规划器。
+每个控制器独立持有原生状态，仅接收允许的观测。调试用的 `terrain/owner/army/path` 返回独立快照。
+
+C++ 在持有 NumPy BitGenerator 锁时直接调用其原生随机函数，保持原有种子派生、洗牌和抽样顺序，
+不预取随机数，不跨席位共享随机流。优化前后的完整动作与逐 tick 状态通过黄金轨迹及 1000 局对照校验。
+策略 CPP 源码也参与 Arena 的算法版本哈希；替换实现不会被当成旧版本继续评测。
 
 ```bash
 PYTHONPATH=env/src:baselines/src python -m unittest discover -s baselines/tests -v
+python -m pytest baselines/tests -q
 ```
