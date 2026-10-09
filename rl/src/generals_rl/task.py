@@ -45,6 +45,8 @@ class TaskConfig:
             raise ValueError("GPU simulation requires a CUDA task device")
         if not 0 <= self.learner_seat < self.players:
             raise ValueError("learner seat is out of range")
+        if self.opponent == "current_self_play" and self.players != 2:
+            raise ValueError("current self-play requires two players")
         if not isinstance(self.productive_actions, bool):
             raise TypeError("productive_actions must be boolean")
         if not isinstance(self.combat_features, bool):
@@ -129,6 +131,9 @@ class GeneralsTask:
             self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
                                             config.players, self.device)
             self.knowledge.update(self.batch(), self.player_ids)
+        bind_knowledge = getattr(self.opponent, "bind_knowledge", None)
+        if bind_knowledge is not None:
+            bind_knowledge(self.knowledge)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids))
         self._notify_opponent("on_reset")
         self.observations = self._observations()
@@ -140,7 +145,7 @@ class GeneralsTask:
         batch = self.batch()
         observations = {
             "policy": self.history.flattened(),
-            "single_obs": self.observation_encoder.encode(batch, self.player_ids),
+            "single_obs": self.history.frames[:, -1].clone(),
             "critic": self.observation_encoder.encode(batch, self.player_ids, privileged=True),
             "action_mask": self.action_space.mask(batch, self.player_ids),
         }

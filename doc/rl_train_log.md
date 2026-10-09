@@ -3224,3 +3224,76 @@ root实际查看了四张终局前/终局contact sheets覆盖八局，并检查�
 **结果入口：** [本轮summary](../outputs/moe_cts/iterations/v36/train/summary.json)、[执行状态](../outputs/moe_cts/iterations/v36/execution_state.json)、[不可变best](../outputs/moe_cts/iterations/v36/final_best/checkpoint.pt)、[开发报告](../outputs/moe_cts/iterations/v36/final_best/development_report.json)、[终态统计](../outputs/moe_cts/iterations/v36/diagnostic/final_training_dynamics.json)、[完整缓存review](../outputs/moe_cts/iterations/v36/diagnostic/terminal_training_review.json)、[失败Core审查](../outputs/moe_cts/iterations/v36/diagnostic/recorded_failure_review.json)、[H4/H8配对](../outputs/moe_cts/iterations/v36/diagnostic/h4_h8_matched_review.json)、[root视觉验收](../outputs/moe_cts/iterations/v36/diagnostic/root_visual_review.json)。
 
 真实原生退出收据和各阶段来源保留在diagnostic。终态读回曾因字段别名失败，修正后仅读取缓存，未重跑TB；绘图首次因observer元数据字段不兼容而在绘图前失败，最小等价守卫适配后成功，diff与两次真实结果保留在[曲线/配对执行记录](../outputs/moe_cts/iterations/v36/diagnostic/terminal_plot_pair_execution.json)。该改动仅离线诊断，不影响冻结训练代码或统计。逐项目标验收及报告commit绑定见[最终验收](../outputs/moe_cts/iterations/v36/diagnostic/goal_completion_audit_final_v36.json)。
+
+### v32-opt：保持原网络容量的吞吐优化（2026-10-09，已接纳历史对手 best，纯自对弈消融失败）
+
+用户将验收调整为 **best 能力及后续趋势为主，允许 final 存在一定差距**，据此接纳历史对手回退的 **best/u699** 为主模型。原先要求 final+best 全部通过的 strict NI 与直接对战门槛仍记录为失败，没有改写原始结果。历史方案整轮计算吞吐为 **112,532.932 transitions/s（+59.13%）**；这是执行效率提升，不声称学习曲线完全相同或 final 能力等同。
+
+本轮从 v32 的 H4/K11、9×9/P2、16,384 环境和 tick 课程开始。actor/critic 仍合计 **26,074 参数**：actor 输入逻辑 61 通道、critic 71 通道，执行卷积时分别补零到 64/72 通道；权重、输出和严格 FP32 梯度保持原网络语义。历史、知识、坐标输入一次拼接，普通 PPO minibatch 的历史解析供 actor/critic 复用。固定推理和更新 batch 后开启 cuDNN 算法选择，最终保留 `cudnn_benchmark=true`。可选纯 current 模式每 tick 使用一个完整环境 batch，仅维护对方席位的局部历史，并共享按席位隔离的知识存储；不向 actor 提供 privileged critic 输入，对手样本也不重复计入 learner transitions。该纯模式作为失败消融保留；已接纳方案恢复原八个历史快照，训练逐局抽取冻结对手。
+
+试过保留两层空间卷积的 critic 历史/知识 32 通道投影，但完整更新实测更慢，正式候选已去掉投影，保留原 critic 容量。12 次真实完整更新的预检包含采样、GAE 和 4 epochs×64 minibatches，N=16,384/T=32；以下计算吞吐不含地图池初始化、评估、存盘和磁盘日志：
+
+| critic 配置 | cuDNN benchmark | transitions/s | collection/update 总秒 | Torch peak allocated |
+|---|---|---:|---:|---:|
+| 32 通道投影 | false | 113,347 | 12.112/43.394 | 15.93 GB |
+| 原始完整输入 | false | 125,570 | 11.858/38.245 | 15.89 GB |
+| 32 通道投影 | true | 119,306 | 12.124/40.609 | 20.16 GB |
+| 原始完整输入（纯 current 预检） | true | **130,346** | **11.979/36.289** | **20.84 GB** |
+
+这是短预检，包含冷启动更新，不代替正式成熟策略的性能对照。v32 已完成整轮计算吞吐为 70,716 transitions/s，N/T/PPO 预算相同，但轨迹和成熟程度不同；整轮训练及受控 benchmark 分别记录。
+
+纯自对弈本身的收益另有固定轨迹对照：v36/H8、8,192 环境、T=32、E4×64 minibatches、RTX 4090，真实八个历史模型变为两个 B=8,192 当前策略 actor batch 后，采样吞吐从 243,264 到约 308,000 transitions/s（+26.5%），采样＋GAE＋完整 PPO 从 **71,403 到 76,047 transitions/s（+6.5%）**。双方合为单个 B=16,384 为 75,046 transitions/s（+5.1%），较大的卷积 batch 和输入拼接略慢。历史基线 PPO 更新占 70.5% 耗时，且每 tick 总 actor 行数仍是 16,384，因此减少分组和调用次数不会等比例降低整体训练耗时。计数仍只含 learner 样本，未把对手样本重复计入；所有模式执行相同联合动作、游戏轨迹、奖励和 PPO 预算，计时排除评估与磁盘 I/O。这不是 v32-opt 整套优化的因果加速比，也不验证纯自对弈的学习效果。[受控速度报告](../outputs/analysis/pure_self_play/20261009/report.txt)。
+
+纯 current 正式消融以随机初始权重、新 Adam 和新对局开始，冻结运行代码于 `outputs/moe_cts/iterations/v32-opt/source`；单卡使用原 StudentPPO，后续多 GPU 开发不影响本轮。已完整完成与 v32 相同的 **1,206 更新、632,291,328 learner transitions**，真实原生退出码 0；12 次 CPU selector 全部完成，没有失败或取消。原 gamma=.995、lambda=.95、奖励和 tick 衰减保持，100 次更新评估一次；CPU selector 200 地图/AI、每地图交换席位、随机动作、seed271828。最终计算吞吐 **130,317 transitions/s**（v32 70,716，+84.3%）；含初始化、日志、存盘和评估排空的 wall 吞吐 **119,116/s**（v32 70,223，+69.6%），总 wall 5,308.21 秒，Torch peak allocated/reserved 20.88/22.26 GB。这两轮对局不同，整体差异包含多项实现优化及对手变化，不能将其全部归因于纯自对弈。1,000 地图 final/best 评估均已完成，十项非劣指标全部失败；该方案不作为同等效果的加速版本接纳。
+
+独立 CPU 对照已完成每 checkpoint 1,000 地图/AI、共 8,000 局，v32 final/u1205 四 AI 胜率为 **89.65/96.40/98.90/99.50%**（overall96.1125%），selector best/u699 为 **88.65/97.15/99.40/98.95%**（overall96.0375%）。两组方案均按相同评估协议分别比较 final 对 final、selector best 对 selector best。原 strict 判定要求十项地图簇配对 bootstrap 单侧 95% 下界全部高于每 AI −3pp、overall −1.5pp，并要求两个 checkpoint 的直接对战下界都高于 45%；以下保留该原始判定，更新后的用户验收依据另列。扩大的 1,000 地图评估仍复用 seed271828，不称独立未见 holdout，也不将单训练种子结果推广为普遍学习稳定性。
+
+独立结果如下，每格为胜率，平局包含在分母中；两组分别按 final 对 final、selector best 对 selector best 比较。
+
+| checkpoint | aggressive | expansion | defensive | random | overall |
+|---|---:|---:|---:|---:|---:|
+| v32 final/u1205 | 89.65% | 96.40% | 98.90% | 99.50% | 96.1125% |
+| 纯 current final/u1205 | 32.80% | 48.65% | 52.80% | 54.25% | 47.1250% |
+| v32 selector best/u699 | 88.65% | 97.15% | 99.40% | 98.95% | 96.0375% |
+| 纯 current selector best/u199 | 40.90% | 66.80% | 71.40% | 82.35% | 65.3625% |
+
+final 总体差 −48.9875pp、单侧 95% 下界 −50.45pp；best 总体差 −30.675pp、下界 −31.80pp。两者四类 AI 的下界也全部低于 −3pp，结论不依赖只取末点或早期 best。[独立验收](../outputs/analysis/v32_opt/local_current_acceptance/candidate_gate.json)、[逐项配对结果](../outputs/analysis/v32_opt/local_current_acceptance/reports/paired_noninferiority.json)。
+
+直接模型对战也已完成：CPU FP32、400 地图交换席位共 800 局、seed/sampling271828、B128、max2,000tick。纯 current final 对 v32 final 为 **70 胜/730 负/0 平**，draw-adjusted score **8.75%**，地图簇 95% CI [6.75%,10.875%]；best 对 best 为 **53 胜/746 负/1 平**，score **6.6875%**，CI [5.00%,8.4375%]。单侧下界分别 7.125%/5.3125%，均未过预定 45% guard；子进程 exit1 为真实 guard 失败，工作流正常完成。这项结果补充说明相对已训练 v32 的能力差距，不将 baseline 胜率和 checkpoint score 混为同一指标。[直接对战执行和来源](../outputs/analysis/v32_opt/local_current_crossplay/receipt.json)。
+
+纯方案实际配置、训练及冻结源码保留在 [v32-opt](../outputs/moe_cts/iterations/v32-opt/)，可复现失败消融；主配置 [v32-opt.json](../rl/configs/v32-opt.json) 对应已接纳的历史回退实际配置。预检、基线、安全权重审查和配对评估工具见 [v32_opt](../outputs/analysis/v32_opt/)。
+
+完整 12 点 CPU selector 中，纯 current best 为 u199/overall **64.875%**；末点 u1199 为 **48.625%**（aggressive36.00%），v32 对应末点 overall **96.3125%**（aggressive90.25%）。以相同最后 100 次更新比较，纯方案平均已结束对局长度从 167.18 到 470.06 tick、timeout 比例从 0.352% 到 31.924%、动作熵从 1.0745 到 2.6839 nats；WAIT 比例反而从 17.04% 到 12.56%。全程按 episode 加权的 timeout 比例为 0.674%→41.847%，与逐更新窗口平均的定义不同。这些指标描述训练状态变化，不独立证明因果；对手分布和实际局面不同，也不能将高 critic explained variance 当作外部对战能力。
+
+原条件启动器在训练启动后因配置 raw SHA 不同退出：实际重建仅补全 `evaluation.device=cpu` 与 `evaluation.timeout_seconds=null` 默认值。逐字段确认与父候选只差历史对手、池大小和 run_id，118 个冻结代码文件 SHA 均一致后，补接同一训练进程的验收监控；未重启、恢复或修改运行配置。prepared 与实际 run_config 的各自 SHA 均保留，验收绑定实际配置，不掩盖启动器失败。[原启动失败](../outputs/analysis/v32_opt/historical_launch_receipt.json)、[监控恢复记录](../outputs/analysis/v32_opt/historical_recovery_receipt.json)、[历史候选执行状态](../outputs/moe_cts/iterations/v32-opt-historical/execution_state.json)。
+
+历史回退 `v32-opt-historical` 已从随机初始权重、新 Adam、新历史池完成 **1,206 更新、632,291,328 fresh learner transitions**，N16,384/T32、E4×64 minibatch、gamma=.995、lambda=.95、tick 课程与 v32 相同，12 个 selector 全部完成且队列排空。collection 累计 **2,003.741 秒**，GAE＋完整 PPO **3,614.981 秒**；计算吞吐 **112,532.932/s**，相对 v32 **+59.13%**。含初始化、日志、存盘和排空的 wall 吞吐 **109,459.278/s（+55.87%）**，wall **5,776.498 秒**，Torch peak allocated/reserved **20.018/20.992 GiB**。正式进程原生退出码无法由轮询监控直接观测；完整 summary、TensorBoard 1206 点、12 个 selector、进程终止、final/best 权重及 118 源码 SHA 已独立核验。阶段时间来自既有 Runner 主机计时边界，没有独立拆分 GAE/PPO，也不是额外同步 benchmark；轨迹和历史池策略不同，执行吞吐不能等同于达到同等实力的学习加速。[历史 summary](../outputs/moe_cts/iterations/v32-opt-historical/train/summary.json)、[独立终态核验](../outputs/analysis/v32_opt/historical_terminal_quality_review.json)。
+
+| 历史回退 checkpoint，1,000 地图/AI | aggressive | expansion | defensive | random | overall |
+|---|---:|---:|---:|---:|---:|
+| final/u1205 | 85.05% | 93.50% | 96.25% | 98.25% | 93.2625% |
+| selector best/u699（主模型） | 90.30% | 95.90% | 99.65% | 99.55% | 96.3500% |
+
+主模型 best/u699 的 SHA 为 **`683795f1bdbefcccfbdfb1db6a81639c30f9e4fbcc5ad4ae459a20a940c6ac64`**，由原固定 200 地图 selector 在终态测试前选定，未根据 1,000 地图或直接对战重选。其五项 NI 全部通过：overall 相对 v32 best 为 **+0.3125pp**，单侧下界 **−0.125pp**；直接 best 对 best 为 **438 胜/362 负/0 平**，score **54.75%**，地图簇 95% CI **[51.25%,58.125%]**，单侧下界 **51.875%**，通过原 45% guard。[主模型](../outputs/moe_cts/iterations/v32-opt-historical/train/evaluations/best.pt)、[逐项 NI](../outputs/analysis/v32_opt/local_historical_acceptance/reports/paired_noninferiority.json)、[直接对战与原生退出](../outputs/analysis/v32_opt/local_historical_crossplay/receipt.json)。
+
+final 的总体差 **−2.85pp**、配对 95% CI **[−3.5,−2.2]pp**、单侧下界 **−3.3875pp**；overall/aggressive/expansion/defensive 四项旧 NI 失败，random 通过。final 直接对战 **289 胜/511 负/0 平**，score **36.125%**，CI **[33.00%,39.25%]**，下界 **33.5%**，原生子进程 exit1 为真实 guard 失败；best 子进程 exit0。工作流 verification 的 `passed` 只证明报告完整、来源和统计有效，不代表原 strict 质量通过；因此原 final+best 联合验收仍为 false。[原 strict 失败记录](../outputs/analysis/v32_opt/local_historical_acceptance/candidate_gate.json)。
+
+三组完整曲线按 fresh 样本数对齐、全部 12 点保留。u699..1199 历史回退 overall 在 **93.125–97.0%**，v32 为 **95.25–96.375%**，纯 current 为 **39.0625–59.125%**；历史方案没有纯模式的大幅低分行为，但其最后两点均比 v32 低 **2.375pp**，u699 到末点下降 **3.0625pp**，大于 v32 的 **0.0625pp**，不能称趋势完全相同。用户在看到这些完整结果后调整验收，以 best 能力和整体后续趋势为主，并允许 final 有一定差距；据此接纳历史 best 作为主模型，同时保留上述 final 对战退化风险。接受依据与原 strict 失败分开记录，没有改变原容差或统计结果。[更新后的本机接受依据](../outputs/analysis/v32_opt/local_acceptance.json)、[三组完整诊断与输入 SHA](../outputs/analysis/v32_opt/historical_final_diagnostics/diagnostics.json)。
+
+主配置对应历史回退实际 `run_config.json`，SHA **`f86936fd2f7445771683b21396694bfaae51bdf9c14c5c059d473fba26332d5a`**；冻结源码 manifest SHA **`bc1940b349a74800a6df63c933a93ec24d7e547ff7a7cff652fe5970e2a32fd8`**。保留历史池 8、无 critic 投影、输入对齐与共享 history 解析，以及 `cudnn_benchmark=true`；关闭 cuDNN benchmark 的正式 noautotune 回退训练未执行。
+
+![v32、失败纯 current 与历史回退完整同样本数 selector 对照](rl_train_figures/v32_opt_selector_comparison.png)
+
+![三组完整训练动态及课程](rl_train_figures/v32_opt_training_comparison.png)
+
+本机完整 E4×64 benchmark 另测 3 次预热＋12 次计时更新，N=16,384/T=32；历史池填充八个独立初始权重副本，以执行真实分组推理，明确不是训练后的历史模型。当前共同基础封装下，原 v32 网络为 **71,027/s**；优化网络＋八历史模型＋cuDNN benchmark 为 **111,824/s**，关闭 benchmark 为 **114,931/s**；优化网络＋当前策略为 **129,919/s**。额外 profile 独立于计时，不计入分母；这些新轨迹没有做联合动作重放，不将差异当成单一组件的因果加速。动态分组 batch 的短窗口算法选择开销及这些执行时间差异，不足以判断 cuDNN benchmark 对学习质量的因果影响。[保留的纯方案诊断](../outputs/analysis/v32_opt/formal_diagnostics_final_v2/diagnostics.json)、[完整更新 benchmark](../outputs/analysis/v32_opt/local_compute_comparison/receipt.json)。
+
+修复后 CUDA profile 窗口分别为 collection 两 tick、完整 T32 GAE、首个 logical B8,192 PPO minibatch，不能将其当成完整训练阶段。完整计时中，优化后的 PPO 仍占总计算 64.8–75.4%；采样 PPO 的 convolution/layout 占设备活动 50.5–53.7%，低于原网络 67.4%；采样 collection 的 cat/copy/memset 占 40.5–43.2%。GAE 完整计时约 7ms，仅占约 0.10–0.17%。采样瓶颈还包含对手推理与输入准备，不能把 environment/opponent scope 合计都归为游戏模拟。
+
+本机 Torch 2.13 连续多个 profiler session 延迟导出时，旧 collection/GAE Chrome trace 的 CUDA ts/dur 全部为零；微型 CUDA 对照复现后，改为每阶段停止时立即导出，十二个修复 trace 的 CUDA timing 全部有效。旧十二更新同步计时仍有效，仅弃用旧时间线。工具 CPU 回归 14 passed；图按叶子 kernel/memcpy/memset 汇总，排除重复注释和算子父级。[修复后 trace](../outputs/analysis/v32_opt/local_profile_comparison_fixed/)、[汇总与 SHA](../outputs/analysis/v32_opt/profile_comparison_analysis/comparison.json)。
+
+![完整计时与独立采样 profile](rl_train_figures/v32_opt_compute_profile.png)
+
+多卡、大模型和 H200 工具独立准备，未进入本轮冻结训练代码或本次单卡提交；其 CPU 开发证据不混为本机训练和验收结果，八卡 CUDA/BF16 正确性、利用率及规模吞吐尚未验证。
+
+首次单卡提交的候选另在独立 Git 导出目录验证：六个修改的运行文件均与历史回退冻结源码相同，保留的 117 个运行文件逐项匹配，未导入未来多卡或大模型模块；CPU 完整测试 **241 passed、2 CUDA parity skipped、1,821 subtests passed**，原生退出码 0。纯模式测试显式设置自己的对手与池大小，避免依赖最终主配置。测试启动器的多进程入口保护修正后重新运行，原无效运行及退出码保留；没有改动冻结运行源码、Git index 或未来工作区文件。此项验证的是候选预览树，实际暂存树另行核验。[候选预览结果](../outputs/analysis/v32_opt/local_commit_preview/summary.json)。

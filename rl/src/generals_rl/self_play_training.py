@@ -61,7 +61,7 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     learner checkpoint. Environment and opponent RNG streams start afresh.
     A weights-only warm start supplies initial_source without restoring a pool.
     """
-    if task.config.opponent != "self_play":
+    if task.config.opponent not in ("self_play", "current_self_play"):
         return None
     settings = SelfPlayConfig(**config.get("self_play", {}))
     policy = runner.alg.policy
@@ -115,5 +115,10 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     session = SelfPlaySession(pool, task.opponent, policy, settings)
     # Even when an old pool is restored, make the resumed learner selectable.
     session.publish(initial_iteration, source=provenance)
-    task.opponent.attach(pool, stochastic=settings.stochastic, seed=settings.seed)
+    if task.config.opponent == "current_self_play":
+        # Snapshots are evaluation/export artifacts only. Every training
+        # opponent uses the live learner, which changes between PPO updates.
+        task.opponent.attach_policy(policy, stochastic=settings.stochastic, seed=settings.seed)
+    else:
+        task.opponent.attach(pool, stochastic=settings.stochastic, seed=settings.seed)
     return session

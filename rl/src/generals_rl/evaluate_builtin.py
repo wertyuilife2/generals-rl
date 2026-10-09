@@ -237,7 +237,7 @@ def _load_student(checkpoint, config, example_obs, device):
         example_obs["action_mask"].shape[-1], **policy_config,
     ).to(device)
     # Do not allocate a second full checkpoint on the GPU during loading.
-    saved = torch.load(checkpoint, weights_only=False, map_location="cpu")
+    saved = torch.load(checkpoint, weights_only=True, map_location="cpu")
     policy.load_state_dict(saved["model_state_dict"])
     policy.eval()
     return policy

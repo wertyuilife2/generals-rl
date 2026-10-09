@@ -25,24 +25,29 @@ from .training_control import TrainingControlConfig, TrainingController, Trainin
 
 
 @contextmanager
-def _matmul_precision(precision, cudnn_allow_tf32=None):
+def _matmul_precision(precision, cudnn_allow_tf32=None, cudnn_benchmark=None):
     """Change this process's precision only for an explicitly configured run."""
-    if precision is None and cudnn_allow_tf32 is None:
+    if precision is None and cudnn_allow_tf32 is None and cudnn_benchmark is None:
         yield
         return
     previous = torch.get_float32_matmul_precision()
     previous_cudnn = torch.backends.cudnn.allow_tf32
+    previous_benchmark = torch.backends.cudnn.benchmark
     try:
         if precision is not None:
             torch.set_float32_matmul_precision(precision)
         if cudnn_allow_tf32 is not None:
             torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
+        if cudnn_benchmark is not None:
+            torch.backends.cudnn.benchmark = cudnn_benchmark
         yield
     finally:
         if cudnn_allow_tf32 is not None:
             torch.backends.cudnn.allow_tf32 = previous_cudnn
         if precision is not None:
             torch.set_float32_matmul_precision(previous)
+        if cudnn_benchmark is not None:
+            torch.backends.cudnn.benchmark = previous_benchmark
 
 
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
@@ -58,6 +63,9 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     cudnn_allow_tf32 = config.get("cudnn_allow_tf32")
     if cudnn_allow_tf32 is not None and not isinstance(cudnn_allow_tf32, bool):
         raise TypeError("cudnn_allow_tf32 must be boolean or null")
+    cudnn_benchmark = config.get("cudnn_benchmark")
+    if cudnn_benchmark is not None and not isinstance(cudnn_benchmark, bool):
+        raise TypeError("cudnn_benchmark must be boolean or null")
     if (iterations is None) == (steps_per_env is None):
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
@@ -81,7 +89,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
-    if settings.opponent == "self_play":
+    if settings.opponent in ("self_play", "current_self_play"):
         SelfPlayConfig(**config.get("self_play", {}))
         if evaluation_settings.enabled and settings.players != 2:
             raise ValueError("periodic built-in evaluation requires players=2; use --no-eval for multiplayer training")
@@ -109,7 +117,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
     last_losses = None
     stop_reason = None
     warm_source = None
-    with _matmul_precision(precision, cudnn_allow_tf32), GeneralsTask(settings) as task:
+    with _matmul_precision(precision, cudnn_allow_tf32, cudnn_benchmark), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output), str(task.device))
         if resume:
@@ -119,7 +127,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             runner.current_learning_iteration += 1
         elif warm_start is not None:
             checkpoint = Path(warm_start).resolve()
-            saved = torch.load(checkpoint, weights_only=False, map_location="cpu")
+            saved = torch.load(checkpoint, weights_only=True, map_location="cpu")
             # Preserve fresh optimizer states, configured LRs and iteration zero.
             runner.alg.policy.load_state_dict(saved["model_state_dict"], strict=True)
             del saved
@@ -259,9 +267,15 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,
-                    "episode_assignments": task.opponent.episode_assignments,
-                    "active_snapshot_counts": {str(k): v for k, v in task.opponent.snapshot_counts().items()},
                 }
+                if settings.opponent == "self_play":
+                    summary["self_play"].update(
+                        episode_assignments=task.opponent.episode_assignments,
+                        active_snapshot_counts={str(k): v for k, v in task.opponent.snapshot_counts().items()},
+                    )
+                else:
+                    summary["self_play"].update(mode="current_self_play", training_opponent="live_learner",
+                                                snapshots_used_for_training=False)
             (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
             print(json.dumps(summary, indent=2))
             return summary
@@ -281,7 +295,7 @@ def main(argv=None):
     parser.add_argument("--backend", choices=("cpu", "gpu"))
     parser.add_argument("--device")
     parser.add_argument("--num-envs", type=int)
-    parser.add_argument("--opponent", choices=("self_play", "random", "wait"))
+    parser.add_argument("--opponent", choices=("self_play", "current_self_play", "random", "wait"))
     parser.add_argument("--seed", type=int)
     parser.add_argument("--no-eval", action="store_true", help="disable periodic evaluation (enabled by default)")
     budget = parser.add_mutually_exclusive_group()
