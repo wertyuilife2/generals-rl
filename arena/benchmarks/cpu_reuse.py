@@ -1,6 +1,6 @@
 """Measure reuse of the existing C++/OpenMP backend through the shared env API.
 
-python arena/benchmarks/cpu_reuse.py --league outputs/arena/optimized_1000 \
+python arena/benchmarks/cpu_reuse.py --league outputs/arena/native_1000 \
     --output outputs/arena/performance/cpu-reuse.json
 
 Full games include AI, observations, callbacks and per-tick recording. Step-only

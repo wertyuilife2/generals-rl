@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -42,20 +43,51 @@ def _private_cache():
 
 
 def source_identity(directory, parameters=None):
-    directory = Path(directory).resolve()
+    supplied = Path(directory)
+    if supplied.is_symlink():
+        raise ValueError('policy sources cannot contain symlinks')
+    directory = supplied.resolve()
+    if not directory.exists():
+        raise ValueError(f'policy source does not exist: {supplied}')
     files = {}
-    for path in sorted(directory.rglob('*')):
+    if directory.is_file():
+        if directory.suffix != '.cpp':
+            raise ValueError('policy source must be a .cpp file or a directory')
+        root = directory.parent
+        pending = [directory]
+    else:
+        root = directory
+        pending = sorted(directory.rglob('*'))
+    seen = set()
+    while pending:
+        path = pending.pop(0)
         if path.is_symlink():
             raise ValueError('policy sources cannot contain symlinks')
+        if path in seen:
+            continue
+        seen.add(path)
         if path.is_file() and path.suffix in ('.cpp', '.h', '.hpp'):
-            name = path.relative_to(directory).as_posix()
-            if name == 'arena_policy.h':
-                if path.read_bytes() != (SDK/name).read_bytes():
+            name = path.relative_to(root).as_posix()
+            if path.name == 'arena_policy.h':
+                if path.read_bytes() != (SDK/'arena_policy.h').read_bytes():
                     raise ValueError('arena_policy.h must match the Arena SDK')
                 continue
             files[name] = path.read_bytes()
-    if 'policy.cpp' not in files:
-        raise ValueError('source directory must contain policy.cpp')
+            if directory.is_file():
+                for include in re.findall(rb'^\s*#\s*include\s*"([^"\r\n]+)"', files[name], re.M):
+                    include = include.decode()
+                    local = path.parent/include
+                    if not local.exists():
+                        local = root/include
+                    if include == 'arena_policy.h' and not local.exists():
+                        continue  # Supplied by Arena, even without a workspace header.
+                    if local.is_symlink() or not local.resolve().is_relative_to(root):
+                        raise ValueError('local policy includes must stay inside the source directory')
+                    if not local.is_file() or local.suffix not in ('.h', '.hpp'):
+                        raise ValueError(f'local include must be a .h/.hpp file: {include}')
+                    pending.append(local.resolve())
+    if not any(name.endswith('.cpp') for name in files):
+        raise ValueError('source directory must contain a .cpp file')
     if sum(map(len, files.values())) > 20*1024*1024:
         raise ValueError('policy sources exceed 20 MiB')
     compiler = shutil.which(os.environ.get('CXX', 'c++'))
@@ -76,9 +108,9 @@ def source_identity(directory, parameters=None):
     return digest(identity), identity, files
 
 
-def build_bundle(directory, destination, parameters=None):
+def build_bundle(directory, destination, parameters=None, *, snapshot=None):
     """Snapshot first, compile only the snapshot, then atomically publish a zip."""
-    key, metadata, files = source_identity(directory, parameters)
+    key, metadata, files = source_identity(directory, parameters) if snapshot is None else snapshot
     with tempfile.TemporaryDirectory(dir=_private_cache()) as scratch:
         root = Path(scratch)
         source = root/'source'

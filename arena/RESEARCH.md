@@ -1,29 +1,135 @@
-# C++ 策略研究接口
+# C++ 策略接入与比赛
 
-Arena 负责源码快照、编译、黑盒对战、计时、录像、版本登记和正式发布。
-研究者只提交 C++ 策略，不需要 Python 适配器、比赛循环或评分工具。
-完整任务提示词见 [AUTORESEARCH_PROMPT.txt](AUTORESEARCH_PROMPT.txt)。
+Arena 提供两个主要命令：`commit` 正式参赛，`run` 自由测试。
+源码快照、编译缓存、版本、赛程、计时、评分和录像均由 Arena 管理，无需创建研究会话或手写 entrant JSON。
 
-## 创建研究会话
-
-在项目根目录运行，使用现有 `.venv`。Linux/macOS 需要 C++17 编译器；`CXX` 可以指定编译器。
-正式联赛须已存在且与当前游戏规则匹配。下面的目录名可换为本次研究唯一名称：
+在项目根目录运行：
 
 ```bash
-.venv/bin/python -m generals_arena research init outputs/autoresearch/run01 \
-  --league outputs/arena/native_1000 --workspace heuristics/run01
+source .venv/bin/activate
+python -m pip install -e ./arena --no-deps --no-build-isolation
 ```
 
-该命令创建研究会话和一个仅返回 WAIT 的 C++ 接口示例，同时导出 `arena_policy.h`。
-已有源码和研究会话不会被覆盖。空实现用于接线验证，不是竞争策略。
-会话记录正式联赛和规则身份，最多允许 3 次正式发布，每次固定 1000 局。
-60 分钟研究任务的墙钟预算由研究者管理，此服务不启动 60 分钟计时任务。
+`generals_arena`、`generals-arena` 和 `python -m generals_arena` 等价。
+默认正式联赛为 `outputs/arena/native_1000`，需要其他联赛时添加 `--league 目录`。
+默认目录须已存在；新的独立联赛可由 `league init` 创建。
+
+## 提交到正式榜单
+
+```bash
+generals_arena commit ./heristic/my_agent/policy.cpp --name "my-model-comet-v1"
+
+# 多文件策略：目录内的所有 .cpp 联合编译
+generals_arena commit ./heristic/my_agent --name "my-model-comet-v2"
+```
+
+`--name` 是正式榜单的显示别名，允许空格、中文及模型名中的点号，长度为 1–128 字符。
+别名不改变源码身份。省略时使用源码文件/目录名加版本哈希前缀；重复提交同一版本且省略别名会沿用原名。
+别名与版本一旦关联就固定：同名不同版本、同版本换别名均明确拒绝，避免重复上榜或覆盖已有记录。
+建议 autoresearch 使用 `<模型名>-<模型自行选择的单词>-v<版本号>`，例如 `my-model-comet-v1`。
+
+Arena 自动快照和编译源码，执行 8 局接口预检，通过后登记选手并串行执行 **1000 局正式比赛**。
+正式比赛沿用联赛的 2–8 人随机地图、自适应配对和统一名次 rating；不能通过 `commit` 改小局数或修改正式规则。
+中断后重新执行同一命令继续原任务，已完成的局不会重复计分。完成后再次提交返回该次完成时保存的成绩。
+如果源码或固定参数变化，会生成新版本；显式指定过别名时，给新版本使用新别名。
+
+可选 `--params 参数.json`，内容必须为 JSON 对象，计入版本身份并传给 `arena_create`。
+Arena 本身不限制提交次数；60 分钟、最多三次全量评测是具体研究任务的约束，由研究者遵守。
+单个版本有已记录的超时/违规时，不能通过换名或重试清除记录，修复实现后才能提交新版本。
+
+命令在 stderr 输出进度，在 stdout 输出 JSON。成功要求 `ok=true`、`completed_games=1000`、
+计时中的 `timeouts=0` 和 `errors=0`。报告包含 `name`、`version`、`rating`、`rank`、
+完整榜单、计时、错误、`report` 路径和联赛路径；预检失败也保存报告及部分录像。
+
+```bash
+generals_arena status
+generals_arena league leaderboard outputs/arena/native_1000
+```
+
+现有网页 http://localhost:8086 无需重启，直接显示新增选手、对局与评分。
+网页使用 `--no-worker` 与提交命令配合，正式任务由 `commit` 执行：
+
+```bash
+generals_arena serve outputs/arena/native_1000 --port 8086 --no-worker
+```
+
+## 自由测试
+
+```bash
+generals_arena run \
+  --player baseline/aggressive \
+  --player ./heristic/my_agent/policy.cpp \
+  --player ./heristic/my_agent/policy.cpp \
+  --size 15:35 --games 100 --seed 42 --output ./results/test01
+```
+
+每个 `--player` 对应一个席位，必须给出 2–8 个，允许相同策略重复，每席位使用独立实例和随机种子。
+每局都包含全部指定玩家。第一局的席位按参数顺序排列；同一地图循环轮换席位，之后生成新地图。
+最后一组按局数截断。自由测试使用独立数据库，不修改正式榜单或增添正式参赛者。
+
+支持的玩家选择方式：
+
+| 选择方式 | 含义 |
+| --- | --- |
+| `baseline/random`、`baseline/aggressive`、`baseline/expansion`、`baseline/defensive` | 内置黑盒 baseline；也接受 `baseline/aggressive.cpp` 写法，它是逻辑名称 |
+| `/path/to/agent.cpp` | 自动快照并编译该文件及本地 `.h/.hpp` 依赖 |
+| `/path/to/source_dir` | 自动快照并联合编译目录中的所有 `.cpp` |
+| `policy/<完整版本哈希>` | Arena 已保存的不可变策略，适合与历史自身版本比较 |
+| `@正式榜单别名` | 已提交的 C++ 策略版本，可包含空格，必要时给整个参数加引号 |
+
+不需要阅读 baseline 源码。一次 `run` 已经包含快照和编译步骤，无需提前注册。
+`--params` 将同一个固定 JSON 参数对象传给本次所有以源码路径指定的玩家；
+`policy/` 与 `@别名` 始终使用其已快照的参数。
+
+| 参数 | 默认与含义 |
+| --- | --- |
+| `--size auto` | 默认值，按实际人数使用正式联赛的随机尺寸分布，当前为 15–35 |
+| `--size 20x25` | 固定宽 20、高 25 |
+| `--size 15:35` | 宽、高分别在 15–35 内均匀随机，与人数缩放无关 |
+| `--games 100` | 总局数，默认 1 |
+| `--seed 42` | 固定地图及策略随机种子；默认 42 |
+| `--max-ticks 3000` | 自由测试的回合上限；默认继承正式联赛 |
+| `--output 目录` | 可选导出报告和含完整录像的 SQLite 数据库；不改变 Arena 自己的存储位置 |
+
+显式指定尺寸时，每边支持 3–64；研究任务的正式评测仍为 15–35。
+相同人数、地图设置、seed 和局数下，替换算法不改变地图及席位随机数。
+同一版本、同一请求重复运行会继续或读取原对局；需要新的独立样本时改变 `--seed`。
+导出目标必须为空，或属于同一 run；不会覆盖别的实验和正式数据库。
+
+stdout 返回 JSON 报告，包含每种策略按人数的平均名次、夺冠率、跨策略两两名次得分、
+每步决策耗时及违规记录。重复席位归入同一种策略，内部比较不计入两两得分；
+纯同版本自我对战的该项为 null，不代表实力高低。
+
+导出目录包含 `report.json`、`league.sqlite3` 和来源标记；可直接查看回放：
+
+```bash
+generals_arena serve ./results/test01 --port 8087 --no-worker
+```
+
+## Arena 管理的数据
+
+所有权属于所选联赛，不依赖开发工作区：
+
+```text
+outputs/arena/native_1000/
+  league.sqlite3                 正式榜单、任务、对局与录像
+  policies/<version>/            不可变源码、参数、SDK、编译产物
+  runs/<run_id>/                  自由测试和预检的请求、报告、对局数据库
+  commits/<version>/
+    commit.json                  别名、正式任务 ID、版本
+    publication.json             本次全量评测完成时的成绩
+```
+
+源码、参数、SDK 和编译环境共同决定版本身份；路径与别名不用于判断是否重复提交。
+同一文件的不同版本独立保存，移动或修改工作区不影响历史比赛和已发布对手。
+失败记录与部分录像保留，失败局不更新评分。普通中断可恢复；已违规版本不能恢复成正常版本。
+`--output` 是导出副本，删除它不会删除 Arena 管理的原始数据。
 
 ## C++ 协议
 
 完整定义见 [arena_policy.h](src/generals_arena/sdk/arena_policy.h)，接口示例见
-[policy.cpp](examples/cpp_wait/policy.cpp)。策略源目录必须包含 `policy.cpp`；
-所有 `.cpp/.h/.hpp` 被一起快照，所有 `.cpp` 参与编译。`arena_policy.h` 是 Arena 所有的协议，不能修改。
+[policy.cpp](examples/cpp_wait/policy.cpp)。可传入任意命名的 `.cpp` 文件，Arena 会递归收集其本地 `.h/.hpp` 引用；
+如有其他参与链接的 `.cpp`，提交整个目录。目录中的 `.cpp/.h/.hpp` 被一起快照，所有 `.cpp` 参与编译。`arena_policy.h` 在编译时自动提供；本地有副本时必须与 SDK 一致，不能修改。
 本接口不接受额外链接参数或外部策略实现；运行时所需参数通过登记的 JSON 对象传入。
 
 ```cpp
@@ -61,61 +167,10 @@ Arena 是先共同决策，再由 env 进行增兵及按席位顺序执行动作
 多人名次由淘汰先后决定；超时存活者并列，兵力不用于打破该并列。
 不用阅读 `baselines/` 中的任何实现即可使用本接口。
 
-## 注册不可变候选
-
-```bash
-.venv/bin/python -m generals_arena research register outputs/autoresearch/run01 \
-  --source heuristics/run01 --name v001
-```
-
-可加 `--params parameters.json`。参数必须是 JSON 对象，原文的规范化形式交给 `arena_create`。
-登记由 Arena 快照源码、SDK、参数、编译器信息和编译后的共享库，并自动生成入口及版本哈希。
-修改工作区不影响已经注册的候选；相同名字和版本重复注册幂等，更换实现必须换名字。
-候选目录保存可读源码、构建元数据、`policy.zip`、`entrant.json` 和登记身份。
-加载时校验工件；正式发布还会将包复制到正式联赛的 `policies/`，不依赖开发工作区。
-二进制工件绑定登记时的平台；包内含源码，可在其他平台重新登记，但不是同一二进制身份。
-
-## 私有黑盒评测
-
-```bash
-# 默认对手池为四种 baseline，默认人数继承正式联赛
-.venv/bin/python -m generals_arena research evaluate outputs/autoresearch/run01 \
-  --candidate v001 --games 128 --seed 42 --label experiment01
-
-# 可指定 baseline、self 或本会话已登记的任意历史候选；允许重复
-.venv/bin/python -m generals_arena research evaluate outputs/autoresearch/run01 \
-  --candidate v002 --opponents baseline:aggressive baseline:random v001 self \
-  --games 128 --seed 43 --players 2 3 4 5 6 7 8 --label experiment02
-
-# 纯自我对战
-.venv/bin/python -m generals_arena research evaluate outputs/autoresearch/run01 \
-  --candidate v002 --opponents self --games 32 --seed 44 --label selfplay01
-```
-
-每局包含候选，对手池有放回抽样。Arena 生成随机地图和成组座位轮换；相同配置、
-种子、对手列表顺序与局数下，替换候选不会改变地图、策略种子或座位轮换。
-末组允许截断以满足准确局数。这里使用固定赛程；正式发布继续使用原联赛的自适应配对。
-已有实验标签不能代表其他请求；同一命令可恢复被中断但未失败的实验，完成后不会重复比赛。
-
-输出 JSON 报告并保存到 `evaluations/<label>/report.json`。报告包含完成局数、
-按人数统计的名次、夺冠率、两两名次得分、决策调用数、最大耗时和违规详情。
-两两得分为名次更好 1、并列 0.5、更差 0；排除同候选实例之间的比较，
-先平均到每局，再对各人数均值等权平均。未出现的人数不进入宏平均；覆盖范围列在报告中。
-纯同版本自我对战的两两得分为 null，不能据此声称实力增长。
-报告中的 game_win_rate 是候选任意实例夺冠的局比例；重复实例会影响该指标。
-
-每次实验拥有独立 `evaluations/<label>/league/league.sqlite3`，保存赛程、结果、完整录像及失败部分录像。
-不向正式联赛登记候选，也不改变正式分数。可以直接复用网页查看私有实验：
-
-```bash
-.venv/bin/python -m generals_arena serve \
-  outputs/autoresearch/run01/evaluations/experiment01/league --port 8003 --no-worker
-```
-
 ## 10ms 决策约束
 
 每个通过此接口登记的 C++ 策略均由同一个 Arena 适配器执行，适用于私有评测、正式比赛和真人对战。
-策略必须单线程，不能在两次调用之间后台计算。`workers` 固定为 1；传入其他值会被拒绝。
+策略必须单线程，不能在两次调用之间后台计算。`commit` / `run` 固定使用一个 worker，不提供并行参数。
 同场所有策略与 env CPU 引擎在一个比赛进程内直接调用，env 的单局 CPU 适配器也使用一个线程。
 10ms 使用 C++ 单调墙钟衡量决策及其原生保护调用开销，不计 Python 构造观测、IPC、
 地图生成、游戏引擎更新或赛前创建。观测数组通过指针传入，无逐决策序列化。
@@ -139,30 +194,5 @@ C++ 决策本身的调度延迟仍计入其墙钟预算；已知超时不会被�
 这是可信本地代码接口，不是安全沙箱。策略不能修改信号处理/计时器、创建线程或子进程、
 通过文件或网络进行额外决策，也不能读取其他席位的状态或隐藏信息。
 
-## 正式发布和查询
 
-```bash
-.venv/bin/python -m generals_arena research publish outputs/autoresearch/run01 \
-  --candidate v002
-.venv/bin/python -m generals_arena research status outputs/autoresearch/run01
-```
-
-`publish` 自动进行 8 局正式规则下的接口预检，然后冻结并登记到目标联赛，执行该 checkpoint 的 1000 局任务。
-最多 3 个发布名额；相同候选再次调用恢复同一任务，不增加名额、不重复计分。
-相同源码/参数版本不能用不同名字重复占位。预检通过后开始正式发布即占名额；
-之后中断或失败仍保留该名额，预检失败不占名额。
-候选已有记录的自身违规会阻止发布，包括作为其他实验的对手时发生的违规，修复后必须注册新版本。
-发布只处理自己的任务，不代跑其他待评测选手；不能同时运行第二个正式联赛 worker。
-
-完整发布要求报告 `ok=true`、`completed_games=1000`，并且超时和错误均为 0。
-异常退出保留进度；违规失败保留真实记录，不宣称完成。
-`strategies/<candidate>/publication.json` 包含完成情况、计时与榜单；原始正式记录由联赛数据库保存。
-网页 `http://127.0.0.1:8002` 使用现有正式服务，必要时运行：
-
-```bash
-.venv/bin/python -m generals_arena serve outputs/arena/native_1000 --port 8002 --no-worker
-```
-
-CLI 成功退出 0，完成但验收失败退出 1，参数/编译/登记错误退出 2。
-Python 也可调用 `generals_arena.research` 的 `initialize/register/evaluate/publish/status`，
-返回与 CLI 相同的结构化数据；研究者不需要编写比赛或计时循环。
+CLI 成功退出 0，已执行但验收失败退出 1，参数、编译或登记错误退出 2。

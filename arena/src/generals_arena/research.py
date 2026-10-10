@@ -1,4 +1,4 @@
-"""Public research service: immutable C++ registration, black-box trials, publication."""
+"""Source-first Arena submissions and private games; all artifacts are Arena-owned."""
 from contextlib import contextmanager
 from dataclasses import asdict, replace
 import fcntl
@@ -6,32 +6,26 @@ import json
 from pathlib import Path
 import random
 import re
-import shutil
+import sqlite3
 import tempfile
 import time
 from types import SimpleNamespace
-import uuid
+from zipfile import ZipFile
 
 from .entrants import prepare_entrant, verify_artifacts
 from .league.service import run_jobs, process_lock
 from .league.store import LeagueStore
-from .native import SDK, DECISION_NS, build_bundle, source_identity
-from .util import canonical, digest, integer, write_json
+from .native import DECISION_NS, build_bundle, source_identity
+from .util import canonical, digest, file_digest, integer, write_json
 
+DEFAULT_LEAGUE = Path('outputs/arena/native_1000')
 PUBLICATION_GAMES = 1000
-PUBLICATION_LIMIT = 3
-DEFAULT_OPPONENTS = ['baseline:random', 'baseline:aggressive', 'baseline:expansion', 'baseline:defensive']
-
-
-def _name(value):
-    if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', value):
-        raise ValueError('names must contain 1–64 letters, digits, underscores or hyphens')
-    return value
+BASELINES = ('random', 'aggressive', 'expansion', 'defensive')
 
 
 @contextmanager
 def _lock(directory):
-    with (Path(directory)/'.research.lock').open('a') as stream:
+    with (Path(directory)/'.registry.lock').open('a') as stream:
         fcntl.flock(stream, fcntl.LOCK_EX)
         try:
             yield
@@ -39,104 +33,111 @@ def _lock(directory):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def session(directory):
-    root = Path(directory).resolve()
-    config = json.loads((root/'session.json').read_text())
-    if config.get('schema') != 1:
-        raise ValueError('unsupported research session')
-    store = LeagueStore(config['league'])
+def _official(directory):
+    store = LeagueStore(Path(directory).resolve())
     store.verify_execution()
-    if store.manifest['rules_id'] != config['rules_id']:
-        raise ValueError('research session league rules changed')
-    return root, config, store
+    return store
 
 
-def initialize(directory, league, workspace=None):
-    store = LeagueStore(league)
-    store.verify_execution()
-    root = Path(directory).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    with _lock(root):
-        if (root/'session.json').exists():
-            raise ValueError('research session already exists; use research status')
-        if workspace is not None:
-            workspace = Path(workspace).resolve()
-            if workspace.exists() and any(workspace.iterdir()):
-                raise ValueError('workspace must be empty; existing source is never overwritten')
-            workspace.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(SDK/'arena_policy.h', workspace/'arena_policy.h')
-            (workspace/'policy.cpp').write_text(
-                '#include "arena_policy.h"\nstruct Policy {};\n'
-                'extern "C" void *arena_create(int, std::uint64_t, const char *) { return new Policy; }\n'
-                'extern "C" std::int64_t arena_act(void *, const ArenaObservation *) { return 0; }\n'
-                'extern "C" void arena_destroy(void *p) { delete static_cast<Policy *>(p); }\n')
-        for name in ('strategies', 'evaluations'):
-            (root/name).mkdir(exist_ok=True)
-        config = {'schema': 1, 'id': uuid.uuid4().hex[:12], 'created': time.time(),
-                  'league': str(store.directory.resolve()), 'rules_id': store.manifest['rules_id'],
-                  'workspace': str(workspace) if workspace is not None else None,
-                  'decision_limit_ns': DECISION_NS, 'publication_games': PUBLICATION_GAMES,
-                  'publication_limit': PUBLICATION_LIMIT}
-        write_json(root/'publications.json', [])
-        write_json(root/'session.json', config)
-    return config
+def _alias(value):
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 128:
+        raise ValueError('name must contain 1–128 characters')
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError('name cannot contain control characters')
+    return value.strip()
 
 
-def registered(root, name):
-    path = root/'strategies'/_name(name)/'entrant.json'
-    spec = json.loads(path.read_text())
-    entrant = prepare_entrant(spec, base_dir=path.parent)
-    identity = json.loads((path.parent/'identity.json').read_text())
-    if entrant['entrant_id'] != identity['entrant_id']:
-        raise ValueError('registered policy artifact or specification changed')
-    verify_artifacts(entrant)
-    return spec, entrant
+def _policy(store, version):
+    if not re.fullmatch('[a-f0-9]{64}', version):
+        raise ValueError('policy/ requires a full version hash from a run or commit report')
+    directory = store.directory/'policies'/version
+    metadata = json.loads((directory/'build.json').read_text())
+    bundle = directory/'policy.zip'
+    if metadata['version'] != version or file_digest(bundle) != metadata['bundle_sha256']:
+        raise ValueError('archived policy artifact changed')
+    return {'name': f'cpp-{version[:16]}', 'kind': 'cpp', 'version': version, 'bundle': str(bundle)}
 
 
-def register(directory, source, name, parameters=None):
-    root, config, _ = session(directory)
-    name = _name(name)
-    key, _, _ = source_identity(source, parameters)
-    with _lock(root):
-        target = root/'strategies'/name
-        if target.exists():
-            spec, entrant = registered(root, name)
-            if entrant['version'] != key:
-                raise ValueError('registered name is immutable; use a new candidate name')
-            return {'candidate': name, 'entrant': entrant, 'entrant_file': str(target/'entrant.json')}
-        with tempfile.TemporaryDirectory(dir=root/'strategies') as temporary:
-            scratch = Path(temporary)/'snapshot'
-            scratch.mkdir()
-            metadata = build_bundle(source, scratch/'policy.zip', parameters)
-            spec = {'name': f'cpp-{config["id"]}-{name}', 'kind': 'cpp',
-                    'version': metadata['version'], 'bundle': str(target/'policy.zip')}
-            write_json(scratch/'entrant.json', spec)
-            write_json(scratch/'build.json', metadata)
-            identity = prepare_entrant({**spec, 'bundle': str(scratch/'policy.zip')})
-            write_json(scratch/'identity.json', {'entrant_id': identity['entrant_id']})
-            # Ship the readable source alongside the exact executable bundle.
-            from zipfile import ZipFile
-            with ZipFile(scratch/'policy.zip') as archive:
-                for item in archive.namelist():
-                    if item.startswith(('source/', 'sdk/')) or item == 'params.json':
-                        output = scratch/item
-                        output.parent.mkdir(parents=True, exist_ok=True)
-                        output.write_bytes(archive.read(item))
-            scratch.rename(target)
-    _, entrant = registered(root, name)
-    return {'candidate': name, 'entrant': entrant, 'entrant_file': str(target/'entrant.json')}
+def snapshot_policy(store, source, parameters=None):
+    """Deduplicate by content, independent of source location and public alias."""
+    snapshot = source_identity(source, parameters)
+    version = snapshot[0]
+    parent = store.directory/'policies'
+    with _lock(store.directory):
+        parent.mkdir(exist_ok=True)
+        target = parent/version
+        if not target.exists():
+            with tempfile.TemporaryDirectory(dir=parent) as temporary:
+                scratch = Path(temporary)/'snapshot'
+                scratch.mkdir()
+                metadata = build_bundle(source, scratch/'policy.zip', parameters, snapshot=snapshot)
+                write_json(scratch/'build.json', {**metadata, 'bundle_sha256': file_digest(scratch/'policy.zip')})
+                with ZipFile(scratch/'policy.zip') as archive:
+                    for name in archive.namelist():
+                        if name.startswith(('source/', 'sdk/')) or name == 'params.json':
+                            path = scratch/name
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.write_bytes(archive.read(name))
+                scratch.rename(target)
+    return _policy(store, version)
 
 
-def _opponent(root, selector, candidate):
-    if selector == 'self':
-        return candidate
-    if selector.startswith('baseline:'):
-        kind = selector.partition(':')[2]
-        if kind not in ('random', 'aggressive', 'expansion', 'defensive'):
-            raise ValueError('unknown baseline opponent')
-        return {'name': 'random' if kind == 'random' else f'baseline:{kind}',
+def _selector(store, value, parameters=None):
+    value = str(value)
+    if value.startswith(('baseline/', 'baseline:')):
+        kind = value[len('baseline/'):].removesuffix('.cpp')
+        if kind not in BASELINES:
+            raise ValueError(f'unknown baseline; choose from {", ".join(BASELINES)}')
+        return {'name': 'random' if kind == 'random' else f'baseline/{kind}',
                 'kind': 'baseline', 'policy': kind}
-    return registered(root, selector)[0]
+    if value.startswith('policy/'):
+        return _policy(store, value[len('policy/'):])
+    if value.startswith('@'):
+        entry = next((e for e in store.entrants().values() if e['name'] == value[1:]), None)
+        if entry is None or entry['kind'] != 'cpp':
+            raise ValueError('@name must identify a committed C++ policy')
+        verify_artifacts(entry)
+        # Use the content identity in private games, even if selected via an alias.
+        return {'name': f'cpp-{entry["version"][:16]}', 'kind': 'cpp',
+                'version': entry['version'], 'bundle': entry['artifact_paths']['bundle']}
+    return snapshot_policy(store, value, parameters)
+
+
+def _size(value):
+    if value == 'auto':
+        return {'mode': 'auto'}
+    if re.fullmatch(r'\d+[xX]\d+', value):
+        width, height = map(int, re.split('[xX]', value))
+        if not 3 <= min(width, height) <= max(width, height) <= 64:
+            raise ValueError('fixed map sides must be between 3 and 64')
+        return {'mode': 'fixed', 'width': width, 'height': height}
+    if re.fullmatch(r'\d+:\d+', value):
+        low, high = map(int, value.split(':'))
+        if not 3 <= low <= high <= 64:
+            raise ValueError('map range must satisfy 3 <= min <= max <= 64')
+        return {'mode': 'range', 'min': low, 'max': high}
+    raise ValueError('size must be auto, WIDTHxHEIGHT, or MIN:MAX (for example 15:35)')
+
+
+def _fixed_plans(store, seats, games, seed, identity, size):
+    """Every selected player participates; rotate seats on each shared map."""
+    rng, plans = random.Random(seed), []
+    count = len(seats)
+    while len(plans) < games:
+        map_seed = rng.getrandbits(63)
+        config = asdict(store.config.sample_map(count, map_seed))
+        if size['mode'] == 'fixed':
+            config.update(width=size['width'], height=size['height'])
+        elif size['mode'] == 'range':
+            config.update(width=rng.randint(size['min'], size['max']), height=rng.randint(size['min'], size['max']))
+        seeds = [rng.getrandbits(63) for _ in seats]
+        for rotation in range(min(count, games-len(plans))):
+            order = list(range(rotation, count))+list(range(rotation))
+            plans.append({'game_id': digest([identity, len(plans)]),
+                'entrant_ids': [seats[i] for i in order], 'instance_ids': order,
+                'controller_seeds': [seeds[i] for i in order], 'map_seed': map_seed,
+                'map': config, 'rules_id': store.manifest['rules_id'], 'human': False})
+    return plans
 
 
 def _plans(store, target, opponents, games, seed, identity):
@@ -191,6 +192,8 @@ def summarize(store, candidate, job_id):
             continue
         ids, places = result['entrant_ids'], ranks(result)
         own = [i for i, key in enumerate(ids) if key == candidate]
+        if not own:
+            continue
         other = [i for i, key in enumerate(ids) if key != candidate]
         score = (sum((places[i] < places[j])+.5*(places[i] == places[j]) for i in own for j in other)
                  / (len(own)*len(other))) if other else None
@@ -219,197 +222,260 @@ def summarize(store, candidate, job_id):
             'league_directory': str(store.directory.resolve())}
 
 
-def evaluate(directory, candidate, *, opponents=None, games=128, seed=42, workers=1,
-             players=None, label=None):
-    root, _, official = session(directory)
-    integer('games', games, 1)
-    integer('seed', seed)
-    integer('workers', workers, 1)
-    if workers != 1:
-        raise ValueError('C++ research matches run serially; workers must be 1')
-    spec, entrant = registered(root, candidate)
-    opponents = DEFAULT_OPPONENTS if opponents is None else opponents
-    if not opponents:
-        raise ValueError('at least one opponent is required (self is allowed)')
-    configs = [_opponent(root, selector, spec) for selector in opponents]
-    prepared = [prepare_entrant(item) for item in configs]
-    rules = official.config if players is None else replace(official.config, player_counts=tuple(players))
-    if not set(rules.player_counts) <= set(official.config.player_counts):
-        raise ValueError('player counts must be enabled in the official league')
-    descriptor = {'candidate': candidate, 'entrant_id': entrant['entrant_id'],
-                  'opponents': opponents, 'opponent_ids': [e['entrant_id'] for e in prepared],
-                  'games': games, 'seed': seed, 'config': asdict(rules)}
-    identity = digest(descriptor)
-    label = _name(label or f'eval-{identity[:16]}')
-    directory = root/'evaluations'/label
-    with _lock(root):
-        if directory.exists():
-            saved = json.loads((directory/'evaluation.json').read_text())
-            if canonical(saved['request']) != canonical(descriptor):
-                raise ValueError('evaluation label already belongs to a different request')
-            store = LeagueStore(directory/'league')
-            job_id = saved['job_id']
-        else:
-            directory.mkdir()
-            store = LeagueStore.create(directory/'league', rules)
-            for item in configs:
-                store.register(item)
-            _, job_id = store.add(spec, games=games)
-            plans = _plans(store, entrant['entrant_id'], descriptor['opponent_ids'], games, seed, identity)
-            store.insert_plans(plans, job_id)
-            write_json(directory/'evaluation.json', {'request': descriptor, 'job_id': job_id})
-    with process_lock(store, '.evaluation.lock'):
-        started = time.monotonic()
-        error = None
+def _trial(official, specs, rules, descriptor, planner, progress=None):
+    run_id = digest(descriptor)
+    parent = official.directory/'runs'
+    directory = parent/run_id
+    with _lock(official.directory):
+        parent.mkdir(exist_ok=True)
+        if not directory.exists():
+            with tempfile.TemporaryDirectory(dir=parent) as temporary:
+                scratch = Path(temporary)/'run'
+                scratch.mkdir()
+                store = LeagueStore.create(scratch/'league', rules)
+                for spec in specs:
+                    store.register(spec)
+                _, job_id = store.add(specs[0], games=descriptor['games'])
+                store.insert_plans(planner(store, run_id), job_id)
+                write_json(scratch/'request.json', {'request': descriptor, 'job_id': job_id})
+                scratch.rename(directory)
+        request = json.loads((directory/'request.json').read_text())
+        if canonical(request['request']) != canonical(descriptor):
+            raise ValueError('stored run request changed')
+    store = LeagueStore(directory/'league')
+    store.verify_execution()
+    with process_lock(store, '.run.lock'):
+        job = next(j for j in store.jobs() if j['id'] == request['job_id'])
+        if job['status'] in ('complete', 'failed') and (directory/'report.json').exists():
+            return json.loads((directory/'report.json').read_text())
+        started, error = time.monotonic(), None
         try:
-            run_jobs(store, workers=workers, job_id=job_id)
+            run_jobs(store, workers=1, job_id=request['job_id'], progress=progress)
         except Exception as exc:
             error = str(exc)
-        report = {**summarize(store, entrant['entrant_id'], job_id), 'request': descriptor,
-                  'workers': workers, 'last_run_seconds': time.monotonic()-started,
-                  'report': str(directory/'report.json')}
+        entries = [prepare_entrant(spec) for spec in specs]
+        players = []
+        for entry in {e['entrant_id']: e for e in entries}.values():
+            result = summarize(store, entry['entrant_id'], request['job_id'])
+            players.append({**{k: entry[k] for k in ('entrant_id', 'name', 'kind', 'version')},
+                **{k: result[k] for k in ('by_players', 'macro_pair_score', 'timing', 'candidate_violations')},
+                'seats': [i for i,e in enumerate(entries) if e['entrant_id'] == entry['entrant_id']]})
+        timing = {'limit_ns': DECISION_NS, 'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
+        for player in players:
+            for key in ('calls', 'total_ns', 'timeouts', 'errors'):
+                timing[key] += player['timing'][key]
+            timing['max_ns'] = max(timing['max_ns'], player['timing']['max_ns'])
+        report = {'ok': result['ok'] and error is None, 'run_id': run_id,
+            'request': descriptor, 'job': result['job'], 'completed_games': result['completed_games'],
+            'players': players, 'timing': timing, 'violations': result['violations'],
+            'league_directory': str(store.directory), 'report': str(directory/'report.json'),
+            'last_run_seconds': time.monotonic()-started}
         if error:
-            report['ok'], report['execution_error'] = False, error
+            report['execution_error'] = error
+        report = json.loads(canonical(report))
         write_json(directory/'report.json', report)
     return report
 
 
-def publish(directory, candidate, *, workers=1):
-    integer('workers', workers, 1)
-    if workers != 1:
-        raise ValueError('C++ research matches run serially; workers must be 1')
-    root, _, _ = session(directory)
-    _name(candidate)
-    # Keep preflight, execution and the final report in one publication attempt.
-    # A simultaneous caller must not overwrite a successful report with its
-    # worker-lock error. Distinct candidates still share the league worker lock.
-    with process_lock(SimpleNamespace(directory=root), f'.publish-{candidate}.lock'):
-        return _publish(root, candidate, workers=workers)
+def _export_target(official, output, run_id):
+    if output is None:
+        return None
+    output = Path(output).resolve()
+    if output.is_relative_to(official.directory) or official.directory.is_relative_to(output):
+        raise ValueError('output must be outside the managed league directory')
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        marker = output/'arena-export.json'
+        if not marker.is_file() or json.loads(marker.read_text()).get('run_id') != run_id:
+            raise ValueError('output is not empty or belongs to a different run')
+    return output
 
 
-def _publish(directory, candidate, *, workers):
-    started = time.monotonic()
-    root, _, official = session(directory)
-    spec, entrant = registered(root, candidate)
-    # A recorded violation by this candidate cannot be hidden by a later lucky run.
-    for path in (root/'evaluations').glob('*/report.json'):
-        report = json.loads(path.read_text())
-        violation = any(v.get('version') == entrant['version'] for v in report['violations'])
-        if violation or (report['request']['entrant_id'] == entrant['entrant_id'] and (
-                report['candidate_violations'] or report['timing']['timeouts'] or report['timing']['errors'])):
-            raise ValueError('candidate has a recorded violation; publish a corrected new version')
-    with _lock(root):
-        publications = json.loads((root/'publications.json').read_text())
-        existing = next((p for p in publications if p['candidate'] == candidate), None)
-        if existing is None:
-            if len(publications) >= PUBLICATION_LIMIT:
-                raise ValueError('research session has used all 3 checkpoint publication slots')
-            if any(p['version'] == entrant['version'] for p in publications):
-                raise ValueError('identical policy version has already been published')
-    if existing is None:
-        probe = evaluate(root, candidate, games=8, seed=8675309, workers=workers,
-                         label=f'preflight-{candidate}')
-        if not probe['ok']:
-            raise ValueError(f'checkpoint preflight failed; inspect {probe["report"]}')
-    with _lock(root):
-        publications = json.loads((root/'publications.json').read_text())
-        existing = next((p for p in publications if p['candidate'] == candidate), None)
-        if existing is None:
-            if len(publications) >= PUBLICATION_LIMIT:
-                raise ValueError('research session has used all 3 checkpoint publication slots')
-            if any(p['version'] == entrant['version'] for p in publications):
-                raise ValueError('identical policy version has already been published')
-            existing = {'candidate': candidate, 'version': entrant['version'],
-                        'entrant_id': entrant['entrant_id'], 'created': time.time(),
-                        'slot': len(publications)+1}
-            publications.append(existing)
-            # Reserve the slot before touching the official DB; restart resumes
-            # this same candidate through the idempotent LeagueStore.add.
-            write_json(root/'publications.json', publications)
-        # The formal league owns its executable and source archive. Removing a
-        # research workspace/session later must not break a published opponent.
-        destination = official.directory/'policies'/entrant['entrant_id']
-        destination.mkdir(parents=True, exist_ok=True)
-        bundle = destination/'policy.zip'
-        if not bundle.exists():
-            temporary = destination/'policy.zip.tmp'
-            shutil.copyfile(spec['bundle'], temporary)
-            temporary.replace(bundle)
-        archived_spec = {**spec, 'bundle': str(bundle.resolve())}
-        if prepare_entrant(archived_spec)['entrant_id'] != entrant['entrant_id']:
-            raise ValueError('published policy archive changed')
-        write_json(destination/'entrant.json', archived_spec)
-        _, job_id = official.add(archived_spec, games=PUBLICATION_GAMES)
-        existing['job_id'] = job_id
-        write_json(root/'publications.json', publications)
-    error = None
-    try:
-        run_jobs(official, workers=workers, job_id=job_id)
-    except Exception as exc:
-        error = str(exc)
-    report = {**summarize(official, entrant['entrant_id'], job_id),
-              'candidate': candidate, 'slot': existing['slot'], 'version': entrant['version'],
-              'leaderboard': official.leaderboard(), 'publication_games': PUBLICATION_GAMES,
-              'workers': workers, 'last_run_seconds': time.monotonic()-started}
-    if error:
-        report['ok'], report['execution_error'] = False, error
-    write_json(root/'strategies'/candidate/'publication.json', report)
+def _export(report, output):
+    if output is None:
+        return
+    output.mkdir(parents=True, exist_ok=True)
+    with process_lock(SimpleNamespace(directory=output), '.export.lock'):
+        marker = output/'arena-export.json'
+        existing = [p for p in output.iterdir() if p.name != '.export.lock']
+        if existing and (not marker.is_file() or json.loads(marker.read_text()).get('run_id') != report['run_id']):
+            raise ValueError('output belongs to a different run')
+        write_json(marker, {'run_id': report['run_id'], 'managed_report': report['report']})
+        # Both completed and failed partial recordings travel with the SQLite backup.
+        with sqlite3.connect(Path(report['league_directory'])/'league.sqlite3') as source:
+            with sqlite3.connect(output/'league.sqlite3.tmp') as target:
+                source.backup(target)
+        (output/'league.sqlite3.tmp').replace(output/'league.sqlite3')
+        write_json(output/'report.json', report)
+
+
+def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
+        output=None, parameters=None, max_ticks=None, progress=None):
+    integer('games', games, 1)
+    integer('seed', seed)
+    if not 2 <= len(players) <= 8:
+        raise ValueError('run requires 2–8 --player arguments, one per seat')
+    dimensions = _size(size)
+    official = _official(league)
+    rules = replace(official.config, player_counts=(len(players),),
+                    max_ticks=official.config.max_ticks if max_ticks is None else integer('max_ticks', max_ticks, 1))
+    specs = [_selector(official, value, parameters) for value in players]
+    entries = [prepare_entrant(spec) for spec in specs]
+    descriptor = {'mode': 'run', 'players': [e['entrant_id'] for e in entries],
+                  'games': games, 'seed': seed, 'size': dimensions, 'rules': rules.manifest()}
+    target = _export_target(official, output, digest(descriptor))
+    report = _trial(official, specs, rules, descriptor,
+        lambda store, identity: _fixed_plans(store, descriptor['players'], games, seed, identity, dimensions), progress)
+    _export(report, target)
     return report
 
 
-def status(directory):
-    root, config, official = session(directory)
+def _preflight(official, spec, progress=None):
+    opponents = [_selector(official, 'baseline/'+kind) for kind in BASELINES]
+    entries = [prepare_entrant(item) for item in [spec, *opponents]]
+    descriptor = {'mode': 'preflight', 'players': [e['entrant_id'] for e in entries],
+                  'games': 8, 'seed': 8675309, 'rules': official.manifest}
+    return _trial(official, [spec, *opponents], official.config, descriptor,
+        lambda store, identity: _plans(store, entries[0]['entrant_id'], descriptor['players'][1:],
+                                       8, 8675309, identity), progress)
+
+
+def _violations(official, version):
+    """Inspect persisted failures, including failures as another player's opponent."""
+    for directory in [official.directory, *(official.directory/'runs').glob('*/league')]:
+        store = LeagueStore(directory)
+        entries = store.entrants()
+        with store.connect() as db:
+            rows = db.execute("SELECT result FROM games WHERE status='failed' AND result IS NOT NULL")
+            for row in rows:
+                result = json.loads(row[0])
+                seat = result.get('error_detail', {}).get('player')
+                if seat is not None and entries[result['entrant_ids'][seat]].get('version') == version:
+                    return True
+    return False
+
+
+def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progress=None):
+    """One source version has one formal job, regardless of path or alias."""
+    if name is not None:
+        name = _alias(name)
+    official = _official(league)
+    spec = snapshot_policy(official, source, parameters)
+    version = spec['version']
+    directory = official.directory/'commits'/version
+    with _lock(official.directory):
+        directory.parent.mkdir(exist_ok=True)
+        if (directory/'commit.json').exists():
+            record = json.loads((directory/'commit.json').read_text())
+            if name is not None and name != record['name']:
+                raise ValueError(f'this version already uses alias {record["name"]!r}; omit --name to resume')
+        else:
+            existing = next((e for e in official.entrants().values()
+                             if e['kind'] == 'cpp' and e['version'] == version), None)
+            alias = name or (existing['name'] if existing else f'{Path(source).stem[:100]}-{version[:12]}')
+            if existing and alias != existing['name']:
+                raise ValueError(f'this version is already committed as {existing["name"]!r}')
+            claimed = [e for e in official.entrants().values() if e['name'] == alias]
+            for path in directory.parent.glob('*/commit.json'):
+                saved = json.loads(path.read_text())
+                if saved['name'] == alias:
+                    claimed.append(saved)
+            if any(entry.get('version') != version for entry in claimed):
+                raise ValueError('alias already identifies a different version; choose a new --name')
+            record = {'name': _alias(alias), 'version': version, 'created': time.time()}
+            directory.mkdir(exist_ok=True)
+            write_json(directory/'commit.json', record)
+    with process_lock(SimpleNamespace(directory=directory), '.commit.lock'):
+        record = json.loads((directory/'commit.json').read_text())
+        report_path = directory/'publication.json'
+        jobs = {j['id']: j for j in official.jobs()}
+        if record.get('job_id') in jobs and jobs[record['job_id']]['status'] == 'complete' and report_path.exists():
+            saved = json.loads(report_path.read_text())
+            if saved['ok']:
+                return saved  # Keep the rating at completion, not today's rating.
+        if _violations(official, version):
+            raise ValueError('policy version has a recorded violation; commit a corrected new version')
+        if 'job_id' not in record:
+            probe = _preflight(official, spec, progress)
+            if not probe['ok']:
+                report = {'ok': False, 'phase': 'preflight', 'name': record['name'], 'version': version,
+                    'completed_games': 0, 'publication_games': PUBLICATION_GAMES,
+                    'timing': probe['timing'], 'violations': probe['violations'],
+                    'preflight_report': probe['report'], 'report': str(report_path)}
+                write_json(report_path, report)
+                return report
+            formal = {**spec, 'name': record['name']}
+            with _lock(official.directory):
+                entrant, job_id = official.add(formal, games=PUBLICATION_GAMES)
+                record.update(job_id=job_id, entrant_id=entrant['entrant_id'], preflight_report=probe['report'])
+                write_json(directory/'commit.json', record)
+        started, error = time.monotonic(), None
+        try:
+            run_jobs(official, workers=1, job_id=record['job_id'], progress=progress)
+        except Exception as exc:
+            error = str(exc)
+        board = json.loads(canonical(official.leaderboard()))
+        row = next(r for r in board['ranking'] if r['entrant_id'] == record['entrant_id'])
+        report = {**summarize(official, record['entrant_id'], record['job_id']),
+            'name': record['name'], 'version': version, 'entrant_id': record['entrant_id'],
+            'rating': row['elo'], 'rank': 1+sum(r['elo'] > row['elo'] for r in board['ranking']),
+            'leaderboard': board, 'publication_games': PUBLICATION_GAMES, 'workers': 1,
+            'last_run_seconds': time.monotonic()-started, 'report': str(report_path),
+            'preflight_report': record['preflight_report']}
+        if error:
+            report['ok'], report['execution_error'] = False, error
+        report = json.loads(canonical(report))
+        write_json(report_path, report)
+        return report
+
+
+def status(league=DEFAULT_LEAGUE):
+    official = _official(league)
     jobs = {j['id']: j for j in official.jobs()}
-    publications = json.loads((root/'publications.json').read_text())
-    return {'session': config,
-            'candidates': [p.name for p in sorted((root/'strategies').iterdir()) if (p/'entrant.json').exists()],
-            'evaluations': [str(p) for p in sorted((root/'evaluations').glob('*/report.json'))],
-            'publications': [{**p, 'job': jobs.get(p.get('job_id'))} for p in publications],
-            'remaining_publications': PUBLICATION_LIMIT-len(publications)}
+    commits = []
+    for path in sorted((official.directory/'commits').glob('*/commit.json')):
+        record = json.loads(path.read_text())
+        commits.append({**record, 'job': jobs.get(record.get('job_id')),
+                        'report': str(path.with_name('publication.json'))})
+    return {'league_directory': str(official.directory), 'commits': commits,
+            'runs': [str(p) for p in sorted((official.directory/'runs').glob('*/report.json'))]}
 
 
 def add_cli(commands):
-    parser = commands.add_parser('research', help='Arena-managed C++ research and checkpoints')
-    actions = parser.add_subparsers(dest='research_action', required=True)
-    init = actions.add_parser('init', help='create a research session and optional C++ workspace')
-    init.add_argument('directory', type=Path)
-    init.add_argument('--league', type=Path, required=True)
-    init.add_argument('--workspace', type=Path)
-    reg = actions.add_parser('register', help='snapshot and compile an immutable C++ candidate')
-    reg.add_argument('directory', type=Path)
-    reg.add_argument('--source', type=Path, required=True)
-    reg.add_argument('--name', required=True)
-    reg.add_argument('--params', type=Path, help='optional JSON parameter object')
-    test = actions.add_parser('evaluate', help='private black-box games; does not touch official ratings')
-    test.add_argument('directory', type=Path)
-    test.add_argument('--candidate', required=True)
-    test.add_argument('--opponents', nargs='+', default=None, help='baseline:KIND, self, or registered candidate name')
-    test.add_argument('--games', type=int, default=128)
-    test.add_argument('--seed', type=int, default=42)
-    test.add_argument('--players', type=int, nargs='+')
-    test.add_argument('--workers', type=int, default=1)
-    test.add_argument('--label', help='immutable experiment name; repeat command to resume')
-    pub = actions.add_parser('publish', help='preflight and run one complete 1000-game checkpoint')
-    pub.add_argument('directory', type=Path)
-    pub.add_argument('--candidate', required=True)
-    pub.add_argument('--workers', type=int, default=1)
-    stat = actions.add_parser('status', help='list candidates, experiments and checkpoint progress')
-    stat.add_argument('directory', type=Path)
+    submit = commands.add_parser('commit', help='compile a C++ source and run its official 1000-game evaluation')
+    submit.add_argument('source', type=Path, help='.cpp file or source directory')
+    submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
+    submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
+    submit.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    play = commands.add_parser('run', help='private games between explicit seats; never updates official ratings')
+    play.add_argument('--player', action='append', required=True,
+                      help='baseline/KIND, source.cpp, source directory, policy/HASH, or @alias; repeat for each seat')
+    play.add_argument('--size', default='auto', help='auto, WIDTHxHEIGHT, or MIN:MAX')
+    play.add_argument('--games', type=int, default=1)
+    play.add_argument('--seed', type=int, default=42)
+    play.add_argument('--max-ticks', type=int, help='private-game tick limit; defaults to official rules')
+    play.add_argument('--params', type=Path, help='fixed JSON parameters for all source-path players')
+    play.add_argument('--output', type=Path, help='optional report and replay database export directory')
+    play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    inspect = commands.add_parser('status', help='show managed submissions, jobs, and run report paths')
+    inspect.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
 
 
 def command(args):
-    action = args.research_action
-    if action == 'init':
-        report = initialize(args.directory, args.league, args.workspace)
-    elif action == 'register':
-        parameters = json.loads(args.params.read_text()) if args.params else None
-        report = register(args.directory, args.source, args.name, parameters)
-    elif action == 'evaluate':
-        report = evaluate(args.directory, args.candidate, opponents=args.opponents, games=args.games,
-                          seed=args.seed, workers=args.workers, players=args.players, label=args.label)
-    elif action == 'publish':
-        report = publish(args.directory, args.candidate, workers=args.workers)
+    import sys
+    last_progress = 0.
+    def progress(done):
+        nonlocal last_progress
+        now = time.monotonic()
+        if done == 1 or now-last_progress >= 2:
+            print(f'Arena: {done} new games completed', file=sys.stderr, flush=True)
+            last_progress = now
+    parameters = json.loads(args.params.read_text()) if getattr(args, 'params', None) else None
+    if args.command == 'commit':
+        report = commit(args.source, name=args.name, league=args.league, parameters=parameters, progress=progress)
+    elif args.command == 'run':
+        report = run(args.player, league=args.league, size=args.size, games=args.games, seed=args.seed,
+                     output=args.output, parameters=parameters, max_ticks=args.max_ticks, progress=progress)
     else:
-        report = status(args.directory)
+        report = status(args.league)
     print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
     return 0 if report.get('ok', True) else 1
