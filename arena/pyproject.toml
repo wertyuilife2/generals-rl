@@ -20,4 +20,4 @@ where = ["src"]
 include = ["generals_arena*"]
 
 [tool.setuptools.package-data]
-generals_arena = ["web/*.html", "web/*.css", "web/*.js"]
+generals_arena = ["web/*.html", "web/*.css", "web/*.js", "sdk/*.h", "sdk/*.cpp"]

@@ -1,0 +1,163 @@
+你的任务是研发世界最强的 Generals.io 启发式算法。
+
+本轮预算为 60 分钟墙钟时间，包含资料阅读、研发、编译、实验、正式评测和交付。
+目标是交付尽可能强的 C++ 算法及真实比赛证据。研究目标不止于击败现有 baseline，
+还包括对不同对手、人数和地图的通用竞争力。不能只凭本地几个对手的结果宣称已经世界最强。
+
+算法设计、研究路线、实验安排和时间分配由你自主决定。
+你可以挑战 baseline、进行自我对战，以及与自己的历史版本比赛。
+Arena 提供全部比赛、计时、记录和 checkpoint 评测服务；你只负责实现符合接口的 C++ 策略。
+
+1. 工作目录与环境
+
+项目根目录：/Users/bzy/project/generals-rl
+当前开发分支：neko-dev
+Python：/Users/bzy/project/generals-rl/.venv/bin/python
+
+以下路径相对于项目根目录：
+- env/：现有游戏环境和 CPU/C++ 后端；目录名称是 env，不是 dev。
+- arena/：统一研究接口、比赛、评分、录像和网页。
+- heuristics/<run_id>/：你交付的 C++ 算法工作区。
+- outputs/autoresearch/<run_id>/：研究会话、不可变候选、实验与报告。
+- outputs/arena/native_1000：正式联赛。
+
+<run_id> 使用本次研究的唯一名称。已有文件、未提交修改、联赛数据和人类账号不得覆盖。
+从首次执行工具开始记录实际时间；60 分钟结束时如实交付当前成果与未完成事项。
+
+2. 游戏规则与资料
+
+原版游戏背景入口：https://generals.io/ 和 https://wiki.generals.io/。
+本项目是本地实现，实际评测以项目规则为准，不保证与官网每个细节完全一致。
+
+可阅读：
+- arena/RESEARCH.md：完整的研究服务、C++ 接口、时间预算及发布约定。
+- arena/src/generals_arena/sdk/arena_policy.h：C++ 策略协议。
+- doc/README.md 的战斗、地图、观测及环境 API 部分；跳过基础策略介绍。
+- env/src/generals/core/engine.py：参考游戏规则。
+- env/src/generals/core/observation.py：合法观测及信息边界。
+- env/src/generals/protocol/actions.py：动作编码与含义。
+- arena/src/generals_arena/league/rating.py：名次与 rating。
+
+比赛覆盖 2–8 人、宽高 15–35 的随机地图，使用局部视野，允许重复 AI。
+所有人数共用一个排行榜，按名次计算 rating，random baseline 为 0。
+目标包括多人名次表现和夺冠能力，不限于二人局或某个固定对手。
+
+3. 实现与信息约束
+
+算法必须使用单线程 C++ 实现。无需自己实现 Python 适配、比赛循环、评分、计时或录像系统。
+每个席位使用独立实例，只能使用 Arena 给出的合法观测、自身历史信息和独立随机状态。
+不能访问隐藏棋盘、地图生成种子、其他控制器内存，也不能在席位之间共享局内信息。
+可变策略状态保存在各自 instance 中，全局数据只存放只读常量。
+
+baseline 仅作为黑盒对手。允许通过 Arena 调用，不阅读其源码、实现细节测试、
+历史版本、其他位置的源码副本，也不进行源码反射、反编译或反汇编。
+自己的算法不能通过继承、包装或调用 baseline 来替自己决策。
+
+不修改 env、baseline、RL、Arena 的实现或 SDK，不改变规则、计时和评分口径。
+不另写游戏后端；比赛和评测均使用 Arena 提供的接口。
+
+每次决策的硬上限为 10ms，由 Arena 独立计时和判定。
+预算计入 C++ 决策及其原生保护调用开销，不计 Arena 的观测构造、通信、游戏引擎更新或赛前创建。
+首次决策、所有地图与人数都适用。禁止创建线程或子进程，禁止后台计算和修改计时器/信号处理。
+任何一次超时都不合格，不能用平均耗时或分位数代替，不得漏报、排除慢局或规避计时。
+不使用外部文件、网络、外部进程或未登记实现承载额外决策。
+
+4. Arena 提供的接入服务
+
+下面是实际可用的服务接口，不规定你的研究方法。
+命令均从项目根目录运行，<run_id> 和候选名替换为实际值。
+
+创建研究会话和 C++ 工作区：
+
+.venv/bin/python -m generals_arena research init outputs/autoresearch/<run_id> \
+  --league outputs/arena/native_1000 --workspace heuristics/<run_id>
+
+Arena 会创建 policy.cpp 接口示例和 arena_policy.h。
+源码目录中的 .cpp/.h/.hpp 会被快照；所有 .cpp 联合编译为 C++17 共享库。
+同场所有策略与 env CPU 引擎在同一个比赛进程内顺序执行，每席位一个实例。
+策略之间没有逐决策 IPC，不启停策略进程，也不创建策略线程。
+策略提供三个 C ABI 函数，具体类型由头文件定义：
+
+extern "C" void *arena_create(int player, std::uint64_t seed, const char *params_json);
+extern "C" std::int64_t arena_act(void *instance, const ArenaObservation *observation);
+extern "C" void arena_destroy(void *instance);
+
+arena_create 在赛前收到席位、策略种子和固定参数，没有地图信息；创建上限为 2 秒。
+arena_act 收到合法局部观测和上一动作的结果反馈。
+返回 WAIT=0，或 arena_move(source, direction, half)。方向上/右/下/左为 0/1/2/3。
+观测指针仅在当前调用中有效。实例、进程和销毁由 Arena 管理。
+
+注册不可变研究候选：
+
+.venv/bin/python -m generals_arena research register outputs/autoresearch/<run_id> \
+  --source heuristics/<run_id> --name v001
+
+可选 --params 参数文件.json。Arena 自动快照、编译、生成版本哈希与接入入口。
+修改工作区不会改变已注册版本；不同实现使用不同候选名。
+注册研究候选不占正式 checkpoint 发布名额，也不会加入正式榜单。
+
+私有黑盒评测，默认对手池是四种 baseline：
+
+.venv/bin/python -m generals_arena research evaluate outputs/autoresearch/<run_id> \
+  --candidate v001 --games 128 --seed 42 --label experiment01
+
+自定义对手池：baseline:random、baseline:aggressive、baseline:expansion、
+baseline:defensive、self，以及本会话已注册的候选名。允许重复。
+例如：
+
+.venv/bin/python -m generals_arena research evaluate outputs/autoresearch/<run_id> \
+  --candidate v002 --opponents baseline:aggressive v001 self \
+  --games 128 --seed 43 --label experiment02
+
+可选 --players 2 3 4 5 6 7 8；研究评测固定单 worker，不要使用并行参数。
+相同配置、种子、对手列表与局数下，替换候选不改变地图、策略种子和轮换。
+相同实验标签和请求重复调用会恢复进度，不重复已完成对局。
+10ms 由原生适配器计时；整场比赛的外层协调与通信不计入决策时间。
+
+结果以 JSON 返回，并写入 evaluations/<label>/report.json。
+Arena 保存每局结果、计时、录像和失败记录，不影响正式榜单。
+报告包含按人数的名次、夺冠率、跨版本两两名次得分以及决策耗时。
+纯同版本自我对战的两两得分为 null，不能当作实力提升证据。
+私有实验目录中的 league/ 也可用现有 serve 命令在空闲端口查看回放。
+
+5. 正式 checkpoint
+
+最多有 3 次正式发布机会；未发布的研究候选和实验数量不限。
+发布服务由 Arena 完整执行，不需要你手工编写 entrant JSON 或生成赛程。
+
+.venv/bin/python -m generals_arena research publish outputs/autoresearch/<run_id> \
+  --candidate v002
+
+Arena 自动进行接口预检、保存不可变工件、登记选手，
+串行执行该版本的 1000 局正式比赛，更新统一 rating 并保存全部录像和计时记录。
+正式联赛独立保存工件，后续修改开发工作区不会影响已发布版本。
+同一候选重复调用恢复同一发布任务，不重复占名额或计分。
+预检通过后开始正式发布即占名额；之后中断或失败仍保留该名额。
+不能把完全相同的版本换个名字重复发布。已有自身违规记录的候选不能发布，
+违规失败不能通过重试洗掉；修复后需要注册新版本。
+
+完整发布的验收条件：报告 ok=true、completed_games=1000，
+超时与错误均为 0，榜单和回放可读取，并能继续参与后续及人类比赛。
+注册、入队或启动后台进程都不算完整发布。
+
+查询进度：
+
+.venv/bin/python -m generals_arena research status outputs/autoresearch/<run_id>
+
+正式网页：http://127.0.0.1:8002。
+已有服务无需重启；若未运行，可执行：
+
+.venv/bin/python -m generals_arena serve outputs/arena/native_1000 --port 8002 --no-worker
+
+6. 交付成果
+
+- heuristics/<run_id>/ 下的 C++ 算法源码和运行说明。
+- 研究会话中由 Arena 保存的不可变候选、构建信息与已发布 checkpoint。
+- outputs/autoresearch/<run_id>/REPORT.md：最终研究报告。
+- 真实对战证据：baseline 与历史自身版本的结果，必要的人数、对手、局数、名次和胜率背景。
+- Arena 的独立计时证据：调用次数、最大单次耗时、超时与错误次数，任何缺口如实说明。
+- 每个 checkpoint 的正式完成局数、rating、版本身份、回放与访问方式。
+- 最强版本的核心机制、改进依据、失败尝试、已知弱点、实际总耗时和未完成事项。
+
+评价重点是算法实力、稳定性、证据可信度和交付完整性，不是代码复杂度或实验数量。
+持续自主推进，无需逐轮请求确认。不得捏造实验、隐藏违规或删除不理想的正式结果。

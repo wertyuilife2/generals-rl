@@ -73,7 +73,7 @@ async function loadRank() {
   $('ranking').replaceChildren();
   data.ranking.forEach((row, i) => {
     const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div');
-    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' ? 'Baseline' : 'Algorithm', row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
+    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
     wrap.append(el('span', `rank-no${i < 3 ? ' top' : ''}`, String(i + 1).padStart(2, '0')), detail); name.append(wrap);
     tr.append(name, el('td', 'elo', row.elo.toFixed(1)), el('td', '', `${number(row.games)} / ${number(row.appearances)}`), el('td', '', `${row.wins} / ${row.losses} / ${row.draws}`), el('td', '', row.appearances ? `${(100 * row.wins / row.appearances).toFixed(1)}%` : '—'));
     $('ranking').append(tr);
@@ -89,14 +89,19 @@ async function loadHistory() {
     for (const id of match.entrant_ids) copies.set(id, (copies.get(id)||0)+1);
     detail.append(el('div', 'match-names', [...copies].map(([id,count]) => `${names.get(id)||id.slice(0,8)}${count>1?` ×${count}`:''}`).join(' · ')));
     const winner = match.winner_seat == null ? null : names.get(match.entrant_ids[match.winner_seat]);
-    detail.append(el('div', 'match-winner', match.status === 'aborted' ? '服务中断 · 未计分' : winner ? `${winner}（P${match.winner_seat+1}）获胜` : '达到时限 · 存活者并列'));
+    detail.append(el('div', 'match-winner', match.status === 'failed' ? `策略违规 · 未计分 · ${match.policy_error || '执行失败'}` : match.status === 'aborted' ? '服务中断 · 未计分' : winner ? `${winner}（P${match.winner_seat+1}）获胜` : '达到时限 · 存活者并列'));
+    if (match.decision_timing?.length) {
+      const calls = match.decision_timing.reduce((n, t) => n + t.calls, 0);
+      const maximum = Math.max(...match.decision_timing.map(t => t.max_ns)) / 1e6;
+      detail.append(el('div', 'match-meta', `C++ 决策 ${calls} 次 · 最大 ${maximum.toFixed(3)} ms · 上限 10 ms`));
+    }
     if(match.ranks) {
       const placements=match.entrant_ids.map((id,seat)=>({id,seat,rank:match.ranks[seat]})).sort((a,b)=>a.rank-b.rank||a.seat-b.seat);
       detail.append(el('div','match-meta',placements.map(p=>`#${p.rank} P${p.seat+1} ${names.get(p.id)||p.id.slice(0,8)}`).join(' · ')));
     }
     if(match.rating_changes)detail.append(el('div','match-winner',Object.entries(match.rating_changes).map(([id,c])=>`${names.get(id)||id.slice(0,8)} ${c.delta>=0?'+':''}${c.delta.toFixed(1)}`).join(' · ')));
     detail.append(el('div', 'match-meta', `${match.map.players} 人 · ${match.map.width} × ${match.map.height} · ${match.ticks ?? '—'} ticks · ${new Date(match.finished * 1000).toLocaleString('zh-CN')} · ${match.game_id.slice(0, 8)}`));
-    const button = el('button', 'subtle', '回放 ↗'); button.disabled = match.status !== 'complete';
+    const button = el('button', 'subtle', '回放 ↗'); button.disabled = !['complete', 'failed'].includes(match.status);
     button.addEventListener('click', () => openReplay(match.game_id).catch(e => notice(e.message)));
     row.append(detail, button); $('history').append(row);
   }
@@ -216,7 +221,7 @@ async function openReplay(id) {
   replay = data; frame = 0;
   showDialog('replay'); $('timeline').max = data.frames.length - 1;
   $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部动作与状态`;
+  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
   seek(0); notice();
 }
 function applyFrame(next) {

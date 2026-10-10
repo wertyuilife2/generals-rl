@@ -15,6 +15,8 @@ from generals.core.state import Action
 
 from ..registry import load_controller
 from ..util import integer, source_digest
+from ..execution import close_game, result as execution_result, failure as execution_failure
+from ..native import PolicyError
 from .game import RecordedGame
 from .scheduler import make_block
 from .views import human_board
@@ -50,6 +52,20 @@ def controllers_for(store, plan):
     return controllers
 
 
+def eligible_schedule(store, job, **options):
+    disabled = store.disabled_policy_ids()
+    if job['entrant_id'] in disabled:
+        raise ValueError('C++ policy is disqualified after a recorded violation')
+    if not disabled:
+        return make_block(store, job, **options)
+    # Eligibility is an execution concern. Keep the original matchmaking and
+    # rating algorithms, and preserve every already-persisted schedule.
+    proxy = SimpleNamespace(config=store.config, anchor=store.anchor, manifest=store.manifest,
+        entrants=lambda: {key: e for key,e in store.entrants().items() if key not in disabled},
+        ratings=store.ratings, pair_counts=store.pair_counts)
+    return make_block(proxy, job, **options)
+
+
 def prepare_batch(store, job):
     """Persist at least 32 games before execution, adapting at each window.
 
@@ -65,7 +81,7 @@ def prepare_batch(store, job):
         return plans
     done = job["done"]
     while len(plans) < 32 and done < job["budget"]:
-        group = make_block(store, {**job, "done": done})
+        group = eligible_schedule(store, {**job, "done": done})
         if not group:
             break
         plans.extend(group)
@@ -75,17 +91,34 @@ def prepare_batch(store, job):
     return plans
 
 
-def run_next(store, stop=None):
+def run_next(store, stop=None, job_id=None, cpp_worker=None):
     """Caller holds the worker lock. A failed game never becomes a rated loss."""
     for job in store.jobs():
-        if job["status"] != "queued":
+        if job["status"] != "queued" or (job_id is not None and job['id'] != job_id):
             continue
+        game = None
+        controllers = []
+        owned_worker = None
         try:
             plans = prepare_batch(store, job)
             if not plans:
                 continue
             plan = plans[0]
-            game = RecordedGame(plan, store.config, controllers_for(store, plan))
+            entries = store.entrants()
+            if any(entries[key]['kind'] == 'cpp' for key in plan['entrant_ids']):
+                from ..cpp_match import MatchWorker
+                worker = cpp_worker
+                if worker is None:
+                    owned_worker = worker = MatchWorker()
+                result, blob = worker.run(store, plan)
+                if 'policy_error' in result:
+                    store.fail_game(result, blob)
+                    store.fail(job['id'], result['policy_error'])
+                    raise PolicyError(result['policy_error'], details=result.get('error_detail'))
+                store.complete_result(result, blob)
+                return True
+            controllers = controllers_for(store, plan)
+            game = RecordedGame(plan, store.config, controllers)
             while not game.done:
                 if stop is not None and stop.is_set():
                     return False  # Keep the plan pending; deterministic retry.
@@ -93,8 +126,23 @@ def run_next(store, stop=None):
             store.complete(game)
             return True
         except Exception as exc:
+            if isinstance(exc, PolicyError) and controllers:
+                if game is None:
+                    game = RecordedGame(plan, store.config, [None]*len(plan['entrant_ids']))
+                    game.controllers = controllers
+                store.fail_game(execution_failure(game, exc), game.replay_blob())
             store.fail(job["id"], exc)
             raise
+        finally:
+            if owned_worker is not None:
+                owned_worker.close()
+            if game is not None:
+                close_game(game)
+            else:
+                for controller in controllers:
+                    close = getattr(controller, 'close', None)
+                    if close is not None:
+                        close()
     return False
 
 
@@ -103,19 +151,38 @@ def simulate(directory, plan):
     from .store import LeagueStore
     store = LeagueStore(directory)
     start = time.monotonic()
-    game = RecordedGame(plan, store.config, controllers_for(store, plan))
-    while not game.done:
-        game.advance()
-    return {**game.result(), "simulation_seconds": time.monotonic() - start}, game.replay_blob()
+    controllers = controllers_for(store, plan)
+    game = None
+    try:
+        game = RecordedGame(plan, store.config, controllers)
+        while not game.done:
+            game.advance()
+        return {**execution_result(game), "simulation_seconds": time.monotonic() - start}, game.replay_blob()
+    except PolicyError as exc:
+        if game is None:
+            game = RecordedGame(plan, store.config, [None]*len(plan['entrant_ids']))
+            game.controllers = controllers
+        return execution_failure(game, exc), game.replay_blob()
+    finally:
+        if game is not None:
+            close_game(game)
+        else:
+            for controller in controllers:
+                close = getattr(controller, 'close', None)
+                if close is not None:
+                    close()
 
 
-def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1):
+def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id=None):
     store.verify_execution()
     if limit is not None:
         integer("limit", limit, 1)
     integer("workers", workers, 1)
     if workers > 32:
         raise ValueError("workers must be <= 32")
+    has_cpp = any(e['kind'] == 'cpp' for e in store.entrants().values())
+    if has_cpp and workers != 1:
+        raise ValueError('C++ research matches run serially; workers must be 1')
     # Compile native libraries once before spawning, avoiding concurrent builds
     # on a cold cache. Workers still load their own library and RNG instances.
     from generals.backends.cpu.env import _library as cpu_library
@@ -128,23 +195,30 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1):
         if retry:
             store.retry()
         if workers > 1:
-            return _run_parallel(store, workers, limit, progress)
-        while limit is None or completed < limit:
-            if not run_next(store):
-                break
-            completed += 1
-            if progress is not None:
-                progress(completed)
+            return _run_parallel(store, workers, limit, progress, job_id)
+        from ..cpp_match import MatchWorker
+        native_worker = MatchWorker() if has_cpp else None
+        try:
+            while limit is None or completed < limit:
+                if not run_next(store, job_id=job_id, cpp_worker=native_worker):
+                    break
+                completed += 1
+                if progress is not None:
+                    progress(completed)
+        finally:
+            if native_worker is not None:
+                native_worker.close()
     return completed
 
 
-def _run_parallel(store, workers, limit, progress):
+def _run_parallel(store, workers, limit, progress, job_id=None):
     completed = 0
     # Keep adaptation at the same persistent window as sequential execution.
     # Spawn works on macOS and does not inherit SQLite connections or locks.
     with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn")) as executor:
         while limit is None or completed < limit:
-            job = next((j for j in store.jobs() if j["status"] == "queued"), None)
+            job = next((j for j in store.jobs() if j["status"] == "queued"
+                        and (job_id is None or j['id'] == job_id)), None)
             if job is None:
                 break
             plans = prepare_batch(store, job)
@@ -153,16 +227,28 @@ def _run_parallel(store, workers, limit, progress):
             if limit is not None:
                 plans = plans[:limit - completed]
             futures = [executor.submit(simulate, str(store.directory.resolve()), plan) for plan in plans]
-            try:
-                for future in futures:
+            first_error = None
+            for future in futures:
+                if future.cancelled():
+                    continue
+                try:
                     result, blob = future.result()
+                    if 'policy_error' in result:
+                        store.fail_game(result, blob)
+                        raise PolicyError(result['policy_error'], details=result.get('error_detail'))
                     store.complete_result(result, blob)
                     completed += 1
                     if progress is not None:
                         progress(completed)
-            except Exception as exc:
-                store.fail(job["id"], exc)
-                raise
+                except Exception as exc:
+                    first_error = first_error or exc
+                    for queued in futures:
+                        queued.cancel()
+                    # Drain started games and preserve their results/violations.
+                    # A failed fast worker must not erase another timeout.
+            if first_error is not None:
+                store.fail(job["id"], first_error)
+                raise first_error
     return completed
 
 
@@ -192,6 +278,9 @@ class LiveArena:
         self.thread.join(timeout=10)
         if self.worker.is_alive():
             self.worker.join(timeout=10)
+        with self.lock:
+            for value in self.games.values():
+                close_game(value['game'])
         self.store.abort_live()
 
     def create_game(self, human, players=None):
@@ -207,12 +296,37 @@ class LiveArena:
             if sum(not value["finished"] for value in self.games.values()) >= 16:
                 raise ValueError("too many active human games; try again later")
             job = {"id": uuid.uuid4().hex, "entrant_id": human, "done": 0, "budget": 1}
-            plans = make_block(self.store, job, human=True, players=players)
+            plans = eligible_schedule(self.store, job, human=True, players=players)
             if not plans:
                 raise ValueError("register more bots before starting this game")
             plan = plans[0]
-            game = RecordedGame(plan, self.store.config, controllers_for(self.store, plan))
             self.store.insert_plans([plan], status="live")
+            controllers, game = [], None
+            try:
+                entries = self.store.entrants()
+                if any(entries[key]['kind']=='cpp' for key in plan['entrant_ids']):
+                    from ..cpp_match import HumanCppGame
+                    game = HumanCppGame(self.store, plan)
+                else:
+                    controllers = controllers_for(self.store, plan)
+                    game = RecordedGame(plan, self.store.config, controllers)
+            except Exception as exc:
+                if hasattr(exc, 'partial'):
+                    self.store.fail_game(*exc.partial)
+                elif isinstance(exc, PolicyError):
+                    game = RecordedGame(plan, self.store.config, [None]*len(plan['entrant_ids']))
+                    game.controllers = controllers
+                    self.store.fail_game(execution_failure(game, exc), game.replay_blob())
+                else:
+                    self.store.abort_live(plan['game_id'])
+                if game is not None:
+                    close_game(game)
+                else:
+                    for controller in controllers:
+                        close = getattr(controller, 'close', None)
+                        if close is not None:
+                            close()
+                raise
             value = {"game": game, "human": human, "seat": plan["entrant_ids"].index(human),
                      "action": Action.wait(), "queue": deque(), "last_command_id": 0,
                      "recent_commands": {}, "revision": 0, "board": None,
@@ -344,10 +458,15 @@ class LiveArena:
                         if value["game"].done:
                             self.store.complete(value["game"])
                             value["finished"] = time.monotonic()
+                            close_game(value['game'])
                     except Exception as exc:
-                        self.store.abort_live(game_id)
+                        if isinstance(exc, PolicyError):
+                            self.store.fail_game(execution_failure(value['game'], exc), value['game'].replay_blob())
+                        else:
+                            self.store.abort_live(game_id)
                         value["error"] = str(exc)
                         value["finished"] = time.monotonic()
+                        close_game(value['game'])
                     self.changed.notify_all()
 
     def _worker(self):
