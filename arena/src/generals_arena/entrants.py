@@ -12,7 +12,7 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
         raise ValueError("each entrant needs a nonempty name of at most 128 characters")
     common = {"name", "kind", "version"}
     allowed = {"baseline": {"policy"}, "rl": {"checkpoint", "config", "device"},
-               "custom": {"factory", "kwargs", "artifacts"}}
+               "custom": {"factory", "kwargs", "artifacts"}, "cpp": {"bundle"}}
     if kind not in allowed or set(spec) - common - allowed[kind]:
         raise ValueError(f"invalid entrant kind or unknown fields: {spec}")
     version = spec.get("version", "")
@@ -33,6 +33,16 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
             raise ValueError(f"baseline policy must be one of {AI_KINDS}")
         kwargs = {"kind": spec["policy"]}
         implementation = {"generals_baselines": source_digest("generals_baselines")}
+    elif kind == "cpp":
+        from .native import bundle_info
+        bundle = artifact("bundle", spec["bundle"])
+        metadata = bundle_info(bundle)
+        if version and version != metadata['version']:
+            raise ValueError('C++ version must match the immutable bundle')
+        version = metadata['version']
+        factory = 'generals_arena.native:create_controller'
+        kwargs = {'bundle': bundle}
+        implementation = {'custom_version': version}
     elif kind == "rl":
         factory = "generals_rl.arena_adapter:CTSController"
         checkpoint = artifact("checkpoint", spec["checkpoint"])

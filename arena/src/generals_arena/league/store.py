@@ -144,13 +144,30 @@ class LeagueStore:
                     raise ValueError("name already identifies a different version; give the new algorithm a new name")
                 job = db.execute("SELECT id FROM jobs WHERE entrant_id=? ORDER BY created LIMIT 1",
                                  (old["id"],)).fetchone()
-                return entrant, job["id"] if job else None  # Idempotent registration.
-            db.execute("INSERT INTO entrants VALUES (?,?,?,?)",
+                if job:
+                    return entrant, job['id']  # Idempotent registration.
+            else:
+                db.execute("INSERT INTO entrants VALUES (?,?,?,?)",
                        (entrant["entrant_id"], entrant["name"], entrant["kind"], canonical(entrant)))
             job_id = uuid.uuid4().hex
             db.execute("INSERT INTO jobs(id,entrant_id,budget,created) VALUES (?,?,?,?)",
                        (job_id, entrant["entrant_id"], games, time.time()))
         return entrant, job_id
+
+    def register(self, spec, *, base_dir=Path('.')):
+        """Register a private-evaluation opponent without scheduling its own job."""
+        self.verify_execution()
+        if spec.get('kind') == 'rl':
+            raise ValueError('RL evaluation is deferred')
+        entrant = prepare_entrant(spec, base_dir=base_dir)
+        with self.connect(write=True) as db:
+            old = db.execute('SELECT id FROM entrants WHERE name=?', (entrant['name'],)).fetchone()
+            if old and old['id'] != entrant['entrant_id']:
+                raise ValueError('name already identifies a different version')
+            if not old:
+                db.execute('INSERT INTO entrants VALUES (?,?,?,?)',
+                    (entrant['entrant_id'], entrant['name'], entrant['kind'], canonical(entrant)))
+        return entrant
 
     def account(self, name):
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 48:
@@ -179,7 +196,8 @@ class LeagueStore:
 
     def retry(self):
         with self.connect(write=True) as db:
-            db.execute("UPDATE jobs SET status='queued',error=NULL WHERE status='failed'")
+            db.execute("""UPDATE jobs SET status='queued',error=NULL WHERE status='failed'
+                AND entrant_id NOT IN (SELECT id FROM entrants WHERE kind='cpp')""")
 
     def fail(self, job_id, error):
         with self.connect(write=True) as db:
@@ -232,7 +250,32 @@ class LeagueStore:
                        (key, changes[key]["after"], 1, changes[key]["rated_games"], appearances, win, loss, draw))
 
     def complete(self, game):
-        return self.complete_result(game.result(), game.replay_blob())
+        from ..execution import result
+        return self.complete_result(result(game), game.replay_blob())
+
+    def fail_game(self, result, blob):
+        """Preserve a policy violation and its partial replay without awarding rating."""
+        with self.connect(write=True) as db:
+            row = db.execute('SELECT status,plan FROM games WHERE id=?', (result['game_id'],)).fetchone()
+            if row is None or row['status'] not in ('pending', 'live'):
+                raise ValueError('failed game was not pending/live')
+            if any(result.get(k) != v for k, v in json.loads(row['plan']).items()):
+                raise ValueError('failed game plan mismatch')
+            db.execute("UPDATE games SET status='failed',result=?,replay=?,finished=? WHERE id=?",
+                (canonical(result), blob, time.time(), result['game_id']))
+
+    def disabled_policy_ids(self):
+        """C++ violations disqualify future scheduling, without deleting history."""
+        with self.connect() as db:
+            native = {r[0] for r in db.execute("SELECT id FROM entrants WHERE kind='cpp'")}
+            rows = db.execute("SELECT result FROM games WHERE status='failed' AND result IS NOT NULL").fetchall()
+        disabled = set()
+        for row in rows:
+            result = json.loads(row[0])
+            seat = result.get('error_detail', {}).get('player')
+            if seat is not None and result['entrant_ids'][seat] in native:
+                disabled.add(result['entrant_ids'][seat])
+        return disabled
 
     def complete_result(self, result, blob):
         with self.connect(write=True) as db:
@@ -270,6 +313,10 @@ class LeagueStore:
         for row in rows:
             row["anchor"] = row["entrant_id"] == self.anchor
             row["provisional"] = row["rated_games"] < PROVISIONAL_GAMES
+        disabled = self.disabled_policy_ids()
+        for row in rows:
+            if row['entrant_id'] in disabled:
+                row['disqualified'] = True
         return {"player_counts": self.config.player_counts, "ranking": rows, "anchor": self.anchor,
                 "scale": SCALE, "completed_games": completed}
 
@@ -278,7 +325,7 @@ class LeagueStore:
         integer("offset", offset)
         if limit > 100:
             raise ValueError("limit must be <= 100")
-        where, values = "status IN ('complete','aborted')", []
+        where, values = "status IN ('complete','aborted','failed')", []
         if players is not None:
             where += " AND json_array_length(plan, '$.entrant_ids')=?"
             values.append(players)
@@ -289,7 +336,7 @@ class LeagueStore:
 
     def replay(self, game_id):
         with self.connect() as db:
-            row = db.execute("SELECT result,replay FROM games WHERE id=? AND status='complete'", (game_id,)).fetchone()
+            row = db.execute("SELECT result,replay FROM games WHERE id=? AND status IN ('complete','failed')", (game_id,)).fetchone()
         if row is None:
             raise ValueError("completed replay not found")
         return json.loads(row[0]), row[1]

@@ -4,6 +4,10 @@
 random baseline 为零点的 Elo。浏览器提供榜单、对局历史、回放和人类排位。
 **目前不评测 RL，也不做 RL 尺寸适配；本功能不修改 `rl/`。**
 
+C++ 启发式研究使用 [统一研究接口](RESEARCH.md)：Arena 提供不可变源码登记、
+黑盒 baseline / 自我对战、10ms 限时和最多 3 次各 1000 局的正式 checkpoint 发布。
+研究者只需实现 C++ SDK；可直接使用 [60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)。
+
 ## 快速开始
 
 在仓库根目录运行（已有 `.venv` 时先 `source .venv/bin/activate`）：

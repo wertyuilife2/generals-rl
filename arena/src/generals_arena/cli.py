@@ -48,6 +48,8 @@ def league_command(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    from .research import add_cli
+    add_cli(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
     init = actions.add_parser("init", help="create a league with a zero-rated random anchor")
@@ -88,6 +90,9 @@ def main(argv=None):
         view.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.command == 'research':
+            from .research import command
+            return command(args)
         if args.command == "league":
             league_command(args)
             return 0
