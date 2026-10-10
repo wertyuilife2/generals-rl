@@ -5,7 +5,7 @@ import json
 import multiprocessing
 import time
 
-from generals_arena.league.game import replay_frames
+from generals_arena.execution import replay_frames
 from generals_arena.league.store import LeagueStore
 
 
@@ -13,7 +13,7 @@ def verify(item):
     directory,game_id=item
     store=LeagueStore(directory)
     result,blob=store.replay(game_id)
-    replay_frames(blob,result,stride=result['ticks'],compact=True)
+    replay_frames(blob,result,stride=max(1,result['ticks']),compact=True)
     return result['ticks']
 
 

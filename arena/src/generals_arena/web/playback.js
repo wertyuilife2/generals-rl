@@ -1,7 +1,9 @@
 // Every replay tick gets its own paint. A slow display limits playback speed;
 // elapsed wall time must never turn into skipped game states.
 export class Playback {
-  constructor({step, interval, stopped, request = requestAnimationFrame, cancel = cancelAnimationFrame}) {
+  constructor({step, interval, stopped,
+    request = callback => globalThis.requestAnimationFrame(callback),
+    cancel = handle => globalThis.cancelAnimationFrame(handle)}) {
     Object.assign(this, {step, interval, stopped, request, cancel});
     this.handle = null;
     this.last = null;

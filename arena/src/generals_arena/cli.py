@@ -12,7 +12,7 @@ def league_command(args):
     if args.action == "init":
         config = json.loads(args.config.read_text()) if args.config else {}
         store = LeagueStore.create(args.directory, LeagueConfig(**config))
-        print(f"League initialized: {store.directory} (random = 0 Elo)")
+        print(f"League initialized: {store.directory} (WAIT = 0 Elo)")
         return
     store = LeagueStore(args.directory)
     if args.action == "resize":
@@ -31,14 +31,15 @@ def league_command(args):
                          progress=lambda done: print(f"League: {done} new games completed", file=sys.stderr))
         print(f"Completed {count} new games. Jobs: {json.dumps(store.jobs(), ensure_ascii=False)}")
     elif args.action == "rebuild":
-        store.rebuild()
+        store.rebuild(upgrade=args.current_policy)
         print("Ratings rebuilt from completed matches.")
     else:
         report = store.leaderboard()
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
-            print(f"Unified rating / {report['completed_games']} games / random = 0")
+            reference = next(row['name'] for row in report['ranking'] if row['anchor'])
+            print(f"Unified rating / {report['completed_games']} games / {reference} = 0")
             for row in report["ranking"]:
                 print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
 
@@ -50,7 +51,7 @@ def main(argv=None):
     add_cli(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
-    init = actions.add_parser("init", help="create a league with a zero-rated random anchor")
+    init = actions.add_parser("init", help="create a league with a zero-rated WAIT reference")
     init.add_argument("directory", type=Path)
     init.add_argument("--config", type=Path, help="optional league distribution JSON")
     add = actions.add_parser("add", help="register a new version and schedule a bounded evaluation job")
@@ -68,6 +69,8 @@ def main(argv=None):
     ranking.add_argument("--json", action="store_true")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
+    refresh.add_argument('--current-policy', action='store_true',
+                         help='re-score all recorded outcomes with current rules; stop server/workers first')
     resize = actions.add_parser("resize", help="revise future map sizes, preserving accounts and recorded matches (stop server/workers first)")
     resize.add_argument("directory", type=Path)
     resize.add_argument("--min-side", type=int, required=True)
