@@ -14,6 +14,7 @@ baselines = ["generals-baselines"]
 
 [project.scripts]
 generals-arena = "generals_arena.cli:main"
+generals_arena = "generals_arena.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -4,9 +4,10 @@
 random baseline 为零点的 Elo。浏览器提供榜单、对局历史、回放和人类排位。
 **目前不评测 RL，也不做 RL 尺寸适配；本功能不修改 `rl/`。**
 
-C++ 启发式研究使用 [统一研究接口](RESEARCH.md)：Arena 提供不可变源码登记、
-黑盒 baseline / 自我对战、10ms 限时和最多 3 次各 1000 局的正式 checkpoint 发布。
-研究者只需实现 C++ SDK；可直接使用 [60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)。
+C++ 启发式使用 [统一接入接口](RESEARCH.md)：`generals_arena commit 源码 --name 别名`
+自动编译并完成 1000 局正式评测；`generals_arena run --player ... --player ...` 自由测试。
+Arena 管理源码版本、10ms 限时、评分和录像。可直接使用
+[60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)，其中最多三次正式评测是该研究任务的约束。
 
 ## 快速开始
 
@@ -17,31 +18,33 @@ C++ 启发式研究使用 [统一研究接口](RESEARCH.md)：Arena 提供不可
 
 ```bash
 python -m pip install -e ./env -e ./baselines -e ./arena
+generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
+```
 
-# 创建联赛，自动登记 random 零分基准
+打开 **http://localhost:8086**（默认端口也是 8086）。当前正式联赛为
+`outputs/arena/native_1000`，保留 4 个 baseline 和完整的 1000 局结果、评分及录像。
+旧联赛、旧运行代码副本、迁移备份和接口试验数据已清理。
+所有人数共用同一个榜单；通过“对局记录”按人数筛选、
+查看回放；通过“人类参赛”创建本地玩家并开始排位，人数可随机或指定。前端直接由 Python 服务提供，无需 Node、npm 或构建。
+不能直接打开 `web/index.html`，它需要同源 API。
+
+`--no-worker` 让正式网页与独立的研究评测共用联赛；榜单、录像和人类对局仍正常工作。
+不带该参数的 `serve` 会处理队列，所以可以在另一个终端继续 `league add ... --queue-only`。
+不加 `--queue-only` 时，`add` 登记后会直接运行待评测队列。完整的 1000 局可能耗时较长，
+可先用 `--games 10` 检查接入；实际结果取决于策略、地图和时限，少量测试局不能代表稳定实力。
+
+若需要创建独立的新联赛（目标目录必须不存在），运行：
+
+```bash
 generals-arena league init outputs/arena/main --config arena/configs/league.json
-
-# 每个新版本默认 1000 局；先入队，启动网页时由后台执行
 generals-arena league add outputs/arena/main --entrant arena/configs/aggressive.json --queue-only
 generals-arena league add outputs/arena/main --entrant arena/configs/expansion.json --queue-only
 generals-arena league add outputs/arena/main --entrant arena/configs/defensive.json --queue-only
 
-generals-arena serve outputs/arena/main --port 8000
-```
-
-打开 **http://127.0.0.1:8000**。所有人数共用同一个榜单；通过“对局记录”按人数筛选、
-查看回放；通过“人类参赛”创建本地玩家并开始排位，人数可随机或指定。前端直接由 Python 服务提供，无需 Node、npm 或构建。
-不能直接打开 `web/index.html`，它需要同源 API。
-
-`serve` 会处理队列，所以可以在另一个终端继续 `league add ... --queue-only`。
-不加 `--queue-only` 时，`add` 登记后会直接运行待评测队列。完整的 1000 局可能耗时较长，
-可先用 `--games 10` 检查接入；实际结果取决于策略、地图和时限，少量测试局不能代表稳定实力。
-
-```bash
 # 仅运行剩余任务；本次最多完成 20 个新对局，然后正常退出
 generals-arena league run outputs/arena/main --limit 20
 # 继续剩余对局（无需重新登记）
-generals-arena league run outputs/arena/main --workers 8
+generals-arena league run outputs/arena/main
 # 修正失败的策略运行问题后重试
 generals-arena league run outputs/arena/main --retry
 
@@ -149,6 +152,22 @@ RA' = RA + alpha(n) * (performanceA - RA)
 
 ## 接入算法版本
 
+推荐的 C++ 入口：
+
+```bash
+generals_arena commit ./heristic/my_agent/policy.cpp --name "my-model-comet-v1"
+generals_arena run --player baseline/aggressive --player ./heristic/my_agent/policy.cpp \
+  --size auto --games 100 --seed 42 --output ./results/test01
+generals_arena status
+```
+
+`--name` 直接作为榜单显示别名；多文件策略传入目录。无需创建会话或手动注册。
+同一版本重复提交恢复原任务或返回已有成绩，不会重复计分；新版本使用新别名。
+自由测试不会进入正式榜单，数据也由 Arena 保存，`--output` 仅导出副本。
+完整的尺寸选项、历史版本对战和工件位置见 [接入文档](RESEARCH.md)。
+
+自定义 Python 控制器仍可使用管理接口：
+
 创建一个 entrant JSON，然后执行 `league add --entrant 文件.json --games 1000`：
 
 ```json
@@ -181,7 +200,8 @@ RA' = RA + alpha(n) * (performanceA - RA)
 渲染只重绘变化格，统计面板复用节点并按兵力降序排列（同兵力按领地、席位排序）。
 人类对局通过长轮询接收新的状态或队列确认，服务器缓存每 tick 的观测，避免重复生成视野和重复重绘。
 
-批量评测通过 `--workers 8` 并行模拟，并严格按持久化赛程顺序提交结果，避免完成速度影响 Elo 顺序。
+批量评测默认串行执行，C++ 研究策略要求 `--workers 1`。仅 baseline 联赛可选择多个 worker，
+并严格按持久化赛程顺序提交结果，避免完成速度影响 Elo 顺序。
 需要同时查看界面时运行 `generals-arena serve outputs/arena/main --no-worker`，由独立 CLI 处理评测。
 使用 WAL 支持榜单读取、批量任务与真人结果并发。系统文件锁确保只有一个批量 worker 和一个网页服务；
 锁在进程退出后自动释放。失败或未完成的算法局保留赛程，重启从该局头重跑，已完成局不会重算。
@@ -192,8 +212,8 @@ RA' = RA + alpha(n) * (performanceA - RA)
 
 ```bash
 # 先结束当前真人对局并停止 serve / worker，再修改后续地图范围。
-generals-arena league resize outputs/arena/rank_1000 --min-side 15 --max-side 20 --side-cap 35
-generals-arena serve outputs/arena/rank_1000 --no-worker
+generals-arena league resize outputs/arena/native_1000 --min-side 15 --max-side 20 --side-cap 35
+generals-arena serve outputs/arena/native_1000 --no-worker
 ```
 
 该操作记录旧 manifest 到 `rules_history`，旧对局继续保留原 `rules_id` 和地图，新对局使用新版本。
@@ -210,59 +230,41 @@ Python 只负责绑定和控制器生命周期，保留 RNG 顺序及动作轨�
 
 模拟复用引擎每 tick 已计算的全局统计，算法观测用两次轴向扩张计算视野，减少重复扫描和数组复制。
 每个玩家的棋盘仍是独立的只读副本，敌方城市数仍隐藏；与环境的原始观测逐字段比较保持一致。
-单局使用一个 OpenMP 线程，批量评测用多个 worker 并行处理不同形状的地图；小批次开更多
-OpenMP 线程反而增加同步开销。此轮扩展环境的公共适配与编译支持，复用原 CPU 内核，未修改 RL，也不省略录像 tick。
+单局使用一个 OpenMP 线程，C++ 策略在同一对局进程内串行调用。
+Arena 复用原 CPU 内核，未修改 RL，也不省略录像 tick。
 
-新版存储为 schema 3。旧的按人数分榜或普通 Elo 数据库保留为历史实验，不能直接续跑；请创建新的名次评分联赛目录，
-避免把旧赛程分布与新实验混合。
+存储使用 schema 3；当前数据可直接使用当前源码继续运行。
 
 ```bash
 python -m pytest arena/tests baselines/tests -q
 node --test arena/tests/web/*.test.mjs
 python arena/benchmarks/simulation.py
-python arena/benchmarks/verify_league.py outputs/arena/rank_1000 --workers 8
+python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 1
 ```
 
-旧的固定地图批量赛 `run / leaderboard / rebuild` 保留以便读取已有实验，使用方法见
-[固定地图锦标赛说明](TOURNAMENTS.md)。它使用自己的旧评分口径、JSONL 输出及独立排名池，
-不与这里的新联赛合并，不用于本次随机地图评测。
+主要 CLI 为 `commit / run / status`，管理命令为 `league / serve`。
+固定地图批量赛的旧 CLI、示例配置和历史报告已移除；当前 `run` 是显式指定席位的自由测试。
+`tournament.py` 及其辅助模块仍作为 Python 兼容接口保留：现有 RL 评测和测试依赖它们；
+它们不进入当前联赛或网页。RL 代码保持原样。
 
 
-## 本次 1000 局试运行
+## 当前 1000 局数据
 
-CPU 原生后端与 C++ baseline 的运行目录为 `outputs/arena/native_1000`，报告见
-[TRIAL-NATIVE.md](TRIAL-NATIVE.md)。1000 局沿用上一轮地图、席位、种子和顺序，
-逐 tick 动作、状态及最终分数均一致。使用以下命令查看：
+CPU 原生后端与 C++ baseline 的运行目录为 `outputs/arena/native_1000`，数据说明见
+[TRIAL-NATIVE.md](TRIAL-NATIVE.md)。使用以下命令查看和校验：
 
 ```bash
-generals-arena serve outputs/arena/native_1000 --port 8002 --no-worker
+generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
 generals-arena league leaderboard outputs/arena/native_1000
-python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 8
+python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 1
 ```
 
-前一轮 Python 版本保留在 `outputs/arena/optimized_1000`，历史报告见
-[TRIAL-OPTIMIZED.md](TRIAL-OPTIMIZED.md)。旧实现已保存，可独立查看和游玩：
+固定地图、种子和动作轨迹的性能检查（重复五次，输出中位数）：
 
 ```bash
-PYTHONPATH=outputs/arena/runtime-e8b9ec8 python -m generals_arena serve outputs/arena/optimized_1000 --port 8001 --no-worker
+python arena/benchmarks/simulation.py --repeat 5
 ```
 
-上一轮 1000 局和随后的人类账号、对局、分数保留在 `outputs/arena/rank_1000`，历史报告见
-[TRIAL.md](TRIAL.md)。当前旧服务使用 `outputs/arena/runtime-a73a024` 中保存的原代码，继续运行于 8000 端口：
-
-```bash
-PYTHONPATH=outputs/arena/runtime-a73a024 python -m generals_arena serve outputs/arena/rank_1000 --no-worker
-```
-
-新联赛的算法身份包含新源码哈希，评分从零按原顺序重新计算；未覆盖旧实验或人类账号。
-早先普通 Elo 的 433 局也继续保留在 `outputs/arena/unified_1000`。
-
-固定地图、种子和动作轨迹的性能对照（重复五次，输出中位数）：
-
-```bash
-python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --repeat 5
-python arena/benchmarks/simulation.py --fixture arena/benchmarks/eight_player_35.json --reference e8b9ec8 --reference-arena e8b9ec8 --repeat 5
-```
-
-`--reference` 加载指定 Git 版本的 baseline；`--reference-arena` 同时固定 Arena 模拟实现。
-两者均只导出到临时目录，不切换工作区。默认 fixture 仍是上一轮的 45×41、3000 tick 对局，便于持续比较。
+默认 fixture 为范围内的 35×33 地图，校验每步动作和状态摘要。
+需要版本间性能比较时，`--reference` / `--reference-arena` 可从 Git 导出指定版本到临时目录，
+无需在工作区保留旧运行代码副本。

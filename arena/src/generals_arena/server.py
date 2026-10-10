@@ -16,7 +16,7 @@ from .util import digest
 STATIC = Path(__file__).with_name("web")
 
 
-def make_server(store, host="127.0.0.1", port=8000):
+def make_server(store, host="127.0.0.1", port=8086):
     arena = LiveArena(store)
 
     @lru_cache(maxsize=3)
@@ -146,7 +146,7 @@ def make_server(store, host="127.0.0.1", port=8000):
     return server
 
 
-def serve(directory, host="127.0.0.1", port=8000, *, run_worker=True):
+def serve(directory, host="127.0.0.1", port=8086, *, run_worker=True):
     store = LeagueStore(directory)
     with process_lock(store, ".server.lock"):
         server = make_server(store, host, port)

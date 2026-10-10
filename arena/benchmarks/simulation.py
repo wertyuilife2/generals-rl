@@ -22,7 +22,7 @@ def run():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference',help='baseline Git revision to benchmark')
     parser.add_argument('--reference-arena',help='also load arena from this Git revision')
-    parser.add_argument('--fixture',type=Path,default=Path(__file__).with_name('eight_player.json'))
+    parser.add_argument('--fixture',type=Path,default=Path(__file__).with_name('eight_player_35.json'))
     parser.add_argument('--repeat',type=int,default=1,help='repeat identical traces, report median')
     args=parser.parse_args()
     root=Path(__file__).resolve().parents[2]

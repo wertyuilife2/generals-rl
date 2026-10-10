@@ -270,15 +270,24 @@ class TournamentTests(unittest.TestCase):
         self.assertEqual((self.output / "matches.jsonl").read_bytes(), (self.root / "other/matches.jsonl").read_bytes())
 
     def test_cli_and_baseline_only_dependency_boundary(self):
+        league_config = self.root / "league.json"
+        league_config.write_text(json.dumps({"player_counts": [2], "max_ticks": 8}))
+        entrant = self.root / "entrant.json"
+        entrant.write_text(json.dumps({"name": "aggressive", "kind": "baseline", "policy": "aggressive"}))
+        commands = [
+            ["league", "init", str(self.output), "--config", str(league_config)],
+            ["league", "add", str(self.output), "--entrant", str(entrant), "--games", "4"],
+            ["league", "leaderboard", str(self.output), "--json"],
+        ]
+        for args in commands:
+            command = subprocess.run([sys.executable, "-m", "generals_arena", *args],
+                                     capture_output=True, text=True)
+            self.assertEqual(command.returncode, 0, command.stderr)
+        self.assertEqual(json.loads(command.stdout)["completed_games"], 4)
+
+        # The Python compatibility API remains available to RL callers.
         config = self.root / "input.json"
         config.write_text(json.dumps(small_config()))
-        command = subprocess.run([sys.executable, "-m", "generals_arena", "run", "--config", str(config),
-                                  "--output", str(self.output)], capture_output=True, text=True)
-        self.assertEqual(command.returncode, 0, command.stderr)
-        command = subprocess.run([sys.executable, "-m", "generals_arena", "leaderboard", str(self.output), "--json"],
-                                 capture_output=True, text=True)
-        self.assertEqual(command.returncode, 0, command.stderr)
-        self.assertEqual(json.loads(command.stdout)["completed_games"], 4)
         code = f'''
 import sys, json
 from generals_arena.tournament import run_tournament

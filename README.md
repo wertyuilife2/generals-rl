@@ -36,12 +36,21 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 
 ```bash
 python -m pip install -e ./env -e ./baselines -e ./arena
-generals-arena league init outputs/arena/main --config arena/configs/league.json
-generals-arena league add outputs/arena/main --entrant arena/configs/aggressive.json --games 1000 --queue-only
-generals-arena serve outputs/arena/main --port 8000
+generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
 ```
 
-打开 http://127.0.0.1:8000 查看随机地图联赛的榜单、录像，或作为人类玩家参赛。
-2–8 人共用一个 rating，允许重复 AI 实例。新算法默认增量评测 1000 局，支持 `league run --workers 8` 并行运行。
+打开 http://localhost:8086 查看已完成的 1000 局榜单、录像，或作为人类玩家参赛。
+当前仅保留 `outputs/arena/native_1000` 正式联赛；新建联赛和 C++ 策略接入见 Arena 文档。
+2–8 人共用一个 rating，允许重复 AI 实例。新算法默认增量评测 1000 局，C++ 研究评测串行执行。
 random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
 当前不评测固定尺寸的 RL 模型；RL 训练部分保持独立。
+
+C++ 策略可以直接提交或自由测试，无需手动注册：
+
+```bash
+generals_arena commit ./heristic/my_agent/policy.cpp --name "my-model-comet-v1"
+generals_arena run --player baseline/aggressive --player ./heristic/my_agent/policy.cpp \
+  --size 15:35 --games 100 --output ./results/test01
+```
+
+`commit` 自动完成 1000 局正式评测，`run` 保存独立测试记录；详见 [接入文档](arena/RESEARCH.md)。
