@@ -31,7 +31,7 @@ def main():
     used = {key for plan in plans for key in plan['entrant_ids']}
     if not records or any(entries[key]['kind'] != 'baseline' for key in used):
         raise ValueError('requires completed baseline-only games')
-    store = LeagueStore.create(args.destination, source.config)
+    store = LeagueStore.create(args.destination, source.config, reference='random')
     ids = {source.anchor: store.anchor}
     budgets = Counter(row['job_id'] for row in records)
     job_ids = {}

@@ -257,7 +257,7 @@ class NativeController:
             details = {'kind': 'timeout' if status == 1 else 'policy_error', 'player': self.player_id,
                        'tick': int(tick), 'elapsed_ns': int(self.values[6]),
                        'limit_ns': DECISION_NS if phase == 'decision' else 2_000_000_000,
-                       'bundle_sha256': self.bundle_sha256}
+                       'bundle_sha256': self.bundle_sha256, 'phase': phase}
             raise PolicyError(f'C++ policy {phase} {details["kind"]}: '
                               f'{details["elapsed_ns"]/1e6:.3f} ms', details=details)
 

@@ -2,6 +2,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Playback } from '../../src/generals_arena/web/playback.js';
 
+test('browser animation APIs retain the Window receiver when playback starts and pauses',()=>{
+  const request=globalThis.requestAnimationFrame,cancel=globalThis.cancelAnimationFrame;
+  let callback,frames=0,cancelled=0;
+  globalThis.requestAnimationFrame=function(cb){
+    assert.equal(this,globalThis,'browser requestAnimationFrame requires its Window receiver');
+    callback=cb;return 17;
+  };
+  globalThis.cancelAnimationFrame=function(handle){
+    assert.equal(this,globalThis,'browser cancelAnimationFrame requires its Window receiver');
+    assert.equal(handle,17);cancelled++;
+  };
+  try {
+    const playback=new Playback({step:()=>{frames++;return true;},interval:()=>100});
+    playback.start();callback(0);callback(100);
+    assert.equal(frames,1);
+    playback.stop();assert.equal(cancelled,1);
+    playback.start();callback(200);callback(300);
+    assert.equal(frames,2);playback.stop();
+  } finally {
+    if(request===undefined)delete globalThis.requestAnimationFrame;else globalThis.requestAnimationFrame=request;
+    if(cancel===undefined)delete globalThis.cancelAnimationFrame;else globalThis.cancelAnimationFrame=cancel;
+  }
+});
+
 function clock(speed, length=10000) {
   let callback, handle = 0, frame = 0, stopped = 0;
   const painted = [];

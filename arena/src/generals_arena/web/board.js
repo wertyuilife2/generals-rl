@@ -119,7 +119,7 @@ export class Battlefield {
       this.lastPaintedCells++;
       // Clear the old tile before drawing translucent player colors.
       ctx.fillStyle='#111';ctx.fillRect(px,py,size,size);
-      ctx.fillStyle=fog?(obstacle?'#555':'#252525'):owner>=0?COLORS[owner]:terrain===1?'#acacac':structure===1?'#555':'#ddd';
+      ctx.fillStyle=fog?(obstacle?'#555':'#252525'):owner>=0?COLORS[owner]:terrain===1?'#acacac':owner===-2||structure===1?'#555':'#ddd';
       ctx.fillRect(px,py,size,size);
       ctx.strokeStyle='#111';ctx.lineWidth=Math.max(1,size/26);ctx.strokeRect(px,py,size,size);
       const icon=this.icons[obstacle||terrain===1?'mountain':structure===2?'general':structure===1?'city':''];

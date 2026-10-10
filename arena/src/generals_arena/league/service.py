@@ -14,11 +14,11 @@ from generals import MapConfig
 from generals.core.state import Action
 
 from ..registry import load_controller
-from ..util import integer, source_digest
-from ..execution import close_game, result as execution_result, failure as execution_failure
+from ..util import digest, integer, source_digest
+from ..execution import RecordedGame, close_game, result as execution_result, failure as execution_failure
 from ..native import PolicyError
-from .game import RecordedGame
 from .scheduler import make_block
+from .rating_policy import POLICY, player_count
 from .views import human_board
 
 
@@ -52,18 +52,40 @@ def controllers_for(store, plan):
     return controllers
 
 
-def eligible_schedule(store, job, **options):
+def eligible_schedule(store, job, *, coverage=None, **options):
     disabled = store.disabled_policy_ids()
     if job['entrant_id'] in disabled:
         raise ValueError('C++ policy is disqualified after a recorded violation')
-    if not disabled:
-        return make_block(store, job, **options)
-    # Eligibility is an execution concern. Keep the original matchmaking and
-    # rating algorithms, and preserve every already-persisted schedule.
+    reference = store.reference if store.entrants()[store.reference]['kind'] == 'cpp' else None
+    coverage = store.pair_counts(job['entrant_id']) if coverage is None else coverage
+    # Front-load two independent reference maps, then add one every 50 target
+    # games. A 1000-game publication spends at most 40 games (4%) on WAIT.
+    # Coverage includes plans reserved in this window, not just finished games.
+    quota = min(2*(job['budget']//50), 4+2*(job['done']//50))
+    calibration = coverage.get(reference, 0) < quota
+    calibration = (reference is not None and reference not in disabled and not options.get('human')
+                   and job['entrant_id'] != reference and calibration and 2 in store.config.player_counts
+                   and options.get('players') in (None, 2))
+    if not options.get('human') and options.get('players') is None:
+        options['players'] = 2 if calibration or (job['entrant_id'] == reference and 2 in store.config.player_counts) else player_count(store.config, job)
+    # Keep WAIT out of the ordinary opponent pool, including proximity and
+    # underplayed weighting. Explicit runs still honor every requested seat.
+    entries = {key: e for key,e in store.entrants().items() if key not in disabled and key != reference}
+    if options.get('players') == 2 and any(key != job['entrant_id'] and e['kind'] != 'human'
+                                         for key,e in entries.items()):
+        entries.pop(job['entrant_id'], None)
     proxy = SimpleNamespace(config=store.config, anchor=store.anchor, manifest=store.manifest,
-        entrants=lambda: {key: e for key,e in store.entrants().items() if key not in disabled},
-        ratings=store.ratings, pair_counts=store.pair_counts)
-    return make_block(proxy, job, **options)
+        entrants=lambda: entries,
+        ratings=store.ratings, pair_counts=lambda target: coverage)
+    plans = make_block(proxy, job, **options)
+    # Each calibration rotation group contains just one WAIT seat.
+    if calibration:
+        for plan in plans:
+            plan['entrant_ids'][plan['instance_ids'].index(1)] = reference
+    for plan in plans:
+        plan['rating_policy'] = POLICY
+        plan['rating_group_size'] = len(plans)
+    return plans
 
 
 def prepare_batch(store, job):
@@ -80,12 +102,16 @@ def prepare_batch(store, job):
     if plans:
         return plans
     done = job["done"]
+    coverage = store.pair_counts(job['entrant_id'])
     while len(plans) < 32 and done < job["budget"]:
-        group = eligible_schedule(store, {**job, "done": done})
+        group = eligible_schedule(store, {**job, "done": done}, coverage=coverage)
         if not group:
             break
         plans.extend(group)
         done += len(group)
+        for plan in group:
+            for key in set(plan['entrant_ids']) - {job['entrant_id']}:
+                coverage[key] = coverage.get(key, 0)+1
     if plans:
         store.insert_plans(plans, job["id"])
     return plans
@@ -181,8 +207,6 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
     if workers > 32:
         raise ValueError("workers must be <= 32")
     has_cpp = any(e['kind'] == 'cpp' for e in store.entrants().values())
-    if has_cpp and workers != 1:
-        raise ValueError('C++ research matches run serially; workers must be 1')
     # Compile native libraries once before spawning, avoiding concurrent builds
     # on a cold cache. Workers still load their own library and RNG instances.
     from generals.backends.cpu.env import _library as cpu_library
@@ -215,7 +239,11 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
     completed = 0
     # Keep adaptation at the same persistent window as sequential execution.
     # Spawn works on macOS and does not inherit SQLite connections or locks.
-    with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn")) as executor:
+    from ..cpp_match import NativeMatchPool
+    native = any(e['kind'] == 'cpp' for e in store.entrants().values())
+    pool = NativeMatchPool(workers) if native else ProcessPoolExecutor(
+        workers, mp_context=multiprocessing.get_context('spawn'))
+    with pool as executor:
         while limit is None or completed < limit:
             job = next((j for j in store.jobs() if j["status"] == "queued"
                         and (job_id is None or j['id'] == job_id)), None)
@@ -226,7 +254,9 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
                 break
             if limit is not None:
                 plans = plans[:limit - completed]
-            futures = [executor.submit(simulate, str(store.directory.resolve()), plan) for plan in plans]
+            directory = str(store.directory.resolve())
+            futures = [executor.submit_native(directory, plan) if native else executor.submit(simulate, directory, plan)
+                       for plan in plans]
             first_error = None
             for future in futures:
                 if future.cancelled():
@@ -347,6 +377,8 @@ class LiveArena:
         game = value["game"]
         if value["board"] is None:
             value["board"] = human_board(game.state, value["seat"])
+            from ..execution import mark_forfeits
+            mark_forfeits(value['board'], getattr(game, 'forfeits', []))
         if "entrants" not in value:
             names = self.store.entrants()
             value["entrants"] = [{"name": names[key]["name"], "entrant_id": key} for key in game.plan["entrant_ids"]]

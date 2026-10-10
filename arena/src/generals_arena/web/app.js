@@ -4,6 +4,7 @@ import { MoveInput } from './input.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
 let meta, names = new Map(), pool = 0, page = 0, tab = 'ranking', player = null;
+let historyRequest = 0;
 let token = '', tokenKey = null;
 let live = null, board = null, sending = false;
 const outbox = [];
@@ -24,7 +25,6 @@ function showTab(next) {
   tab = next;
   for (const button of document.querySelectorAll('.tab')) button.classList.toggle('active', button.dataset.tab === next);
   for (const key of ['ranking','history','play']) $(`${key}-panel`).hidden = key !== next;
-  $('history-filter').hidden = next !== 'history';
   if (next === 'history') loadHistory().catch(e => notice(e.message));
   if (next === 'play') renderPlayer();
 }
@@ -37,6 +37,7 @@ function renderMeta(value) {
     player = null; live = null;
   }
   names = new Map(meta.entrants.map(e => [e.entrant_id, e.name]));
+  $('rating-reference').textContent = names.get(meta.anchor) || 'WAIT';
   const options = ['0', ...meta.config.player_counts.map(String)];
   if ([...$('pool').options].map(n => n.value).join() !== options.join()) {
     for (const id of ['pool', 'play-players']) {
@@ -47,6 +48,16 @@ function renderMeta(value) {
       }));
     }
     $('pool').value=pool;
+  }
+  for (const [id, label] of [['history-entrant', '全部选手'], ['history-opponent', '不限对手']]) {
+    const select = $(id), choices = [['', label], ...meta.entrants.map(e => [e.entrant_id, e.name])];
+    if (JSON.stringify([...select.options].map(o => [o.value, o.textContent])) !== JSON.stringify(choices)) {
+      const selected = select.value;
+      select.replaceChildren(...choices.map(([value, name]) => {
+        const option = el('option', '', name); option.value = value; return option;
+      }));
+      select.value = choices.some(([value]) => value === selected) ? selected : '';
+    }
   }
   const counts=meta.config.player_counts;
   const first=meta.map_ranges[counts[0]],last=meta.map_ranges[counts[counts.length-1]];
@@ -73,15 +84,38 @@ async function loadRank() {
   $('ranking').replaceChildren();
   data.ranking.forEach((row, i) => {
     const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div');
-    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
+    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
     wrap.append(el('span', `rank-no${i < 3 ? ' top' : ''}`, String(i + 1).padStart(2, '0')), detail); name.append(wrap);
-    tr.append(name, el('td', 'elo', row.elo.toFixed(1)), el('td', '', `${number(row.games)} / ${number(row.appearances)}`), el('td', '', `${row.wins} / ${row.losses} / ${row.draws}`), el('td', '', row.appearances ? `${(100 * row.wins / row.appearances).toFixed(1)}%` : '—'));
+    const change = Number.isFinite(row.elo_delta) ? Math.round(row.elo_delta * 10) / 10 : null;
+    const delta = el('td', `elo-delta${change > 0 ? ' positive' : change < 0 ? ' negative' : ''}`,
+      change === null ? '—' : `${change > 0 ? '+' : ''}${change.toFixed(1)}`);
+    delta.title = row.previous_version ? `相对 ${row.previous_version} 的当前 Elo${change === null ? '（双方均完成对局后显示）' : ''}` : '暂无可比较的上一版本';
+    const elo = el('td', 'elo'), estimate = el('span', 'elo-value', row.elo.toFixed(1));
+    const ci = el('span', 'elo-ci', row.elo_ci ? `±${row.elo_ci.half_width.toFixed(1)}` : '± —');
+    ci.title = row.anchor ? '零分基准固定为 0' : row.elo_ci
+      ? `95% 估计区间 [${row.elo_ci.lower.toFixed(1)}, ${row.elo_ci.upper.toFixed(1)}] · ${row.ci_blocks} 组独立地图；基于名次模型的近似估计`
+      : '95% 估计区间：独立地图或基准校准样本不足';
+    ci.setAttribute('aria-label', ci.title);
+    elo.append(estimate, ci);
+    tr.append(name, elo, delta,
+      ...['win_rate', 'survival_index', 'kill_index'].map(key =>
+        el('td', 'metric', Number.isFinite(row[key]) ? `${(100 * row[key]).toFixed(1)}%` : '—')));
     $('ranking').append(tr);
     if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `统一榜单 · ${row.elo.toFixed(1)} Elo · ${row.games} 局`;
   });
 }
 async function loadHistory() {
-  const data = await api(`/api/matches?offset=${page * 20}&limit=20${pool ? `&players=${pool}` : ""}`);
+  const request = ++historyRequest;
+  const query = new URLSearchParams({offset: page * 20, limit: 20});
+  if (pool) query.set('players', pool);
+  for (const key of ['entrant', 'opponent']) {
+    const value = $(`history-${key}`).value;
+    if (value) query.set(key, value);
+  }
+  const filtered = !!(pool || $('history-entrant').value || $('history-opponent').value);
+  $('clear-history-filters').disabled = !filtered;
+  const data = await api(`/api/matches?${query}`);
+  if (request !== historyRequest) return; // A slower previous filter must not replace the latest results.
   $('history').replaceChildren();
   for (const match of data.matches) {
     const row = el('div', 'match-row'), detail = el('div');
@@ -105,7 +139,7 @@ async function loadHistory() {
     button.addEventListener('click', () => openReplay(match.game_id).catch(e => notice(e.message)));
     row.append(detail, button); $('history').append(row);
   }
-  if (!data.matches.length) $('history').append(el('p', 'empty', '还没有对局记录。登记算法或开始你的第一局。'));
+  if (!data.matches.length) $('history').append(el('p', 'empty', filtered ? '没有符合筛选条件的对局。' : '还没有对局记录。登记算法或开始你的第一局。'));
   $('page-info').textContent = `第 ${page + 1} 页 · 共 ${data.total} 局`;
   $('prev-page').disabled = page === 0; $('next-page').disabled = (page + 1) * 20 >= data.total;
 }
@@ -155,9 +189,10 @@ function renderGamePlayers(entries) {
   }
   const order=entries.map((_,seat)=>seat).sort((a,b)=>board.stats.army[b]-board.stats.army[a] || board.stats.territory[b]-board.stats.territory[a] || a-b);
   for(const [place,seat] of order.entries()) {
-    const {row,stats}=playerNodes[seat],text=`${board.alive[seat]?'':'已淘汰 · '}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
+    const {row,stats}=playerNodes[seat],text=`${board.forfeited?.includes(seat)?'超时投降 · ':board.alive[seat]?'':'已淘汰 · '}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
     if(stats.textContent!==text)stats.textContent=text;
     row.classList.toggle('eliminated',!board.alive[seat]);
+    row.classList.toggle('forfeited',!!board.forfeited?.includes(seat));
     const current=$('game-players').children[place];
     if(current!==row)$('game-players').insertBefore(row,current||null);
   }
@@ -221,13 +256,13 @@ async function openReplay(id) {
   replay = data; frame = 0;
   showDialog('replay'); $('timeline').max = data.frames.length - 1;
   $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
+  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'surrender' ? '投降结算' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
   seek(0); notice();
 }
 function applyFrame(next) {
   const f = replay.frames[next];
   for (const [cell,owner,army,structure] of f.cells) { const y=Math.floor(cell/board.width),x=cell%board.width;board.owner[y][x]=owner;board.army[y][x]=army;board.structure[y][x]=structure; }
-  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;
+  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;board.forfeited=f.forfeited;
 }
 function seek(next) {
   next=Math.max(0,Math.min(replay.frames.length-1,next));
@@ -271,8 +306,16 @@ $('board-dialog').addEventListener('keydown',event=>{
 });
 for(const button of document.querySelectorAll('[data-dir]'))button.addEventListener('click',()=>move(Number(button.dataset.dir)));
 for(const button of document.querySelectorAll('.tab'))button.addEventListener('click',()=>showTab(button.dataset.tab));
-$('pool').addEventListener('change',()=>{pool=Number($('pool').value);page=0;renderMeta(meta);loadRank().catch(e=>notice(e.message));if(tab==='history')loadHistory().catch(e=>notice(e.message));});
-$('refresh-history').addEventListener('click',()=>loadHistory().catch(e=>notice(e.message)));
+function filterHistory() {
+  pool = Number($('pool').value); page = 0;
+  loadHistory().catch(e => notice(e.message));
+}
+for (const id of ['pool', 'history-entrant', 'history-opponent']) $(id).addEventListener('change', filterHistory);
+$('history-filter').addEventListener('submit', event => { event.preventDefault(); filterHistory(); });
+$('clear-history-filters').addEventListener('click', () => {
+  $('pool').value = '0'; $('history-entrant').value = ''; $('history-opponent').value = '';
+  filterHistory();
+});
 $('prev-page').addEventListener('click',()=>{page=Math.max(0,page-1);loadHistory().catch(e=>notice(e.message));});
 $('next-page').addEventListener('click',()=>{page++;loadHistory().catch(e=>notice(e.message));});
 $('signup-form').addEventListener('submit',async event=>{event.preventDefault();try{const data=await api('/api/players',{name:$('player-name').value},false);token=data.token;player=data.entrant;localStorage.setItem(tokenKey,token);notice();await refresh();renderPlayer();}catch(e){notice(e.message);}});

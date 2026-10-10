@@ -8,9 +8,10 @@ from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlsplit
 
-from .league.game import replay_frames
+from .execution import replay_frames
 from .league.service import LiveArena, process_lock
 from .league.store import LeagueStore
+from .league.statistics import LeaderboardStatistics
 from .util import digest
 
 STATIC = Path(__file__).with_name("web")
@@ -18,6 +19,8 @@ STATIC = Path(__file__).with_name("web")
 
 def make_server(store, host="127.0.0.1", port=8086):
     arena = LiveArena(store)
+    statistics = LeaderboardStatistics(store)
+    statistics.leaderboard()
 
     @lru_cache(maxsize=3)
     def replay_response(game_id):
@@ -97,17 +100,19 @@ def make_server(store, host="127.0.0.1", port=8086):
                         self.respond({"error": "not found"}, 404)
                 elif path == "/api/meta":
                     entries = store.entrants()
-                    self.respond({"config": asdict(store.config), "anchor": store.anchor,
+                    self.respond({"config": asdict(store.config), "anchor": store.reference,
                                   "league_id": digest(str(store.directory.resolve())),
                                   "rules_id": store.manifest["rules_id"],
                                   "entrants": [{k: e[k] for k in ("entrant_id", "name", "kind", "version")} for e in entries.values()],
                                   "map_ranges": {p: store.config.side_range(p) for p in store.config.player_counts},
                                   "jobs": store.jobs(), "worker_error": arena.worker_error})
                 elif path == "/api/leaderboard":
-                    self.respond(store.leaderboard())
+                    self.respond(statistics.leaderboard())
                 elif path == "/api/matches":
                     self.respond(store.matches(limit=int(query.get("limit", ["20"])[0]),
-                                               offset=int(query.get("offset", ["0"])[0]), players=players))
+                                               offset=int(query.get("offset", ["0"])[0]), players=players,
+                                               entrant=query.get('entrant', [None])[0],
+                                               opponent=query.get('opponent', [None])[0]))
                 elif path.startswith("/api/replay/"):
                     self.respond(replay_response(path.split("/")[-1]))
                 elif path == "/api/me":

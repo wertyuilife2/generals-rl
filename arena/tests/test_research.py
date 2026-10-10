@@ -11,9 +11,18 @@ from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals_arena import research
 from generals_arena.league.config import LeagueConfig
-from generals_arena.league.game import replay_frames
+from generals_arena.execution import replay_frames
 from generals_arena.league.store import LeagueStore
 from generals_arena.native import build_bundle, NativeController, PolicyError, DECISION_NS
+
+
+def test_legacy_decision_timeouts_remain_eligible():
+    from generals_arena.execution import decision_timeout
+    assert decision_timeout({'kind':'timeout', 'limit_ns':10_000_000})
+    assert decision_timeout({'kind':'timeout', 'phase':'decision', 'limit_ns':10_000_000})
+    assert not decision_timeout({'kind':'timeout', 'limit_ns':2_000_000_000})
+    assert not decision_timeout({'kind':'timeout', 'phase':'initialization', 'limit_ns':2_000_000_000})
+    assert not decision_timeout({'kind':'policy_error', 'phase':'decision', 'limit_ns':10_000_000})
 
 
 def source(root, body='return 0;'):
@@ -109,8 +118,6 @@ def test_multiple_cpp_seats_share_one_serial_match_process(setup, tmp_path):
 
 
 @pytest.mark.parametrize('body,kind', [
-    ('std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;', 'timeout'),
-    ('for(;;) { asm volatile("" ::: "memory"); }', 'timeout'),
     ('_exit(42);', 'policy_error'),
     ('throw std::runtime_error("broken");', 'policy_error'),
     ('return -1;', 'policy_error'),
@@ -193,25 +200,40 @@ def test_invalid_run_inputs_fail_before_recording(setup,players,size):
     assert not (directory/'runs').exists()
 
 
-def test_timeout_is_persisted_not_scored_and_cannot_be_committed(setup, tmp_path):
+@pytest.mark.parametrize('body', [
+    'std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;',
+    'for(;;) { asm volatile("" ::: "memory"); }',
+])
+def test_timeout_surrenders_scores_and_can_be_committed(setup, tmp_path, monkeypatch, body):
     directory, official = setup
-    slow = source(tmp_path/'slow','std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;')
-    report = research.run([slow,'baseline/random'],league=directory,games=4)
-    assert not report['ok'] and report['timing']['timeouts'] == 1
-    assert report['job']['status'] == 'failed' and report['completed_games'] == 0
+    slow = source(tmp_path/'slow', body)
+    report = research.run([slow,'baseline/random'],league=directory,games=4,workers=2)
+    assert report['ok'] and report['timing']['timeouts'] == 4
+    assert report['job']['status'] == 'complete' and report['completed_games'] == 4
+    assert report['violations'] == []
     store = LeagueStore(report['league_directory'])
+    entrant = next(p for p in report['players'] if p['kind']=='cpp')
     for row in store.matches()['matches']:
-        assert row['status'] == 'failed' and row['error_detail']['kind'] == 'timeout'
+        assert row['status'] == 'complete' and row['reason'] == 'surrender'
         result, blob = store.replay(row['game_id'])
+        event = result['forfeits'][0]
+        assert event['reason'] == 'decision_timeout' and event['tick'] == 0
+        assert result['elimination_ticks'][event['seat']] == 0
+        assert result['ranks'][event['seat']] == 2
+        assert result['winner_seat'] != event['seat']
+        assert not result['final_alive'][event['seat']]
+        assert result['kills'] == [0,0]
         assert len(replay_frames(blob,result)) == 1
-    with pytest.raises(ValueError,match='violation'):
-        research.commit(slow,league=directory,name='slow')
-    assert official.leaderboard()['completed_games'] == 0
-    from generals_arena.league.service import eligible_schedule
-    _, entrant = next((i,p) for i,p in enumerate(report['players']) if p['kind']=='cpp')
-    assert entrant['entrant_id'] in store.disabled_policy_ids()
-    plans = eligible_schedule(store, {'entrant_id':store.anchor,'id':'later','done':0,'budget':2})
-    assert all(entrant['entrant_id'] not in plan['entrant_ids'] for plan in plans)
+        assert result['rating_changes'][entrant['entrant_id']]['delta'] < 0
+    assert entrant['entrant_id'] not in store.disabled_policy_ids()
+    from generals_arena.league.statistics import LeaderboardStatistics
+    stats = LeaderboardStatistics(store).leaderboard()
+    loser = next(p for p in stats['ranking'] if p['entrant_id'] == entrant['entrant_id'])
+    assert loser['survival_index'] == loser['kill_index'] == loser['win_rate'] == 0
+    monkeypatch.setattr(research, 'PUBLICATION_GAMES', 4)
+    publication = research.commit(slow,league=directory,name='slow',workers=2)
+    assert publication['ok'] and publication['completed_games'] == 4
+    assert official.leaderboard()['completed_games'] == 4
 
 
 def test_violation_as_an_opponent_also_prevents_commit(setup,tmp_path):
@@ -242,14 +264,87 @@ def test_signal_timeout_recovers_committed_moves_from_shared_journal(setup,tmp_p
     directory, _ = setup
     code = source(tmp_path/'late','if(o->tick==2) std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;')
     report = research.run([code,'baseline/random'],league=directory)
-    assert not report['ok'] and report['timing']['timeouts'] == 1
-    violation = report['violations'][0]
-    assert violation['ticks'] == 2 and violation['error_detail']['phase'] == 'decision'
+    assert report['ok'] and report['timing']['timeouts'] == 1
     store = LeagueStore(report['league_directory'])
-    result,blob = store.replay(violation['game_id'])
+    match = store.matches()['matches'][0]
+    result, blob = store.replay(match['game_id'])
+    assert result['ticks'] == 2 and result['forfeits'][0]['phase'] == 'decision'
     frames = replay_frames(blob,result)
     assert len(frames) == 3 and frames[-1]['tick'] == 2
-    assert report['completed_games'] == 0
+    assert report['completed_games'] == 1
+    assert sum(frames[-1]['alive']) == 1
+
+
+def test_multiplayer_timeout_restores_survivor_memory_and_neutralizes_land(setup, tmp_path):
+    import gzip
+    from generals_arena.league.statistics import replay_kills
+    directory, _ = setup
+    slow = source(tmp_path/'late_multi',
+        'if(o->tick==2) for(;;) { asm volatile("" ::: "memory"); } return 0;')
+    survivor = source(tmp_path/'survivor', '''
+auto *s = static_cast<Policy *>(p);
+if(s->calls++ != o->tick) throw std::runtime_error("lost memory");
+if(o->tick>=2 && o->alive[0]) throw std::runtime_error("surrendered player still alive");
+return 0;''')
+    path = survivor/'policy.cpp'
+    path.write_text(path.read_text().replace('int pid;', 'int pid; int calls=0;'))
+    report = research.run([slow, survivor, survivor, 'baseline/random'], league=directory)
+    assert report['ok'], report
+    store = LeagueStore(report['league_directory'])
+    match = store.matches()['matches'][0]
+    result, blob = store.replay(match['game_id'])
+    assert result['ticks'] == 4 and result['elimination_ticks'][0] == 2
+    assert result['forfeits'][0]['seat'] == 0 and result['ranks'][0] == 4
+    assert result['capture_ticks'] == [None]*4 and result['kills'] == [0]*4
+    assert replay_kills(result, blob) == [0]*4
+    assert [m['calls'] for m in result['decision_timing']] == [3,4,4]
+    trace = json.loads(gzip.decompress(blob))
+    assert all(Action(*row[0]) == Action.wait() for row in trace['actions'][2:])
+    frames = replay_frames(blob, result)
+    import numpy as np
+    mask = np.array(frames[1]['owner']) == 0
+    for frame in frames[2:]:
+        assert not frame['alive'][0]
+        assert (np.array(frame['owner'])[mask] == -2).all()
+        assert (np.array(frame['army'])[mask] == np.array(frames[2]['army'])[mask]).all()
+
+
+def test_native_parallel_and_serial_results_and_ratings_match(setup, tmp_path):
+    import shutil
+    directory, _ = setup
+    cpp = source(tmp_path/'counter')
+    spec = research.snapshot_policy(LeagueStore(directory), cpp)
+    copy = tmp_path/'parallel'
+    shutil.copytree(directory, copy)
+    selector = 'policy/'+spec['version']
+    left = research.run([selector,'baseline/aggressive'],league=directory,games=6,workers=1)
+    right = research.run([selector,'baseline/aggressive'],league=copy,games=6,workers=2)
+    assert left['ok'] and right['ok'] and right['workers'] == 2
+    first, second = LeagueStore(left['league_directory']), LeagueStore(right['league_directory'])
+    assert first.leaderboard() == second.leaderboard()
+    for match in first.matches()['matches']:
+        a, blob_a = first.replay(match['game_id'])
+        b, blob_b = second.replay(match['game_id'])
+        assert blob_a == blob_b
+        assert a['final_digest'] == b['final_digest']
+        assert a['rating_changes'] == b['rating_changes']
+
+
+def test_duplicate_policy_timeouts_forfeit_each_seat_once_and_keep_playing(setup, tmp_path):
+    directory, _ = setup
+    slow = source(tmp_path/'two_slow',
+        'if(o->tick==2) for(;;) { asm volatile("" ::: "memory"); } return 0;')
+    fast = source(tmp_path/'two_fast')
+    report = research.run([slow,slow,fast,fast],league=directory,games=2,workers=2)
+    assert report['ok'] and report['timing']['timeouts'] == 4
+    store = LeagueStore(report['league_directory'])
+    for match in store.matches()['matches']:
+        result, blob = store.replay(match['game_id'])
+        assert result['ticks'] == 4 and sum(result['final_alive']) == 2
+        assert len({event['seat'] for event in result['forfeits']}) == 2
+        assert all(event['tick'] == 2 for event in result['forfeits'])
+        assert sorted(record['calls'] for record in result['decision_timing']) == [3,3,4,4]
+        assert len(replay_frames(blob, result, compact=True)) == 5
 
 
 def test_human_match_preserves_cpp_initialization_failure(setup, tmp_path, monkeypatch):
@@ -276,7 +371,7 @@ def test_human_match_preserves_cpp_initialization_failure(setup, tmp_path, monke
 
 
 @pytest.mark.parametrize('body,failed', [('return 0;',False),
-    ('std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;',True)])
+    ('std::this_thread::sleep_for(std::chrono::milliseconds(100)); return 0;',False)])
 def test_human_cpp_match_uses_same_native_deadline_and_replay(setup,tmp_path,monkeypatch,body,failed):
     directory, official = setup
     spec = research.snapshot_policy(official,source(tmp_path/'human_cpp',body))
@@ -350,7 +445,7 @@ def test_commit_preflight_failure_and_interrupt_resume(setup,tmp_path,monkeypatc
     bad = source(tmp_path/'bad','return -1;')
     report = research.commit(bad,league=directory,name='bad')
     assert not report['ok'] and report['phase']=='preflight' and report['completed_games']==0
-    assert len(official.entrants()) == 1
+    assert {e['name'] for e in official.entrants().values()} == {'random', 'WAIT'}
     code = source(tmp_path/'good')
     monkeypatch.setattr(research,'PUBLICATION_GAMES',3)
     original = research.run_jobs

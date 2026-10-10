@@ -10,9 +10,16 @@ import time
 import uuid
 
 from ..entrants import prepare_entrant
+from ..execution import decision_timeout
 from ..util import canonical, integer
 from .config import LeagueConfig
-from .rating import SCALE, PROVISIONAL_GAMES, ranks, rate
+from .rating import SCALE, PROVISIONAL_GAMES, ranks
+from .rating_policy import EVIDENCE_POLICIES, POLICY, score
+from .rank_model import comparisons, rotation_key
+
+PAIR_SCHEMA = """CREATE TABLE IF NOT EXISTS rating_pairs(
+ left_id TEXT NOT NULL, right_id TEXT NOT NULL, weight REAL NOT NULL, score REAL NOT NULL,
+ PRIMARY KEY(left_id,right_id))"""
 
 SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -43,8 +50,16 @@ class LeagueStore:
         self.config = LeagueConfig(**self.manifest["config"])
         self.anchor = meta["anchor"]
 
+    @property
+    def reference(self):
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM meta WHERE key='rating_reference'").fetchone()
+        return json.loads(row[0]) if row else self.anchor
+
     @classmethod
-    def create(cls, directory, config=None):
+    def create(cls, directory, config=None, *, reference="wait"):
+        if reference not in ("wait", "random"):
+            raise ValueError("rating reference must be wait or random")
         config = config or LeagueConfig()
         manifest = config.manifest()
         anchor = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
@@ -64,7 +79,23 @@ class LeagueStore:
         except BaseException:
             path.unlink(missing_ok=True)
             raise
-        return cls(directory)
+        store = cls(directory)
+        if reference == "wait":
+            from ..reference import register_wait_reference
+            register_wait_reference(store)
+        return store
+
+    def set_rating_reference(self, entrant_id):
+        """Choose the fixed numerical anchor before the first rated game."""
+        with self.connect(write=True) as db:
+            if not db.execute('SELECT 1 FROM entrants WHERE id=?', (entrant_id,)).fetchone():
+                raise ValueError('rating reference must be a registered entrant')
+            if entrant_id != self.anchor and db.execute("SELECT 1 FROM games WHERE status='complete' LIMIT 1").fetchone():
+                raise ValueError('choose a fixed rating anchor before rated games; start a new league to change it')
+            db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
+                       ('rating_reference', canonical(entrant_id)))
+            db.execute("UPDATE meta SET value=? WHERE key='anchor'", (canonical(entrant_id),))
+        self.anchor = entrant_id
 
     @contextmanager
     def connect(self, write=False):
@@ -194,10 +225,18 @@ class LeagueStore:
         with self.connect() as db:
             return [dict(r) for r in db.execute("SELECT jobs.*, entrants.name FROM jobs JOIN entrants ON entrants.id=jobs.entrant_id ORDER BY created")]
 
-    def retry(self):
+    def retry(self, job_id=None):
         with self.connect(write=True) as db:
-            db.execute("""UPDATE jobs SET status='queued',error=NULL WHERE status='failed'
-                AND entrant_id NOT IN (SELECT id FROM entrants WHERE kind='cpp')""")
+            jobs = db.execute("SELECT j.id,e.kind FROM jobs j JOIN entrants e ON e.id=j.entrant_id "
+                              "WHERE j.status='failed'").fetchall()
+            for job in jobs:
+                if job_id is not None and job['id'] != job_id:
+                    continue
+                failures = [json.loads(r[0] or '{}') for r in db.execute(
+                    "SELECT result FROM games WHERE job_id=? AND status='failed'", (job['id'],))]
+                if job['kind'] != 'cpp' or (failures and all(
+                        decision_timeout(r.get('error_detail', {})) for r in failures)):
+                    db.execute("UPDATE jobs SET status='queued',error=NULL WHERE id=?", (job['id'],))
 
     def fail(self, job_id, error):
         with self.connect(write=True) as db:
@@ -234,7 +273,16 @@ class LeagueStore:
         rows = list(db.execute("SELECT * FROM ratings"))
         old = {r["entrant_id"]: r["elo"] for r in rows}
         games = {r["entrant_id"]: r["rated_games"] for r in rows}
-        changes = rate(old, result, self.anchor, self.config.k_factor, games)
+        evidence = None
+        if result.get('rating_policy') in EVIDENCE_POLICIES:
+            db.execute(PAIR_SCHEMA)
+            evidence = {(row[0], row[1]): (row[2], row[3])
+                        for row in db.execute('SELECT * FROM rating_pairs')}
+        changes = score(old, result, self.anchor, self.config.k_factor, games, evidence)
+        if evidence is not None:
+            db.executemany('INSERT OR REPLACE INTO rating_pairs VALUES (?,?,?,?)',
+                           [(left, right, *evidence[left, right])
+                            for left, right, _, _ in comparisons(result)])
         result["ranks"] = ranks(result)
         result["rating_changes"] = changes
         for key in dict.fromkeys(ids):
@@ -265,13 +313,15 @@ class LeagueStore:
                 (canonical(result), blob, time.time(), result['game_id']))
 
     def disabled_policy_ids(self):
-        """C++ violations disqualify future scheduling, without deleting history."""
+        """Fatal C++ errors disqualify; decision timeouts only surrender a seat."""
         with self.connect() as db:
             native = {r[0] for r in db.execute("SELECT id FROM entrants WHERE kind='cpp'")}
             rows = db.execute("SELECT result FROM games WHERE status='failed' AND result IS NOT NULL").fetchall()
         disabled = set()
         for row in rows:
             result = json.loads(row[0])
+            if decision_timeout(result.get('error_detail', {})):
+                continue
             seat = result.get('error_detail', {}).get('player')
             if seat is not None and result['entrant_ids'][seat] in native:
                 disabled.add(result['entrant_ids'][seat])
@@ -320,7 +370,7 @@ class LeagueStore:
         return {"player_counts": self.config.player_counts, "ranking": rows, "anchor": self.anchor,
                 "scale": SCALE, "completed_games": completed}
 
-    def matches(self, limit=50, offset=0, players=None):
+    def matches(self, limit=50, offset=0, players=None, entrant=None, opponent=None):
         integer("limit", limit, 1)
         integer("offset", offset)
         if limit > 100:
@@ -329,6 +379,13 @@ class LeagueStore:
         if players is not None:
             where += " AND json_array_length(plan, '$.entrant_ids')=?"
             values.append(players)
+        for key in dict.fromkeys(key for key in (entrant, opponent) if key):
+            if not isinstance(key, str):
+                raise ValueError('entrant and opponent must be entrant IDs')
+            # Selecting the same strategy twice means two distinct seats.
+            minimum = 2 if entrant == opponent == key else 1
+            where += " AND (SELECT count(*) FROM json_each(plan, '$.entrant_ids') WHERE value=?)>=?"
+            values.extend((key, minimum))
         with self.connect() as db:
             total = db.execute(f"SELECT count(*) FROM games WHERE {where}", values).fetchone()[0]
             rows = db.execute(f"SELECT id,status,plan,result,finished FROM games WHERE {where} ORDER BY finished DESC LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
@@ -341,12 +398,42 @@ class LeagueStore:
             raise ValueError("completed replay not found")
         return json.loads(row[0]), row[1]
 
-    def rebuild(self):
+    def rebuild(self, *, upgrade=False):
+        """Re-score recorded outcomes atomically; optionally adopt current rules.
+
+        Migration rewrites scoring metadata only, never maps, actions or replay
+        blobs. No archived copy of the old scores is retained.
+        """
+        from collections import Counter
+        from .service import process_lock
         self.verify_execution()
-        with self.connect(write=True) as db:
-            db.execute("DELETE FROM ratings")
-            for row in db.execute("SELECT result FROM games WHERE status='complete' ORDER BY sequence").fetchall():
-                result = json.loads(row[0])
-                self._score(db, result)
-                db.execute("UPDATE games SET result=? WHERE id=?", (canonical(result), result["game_id"]))
+        with process_lock(self, '.server.lock'), process_lock(self, '.worker.lock'), process_lock(self, '.registry.lock'):
+            with self.connect(write=True) as db:
+                if db.execute("SELECT 1 FROM games WHERE status='live' LIMIT 1").fetchone():
+                    raise ValueError('finish or abort live games before rebuilding ratings')
+                if upgrade:
+                    rows = db.execute('SELECT id,job_id,plan,result FROM games ORDER BY rowid').fetchall()
+                    plans = {row['id']: json.loads(row['plan']) for row in rows}
+                    sizes = Counter(rotation_key(plans[row['id']], row['job_id']) for row in rows)
+                    for row in rows:
+                        plan = plans[row['id']]
+                        metadata = dict(rating_policy=POLICY,
+                                        rating_group_size=plan.get('rating_group_size', sizes[rotation_key(plan, row['job_id'])]))
+                        plan.update(metadata)
+                        result = json.loads(row['result']) if row['result'] else None
+                        if result is not None:
+                            result.update(metadata)
+                        db.execute('UPDATE games SET plan=?,result=? WHERE id=?',
+                                   (canonical(plan), canonical(result) if result is not None else None, row['id']))
+                db.execute(PAIR_SCHEMA)
+                db.execute('DELETE FROM rating_pairs')
+                db.execute("DELETE FROM ratings")
+                for row in db.execute("SELECT result FROM games WHERE status='complete' ORDER BY sequence").fetchall():
+                    result = json.loads(row[0])
+                    self._score(db, result)
+                    db.execute("UPDATE games SET result=? WHERE id=?", (canonical(result), result["game_id"]))
+                db.execute("INSERT OR REPLACE INTO meta VALUES ('rating_revision',?)", (canonical(uuid.uuid4().hex),))
+            if upgrade:
+                from ..research import refresh_publications
+                refresh_publications(self)
         return self.leaderboard()

@@ -28,7 +28,7 @@ def config(**kwargs):
 
 
 def league(tmp_path, **kwargs):
-    return LeagueStore.create(tmp_path / 'league', config(**kwargs))
+    return LeagueStore.create(tmp_path / 'league', config(**kwargs), reference='random')
 
 
 def add(store, policy='aggressive', games=6):
@@ -128,6 +128,44 @@ def test_queue_budget_idempotency_resume_rebuild_and_replay(tmp_path):
         for key in ('owner','army','structure'):
             assert board[key] == frames[-1][key]
     assert not any('rl' == e['kind'] for e in store.entrants().values())
+
+
+def test_match_filters_combine_participants_counts_and_pagination(tmp_path):
+    store = league(tmp_path, player_counts=(2,3))
+    a, b, c = 'entrant-a', 'entrant-b', 'entrant-c'
+    fixtures = [[a,b], [a,c], [b,c], [a,a,b], [a,b,c], [c,c]]
+    for index, ids in enumerate(fixtures):
+        store.insert_plans([{'game_id':str(index),'entrant_ids':ids}], status='live')
+        store.abort_live(str(index))
+    def keys(**filters):
+        return {match['game_id'] for match in store.matches(**filters)['matches']}
+    assert keys(entrant=a) == {'0','1','3','4'}
+    assert keys(opponent=b) == {'0','2','3','4'}
+    assert keys(entrant=a,opponent=b) == {'0','3','4'}
+    assert keys(entrant=b,opponent=a,players=2) == {'0'}
+    assert keys(entrant=a,opponent=a) == {'3'}
+    assert keys(entrant=a,opponent=a,players=2) == set()
+    assert keys(entrant="' OR 1=1 --") == set()
+    first = store.matches(entrant=a,opponent=b,limit=2)
+    second = store.matches(entrant=a,opponent=b,limit=2,offset=2)
+    assert first['total'] == second['total'] == 3
+    assert len(first['matches']) == 2 and len(second['matches']) == 1
+    assert {m['game_id'] for m in first['matches']+second['matches']} == {'0','3','4'}
+    server = make_server(store, port=0)
+    server.arena.start(run_worker=False)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    url = f'http://127.0.0.1:{server.server_address[1]}/api/matches'
+    try:
+        with urlopen(url+f'?entrant={a}&opponent={b}&players=2') as response:
+            assert {m['game_id'] for m in json.load(response)['matches']} == {'0'}
+        with urlopen(url+f'?entrant={a}&opponent={a}') as response:
+            assert json.load(response)['total'] == 1
+    finally:
+        server.shutdown()
+        server.arena.close()
+        server.server_close()
+        server_thread.join(2)
 
 
 def test_new_algorithm_only_schedules_its_budget(tmp_path):
@@ -281,7 +319,8 @@ def test_human_matchmaking_can_select_non_random_opponents(tmp_path):
 
 
 def test_http_frontend_and_privacy_boundaries(tmp_path):
-    store = league(tmp_path)
+    # Leave enough time for HTTP assertions before submitting the first tick.
+    store = league(tmp_path, tick_seconds=.2)
     server = make_server(store, port=0)
     server.arena.start()
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -327,7 +366,14 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
         replay = json.loads(raw)
         assert replay['frames'][-1]['tick'] == replay['result']['ticks']
         _, raw = request('/api/leaderboard?players=2')
-        assert json.loads(raw)['completed_games'] == 1
+        leaderboard = json.loads(raw)
+        assert leaderboard['completed_games'] == 1
+        for row in leaderboard['ranking']:
+            assert row['elo_delta'] is None
+            assert 0 <= row['win_rate'] <= 1
+            assert 0 <= row['survival_index'] <= 1
+            assert 0 <= row['kill_index'] <= 1
+        assert sum(replay['result']['kills']) == sum(t is not None for t in replay['result']['elimination_ticks'])
         with pytest.raises(HTTPError) as error:
             request('/../league.sqlite3')
         assert error.value.code == 404

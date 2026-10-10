@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, replace
 import fcntl
 import json
+import os
 from pathlib import Path
 import random
 import re
@@ -13,14 +14,23 @@ from types import SimpleNamespace
 from zipfile import ZipFile
 
 from .entrants import prepare_entrant, verify_artifacts
+from .execution import EXECUTION_POLICY, decision_timeout
 from .league.service import run_jobs, process_lock
 from .league.store import LeagueStore
+from .league.rating_policy import POLICY
 from .native import DECISION_NS, build_bundle, source_identity
 from .util import canonical, digest, file_digest, integer, write_json
 
 DEFAULT_LEAGUE = Path('outputs/arena/native_1000')
 PUBLICATION_GAMES = 1000
 BASELINES = ('random', 'aggressive', 'expansion', 'defensive')
+
+
+def worker_count(value):
+    value = min(4, os.cpu_count() or 1) if value is None else integer('workers', value, 1)
+    if value > 32:
+        raise ValueError('workers must be <= 32')
+    return value
 
 
 @contextmanager
@@ -86,8 +96,11 @@ def _selector(store, value, parameters=None):
     value = str(value)
     if value.startswith(('baseline/', 'baseline:')):
         kind = value[len('baseline/'):].removesuffix('.cpp')
+        if kind == 'wait':
+            from .reference import wait_spec
+            return wait_spec(store)
         if kind not in BASELINES:
-            raise ValueError(f'unknown baseline; choose from {", ".join(BASELINES)}')
+            raise ValueError(f'unknown baseline; choose from {", ".join((*BASELINES, "wait"))}')
         return {'name': 'random' if kind == 'random' else f'baseline/{kind}',
                 'kind': 'baseline', 'policy': kind}
     if value.startswith('policy/'):
@@ -131,12 +144,14 @@ def _fixed_plans(store, seats, games, seed, identity, size):
         elif size['mode'] == 'range':
             config.update(width=rng.randint(size['min'], size['max']), height=rng.randint(size['min'], size['max']))
         seeds = [rng.getrandbits(63) for _ in seats]
-        for rotation in range(min(count, games-len(plans))):
+        rotations = min(count, games-len(plans))
+        for rotation in range(rotations):
             order = list(range(rotation, count))+list(range(rotation))
             plans.append({'game_id': digest([identity, len(plans)]),
                 'entrant_ids': [seats[i] for i in order], 'instance_ids': order,
                 'controller_seeds': [seeds[i] for i in order], 'map_seed': map_seed,
-                'map': config, 'rules_id': store.manifest['rules_id'], 'human': False})
+                'map': config, 'rules_id': store.manifest['rules_id'], 'human': False,
+                'rating_policy': POLICY, 'rating_group_size': rotations})
     return plans
 
 
@@ -151,13 +166,14 @@ def _plans(store, target, opponents, games, seed, identity):
         map_seed = rng.getrandbits(63)
         map_config = asdict(store.config.sample_map(count, map_seed))
         seeds = {i: rng.getrandbits(63) for i, _ in instances}
-        for rotation in range(min(count, games-len(plans))):
+        rotations = min(count, games-len(plans))
+        for rotation in range(rotations):
             seats = instances[rotation:]+instances[:rotation]
             plans.append({'game_id': digest([identity, len(plans)]),
                 'entrant_ids': [key for _, key in seats], 'instance_ids': [i for i, _ in seats],
                 'controller_seeds': [seeds[i] for i, _ in seats], 'map_seed': map_seed,
                 'map': map_config, 'rules_id': store.manifest['rules_id'], 'human': False,
-                'evaluation_block': block})
+                'evaluation_block': block, 'rating_policy': POLICY, 'rating_group_size': rotations})
         block += 1
     return plans
 
@@ -166,7 +182,7 @@ def summarize(store, candidate, job_id):
     from .league.rating import ranks
     with store.connect() as db:
         rows = list(db.execute('SELECT status,result FROM games WHERE job_id=? ORDER BY rowid', (job_id,)))
-    groups, errors = {}, []
+    groups, errors, forfeits, historical_timeouts = {}, [], [], []
     entrants = store.entrants()
     total = {'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
     candidate_violations = 0
@@ -174,6 +190,9 @@ def summarize(store, candidate, job_id):
         if not row['result']:
             continue
         result = json.loads(row['result'])
+        forfeits.extend({'game_id': result['game_id'], **event}
+                        for event in result.get('forfeits', [])
+                        if result['entrant_ids'][event['seat']] == candidate)
         for record in result.get('decision_timing', []):
             if record['entrant_id'] != candidate:
                 continue
@@ -181,6 +200,9 @@ def summarize(store, candidate, job_id):
                 total[key] += record[key]
             total['max_ns'] = max(total['max_ns'], record['max_ns'])
         if row['status'] == 'failed':
+            if decision_timeout(result.get('error_detail', {})):
+                historical_timeouts.append(result['game_id'])
+                continue
             seat = result.get('error_detail', {}).get('player')
             offender = result['entrant_ids'][seat] if seat is not None else None
             errors.append({**{key: result.get(key) for key in ('game_id','ticks','policy_error','error_detail')},
@@ -214,15 +236,16 @@ def summarize(store, candidate, job_id):
             'pair_score': sum(g['pair_scores'])/len(g['pair_scores']) if g['pair_scores'] else None}
     values = [g['pair_score'] for g in by_players.values() if g['pair_score'] is not None]
     job = next(j for j in store.jobs() if j['id'] == job_id)
-    return {'ok': job['status'] == 'complete' and not errors and not total['timeouts'] and not total['errors'],
+    return {'ok': job['status'] == 'complete' and not errors and not total['errors'],
             'job': job, 'completed_games': job['done'], 'by_players': by_players,
             'macro_pair_score': sum(values)/len(values) if values else None,
             'timing': {**total, 'limit_ns': DECISION_NS}, 'violations': errors,
             'candidate_violations': candidate_violations,
+            'forfeits': forfeits, 'historical_timeout_games': historical_timeouts,
             'league_directory': str(store.directory.resolve())}
 
 
-def _trial(official, specs, rules, descriptor, planner, progress=None):
+def _trial(official, specs, rules, descriptor, planner, progress=None, workers=1):
     run_id = digest(descriptor)
     parent = official.directory/'runs'
     directory = parent/run_id
@@ -232,7 +255,15 @@ def _trial(official, specs, rules, descriptor, planner, progress=None):
             with tempfile.TemporaryDirectory(dir=parent) as temporary:
                 scratch = Path(temporary)/'run'
                 scratch.mkdir()
-                store = LeagueStore.create(scratch/'league', rules)
+                store = LeagueStore.create(scratch/'league', rules, reference='random')
+                if official.entrants()[official.reference]['kind'] == 'cpp':
+                    # The scratch directory is renamed below; reuse the stable
+                    # official bundle path rather than embedding scratch paths.
+                    original = official.entrants()[official.reference]
+                    reference = store.register({'name': original['name'], 'kind': 'cpp',
+                                                'version': original['version'],
+                                                'bundle': original['artifact_paths']['bundle']})
+                    store.set_rating_reference(reference['entrant_id'])
                 for spec in specs:
                     store.register(spec)
                 _, job_id = store.add(specs[0], games=descriptor['games'])
@@ -250,7 +281,7 @@ def _trial(official, specs, rules, descriptor, planner, progress=None):
             return json.loads((directory/'report.json').read_text())
         started, error = time.monotonic(), None
         try:
-            run_jobs(store, workers=1, job_id=request['job_id'], progress=progress)
+            run_jobs(store, workers=workers, job_id=request['job_id'], progress=progress)
         except Exception as exc:
             error = str(exc)
         entries = [prepare_entrant(spec) for spec in specs]
@@ -258,7 +289,7 @@ def _trial(official, specs, rules, descriptor, planner, progress=None):
         for entry in {e['entrant_id']: e for e in entries}.values():
             result = summarize(store, entry['entrant_id'], request['job_id'])
             players.append({**{k: entry[k] for k in ('entrant_id', 'name', 'kind', 'version')},
-                **{k: result[k] for k in ('by_players', 'macro_pair_score', 'timing', 'candidate_violations')},
+                **{k: result[k] for k in ('by_players', 'macro_pair_score', 'timing', 'candidate_violations', 'forfeits')},
                 'seats': [i for i,e in enumerate(entries) if e['entrant_id'] == entry['entrant_id']]})
         timing = {'limit_ns': DECISION_NS, 'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
         for player in players:
@@ -268,6 +299,7 @@ def _trial(official, specs, rules, descriptor, planner, progress=None):
         report = {'ok': result['ok'] and error is None, 'run_id': run_id,
             'request': descriptor, 'job': result['job'], 'completed_games': result['completed_games'],
             'players': players, 'timing': timing, 'violations': result['violations'],
+            'workers': workers,
             'league_directory': str(store.directory), 'report': str(directory/'report.json'),
             'last_run_seconds': time.monotonic()-started}
         if error:
@@ -309,7 +341,8 @@ def _export(report, output):
 
 
 def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
-        output=None, parameters=None, max_ticks=None, progress=None):
+        output=None, parameters=None, max_ticks=None, progress=None, workers=1):
+    workers = worker_count(workers)
     integer('games', games, 1)
     integer('seed', seed)
     if not 2 <= len(players) <= 8:
@@ -321,22 +354,24 @@ def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
     specs = [_selector(official, value, parameters) for value in players]
     entries = [prepare_entrant(spec) for spec in specs]
     descriptor = {'mode': 'run', 'players': [e['entrant_id'] for e in entries],
-                  'games': games, 'seed': seed, 'size': dimensions, 'rules': rules.manifest()}
+                  'games': games, 'seed': seed, 'size': dimensions, 'rules': rules.manifest(),
+                  'rating_policy': POLICY, 'execution_policy': EXECUTION_POLICY}
     target = _export_target(official, output, digest(descriptor))
     report = _trial(official, specs, rules, descriptor,
-        lambda store, identity: _fixed_plans(store, descriptor['players'], games, seed, identity, dimensions), progress)
+        lambda store, identity: _fixed_plans(store, descriptor['players'], games, seed, identity, dimensions), progress, workers)
     _export(report, target)
     return report
 
 
-def _preflight(official, spec, progress=None):
+def _preflight(official, spec, progress=None, workers=1):
     opponents = [_selector(official, 'baseline/'+kind) for kind in BASELINES]
     entries = [prepare_entrant(item) for item in [spec, *opponents]]
     descriptor = {'mode': 'preflight', 'players': [e['entrant_id'] for e in entries],
-                  'games': 8, 'seed': 8675309, 'rules': official.manifest}
+                  'games': 8, 'seed': 8675309, 'rules': official.manifest, 'rating_policy': POLICY,
+                  'execution_policy': EXECUTION_POLICY}
     return _trial(official, [spec, *opponents], official.config, descriptor,
         lambda store, identity: _plans(store, entries[0]['entrant_id'], descriptor['players'][1:],
-                                       8, 8675309, identity), progress)
+                                       8, 8675309, identity), progress, workers)
 
 
 def _violations(official, version):
@@ -348,14 +383,17 @@ def _violations(official, version):
             rows = db.execute("SELECT result FROM games WHERE status='failed' AND result IS NOT NULL")
             for row in rows:
                 result = json.loads(row[0])
+                if decision_timeout(result.get('error_detail', {})):
+                    continue
                 seat = result.get('error_detail', {}).get('player')
                 if seat is not None and entries[result['entrant_ids'][seat]].get('version') == version:
                     return True
     return False
 
 
-def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progress=None):
+def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progress=None, workers=None):
     """One source version has one formal job, regardless of path or alias."""
+    workers = worker_count(workers)
     if name is not None:
         name = _alias(name)
     official = _official(league)
@@ -394,8 +432,10 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
                 return saved  # Keep the rating at completion, not today's rating.
         if _violations(official, version):
             raise ValueError('policy version has a recorded violation; commit a corrected new version')
+        if record.get('job_id') in jobs and jobs[record['job_id']]['status'] == 'failed':
+            official.retry(record['job_id'])
         if 'job_id' not in record:
-            probe = _preflight(official, spec, progress)
+            probe = _preflight(official, spec, progress, workers)
             if not probe['ok']:
                 report = {'ok': False, 'phase': 'preflight', 'name': record['name'], 'version': version,
                     'completed_games': 0, 'publication_games': PUBLICATION_GAMES,
@@ -410,7 +450,7 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
                 write_json(directory/'commit.json', record)
         started, error = time.monotonic(), None
         try:
-            run_jobs(official, workers=1, job_id=record['job_id'], progress=progress)
+            run_jobs(official, workers=workers, job_id=record['job_id'], progress=progress)
         except Exception as exc:
             error = str(exc)
         board = json.loads(canonical(official.leaderboard()))
@@ -418,7 +458,7 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
         report = {**summarize(official, record['entrant_id'], record['job_id']),
             'name': record['name'], 'version': version, 'entrant_id': record['entrant_id'],
             'rating': row['elo'], 'rank': 1+sum(r['elo'] > row['elo'] for r in board['ranking']),
-            'leaderboard': board, 'publication_games': PUBLICATION_GAMES, 'workers': 1,
+            'leaderboard': board, 'publication_games': PUBLICATION_GAMES, 'workers': workers,
             'last_run_seconds': time.monotonic()-started, 'report': str(report_path),
             'preflight_report': record['preflight_report']}
         if error:
@@ -426,6 +466,26 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
         report = json.loads(canonical(report))
         write_json(report_path, report)
         return report
+
+
+def refresh_publications(store):
+    """Explicit re-rating replaces published score snapshots, not simulations."""
+    board = store.leaderboard()
+    write_json(store.directory/'leaderboard.json', board)
+    rows = {row['entrant_id']:row for row in board['ranking']}
+    for path in (store.directory/'commits').glob('*/publication.json'):
+        report = json.loads(path.read_text())
+        row = rows.get(report.get('entrant_id'))
+        if row is None:
+            continue
+        report.update(rating=row['elo'], rank=1+sum(r['elo'] > row['elo'] for r in rows.values()),
+                      leaderboard=board, rating_policy=POLICY, rating_recomputed=True)
+        write_json(path, report)
+    path = store.directory/'reevaluation.json'
+    if path.exists():
+        report = json.loads(path.read_text())
+        report.update(leaderboard=board, rating_policy=POLICY, rating_recomputed=True)
+        write_json(path, report)
 
 
 def status(league=DEFAULT_LEAGUE):
@@ -446,6 +506,7 @@ def add_cli(commands):
     submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
     submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
     submit.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    submit.add_argument('--workers', type=int, default=None, help='parallel games (default: up to 4 CPU workers)')
     play = commands.add_parser('run', help='private games between explicit seats; never updates official ratings')
     play.add_argument('--player', action='append', required=True,
                       help='baseline/KIND, source.cpp, source directory, policy/HASH, or @alias; repeat for each seat')
@@ -456,6 +517,7 @@ def add_cli(commands):
     play.add_argument('--params', type=Path, help='fixed JSON parameters for all source-path players')
     play.add_argument('--output', type=Path, help='optional report and replay database export directory')
     play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    play.add_argument('--workers', type=int, default=1, help='parallel games (default: 1)')
     inspect = commands.add_parser('status', help='show managed submissions, jobs, and run report paths')
     inspect.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
 
@@ -471,10 +533,12 @@ def command(args):
             last_progress = now
     parameters = json.loads(args.params.read_text()) if getattr(args, 'params', None) else None
     if args.command == 'commit':
-        report = commit(args.source, name=args.name, league=args.league, parameters=parameters, progress=progress)
+        report = commit(args.source, name=args.name, league=args.league, parameters=parameters,
+                        progress=progress, workers=args.workers)
     elif args.command == 'run':
         report = run(args.player, league=args.league, size=args.size, games=args.games, seed=args.seed,
-                     output=args.output, parameters=parameters, max_ticks=args.max_ticks, progress=progress)
+                     output=args.output, parameters=parameters, max_ticks=args.max_ticks,
+                     progress=progress, workers=args.workers)
     else:
         report = status(args.league)
     print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
