@@ -21,7 +21,8 @@ def _integer_array(value: object, dtype: object, name: str) -> np.ndarray:
     if raw.dtype.kind not in "iu":
         raise TypeError(f"{name} must contain integers")
     bounds = np.iinfo(dtype)
-    if raw.size and (np.any(raw < bounds.min) or np.any(raw > bounds.max)):
+    if (not np.can_cast(raw.dtype, dtype, casting="safe") and raw.size
+            and (np.any(raw < bounds.min) or np.any(raw > bounds.max))):
         raise ValueError(f"{name} values exceed {np.dtype(dtype).name}")
     return np.array(raw, dtype=dtype, order="C", copy=True)
 
