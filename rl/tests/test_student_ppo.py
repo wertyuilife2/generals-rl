@@ -12,7 +12,7 @@ from unittest.mock import patch
 import torch
 from tensordict import TensorDict
 
-from generals.controllers import AI_KINDS
+from generals_baselines import AI_KINDS
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.student_ppo import StudentPPO, StudentPPOPolicy
 from generals_rl.train import train

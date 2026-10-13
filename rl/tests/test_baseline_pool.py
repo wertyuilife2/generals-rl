@@ -157,7 +157,7 @@ class BaselinePoolTests(unittest.TestCase):
         pool = BaselinePool(specs(), 2).__enter__()
         processes = list(pool._processes)
         malformed = replace(observation(1), visible=np.ones((2, 2), dtype=bool))
-        with self.assertRaisesRegex(RuntimeError, "IndexError"):
+        with self.assertRaisesRegex(RuntimeError, "ValueError: invalid observation array: visible"):
             pool.act({0: malformed, 1: observation(0)})
         self.assertTrue(all(not process.is_alive() for process in processes))
         self.assertTrue(all(connection.closed for connection in pool._connections))
@@ -166,7 +166,7 @@ class BaselinePoolTests(unittest.TestCase):
     def test_serial_partial_act_or_feedback_failure_closes_pool(self):
         with BaselinePool(specs(), 1) as pool:
             malformed = replace(observation(0), visible=np.ones((2, 2), dtype=bool))
-            with self.assertRaises(IndexError):
+            with self.assertRaisesRegex(ValueError, "invalid observation array: visible"):
                 pool.act({0: observation(1), 1: malformed})
             with self.assertRaisesRegex(RuntimeError, "closed"):
                 pool.act({0: observation(1)})

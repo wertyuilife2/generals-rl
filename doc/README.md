@@ -1,6 +1,6 @@
 # Generals 环境开发与使用说明
 
-更新日期：2026-10-03。本文说明当前唯一的 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法。
+更新日期：2026-10-10。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。
 
 项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则源自原 JS 游戏，交互参考 generals.io；不保证与官网或原 JS 的随机决策逐步相同。强化学习算法独立放在 `rl/`，本文说明环境本身及其接口。
 
@@ -21,28 +21,28 @@
 
 | 用途 | 依赖与支持情况 |
 |---|---|
-| 参考引擎、无界面 AI 模拟 | Python ≥3.11、NumPy ≥1.24；不需要 PyTorch/CUDA |
-| GUI | 额外需要 Tk 和图形桌面；源码兼容 Windows/Linux，Linux/X11 已实测，Windows 尚未实机验收 |
-| CPU 批量模拟 | 当前原生加载器支持 Linux，需要 C++17/OpenMP 编译器，可用 `CXX` 指定 |
+| 参考引擎 | Python ≥3.11、NumPy ≥1.24；不需要 PyTorch/CUDA |
+| AI 策略 / 无界面 AI 模拟 | 额外需要 Linux/macOS 与 C++17 编译器，baseline 在 C++ 中执行 |
+| GUI | 额外需要 Tk 和图形桌面；Linux/X11 已实测，内置 AI 目前要求 Linux/macOS |
+| CPU 单局 / 批量模拟 | 支持 Linux/macOS；需要 C++17/OpenMP，macOS 需 clang 与 libomp；编译器可用 `CXX` 指定 |
 | GPU 批量模拟 | Linux、PyTorch ≥2.13、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件 |
 
 在仓库根目录安装到现有 conda 环境：
 
 ```bash
-conda run -n generals-rl python -m pip install -e ./env --no-deps --no-build-isolation
+conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
 `--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
 
-不安装包时，从仓库根目录进入源码目录运行，Windows/Linux 均适用：
+不安装包时，可在仓库根目录设置源码路径运行（Windows 的路径分隔符用 `;`）：
 
 ```bash
-cd env/src
-conda run -n generals-rl python -m generals play --players 4 --seed 42
+PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-也可在 Linux 仓库根目录使用 `PYTHONPATH=env/src conda run -n generals-rl python -m generals ...`。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。
+也可在 Linux 仓库根目录使用 `PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals ...`。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。
 
 ### 常用命令
 
@@ -124,23 +124,25 @@ GUI 使用 Tk、参考引擎和 `Runner`，支持一个人类对抗其余 AI，�
 env/
   src/generals/
     api.py / vector.py       统一创建入口与 VecEnv
-    protocol/                配置、动作、数组字段、BatchStep/VectorBackend
+    protocol/                配置、动作、Controller、数组字段、BatchStep/VectorBackend
     core/                    独立参考规则、状态、地图、观测、路径、记录
       batch.py               CPU/GPU 共用的冷初始化和状态转换
     backends/cpu/            C++/OpenMP 单 tick 执行、NumPy/ctypes 缓冲区
     backends/gpu/            CUDA 单 tick 内核、Torch 状态与原生启动桥
-    controllers/             四种 AI、人类队列、Controller 协议
+    controllers/             人类队列及按需加载 baseline 的交互工厂
     runtime/                 Runner 与 PlaySession
     gui/                     Tk 展示与输入
     benchmarks/              workload、step 计时、CPU/CUDA profiling
   benchmarks/                benchmark_step.py、profile_step.py 两个入口
   tests/                     规则、设备、接口、GUI 和工具测试
-rl/                          后续算法、模型、训练与模型专用特征
+baselines/                   独立的手写策略包 generals_baselines
+arena/                       统一对战、版本登记、结果记录与 Elo 排名
+rl/                          算法、模型、训练与模型专用特征
 outputs/                     运行结果与本地历史归档
 doc/README.md                本文，统一文档入口
 ```
 
-依赖方向是 `rl → generals`；环境不反向导入训练代码。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
+依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；环境不反向导入训练代码。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
 
 CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部仍按玩家顺序行动。增量维护统计及城市/主城增长索引，周期性全图增长、继承、重置和缓存重建保留必要扫描。
 
@@ -148,10 +150,31 @@ GPU 使用 CUDA 单 tick 内核：棋盘常驻设备张量，统计和增长索�
 
 `VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只接受默认配置或兼容参数 `kernel_backend="cuda"`。
 
-公开根包只有 `make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
+公开根包为 `make_engine, make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
 
 <a id="api"></a>
 ## 5. 批量环境 API
+
+### 单局 Arena 接口
+
+```python
+from generals import Action, MapConfig, make_engine
+from generals.core.mapgen import generate_map
+
+state = generate_map(MapConfig(25, 25, 4), seed=42)
+engine = make_engine(state)  # CPUEnv 的单环境适配，共用 step.cpp
+try:
+    result = engine.step([Action.wait()] * 4)
+    print(state.tick, result.stats.army)
+finally:
+    engine.close()
+```
+
+该入口默认使用 CPU 原生后端、一个 OpenMP 线程，适用于不同尺寸对局分别运行。
+`state` 的动态数组借用后端存储，tick 之间不复制整张棋盘；直接编辑后须调用
+`engine.invalidate_cache()`，不要替换数组存储。返回的 `TickResult` 与统计可安全保存。
+适配器只提供联合动作 `step()`；需要分玩家事务接口时使用 `make_engine(state, backend="reference")`
+返回的 Python `CoreEngine`。Arena 的算法局、真人局和录像重演统一使用默认原生入口，RL 的批量入口不变。
 
 ### 创建与推进
 
@@ -256,7 +279,7 @@ controllers = make_controllers(["aggressive", "expansion", "defensive", "random"
 summary = Runner(state, controllers, seed=42, visibility="local", max_ticks=20000).run()
 ```
 
-外部控制器实现 `generals.controllers.base.Controller` 的 `reset/act/on_result` 协议。`Runner` 不隐式重置调用者传入的控制器；新局创建新状态和控制器。更低层的 `CoreEngine` 在 `generals.core.engine`，支持 `step(actions)` 或 `begin_tick → next_player/observe/apply_action → finish_tick`。
+外部控制器实现 `generals.protocol.controller.Controller` 的 `reset/act/on_result` 协议。`Runner` 不隐式重置调用者传入的控制器；新局创建新状态和控制器。更低层的 `CoreEngine` 在 `generals.core.engine`，支持 `step(actions)` 或 `begin_tick → next_player/observe/apply_action → finish_tick`。
 
 <a id="benchmark"></a>
 ## 7. 逐 step benchmark 与 profiling
@@ -348,3 +371,5 @@ conda run -n generals-rl python -m unittest discover -s env/tests -v
 GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。本轮 163 项环境测试（含 Linux GUI 和 CUDA）通过；独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。规则覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
 
 本次清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证结论。恢复历史实现时应解压到独立目录。
+
+跨算法与模型版本的统一评测见 [Arena 使用说明](../arena/README.md)。

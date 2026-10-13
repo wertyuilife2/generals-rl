@@ -14,7 +14,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from generals.controllers import AI_KINDS
+from generals_baselines import AI_KINDS
 from generals.core.recording import replay, state_digest
 from generals.core.state import Action, Direction, GameState, MapLayout
 from generals_rl.config import task_config
