@@ -160,6 +160,64 @@ class LeagueStore:
         with self.connect() as db:
             return {r["id"]: json.loads(r["data"]) for r in db.execute("SELECT * FROM entrants ORDER BY name")}
 
+    def retired_entrants(self):
+        """Return immutable entrant IDs that are hidden from the active roster."""
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def retired_entrant_ids(self):
+        return set(self.retired_entrants())
+
+    def set_retired(self, entrant, retired=True, *, reason=None):
+        """Retire or restore an entrant without deleting results or artifacts.
+
+        Retirement is deliberately restricted to entrants with no scheduled or
+        live games. This makes the boundary auditable: every existing plan runs
+        under the roster that selected it, and all later plans use the new one.
+        """
+        if not isinstance(entrant, str) or not entrant.strip():
+            raise ValueError("entrant must be a name or entrant ID")
+        selector = entrant.strip()
+        if selector.startswith('@'):
+            selector = selector[1:]
+        if reason is not None and (not isinstance(reason, str) or len(reason) > 500):
+            raise ValueError("retirement reason must be a string of at most 500 characters")
+        with self.connect(write=True) as db:
+            row = db.execute("SELECT id,name,kind FROM entrants WHERE id=? OR name=?",
+                             (selector, selector)).fetchone()
+            if row is None:
+                raise ValueError(f"entrant not found: {entrant}")
+            key = row['id']
+            current_row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+            current = json.loads(current_row[0]) if current_row else {}
+            history_row = db.execute("SELECT value FROM meta WHERE key='entrant_status_history'").fetchone()
+            history = json.loads(history_row[0]) if history_row else []
+            if retired:
+                if key in (self.anchor, self.reference):
+                    raise ValueError("the rating anchor/reference cannot be retired")
+                if key in current:
+                    return {'entrant_id': key, 'name': row['name'], 'retired': True, **current[key]}
+                active = db.execute("""SELECT 1 FROM games,json_each(games.plan,'$.entrant_ids') participant
+                    WHERE games.status IN ('pending','live') AND participant.value=? LIMIT 1""", (key,)).fetchone()
+                if active:
+                    raise ValueError("entrant has pending or live games; finish them before retirement")
+                record = {'retired_at': time.time(), 'reason': reason.strip() if reason else None}
+                current[key] = record
+            else:
+                if key not in current:
+                    return {'entrant_id': key, 'name': row['name'], 'retired': False}
+                record = current.pop(key)
+            history.append({'entrant_id': key, 'name': row['name'],
+                            'action': 'retire' if retired else 'restore',
+                            'at': time.time(), 'reason': reason.strip() if reason else None})
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('retired_entrants',?)", (canonical(current),))
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('entrant_status_history',?)", (canonical(history),))
+        result = {'entrant_id': key, 'name': row['name'], 'retired': bool(retired)}
+        if retired:
+            result.update(record)
+        return result
+
     def add(self, spec, *, base_dir=Path("."), games=1000):
         self.verify_execution()
         integer("games", games, 1)
@@ -353,20 +411,25 @@ class LeagueStore:
             else:
                 db.execute("UPDATE games SET status='aborted',finished=? WHERE status='live' AND id=?", (time.time(), game_id))
 
-    def leaderboard(self):
+    def leaderboard(self, *, include_retired=False):
         with self.connect() as db:
             rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,
                 COALESCE(r.elo,0) elo,COALESCE(r.games,0) games,COALESCE(r.rated_games,0) rated_games,COALESCE(r.appearances,0) appearances,
                 COALESCE(r.wins,0) wins,COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
                 LEFT JOIN ratings r ON r.entrant_id=e.id ORDER BY elo DESC,e.name""")]
             completed = db.execute("SELECT count(*) FROM games WHERE status='complete'").fetchone()[0]
+        retired = self.retired_entrants()
         for row in rows:
             row["anchor"] = row["entrant_id"] == self.anchor
             row["provisional"] = row["rated_games"] < PROVISIONAL_GAMES
+            if row['entrant_id'] in retired:
+                row['retired'] = True
         disabled = self.disabled_policy_ids()
         for row in rows:
             if row['entrant_id'] in disabled:
                 row['disqualified'] = True
+        if not include_retired:
+            rows = [row for row in rows if not row.get('retired')]
         return {"player_counts": self.config.player_counts, "ranking": rows, "anchor": self.anchor,
                 "scale": SCALE, "completed_games": completed}
 

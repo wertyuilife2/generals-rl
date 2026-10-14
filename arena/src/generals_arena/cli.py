@@ -19,6 +19,15 @@ def league_command(args):
         ranges = store.resize_maps(args.min_side, args.max_side, args.side_cap)
         print(f"Map ranges updated for future games: {json.dumps(ranges)}. Existing results and ratings retained.")
         return
+    if args.action in ("retire", "restore"):
+        result = store.set_retired(args.entrant, args.action == "retire", reason=args.reason)
+        # Research leagues keep a static board beside the database. Refresh it
+        # when present; publications and replay data remain untouched.
+        if (store.directory / "commits").is_dir():
+            from .research import refresh_publications
+            refresh_publications(store)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     if args.action == "add":
         spec = json.loads(args.entrant.read_text(encoding="utf-8"))
         entrant, job = store.add(spec, base_dir=args.entrant.resolve().parent, games=args.games)
@@ -34,7 +43,7 @@ def league_command(args):
         store.rebuild(upgrade=args.current_policy)
         print("Ratings rebuilt from completed matches.")
     else:
-        report = store.leaderboard()
+        report = store.leaderboard(include_retired=args.all)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
@@ -67,6 +76,13 @@ def main(argv=None):
     ranking = actions.add_parser("leaderboard")
     ranking.add_argument("directory", type=Path)
     ranking.add_argument("--json", action="store_true")
+    ranking.add_argument("--all", action="store_true", help="include retired entrants")
+    for action, help_text in (("retire", "hide an entrant and exclude it from future matchmaking"),
+                              ("restore", "return a retired entrant to the active roster")):
+        roster = actions.add_parser(action, help=help_text)
+        roster.add_argument("directory", type=Path)
+        roster.add_argument("entrant", help="entrant name, @alias, or immutable entrant ID")
+        roster.add_argument("--reason", help="optional audit note")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
     refresh.add_argument('--current-policy', action='store_true',

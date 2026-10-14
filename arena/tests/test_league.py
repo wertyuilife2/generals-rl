@@ -16,7 +16,7 @@ from generals_arena.league.config import LeagueConfig
 from generals_arena.league.game import RecordedGame, replay_frames
 from generals_arena.league.rating import expected, update, ranks, rate, learning_rate
 from generals_arena.league.scheduler import make_block
-from generals_arena.league.service import LiveArena, controllers_for, process_lock, run_jobs
+from generals_arena.league.service import LiveArena, controllers_for, eligible_schedule, process_lock, run_jobs
 from generals_arena.league.store import LeagueStore
 from generals_arena.server import make_server
 
@@ -179,6 +179,35 @@ def test_new_algorithm_only_schedules_its_budget(tmp_path):
     assert len(after) == 5
     assert {m['game_id'] for m in before}.issubset(m['game_id'] for m in after)
     assert all(newcomer['entrant_id'] in m['entrant_ids'] for m in after[:3])
+
+
+def test_retirement_hides_and_unschedules_without_deleting_history(tmp_path):
+    store = league(tmp_path, player_counts=(2,))
+    old, _ = add(store, 'aggressive', games=2)
+    run_jobs(store)
+    newcomer, _ = add(store, 'defensive', games=1)
+    run_jobs(store)
+    before_matches = store.matches(limit=100)
+    before_rating = store.ratings()[old['entrant_id']]
+
+    retired = store.set_retired('@aggressive', reason='superseded')
+    assert retired['entrant_id'] == old['entrant_id'] and retired['retired']
+    assert old['entrant_id'] not in {r['entrant_id'] for r in store.leaderboard()['ranking']}
+    archived = store.leaderboard(include_retired=True)
+    assert next(r for r in archived['ranking'] if r['entrant_id'] == old['entrant_id'])['retired']
+    assert store.matches(limit=100) == before_matches
+    assert store.ratings()[old['entrant_id']] == before_rating
+
+    job = {'id': 'next', 'entrant_id': newcomer['entrant_id'], 'done': 0, 'budget': 20}
+    assert all(old['entrant_id'] not in plan['entrant_ids'] for plan in eligible_schedule(store, job))
+    with pytest.raises(ValueError, match='retired'):
+        eligible_schedule(store, {**job, 'entrant_id': old['entrant_id']})
+    with pytest.raises(ValueError, match='anchor'):
+        store.set_retired(store.anchor)
+
+    restored = store.set_retired(old['entrant_id'], False, reason='needed again')
+    assert restored['retired'] is False
+    assert old['entrant_id'] in {r['entrant_id'] for r in store.leaderboard()['ranking']}
 
 
 @pytest.mark.parametrize('players', [3, 8])
