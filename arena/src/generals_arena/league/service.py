@@ -19,6 +19,7 @@ from ..execution import RecordedGame, close_game, result as execution_result, fa
 from ..native import PolicyError
 from .scheduler import make_block
 from .rating_policy import POLICY, player_count
+from .modes import MODES, rating_mode
 from .views import human_board
 
 
@@ -60,17 +61,28 @@ def eligible_schedule(store, job, *, coverage=None, **options):
     if job['entrant_id'] in disabled:
         raise ValueError('C++ policy is disqualified after a recorded violation')
     reference = store.reference if store.entrants()[store.reference]['kind'] == 'cpp' else None
-    coverage = store.pair_counts(job['entrant_id']) if coverage is None else coverage
+    quotas = job.get('modes', {})
+    mode = None
+    if quotas and not options.get('human'):
+        available = [key for key, value in quotas.items() if value['done'] < value['budget']]
+        if not available:
+            return []
+        mode = min(available, key=lambda key: (quotas[key]['done']/quotas[key]['budget'], MODES.index(key)))
+        counts = tuple(p for p in store.config.player_counts if (p == 2) == (mode == '1v1'))
+        options['players'] = player_count(SimpleNamespace(player_counts=counts, seed=store.config.seed), job)
+    elif not options.get('human') and options.get('players') is None:
+        options['players'] = 2 if job['entrant_id'] == reference and 2 in store.config.player_counts else player_count(store.config, job)
+    if options.get('players') is not None:
+        mode = '1v1' if options['players'] == 2 else 'ffa'
+    coverage = store.pair_counts(job['entrant_id'], mode=mode) if coverage is None else coverage
     # Front-load two independent reference maps, then add one every 50 target
     # games. A 1000-game publication spends at most 40 games (4%) on WAIT.
     # Coverage includes plans reserved in this window, not just finished games.
-    quota = min(2*(job['budget']//50), 4+2*(job['done']//50))
+    progress = quotas.get(mode, job)
+    quota = min(2*(progress['budget']//50), 4+2*(progress['done']//50))
     calibration = coverage.get(reference, 0) < quota
     calibration = (reference is not None and reference not in disabled and not options.get('human')
-                   and job['entrant_id'] != reference and calibration and 2 in store.config.player_counts
-                   and options.get('players') in (None, 2))
-    if not options.get('human') and options.get('players') is None:
-        options['players'] = 2 if calibration or (job['entrant_id'] == reference and 2 in store.config.player_counts) else player_count(store.config, job)
+                   and job['entrant_id'] != reference and calibration)
     # Keep WAIT out of the ordinary opponent pool, including proximity and
     # underplayed weighting. Explicit runs still honor every requested seat.
     entries = {key: e for key,e in store.entrants().items() if key not in disabled and key != reference}
@@ -79,8 +91,12 @@ def eligible_schedule(store, job, *, coverage=None, **options):
         entries.pop(job['entrant_id'], None)
     proxy = SimpleNamespace(config=store.config, anchor=store.anchor, manifest=store.manifest,
         entrants=lambda: entries,
-        ratings=store.ratings, pair_counts=lambda target: coverage)
+        ratings=store.ratings, pair_counts=lambda target, **kwargs: coverage if mode is not None else store.pair_counts(target, **kwargs))
     plans = make_block(proxy, job, **options)
+    if quotas:
+        plans = plans[:progress['budget'] - progress['done']]
+    if calibration:
+        plans = plans[:quota - coverage.get(reference, 0)]
     # Each calibration rotation group contains just one WAIT seat.
     if calibration:
         for plan in plans:
@@ -88,6 +104,7 @@ def eligible_schedule(store, job, *, coverage=None, **options):
     for plan in plans:
         plan['rating_policy'] = POLICY
         plan['rating_group_size'] = len(plans)
+        plan['rating_mode'] = rating_mode(plan)
     return plans
 
 
@@ -105,16 +122,30 @@ def prepare_batch(store, job):
     if plans:
         return plans
     done = job["done"]
-    coverage = store.pair_counts(job['entrant_id'])
+    coverage = {mode: store.pair_counts(job['entrant_id'], mode=mode) for mode in MODES}
+    modes = {key: dict(value) for key, value in job.get('modes', {}).items()}
     while len(plans) < 32 and done < job["budget"]:
-        group = eligible_schedule(store, {**job, "done": done}, coverage=coverage)
+        # Each pool carries separate coverage, including this reserved window.
+        planned_job = {**job, 'done': done, 'modes': modes}
+        if modes:
+            available = [m for m,v in modes.items() if v['done'] < v['budget']]
+            if not available:
+                break
+            mode = min(available, key=lambda m: (modes[m]['done']/modes[m]['budget'], MODES.index(m)))
+        else:
+            mode = '1v1' if player_count(store.config, planned_job) == 2 else 'ffa'
+            if job['entrant_id'] == store.reference and 2 in store.config.player_counts:
+                mode = '1v1'
+        group = eligible_schedule(store, planned_job, coverage=coverage[mode])
         if not group:
             break
         plans.extend(group)
         done += len(group)
+        if modes:
+            modes[mode]['done'] += len(group)
         for plan in group:
             for key in set(plan['entrant_ids']) - {job['entrant_id']}:
-                coverage[key] = coverage.get(key, 0)+1
+                coverage[mode][key] = coverage[mode].get(key, 0)+1
     if plans:
         store.insert_plans(plans, job["id"])
     return plans

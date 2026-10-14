@@ -28,22 +28,24 @@ generals_arena commit ./heristic/my_agent --name "my-model-comet-v2"
 别名与版本一旦关联就固定：同名不同版本、同版本换别名均明确拒绝，避免重复上榜或覆盖已有记录。
 建议 autoresearch 使用 `<模型名>-<模型自行选择的单词>-v<版本号>`，例如 `my-model-comet-v1`。
 
-Arena 自动快照和编译源码，执行 8 局接口预检，通过后登记选手并串行执行 **1000 局正式比赛**。
-正式比赛沿用联赛的 2–8 人随机地图、自适应配对和统一名次 rating；不能通过 `commit` 改小局数或修改正式规则。
+Arena 自动快照和编译源码，执行 8 局接口预检，通过后登记选手并执行 **500 局 1v1 + 500 局 FFA 正式比赛**（默认最多 4 局并行）。
+正式比赛沿用联赛的 2–8 人随机地图、自适应配对和两套独立的名次 rating（1v1 / FFA）；不能通过 `commit` 改小局数或修改正式规则。
+FFA 优先使用不同策略，策略不足时才均匀增加重复席位。两套配额分别保存。
 中断后重新执行同一命令继续原任务，已完成的局不会重复计分。完成后再次提交返回该次完成时保存的成绩。
 如果源码或固定参数变化，会生成新版本；显式指定过别名时，给新版本使用新别名。
 
 可选 `--params 参数.json`，内容必须为 JSON 对象，计入版本身份并传给 `arena_create`。
 Arena 本身不限制提交次数；60 分钟、最多三次全量评测是具体研究任务的约束，由研究者遵守。
-单个版本有已记录的超时/违规时，不能通过换名或重试清除记录，修复实现后才能提交新版本。
+单个版本有已记录的非决策超时违规时，不能通过换名或重试清除记录，修复实现后才能提交新版本。
 
 命令在 stderr 输出进度，在 stdout 输出 JSON。成功要求 `ok=true`、`completed_games=1000`、
-计时中的 `timeouts=0` 和 `errors=0`。报告包含 `name`、`version`、`rating`、`rank`、
-完整榜单、计时、错误、`report` 路径和联赛路径；预检失败也保存报告及部分录像。
+`job.modes` 中两种模式均完成 500 局，且 `errors=0`。决策超时按投降计分。报告包含 `name`、`version`、
+`ratings`、`ranks`、`leaderboards`（均按 `1v1` / `ffa` 分组）、`publication_games_by_mode`、完整榜单、计时、错误、`report` 路径和联赛路径；预检失败也保存报告及部分录像。
 
 ```bash
 generals_arena status
-generals_arena league leaderboard outputs/arena/native_1000
+generals_arena league leaderboard outputs/arena/native_1000 --mode 1v1
+generals_arena league leaderboard outputs/arena/native_1000 --mode ffa
 ```
 
 现有网页 http://localhost:8086 无需重启，直接显示新增选手、对局与评分。

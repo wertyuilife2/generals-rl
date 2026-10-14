@@ -12,7 +12,8 @@ import uuid
 
 from generals_arena.league.service import process_lock, run_jobs
 from generals_arena.league.store import LeagueStore
-from generals_arena.research import summarize, worker_count, refresh_publications
+from generals_arena.research import summarize, worker_count, refresh_publications, publication_ratings
+from generals_arena.league.modes import split_budget
 from generals_arena.util import canonical, integer, write_json
 
 
@@ -35,8 +36,12 @@ def reset(store, games):
             for i, entry in enumerate(entrants.values()):
                 key = entry['entrant_id']
                 if entry['kind'] != 'human' and key != wait:
+                    job_id = jobs.get(key, uuid.uuid4().hex)
                     db.execute('INSERT INTO jobs(id,entrant_id,budget,created) VALUES (?,?,?,?)',
-                               (jobs.get(key, uuid.uuid4().hex), key, games, time.time()+i/1000))
+                               (job_id, key, games, time.time()+i/1000))
+                    budgets = split_budget(games, store.config.player_counts) if games >= 2 and 2 in store.config.player_counts and len(store.config.player_counts) > 1 else {store.default_mode():games}
+                    db.executemany('INSERT INTO job_modes(job_id,mode,budget) VALUES (?,?,?)',
+                                   [(job_id, mode, amount) for mode, amount in budgets.items()])
         store.anchor = wait
         for suffix in ('', '-wal', '-shm'):
             (store.directory / ('statistics.sqlite3'+suffix)).unlink(missing_ok=True)
@@ -66,12 +71,10 @@ def evaluate(store, workers):
                 last = now
         run_jobs(store, workers=workers, job_id=job['id'], progress=progress)
         entry = entries[job['entrant_id']]
-        board = store.leaderboard()
-        row = next(r for r in board['ranking'] if r['entrant_id'] == entry['entrant_id'])
         report = {**summarize(store, entry['entrant_id'], job['id']), 'name':entry['name'],
                   'version':entry['version'], 'entrant_id':entry['entrant_id'],
-                  'rating':row['elo'], 'rank':1+sum(r['elo'] > row['elo'] for r in board['ranking']),
-                  'leaderboard':board, 'publication_games':job['budget'], 'workers':workers,
+                  **publication_ratings(store, entry['entrant_id']),
+                  'publication_games':job['budget'], 'workers':workers,
                   'reevaluation':True, 'last_run_seconds':time.monotonic()-start}
         if entry['kind'] == 'cpp':
             directory = store.directory/'commits'/entry['version']
@@ -81,10 +84,10 @@ def evaluate(store, workers):
                 report['preflight_report'] = metadata.get('preflight_report')
                 report['report'] = str((directory/'publication.json').resolve())
                 write_json(directory/'publication.json', report)
-        print(f"{entry['name']}: completed, Elo {row['elo']:.1f}", flush=True)
-    board = store.leaderboard()
-    report = {'completed_games':board['completed_games'], 'workers':workers,
-              'seconds':time.monotonic()-start, 'jobs':store.jobs(), 'leaderboard':board}
+        print(f"{entry['name']}: completed, ratings {report['ratings']}", flush=True)
+    boards = store.leaderboards()
+    report = {'completed_games':sum(b['completed_games'] for b in boards.values()), 'workers':workers,
+              'seconds':time.monotonic()-start, 'jobs':store.jobs(), 'leaderboards':boards}
     write_json(store.directory/'reevaluation.json', report)
     refresh_publications(store)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)

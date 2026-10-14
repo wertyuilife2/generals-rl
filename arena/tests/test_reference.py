@@ -52,8 +52,6 @@ def test_wait_is_rare_single_seat_and_absent_from_human_matchmaking(tmp_path):
         counts = [p['entrant_ids'].count(store.reference) for p in plans]
         assert len(set(counts)) == 1
         assert max(counts) <= 1
-        if counts[0]:
-            assert all(len(p['entrant_ids']) == 2 for p in plans)
         included += sum(counts)
         total += len(plans)
         for plan in plans:

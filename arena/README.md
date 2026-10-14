@@ -5,7 +5,7 @@ WAIT 固定为零点的 Elo。浏览器提供榜单、对局历史、回放和�
 **目前不评测 RL，也不做 RL 尺寸适配；本功能不修改 `rl/`。**
 
 C++ 启发式使用 [统一接入接口](RESEARCH.md)：`generals_arena commit 源码 --name 别名`
-自动编译并完成 1000 局正式评测；`generals_arena run --player ... --player ...` 自由测试。
+自动编译并完成 500 局 1v1 + 500 局 FFA 正式评测；`generals_arena run --player ... --player ...` 自由测试。
 Arena 管理源码版本、10ms 限时、评分和录像。可直接使用
 [60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)，其中最多三次正式评测是该研究任务的约束。
 
@@ -54,7 +54,7 @@ generals-arena league rebuild outputs/arena/main
 ```
 
 同一版本重复登记是幂等操作，不会重复增加 1000 局；不同版本须使用新名字。
-`--games` 是**该新选手任务的总局数**，所有 2–8 人对局共同更新同一个 rating。
+`league add --games` 是该任务的总局数。正式 `commit` 固定为 500 局 1v1 + 500 局 FFA；两种模式分别更新 rating。
 需要专测某人数时，初始化配置中只保留一个 `player_counts`，如 `[4]`。
 AI 可以重复入场，即使只登记一个 baseline 也能生成八人局。每个席位拥有独立控制器和随机种子。
 同一算法出现多次时，对局数只加 1，出场数按实例数增加。
@@ -105,17 +105,18 @@ generals_arena league configure-maps outputs/arena/native_1000
 
 每个新算法有独立持久化任务，默认预算 1000 局。每一组对局都包含该算法，不重新跑旧算法的全组合：
 
-- 新自动评测以 **50% 的对局为 1v1**，其余 50% 在启用的 3–8 人之间均分。
-  人数的换位组抽样权重为 `目标对局占比 / P`，避免把“半数换位组”误当作“半数对局”。
-  单次有限预算会有波动。自动 1v1 优先匹配不同策略；显式 `run` 仍支持两个相同策略自我对战。
-- 按相近 Elo（60%）、较少交手的对手（25%）、均匀探索（15%）有放回混合采样，允许对手和新算法自身出现多个实例。
-- WAIT 作为零分参照，不进入普通对手池。自动任务前期安排 2 组 **1v1 校准**，此后每 50 局
-  增加一组，已有交手抵扣额度；1000 局任务最多 40 局（4%）包含 WAIT。窗口内尚未执行的校准
-  也计入额度，避免并行规划重复补量。每局最多一个 WAIT，人类匹配和多人自动对局不加入 WAIT。
-  显式 `run --player baseline/wait` 不受这一限制。
+- 正式 `commit` 精确安排 **500 局 1v1 + 500 局 FFA**。配额与进度独立持久化；
+  中断续跑、并行、最后一组不足完整换位均不会超过任何模式的配额。
+- FFA 在启用的 3–8 人之间按 `1/P` 抽换位组，避免大局人数获得过多比赛。
+- 按当前模式的相近 Elo（60%）、较少交手（25%）、均匀探索（15%）混合配对。
+  优先无放回选择策略；可用策略足够时每局全部不同，不足时均匀补重复席位，包含目标选手的已有席位。
+  显式 `run --player ...` 始终保留用户指定的重复席位和自我对战。
+- WAIT 不进入普通对手池。每种模式分别少量安排校准，500 局任务每种模式最多 20 局（4%）含 WAIT。
+  每局最多一个 WAIT，已完成和窗口内预留的校准都抵扣额度；人类匹配不加入 WAIT。
+  FFA 必须用 FFA 的 WAIT 对局独立确定零点，不能借用 1v1 的校准证据。
 - 每组共用一张图，循环轮换 P 个座位；每个实例的策略随机种子随实例轮换，不会因同名算法覆盖种子。
   最后一组按剩余预算截断，保证总局数准确，可能无法完成最后一轮完整换位。
-- 以约 32 局为一个自适应窗口（保留完整换位组），根据窗口开始时的全局分数与交手记录选人。
+- 以约 32 局为一个自适应窗口（保留完整换位组），根据窗口开始时对应模式的分数与交手记录选人。
   完成窗口后再更新配对。窗口持久化，单进程和多进程使用相同赛程；重启优先执行已有赛程。
 
 前 6 场包含其他算法的有效对局用于快速定级，全同算法对局不推进定级；该标签不是统计置信区间。
@@ -126,8 +127,9 @@ C++ 硬超时退出比赛进程后，Arena 从动作日志重建存活策略状�
 
 ## Rank rating
 
-2–8 人使用同一种名次算法，每个算法版本 / 每个人类有一个全局 rating，初始为 0。
-WAIT 的实际 rating 固定为 0；random 与其他算法正常计分。每局只更新参赛选手，不再通过减去浮动基准分平移全榜。
+1v1（2 人）与 FFA（3–8 人）使用同一种名次算法，但每个算法版本 / 每个人类分别拥有两套独立 rating，初始为 0。
+Elo、定级次数、历史校准、置信区间、胜率、存活指数和击杀指数都只使用对应模式的记录。
+WAIT 在两种模式的实际 rating 都固定为 0；random 与其他算法正常计分。每局只更新参赛选手，不再通过减去浮动基准分平移全榜。
 
 当前使用**本局名次更新 + 有方向和幅度约束的历史校准**。令 `a = ln(9)/500`，所有本局概率由赛前分数计算：
 
@@ -236,7 +238,7 @@ WAIT 本身固定为 `[0, 0]`；选手或基准不足 6 组独立地图、没有
 - 操作依据 [generals.io 的移动队列与快捷键](https://generals.io/versions)，不改动底层战斗规则。
 - 服务器以固定时钟推进（默认每 0.5 秒一次）；刷新、请求次数、关闭页面均不能暂停或加速计分。
   断线期间继续执行已收到的队列，耗尽后 WAIT；重新打开页面可返回当前对局。
-- 对局结束后，人类进入统一榜单，并保留可回放记录。
+- 对局结束后，人类进入对应模式的榜单，并保留可回放记录。
 - 身份凭证自动保存在浏览器，可复制后在另一个浏览器恢复。凭证丢失不能只靠同名取回身份。
 - 服务退出 / 崩溃导致的未完成真人局标记为中断、不计分，历史中可见。
 
@@ -352,7 +354,8 @@ CPU 原生后端与 C++ baseline 的运行目录为 `outputs/arena/native_1000`�
 
 ```bash
 generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
-generals-arena league leaderboard outputs/arena/native_1000
+generals-arena league leaderboard outputs/arena/native_1000 --mode 1v1
+generals-arena league leaderboard outputs/arena/native_1000 --mode ffa
 python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 1
 ```
 
@@ -382,3 +385,8 @@ python arena/benchmarks/reevaluate_league.py outputs/arena/native_1000 --workers
 ```bash
 python arena/benchmarks/rating.py outputs/arena/native_1000 --output outputs/arena/native_1000/rating_validation.json
 ```
+
+拆分历史评分时，先停止 Web/worker，再执行 `league rebuild 目录 --current-policy`。
+该操作按原结算顺序分别重算两种模式，更新对局 Elo 变化及提交报告，不重新模拟、不保留旧分数备份，地图和回放不变。
+旧 FFA 若没有 WAIT 对局，榜单显示“待 WAIT 校准”，置信区间保持未知；未来 FFA 校准局逐步补足证据。
+Web 榜单可以切换 1v1 / FFA；API 使用 `/api/leaderboard?mode=1v1` 或 `?mode=ffa`，默认 1v1。

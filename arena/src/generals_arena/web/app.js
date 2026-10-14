@@ -1,10 +1,14 @@
 import { Battlefield } from './board.js';
 import { Playback } from './playback.js';
 import { MoveInput } from './input.js';
+import { historyQuery, placements, nextCondition, entrantColor } from './history.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
-let meta, names = new Map(), pool = 0, page = 0, tab = 'ranking', player = null;
+let meta, names = new Map(), colors = new Map(), page = 0, tab = 'ranking', player = null;
+let historyMode = 'all', historyRoster = '';
+const historyConditions = new Map();
 let historyRequest = 0;
+let rankingMode = '1v1', rankingRequest = 0;
 let token = '', tokenKey = null;
 let live = null, board = null, sending = false;
 const outbox = [];
@@ -28,6 +32,17 @@ function showTab(next) {
   if (next === 'history') loadHistory().catch(e => notice(e.message));
   if (next === 'play') renderPlayer();
 }
+function playerName(id, name, className) {
+  const button = el('button', `entrant-name ${className}`, name);
+  button.type = 'button';
+  button.style.setProperty('--entrant-color', colors.get(id) || 'var(--accent)');
+  button.title = `筛选 ${name} 出现的对局`;
+  button.addEventListener('click', () => {
+    historyConditions.set(id, 'include'); filterHistory();
+    $('history-filter').scrollIntoView({block:'start', behavior:'smooth'});
+  });
+  return button;
+}
 function renderMeta(value) {
   meta = value;
   const nextTokenKey = `generals-arena-token:${meta.league_id || meta.rules_id}`;
@@ -37,32 +52,43 @@ function renderMeta(value) {
     player = null; live = null;
   }
   names = new Map(meta.entrants.map(e => [e.entrant_id, e.name]));
+  colors = new Map(meta.entrants.map(e => [e.entrant_id, entrantColor(e).color]));
   $('rating-reference').textContent = names.get(meta.anchor) || 'WAIT';
   const options = ['0', ...meta.config.player_counts.map(String)];
-  if ([...$('pool').options].map(n => n.value).join() !== options.join()) {
-    for (const id of ['pool', 'play-players']) {
-      $(id).replaceChildren(...options.map(p => {
-        const option = el('option', '', p==='0' ? (id==='pool'?'全部人数':'随机人数（2–8）') : `${p} 人`);
-        option.value=p;
-        return option;
-      }));
-    }
-    $('pool').value=pool;
+  if ([...$('play-players').options].map(n => n.value).join() !== options.join()) {
+    const selected = $('play-players').value;
+    $('play-players').replaceChildren(...options.map(p => {
+      const option = el('option', '', p==='0' ? '随机人数（2–8）' : `${p} 人`);
+      option.value=p;
+      return option;
+    }));
+    $('play-players').value=options.includes(selected) ? selected : '0';
   }
-  for (const [id, label] of [['history-entrant', '全部选手'], ['history-opponent', '不限对手']]) {
-    const select = $(id), choices = [['', label], ...meta.entrants.map(e => [e.entrant_id, e.name])];
-    if (JSON.stringify([...select.options].map(o => [o.value, o.textContent])) !== JSON.stringify(choices)) {
-      const selected = select.value;
-      select.replaceChildren(...choices.map(([value, name]) => {
-        const option = el('option', '', name); option.value = value; return option;
-      }));
-      select.value = choices.some(([value]) => value === selected) ? selected : '';
+  for (const id of historyConditions.keys()) {
+    if (!names.has(id)) { historyConditions.delete(id); page = 0; }
+  }
+  const roster = JSON.stringify(meta.entrants.map(e => [e.entrant_id, e.name]));
+  if (roster !== historyRoster) {
+    historyRoster = roster;
+    $('history-conditions').replaceChildren();
+    const ordered = [...meta.entrants].sort((a,b) => {
+      const first = entrantColor(a), second = entrantColor(b);
+      return first.series.localeCompare(second.series) || first.version - second.version;
+    });
+    for (const entry of ordered) {
+      const button = el('button', 'history-condition');
+      button.type = 'button'; button.dataset.entrant = entry.entrant_id;
+      button.style.setProperty('--entrant-color', colors.get(entry.entrant_id));
+      const mark = el('span', 'condition-mark'); mark.setAttribute('aria-hidden', 'true');
+      button.append(mark, el('span', 'condition-name', entry.name));
+      $('history-conditions').append(button);
     }
   }
+  renderHistoryFilters();
   const counts=meta.config.player_counts;
   const first=meta.map_ranges[counts[0]],last=meta.map_ranges[counts[counts.length-1]];
   $('map-description').textContent = `宽高按人数随机：${counts[0]} 人 ${first[0]}–${first[1]} 格，${counts[counts.length-1]} 人 ${last[0]}–${last[1]} 格。同一 AI 可有多个独立实例。`;
-  $('pool-caption').textContent = '统一 rating · 所有人数的对局共同计分';
+  $('pool-caption').textContent = rankingMode === '1v1' ? '1v1 · 仅计算双人对局' : 'FFA · 仅计算 3–8 人对局';
   $('turn-description').textContent = `每 ${meta.config.tick_seconds} 秒执行至多一步。关闭页面后对局继续，按最终结果计分。`;
   const active = meta.jobs.filter(j => j.status !== 'complete');
   $('job-count').textContent = active.length;
@@ -72,6 +98,8 @@ function renderMeta(value) {
     title.append(el('span', '', job.name), el('span', '', `${job.done} / ${job.budget}`));
     const progress = el('progress'); progress.max = job.budget; progress.value = job.done;
     row.append(title, progress, el('div', 'job-state', {queued:'等待 / 评测中',failed:'评测失败，可用 CLI 重试',complete:'已完成'}[job.status] || job.status));
+    if (job.modes && Object.keys(job.modes).length) row.append(el('div', 'job-state',
+      Object.entries(job.modes).map(([mode, value]) => `${mode.toUpperCase()} ${value.done}/${value.budget}`).join(' · ')));
     if (job.error) row.append(el('div', 'job-error', job.error));
     $('jobs').append(row);
   }
@@ -80,11 +108,14 @@ function renderMeta(value) {
   renderPlayer();
 }
 async function loadRank() {
-  const data = await api('/api/leaderboard');
+  const request = ++rankingRequest, mode = rankingMode;
+  const data = await api(`/api/leaderboard?mode=${mode}`);
+  if (request !== rankingRequest) return;
+  $('pool-caption').textContent = `${mode === '1v1' ? '1v1 · 双人对局' : 'FFA · 3–8 人对局'} · ${number(data.completed_games)} 局${data.completed_games && !data.anchor_games ? ' · 待 WAIT 校准' : ''}`;
   $('ranking').replaceChildren();
   data.ranking.forEach((row, i) => {
     const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div');
-    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
+    detail.append(playerName(row.entrant_id, row.name, 'player-name'), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
     wrap.append(el('span', `rank-no${i < 3 ? ' top' : ''}`, String(i + 1).padStart(2, '0')), detail); name.append(wrap);
     const change = Number.isFinite(row.elo_delta) ? Math.round(row.elo_delta * 10) / 10 : null;
     const delta = el('td', `elo-delta${change > 0 ? ' positive' : change < 0 ? ' negative' : ''}`,
@@ -101,43 +132,48 @@ async function loadRank() {
       ...['win_rate', 'survival_index', 'kill_index'].map(key =>
         el('td', 'metric', Number.isFinite(row[key]) ? `${(100 * row[key]).toFixed(1)}%` : '—')));
     $('ranking').append(tr);
-    if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `统一榜单 · ${row.elo.toFixed(1)} Elo · ${row.games} 局`;
+    if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `${mode.toUpperCase()} · ${row.elo.toFixed(1)} Elo · ${row.games} 局`;
   });
 }
 async function loadHistory() {
   const request = ++historyRequest;
-  const query = new URLSearchParams({offset: page * 20, limit: 20});
-  if (pool) query.set('players', pool);
-  for (const key of ['entrant', 'opponent']) {
-    const value = $(`history-${key}`).value;
-    if (value) query.set(key, value);
-  }
-  const filtered = !!(pool || $('history-entrant').value || $('history-opponent').value);
-  $('clear-history-filters').disabled = !filtered;
+  const query = historyQuery(historyMode, historyConditions, page);
+  const filtered = historyMode !== 'all' || historyConditions.size > 0;
   const data = await api(`/api/matches?${query}`);
   if (request !== historyRequest) return; // A slower previous filter must not replace the latest results.
+  const lastPage = Math.max(0, Math.ceil(data.total / 20) - 1);
+  if (page > lastPage) { page = lastPage; return loadHistory(); }
   $('history').replaceChildren();
   for (const match of data.matches) {
-    const row = el('div', 'match-row'), detail = el('div');
-    const copies = new Map();
-    for (const id of match.entrant_ids) copies.set(id, (copies.get(id)||0)+1);
-    detail.append(el('div', 'match-names', [...copies].map(([id,count]) => `${names.get(id)||id.slice(0,8)}${count>1?` ×${count}`:''}`).join(' · ')));
-    const winner = match.winner_seat == null ? null : names.get(match.entrant_ids[match.winner_seat]);
-    detail.append(el('div', 'match-winner', match.status === 'failed' ? `策略违规 · 未计分 · ${match.policy_error || '执行失败'}` : match.status === 'aborted' ? '服务中断 · 未计分' : winner ? `${winner}（P${match.winner_seat+1}）获胜` : '达到时限 · 存活者并列'));
-    if (match.decision_timing?.length) {
-      const calls = match.decision_timing.reduce((n, t) => n + t.calls, 0);
-      const maximum = Math.max(...match.decision_timing.map(t => t.max_ns)) / 1e6;
-      detail.append(el('div', 'match-meta', `C++ 决策 ${calls} 次 · 最大 ${maximum.toFixed(3)} ms · 上限 10 ms`));
+    const row = el('article', 'match-row'), summary = el('div', 'match-summary');
+    const date = new Date(match.finished * 1000), time = el('time', 'match-time');
+    time.dateTime = date.toISOString();
+    time.append(el('span', '', date.toLocaleDateString('zh-CN')), el('span', '', date.toLocaleTimeString('zh-CN', {hour12:false})));
+    summary.append(time, el('span', 'match-steps', `${match.ticks ?? '—'} 步 · ${match.entrant_ids.length === 2 ? '1v1' : 'FFA'}`));
+    if (match.status !== 'complete') {
+      const status = el('span', 'match-unrated', '未计分');
+      status.title = match.status === 'failed' ? match.policy_error || '执行失败' : '服务中断';
+      summary.append(status);
     }
-    if(match.ranks) {
-      const placements=match.entrant_ids.map((id,seat)=>({id,seat,rank:match.ranks[seat]})).sort((a,b)=>a.rank-b.rank||a.seat-b.seat);
-      detail.append(el('div','match-meta',placements.map(p=>`#${p.rank} P${p.seat+1} ${names.get(p.id)||p.id.slice(0,8)}`).join(' · ')));
+    if (['complete', 'failed'].includes(match.status)) {
+      const open = el('button', 'match-open'); open.type = 'button';
+      open.setAttribute('aria-label', `查看 ${date.toLocaleString('zh-CN', {hour12:false})} 的对局回放`);
+      open.addEventListener('click', () => openReplay(match.game_id).catch(e => notice(e.message)));
+      row.append(open);
     }
-    if(match.rating_changes)detail.append(el('div','match-winner',Object.entries(match.rating_changes).map(([id,c])=>`${names.get(id)||id.slice(0,8)} ${c.delta>=0?'+':''}${c.delta.toFixed(1)}`).join(' · ')));
-    detail.append(el('div', 'match-meta', `${match.map.players} 人 · ${match.map.width} × ${match.map.height} · ${match.ticks ?? '—'} ticks · ${new Date(match.finished * 1000).toLocaleString('zh-CN')} · ${match.game_id.slice(0, 8)}`));
-    const button = el('button', 'subtle', '回放 ↗'); button.disabled = !['complete', 'failed'].includes(match.status);
-    button.addEventListener('click', () => openReplay(match.game_id).catch(e => notice(e.message)));
-    row.append(detail, button); $('history').append(row);
+    const players = el('ol', 'match-placements'); players.setAttribute('aria-label', '本局名次与 Elo 变化');
+    for (const entry of placements(match)) {
+      const item = el('li', 'match-placement');
+      const rank = el('span', 'match-place', entry.place === null ? '—' : `#${entry.place}`);
+      const participant = playerName(entry.id, names.get(entry.id) || entry.id.slice(0,8), 'match-player-name');
+      const delta = el('span', `match-delta elo-delta${entry.delta > 0 ? ' positive' : entry.delta < 0 ? ' negative' : ''}`,
+        entry.delta === null ? '—' : `${entry.delta > 0 ? '+' : ''}${entry.delta.toFixed(1)}`);
+      const pool = match.entrant_ids.length === 2 ? '1v1' : 'FFA';
+      delta.title = entry.copies > 1 ? `${pool}：该策略本局 ${entry.copies} 个席位共用的 Elo 总变化，不按席位累加` : `本局 ${pool} Elo 变化`;
+      if (entry.delta !== null) delta.append(el('small', '', entry.copies > 1 ? 'Elo 合计' : 'Elo'));
+      item.append(rank, participant, delta); players.append(item);
+    }
+    row.append(summary, players); $('history').append(row);
   }
   if (!data.matches.length) $('history').append(el('p', 'empty', filtered ? '没有符合筛选条件的对局。' : '还没有对局记录。登记算法或开始你的第一局。'));
   $('page-info').textContent = `第 ${page + 1} 页 · 共 ${data.total} 局`;
@@ -204,7 +240,7 @@ function updateLive(value, force=false) {
   if(dialogMode!=='live'||!$('board-dialog').open)return;
   board=live.board;
   $('board-title').textContent=`${live.entrants.length} 人排位 · ${board.width} × ${board.height}`;
-  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入排行榜`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
+  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 排行榜`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
   draw();renderGamePlayers(live.entrants);
   if(live.done)renderPlayer();
 }
@@ -306,14 +342,42 @@ $('board-dialog').addEventListener('keydown',event=>{
 });
 for(const button of document.querySelectorAll('[data-dir]'))button.addEventListener('click',()=>move(Number(button.dataset.dir)));
 for(const button of document.querySelectorAll('.tab'))button.addEventListener('click',()=>showTab(button.dataset.tab));
+for (const button of document.querySelectorAll('[data-ranking-mode]')) button.addEventListener('click', () => {
+  rankingMode = button.dataset.rankingMode;
+  for (const item of document.querySelectorAll('[data-ranking-mode]')) item.setAttribute('aria-pressed', String(item === button));
+  loadRank().catch(e => notice(e.message));
+});
 function filterHistory() {
-  pool = Number($('pool').value); page = 0;
-  loadHistory().catch(e => notice(e.message));
+  page = 0;
+  renderHistoryFilters();
+  if (tab !== 'history') showTab('history');
+  else loadHistory().catch(e => notice(e.message));
 }
-for (const id of ['pool', 'history-entrant', 'history-opponent']) $(id).addEventListener('change', filterHistory);
+function renderHistoryFilters() {
+  $('clear-history-filters').disabled = historyMode === 'all' && !historyConditions.size;
+  for (const button of document.querySelectorAll('[data-history-mode]')) button.setAttribute('aria-pressed', String(button.dataset.historyMode === historyMode));
+  for (const button of $('history-conditions').children) {
+    const condition = historyConditions.get(button.dataset.entrant) || 'any';
+    button.dataset.condition = condition;
+    button.setAttribute('aria-pressed', condition === 'include' ? 'true' : condition === 'exclude' ? 'mixed' : 'false');
+    const state = {any:'不限', include:'出现', exclude:'不出现'};
+    button.setAttribute('aria-label', `${names.get(button.dataset.entrant)}：${state[condition]}，点击改为${state[nextCondition(condition)]}`);
+    button.title = button.getAttribute('aria-label');
+    button.firstElementChild.textContent = {any:'·', include:'+', exclude:'−'}[condition];
+  }
+}
+for (const button of document.querySelectorAll('[data-history-mode]')) button.addEventListener('click', () => { historyMode = button.dataset.historyMode; filterHistory(); });
+$('history-conditions').addEventListener('click', event => {
+  const button = event.target.closest('button[data-entrant]');
+  if (!button) return;
+  const id = button.dataset.entrant, next = nextCondition(historyConditions.get(id));
+  if (next === 'any') historyConditions.delete(id);
+  else historyConditions.set(id, next);
+  filterHistory();
+});
 $('history-filter').addEventListener('submit', event => { event.preventDefault(); filterHistory(); });
 $('clear-history-filters').addEventListener('click', () => {
-  $('pool').value = '0'; $('history-entrant').value = ''; $('history-opponent').value = '';
+  historyMode = 'all'; historyConditions.clear();
   filterHistory();
 });
 $('prev-page').addEventListener('click',()=>{page=Math.max(0,page-1);loadHistory().catch(e=>notice(e.message));});

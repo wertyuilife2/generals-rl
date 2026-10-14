@@ -83,11 +83,15 @@ def main():
     sizes = Counter(rotation_key(result,job) for job,result in rows)
     records = [{**result,'rating_group_size':result.get('rating_group_size',sizes[rotation_key(result,job)])}
                for job,result in rows]
-    report = dict(games=len(records), provisional_cutoff=200,
-                  legacy=evaluate(records,LEGACY_POLICY,store.anchor),
-                  cumulative=evaluate(records,CUMULATIVE_POLICY,store.anchor),
-                  previous=evaluate(records,ONLINE_POLICY,store.anchor),
-                  current=evaluate(records,POLICY,store.anchor))
+    from generals_arena.league.modes import MODES, rating_mode
+    report = {'games':len(records), 'modes':{}}
+    for mode in MODES:
+        matches = [result for result in records if rating_mode(result) == mode]
+        report['modes'][mode] = dict(games=len(matches), provisional_cutoff=200,
+                      legacy=evaluate(matches,LEGACY_POLICY,store.anchor),
+                      cumulative=evaluate(matches,CUMULATIVE_POLICY,store.anchor),
+                      previous=evaluate(matches,ONLINE_POLICY,store.anchor),
+                      current=evaluate(matches,POLICY,store.anchor))
     if args.output:
         write_json(args.output, report)
     print(json.dumps(report,indent=2))

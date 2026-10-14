@@ -18,6 +18,7 @@ from .execution import EXECUTION_POLICY, decision_timeout
 from .league.service import run_jobs, process_lock
 from .league.store import LeagueStore
 from .league.rating_policy import POLICY
+from .league.modes import split_budget
 from .native import DECISION_NS, build_bundle, source_identity
 from .util import canonical, digest, file_digest, integer, write_json
 
@@ -152,7 +153,8 @@ def _fixed_plans(store, seats, games, seed, identity, size):
                 'entrant_ids': [seats[i] for i in order], 'instance_ids': order,
                 'controller_seeds': [seeds[i] for i in order], 'map_seed': map_seed,
                 'map': config, 'rules_id': store.manifest['rules_id'], 'human': False,
-                'rating_policy': POLICY, 'rating_group_size': rotations})
+                'rating_policy': POLICY, 'rating_group_size': rotations,
+                'rating_mode': '1v1' if count == 2 else 'ffa'})
     return plans
 
 
@@ -398,6 +400,7 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
     if name is not None:
         name = _alias(name)
     official = _official(league)
+    mode_games = split_budget(PUBLICATION_GAMES, official.config.player_counts)
     spec = snapshot_policy(official, source, parameters)
     version = spec['version']
     directory = official.directory/'commits'/version
@@ -446,7 +449,7 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
                 return report
             formal = {**spec, 'name': record['name']}
             with _lock(official.directory):
-                entrant, job_id = official.add(formal, games=PUBLICATION_GAMES)
+                entrant, job_id = official.add(formal, games=PUBLICATION_GAMES, mode_games=mode_games)
                 record.update(job_id=job_id, entrant_id=entrant['entrant_id'], preflight_report=probe['report'])
                 write_json(directory/'commit.json', record)
         started, error = time.monotonic(), None
@@ -454,12 +457,10 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
             run_jobs(official, workers=workers, job_id=record['job_id'], progress=progress)
         except Exception as exc:
             error = str(exc)
-        board = json.loads(canonical(official.leaderboard()))
-        row = next(r for r in board['ranking'] if r['entrant_id'] == record['entrant_id'])
         report = {**summarize(official, record['entrant_id'], record['job_id']),
             'name': record['name'], 'version': version, 'entrant_id': record['entrant_id'],
-            'rating': row['elo'], 'rank': 1+sum(r['elo'] > row['elo'] for r in board['ranking']),
-            'leaderboard': board, 'publication_games': PUBLICATION_GAMES, 'workers': workers,
+            **publication_ratings(official, record['entrant_id']),
+            'publication_games': PUBLICATION_GAMES, 'publication_games_by_mode': mode_games, 'workers': workers,
             'last_run_seconds': time.monotonic()-started, 'report': str(report_path),
             'preflight_report': record['preflight_report']}
         if error:
@@ -469,23 +470,34 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
         return report
 
 
+def publication_ratings(store, entrant_id, boards=None):
+    boards = store.leaderboards() if boards is None else boards
+    ratings, places = {}, {}
+    for mode, board in boards.items():
+        row = next((r for r in board['ranking'] if r['entrant_id'] == entrant_id), None)
+        ratings[mode] = row['elo'] if row else store.ratings(mode).get(entrant_id, 0.)
+        places[mode] = 1+sum(r['elo'] > row['elo'] for r in board['ranking']) if row else None
+    return {'ratings': ratings, 'ranks': places, 'leaderboards': boards}
+
+
 def refresh_publications(store):
     """Explicit re-rating replaces published score snapshots, not simulations."""
-    board = store.leaderboard()
-    write_json(store.directory/'leaderboard.json', board)
-    rows = {row['entrant_id']:row for row in board['ranking']}
+    boards = store.leaderboards()
+    write_json(store.directory/'leaderboard.json', boards)
     for path in (store.directory/'commits').glob('*/publication.json'):
         report = json.loads(path.read_text())
-        row = rows.get(report.get('entrant_id'))
-        if row is None:
+        if report.get('entrant_id') not in store.entrants():
             continue
-        report.update(rating=row['elo'], rank=1+sum(r['elo'] > row['elo'] for r in rows.values()),
-                      leaderboard=board, rating_policy=POLICY, rating_recomputed=True)
+        for key in ('rating', 'rank', 'leaderboard'):
+            report.pop(key, None)
+        report.update(**publication_ratings(store, report['entrant_id'], boards),
+                      rating_policy=POLICY, rating_recomputed=True)
         write_json(path, report)
     path = store.directory/'reevaluation.json'
     if path.exists():
         report = json.loads(path.read_text())
-        report.update(leaderboard=board, rating_policy=POLICY, rating_recomputed=True)
+        report.pop('leaderboard', None)
+        report.update(leaderboards=boards, rating_policy=POLICY, rating_recomputed=True)
         write_json(path, report)
 
 
@@ -502,7 +514,7 @@ def status(league=DEFAULT_LEAGUE):
 
 
 def add_cli(commands):
-    submit = commands.add_parser('commit', help='compile a C++ source and run its official 1000-game evaluation')
+    submit = commands.add_parser('commit', help='compile a C++ source and evaluate 500 1v1 + 500 FFA games')
     submit.add_argument('source', type=Path, help='.cpp file or source directory')
     submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
     submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')

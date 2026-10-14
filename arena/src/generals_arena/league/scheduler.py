@@ -4,6 +4,7 @@ import math
 import random
 
 from ..util import digest
+from .modes import rating_mode
 
 
 def choose_opponents(target, candidates, count, ratings, coverage, anchor, rng, block):
@@ -12,15 +13,22 @@ def choose_opponents(target, candidates, count, ratings, coverage, anchor, rng, 
     if not remaining:
         raise ValueError("register at least one bot")
     picked = []
-    if block % 5 == 0 and anchor in remaining:
+    usage = {key: int(key == target) for key in remaining}
+    if block % 5 == 0 and anchor in remaining and anchor != target:
         picked.append(anchor)
+        usage[anchor] += 1
     while len(picked) < count - 1:
-        nearby = [math.exp(-min(700, abs(ratings.get(key, 0) - ratings.get(target, 0)) / 300)) for key in remaining]
-        underplayed = [1 / (1 + coverage.get(key, 0)) for key in remaining]
-        weights = [.6 * n / sum(nearby) + .25 * c / sum(underplayed) + .15 / len(remaining)
+        # Exhaust distinct strategies before adding a second copy. When the
+        # roster is small, allocate repeats evenly, counting the target seat.
+        minimum = min(usage.values())
+        available = [key for key in remaining if usage[key] == minimum]
+        nearby = [math.exp(-min(700, abs(ratings.get(key, 0) - ratings.get(target, 0)) / 300)) for key in available]
+        underplayed = [1 / (1 + coverage.get(key, 0)) for key in available]
+        weights = [.6 * n / sum(nearby) + .25 * c / sum(underplayed) + .15 / len(available)
                    for n, c in zip(nearby, underplayed)]
-        selected = rng.choices(remaining, weights=weights, k=1)[0]
+        selected = rng.choices(available, weights=weights, k=1)[0]
         picked.append(selected)
+        usage[selected] += 1
     return picked
 
 
@@ -40,9 +48,10 @@ def make_block(store, job, *, human=False, players=None):
                 rng.choices(enabled, weights=[1 / p for p in enabled])[0])
     if count not in enabled:
         raise ValueError("player count is not enabled")
-    coverage = store.pair_counts(target)
+    mode = rating_mode({'entrant_ids': [None] * count})
+    coverage = store.pair_counts(target, mode=mode)
     block = sum(coverage.values()) if human else job["done"]
-    opponents = choose_opponents(target, candidates, count, store.ratings(),
+    opponents = choose_opponents(target, candidates, count, store.ratings(mode=mode),
                                  coverage, store.anchor, rng, block)
     group = list(enumerate([target, *opponents]))
     rng.shuffle(group)
