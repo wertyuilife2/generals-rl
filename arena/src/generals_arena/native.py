@@ -5,6 +5,7 @@ the match process contains crashes/hangs but is not an OS security sandbox.
 """
 from functools import lru_cache
 from hashlib import sha256
+import fcntl
 import io
 import ctypes as C
 import json
@@ -164,8 +165,27 @@ def _unpack(bundle, expected):
     if file_digest(bundle) != expected:
         raise ValueError('policy bundle changed')
     metadata = bundle_info(bundle)
-    target = _private_cache()/expected
-    if not target.exists():
+    parent = _private_cache()
+    target = parent/expected
+
+    def valid():
+        try:
+            return (target.is_dir() and not target.is_symlink()
+                    and file_digest(target/'policy.so') == metadata['library_sha256']
+                    and (target/'params.json').read_text() == canonical(metadata['parameters']))
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    # Cache eviction can leave an empty directory behind. Serialize validation
+    # and replacement so several match workers never consume a partial repair.
+    with (parent/f'.{expected}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if valid():
+            return target
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.exists():
+            shutil.rmtree(target)
         with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
             root = Path(temporary)/'artifact'
             root.mkdir(mode=0o700)
@@ -190,8 +210,8 @@ def _unpack(bundle, expected):
             except OSError:
                 if not target.is_dir():
                     raise
-    if file_digest(target/'policy.so') != metadata['library_sha256']:
-        raise ValueError('cached policy executable changed')
+        if not valid():
+            raise ValueError('cached policy artifact changed')
     return target
 
 

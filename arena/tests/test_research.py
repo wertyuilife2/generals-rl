@@ -65,13 +65,20 @@ def test_native_reextracts_policy_after_temporary_cache_is_removed(tmp_path):
     first = NativeController(bundle=bundle)
     root = first.root
     first.close()
-    shutil.rmtree(root)
+    (root/'policy.so').unlink()
     second = NativeController(bundle=bundle)
     try:
         assert second.root == root
         assert (root/'policy.so').is_file()
     finally:
         second.close()
+    shutil.rmtree(root)
+    third = NativeController(bundle=bundle)
+    try:
+        assert third.root == root
+        assert (root/'policy.so').is_file()
+    finally:
+        third.close()
 
 
 def test_native_receives_only_observation_and_previous_result(tmp_path):
