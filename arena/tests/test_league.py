@@ -22,7 +22,7 @@ from generals_arena.server import make_server
 
 
 def config(**kwargs):
-    return LeagueConfig(**{**dict(player_counts=(2, 4), min_side=3, max_side=5, max_ticks=8,
+    return LeagueConfig(**{**dict(player_counts=(2, 4), map_generation=None, min_side=3, max_side=5, max_ticks=8,
                                  mountain_min=0, mountain_max=.1, city_min=0, city_max=0,
                                  tick_seconds=.05), **kwargs})
 
@@ -37,9 +37,9 @@ def add(store, policy='aggressive', games=6):
 
 def test_variable_map_distribution_is_seeded_and_scales_with_players():
     rules = LeagueConfig(player_counts=tuple(range(2, 9)))
-    assert rules.side_range(2) == (15, 20)
-    assert rules.side_range(4) == (22, 29)
-    assert rules.side_range(8) == (30, 35)
+    assert rules.side_range(2) == (18, 23)
+    assert rules.side_range(4) == (20, 26)
+    assert rules.side_range(8) == (25, 33)
     shapes = set()
     for players in range(2, 9):
         for seed in range(5):
@@ -48,7 +48,7 @@ def test_variable_map_distribution_is_seeded_and_scales_with_players():
             low, high = rules.side_range(players)
             assert 15 <= low <= map_config.width <= high <= 35
             assert low <= map_config.height <= high
-            assert .15 <= map_config.mountain_density <= .22
+            assert map_config.generation == rules.map_generation
             state = generate_map(map_config, seed)
             state.validate()
             assert state.player_count == players
@@ -664,3 +664,47 @@ def test_map_revision_rejects_pending_games_and_non_map_code_changes(tmp_path):
     store.manifest={**before,'rating':'different-algorithm'}
     with pytest.raises(ValueError,match='engine or rating'):
         store.resize_maps(15,20,35)
+
+
+def test_configured_maps_upgrade_preserves_results_and_replays(tmp_path):
+    from generals import MapGenerationConfig
+    store = league(tmp_path)
+    add(store, games=2)
+    run_jobs(store)
+    before, records, previous = store.leaderboard(), store.matches(), store.manifest
+    # Old manifests must retain their old distribution until explicitly upgraded.
+    legacy = json.loads(json.dumps(previous))
+    legacy['config'].pop('map_generation')
+    with store.connect(write=True) as db:
+        db.execute("UPDATE meta SET value=? WHERE key='manifest'", (json.dumps(legacy),))
+    store = LeagueStore(store.directory)
+    assert store.config.map_generation is None
+    options = MapGenerationConfig(city_army_min=50, city_army_max=50)
+    store.configure_maps(options)
+    store = LeagueStore(store.directory)
+    store.verify_execution()
+    assert store.config.map_generation == options
+    assert store.config.side_range(2) == (18, 23)
+    assert store.leaderboard() == before
+    for record in records['matches']:
+        result, blob = store.replay(record['game_id'])
+        assert result['rules_id'] == previous['rules_id']
+        assert replay_frames(blob, result)[-1]['tick'] == result['ticks']
+    add(store, 'defensive', games=1)
+    run_jobs(store)
+    result, blob = store.replay(store.matches()['matches'][0]['game_id'])
+    assert result['map']['generation']['city_army_min'] == 50
+    assert result['rules_id'] == store.manifest['rules_id']
+    assert replay_frames(blob, result)[-1]['tick'] == result['ticks']
+
+
+def test_configured_maps_cannot_change_an_unfinished_evaluation(tmp_path):
+    store = league(tmp_path)
+    add(store, games=2)
+    previous = store.manifest
+    with pytest.raises(ValueError, match='queued evaluations'):
+        store.configure_maps()
+    assert store.manifest == previous
+    store.manifest = {**previous, 'rating': 'different-algorithm'}
+    with pytest.raises(ValueError, match='simulation or rating'):
+        store.configure_maps()

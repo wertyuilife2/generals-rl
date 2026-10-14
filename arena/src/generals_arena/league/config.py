@@ -1,10 +1,11 @@
 """Versioned league distribution; no changes to the environment or RL config."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import math
 from pathlib import Path
 
 import numpy as np
-from generals import MapConfig
+from generals import MapConfig, MapGenerationConfig
+from generals.core.random_map import sample_map_config
 
 from ..util import digest, file_digest, integer, source_digest
 
@@ -12,6 +13,8 @@ from ..util import digest, file_digest, integer, source_digest
 @dataclass(frozen=True)
 class LeagueConfig:
     player_counts: tuple = (2, 3, 4, 5, 6, 7, 8)
+    map_generation: MapGenerationConfig | None = field(default_factory=MapGenerationConfig)
+    # Historical distribution, used only when map_generation is explicitly null.
     min_side: int = 15
     max_side: int = 20
     side_cap: int = 35
@@ -25,6 +28,10 @@ class LeagueConfig:
     tick_seconds: float = 0.5
 
     def __post_init__(self):
+        if isinstance(self.map_generation, dict):
+            object.__setattr__(self, 'map_generation', MapGenerationConfig(**self.map_generation))
+        if self.map_generation is not None and not isinstance(self.map_generation, MapGenerationConfig):
+            raise TypeError('map_generation must be MapGenerationConfig or None')
         counts = tuple(self.player_counts)
         if not counts or len(set(counts)) != len(counts):
             raise ValueError("player_counts must contain distinct counts from 2 to 8")
@@ -52,17 +59,26 @@ class LeagueConfig:
             raise ValueError("tick_seconds must be in [0.05, 5]")
 
     def side_range(self, players):
+        if self.map_generation is not None:
+            width = self.map_generation.side_range(players, 'width')
+            height = self.map_generation.side_range(players, 'height')
+            return min(width[0], height[0]), max(width[1], height[1])
         factor = math.sqrt(players / 2)
         return (min(self.side_cap, math.ceil(self.min_side * factor)),
                 min(self.side_cap, math.ceil(self.max_side * factor)))
 
-    def sample_map(self, players, seed):
+    def sample_map(self, players, seed, *, width=None, height=None):
         if players not in self.player_counts:
             raise ValueError("player count is not enabled in this league")
+        if self.map_generation is not None:
+            return sample_map_config(players, seed, self.map_generation, width=width, height=height)
+        if (width is None) != (height is None):
+            raise ValueError('provide both width and height, or neither')
         rng = np.random.default_rng(np.random.SeedSequence([seed, 714]))
         low, high = self.side_range(players)
-        return MapConfig(width=int(rng.integers(low, high + 1)),
-                         height=int(rng.integers(low, high + 1)), players=players,
+        sampled_width, sampled_height = int(rng.integers(low, high + 1)), int(rng.integers(low, high + 1))
+        return MapConfig(width=sampled_width if width is None else width,
+                         height=sampled_height if height is None else height, players=players,
                          mountain_density=float(rng.uniform(self.mountain_min, self.mountain_max)),
                          city_density=float(rng.uniform(self.city_min, self.city_max)))
 

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from math import floor, isfinite
 from numbers import Integral, Real
+from generals.protocol.mapgen import MapGenerationConfig
 
 
 def _integer(name: str, value: object, minimum: int) -> int:
@@ -20,8 +21,16 @@ class MapConfig:
     players: int = 4
     mountain_density: float = 0.2
     city_density: float = 0.1
+    generation: MapGenerationConfig | None = None
+    generation_attempt: int = 0
 
     def __post_init__(self) -> None:
+        if isinstance(self.generation, dict):
+            object.__setattr__(self, 'generation', MapGenerationConfig(**self.generation))
+        if self.generation is not None and not isinstance(self.generation, MapGenerationConfig):
+            raise TypeError('generation must be MapGenerationConfig or None')
+        object.__setattr__(self, 'generation_attempt',
+                           _integer('generation_attempt', self.generation_attempt, 0))
         for name in ("width", "height", "players"):
             object.__setattr__(self, name, _integer(name, getattr(self, name), 1))
         if not 2 <= self.players <= 8:
@@ -35,7 +44,7 @@ class MapConfig:
             object.__setattr__(self, name, float(value))
         cells = self.width * self.height
         available = cells - floor(cells * self.mountain_density) - floor(cells * self.city_density)
-        if available < self.players:
+        if (available if self.generation is None else cells) < self.players:
             raise ValueError("not enough ordinary cells to place all generals")
         if cells > 2**31 - 1:
             raise ValueError("map is too large for int32 cell identifiers")

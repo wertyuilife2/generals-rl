@@ -74,6 +74,9 @@ def _ensure_connected(terrain: np.ndarray, source: int) -> None:
 
 def generate_map(config: MapConfig, seed: int = 42) -> GameState:
     """Create a fully connected tick-zero map with an independent seeded RNG."""
+    if config.generation is not None:
+        from .random_map import generate_configured_map
+        return generate_configured_map(config, seed)
     rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(1)[0])
     h, w, p = config.height, config.width, config.players
     n = h * w

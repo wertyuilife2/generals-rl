@@ -47,7 +47,7 @@ class LeagueStore:
         self.manifest = meta["manifest"]
         if self.manifest.get("schema") != 3:
             raise ValueError("this is an archived league schema; initialize a new rank-rated league directory")
-        self.config = LeagueConfig(**self.manifest["config"])
+        self.config = LeagueConfig(**{"map_generation": None, **self.manifest["config"]})
         self.anchor = meta["anchor"]
 
     @property
@@ -129,7 +129,7 @@ class LeagueStore:
         scoring algorithm or scheduler still requires its own league.
         """
         from .service import process_lock
-        config = replace(self.config, min_side=min_side, max_side=max_side, side_cap=side_cap)
+        config = replace(self.config, map_generation=None, min_side=min_side, max_side=max_side, side_cap=side_cap)
         manifest = config.manifest()
         previous = self.manifest
         for key in ("schema", "engine_sha256", "rating", "decision_timing"):
@@ -151,6 +151,43 @@ class LeagueStore:
                     history.append({"manifest": previous, "replaced_at": time.time(),
                                     "next_sequence": db.execute("SELECT COALESCE(MAX(sequence),-1)+1 FROM games").fetchone()[0],
                                     "reason": "map bounds and human fog presentation updated"})
+                    db.execute("INSERT OR REPLACE INTO meta VALUES ('rules_history',?)", (canonical(history),))
+                    db.execute("UPDATE meta SET value=? WHERE key='manifest'", (canonical(manifest),))
+        self.config, self.manifest = config, manifest
+        return {p: config.side_range(p) for p in config.player_counts}
+
+    def configure_maps(self, options=None):
+        """Explicitly adopt the installed generator for future games.
+
+        This accepts the new environment source revision as part of the map
+        upgrade. Recorded plans, replays, ratings and entrants are untouched.
+        Finish evaluations and stop servers/workers before changing rules.
+        """
+        from generals import MapGenerationConfig
+        from .service import process_lock
+        options = MapGenerationConfig() if options is None else options
+        config = replace(self.config, map_generation=options)
+        manifest, previous = config.manifest(), self.manifest
+        for key in ('schema', 'rating', 'decision_timing', 'simulation_backend', 'human_observation'):
+            if previous.get(key) != manifest[key]:
+                raise ValueError('map configuration cannot change simulation or rating rules')
+        for name in ('game.py', 'observation.py', 'rating.py', 'scheduler.py', 'views.py'):
+            if previous['implementation'].get(name) != manifest['implementation'][name]:
+                raise ValueError('map configuration cannot change simulation, scoring or scheduling code')
+        with process_lock(self, '.server.lock'), process_lock(self, '.worker.lock'), process_lock(self, '.registry.lock'):
+            with self.connect(write=True) as db:
+                current = json.loads(db.execute("SELECT value FROM meta WHERE key='manifest'").fetchone()[0])
+                if canonical(current) != canonical(previous):
+                    raise ValueError('league changed; reopen it before configuring maps')
+                if (db.execute("SELECT 1 FROM games WHERE status IN ('live','pending') LIMIT 1").fetchone() or
+                    db.execute("SELECT 1 FROM jobs WHERE done < budget AND status='queued' LIMIT 1").fetchone()):
+                    raise ValueError('finish active and queued evaluations before configuring maps')
+                if canonical(previous) != canonical(manifest):
+                    row = db.execute("SELECT value FROM meta WHERE key='rules_history'").fetchone()
+                    history = json.loads(row[0]) if row else []
+                    history.append({'manifest': previous, 'replaced_at': time.time(),
+                                    'next_sequence': db.execute('SELECT COALESCE(MAX(sequence),-1)+1 FROM games').fetchone()[0],
+                                    'reason': 'configured random-map generation'})
                     db.execute("INSERT OR REPLACE INTO meta VALUES ('rules_history',?)", (canonical(history),))
                     db.execute("UPDATE meta SET value=? WHERE key='manifest'", (canonical(manifest),))
         self.config, self.manifest = config, manifest

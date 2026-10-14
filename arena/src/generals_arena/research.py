@@ -138,11 +138,12 @@ def _fixed_plans(store, seats, games, seed, identity, size):
     count = len(seats)
     while len(plans) < games:
         map_seed = rng.getrandbits(63)
-        config = asdict(store.config.sample_map(count, map_seed))
+        dimensions = {}
         if size['mode'] == 'fixed':
-            config.update(width=size['width'], height=size['height'])
+            dimensions = dict(width=size['width'], height=size['height'])
         elif size['mode'] == 'range':
-            config.update(width=rng.randint(size['min'], size['max']), height=rng.randint(size['min'], size['max']))
+            dimensions = dict(width=rng.randint(size['min'], size['max']), height=rng.randint(size['min'], size['max']))
+        config = asdict(store.config.sample_map(count, map_seed, **dimensions))
         seeds = [rng.getrandbits(63) for _ in seats]
         rotations = min(count, games-len(plans))
         for rotation in range(rotations):

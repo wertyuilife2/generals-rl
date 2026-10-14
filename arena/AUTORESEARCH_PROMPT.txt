@@ -46,7 +46,7 @@ Python：/Users/bzy/project/generals-rl/.venv/bin/python
 - env/src/generals/protocol/actions.py：动作编码与含义。
 - arena/src/generals_arena/league/rating.py：名次与 rating。
 
-正式比赛覆盖 2–8 人、宽高 15–35 的随机地图，使用局部视野，允许重复 AI。
+正式比赛覆盖 2–8 人，使用 Arena 联赛配置中的随机地图规则。新默认对齐官方标准地图：1v1 每边 18–23，8 人每边 25–33，城市守军 40–50。使用局部视野，允许重复 AI。
 所有人数共用一个排行榜，按名次计算 rating，以 WAIT 为 0 分参照。
 新自动评测约 50% 为 1v1，1v1 的评分更新权重是多人的 2 倍；多人对重复席位先取平均，
 再对不同对手策略等权计分。WAIT 只参与少量 1v1 自动校准对局。
