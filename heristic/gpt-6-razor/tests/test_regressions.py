@@ -82,3 +82,39 @@ class RazorV4Regressions(RazorRegressions):
                 self.assertEqual(controller.decision_metrics['errors'], 0)
             finally:
                 controller.close()
+
+
+class RazorV5Regressions(RazorV4Regressions):
+    version = 'v5'
+
+    def test_defense_merges_nearby_donors_before_emptying_the_return_corridor(self):
+        fixture = json.loads(gzip.decompress(
+            (ROOT / 'reinforcement_merge_history.json.gz').read_bytes()))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = ROOT.parent / self.version
+            bundle = Path(tmp) / 'policy.zip'
+            build_bundle(source / 'policy.cpp', bundle,
+                         json.loads((source / 'params.json').read_text()))
+            controller = NativeController(bundle=bundle)
+            try:
+                controller.reset(fixture['seat'], fixture['seed'])
+                for value in fixture['observations']:
+                    arrays = {key: np.array(value[key], dtype=dtype) for key, dtype in (
+                        ('terrain', np.uint8), ('structure', np.uint8), ('owner', np.int16),
+                        ('army', np.int64), ('visible', bool), ('alive', bool))}
+                    obs = Observation(player_id=value['player_id'], tick=value['tick'],
+                        general_pos=value['general_pos'], **arrays,
+                        stats=PlayerStats(**{k: np.array(v, dtype=np.int64)
+                                            for k, v in value['stats'].items()}))
+                    action = controller.act(obs)
+                self.assertEqual(action.kind, ActionKind.MOVE)
+                target = action.source + (-obs.width, 1, obs.width, -1)[action.direction]
+                self.assertNotEqual([action.source, target], fixture['bad_transfer'])
+                self.assertEqual(int(obs.owner.flat[target]), obs.player_id)
+                self.assertNotEqual(target, obs.general_pos)
+                self.assertGreater(int(obs.army.flat[target]), 1)
+                self.assertGreater(int(obs.army.flat[action.source]), 1)
+                self.assertEqual(controller.decision_metrics['timeouts'], 0)
+                self.assertEqual(controller.decision_metrics['errors'], 0)
+            finally:
+                controller.close()

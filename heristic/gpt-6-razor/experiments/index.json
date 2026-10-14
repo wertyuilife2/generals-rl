@@ -644,7 +644,11 @@
         "outputs/arena/native_1000/runs/a38900e1bb594a29c41fc1c81a142cfa3273fc42ab0f7851df57db32053131ca/report.json",
         "outputs/arena/native_1000/runs/b60525ea2b138cff3b302fde7a7fd0d5d6505160c44bfdb425564763a6fa4674/report.json",
         "outputs/arena/native_1000/runs/33db26125e501b721b501fa22d56b6937eaeec28ad7223bc1cbc51244ba97f77/report.json",
-        "outputs/arena/native_1000/runs/908bdab90201ca8ef56bc868662346b53f3fca36a2a8ca69266719250687569c/report.json"
+        "outputs/arena/native_1000/runs/908bdab90201ca8ef56bc868662346b53f3fca36a2a8ca69266719250687569c/report.json",
+        "outputs/arena/native_1000/runs/68dd5b2f696e720f4b860f283be3a99cb827967dcf5d8db0529c3006bde0bd70/report.json",
+        "outputs/arena/native_1000/runs/0f52e163576ac84a24fe9f095a9f1dd7a55c4927e018ab7d300531d77c4bc539/report.json",
+        "outputs/arena/native_1000/runs/df4167f5cf54da9c13971fa2839401570acdf71d10381f9c05b420a029fec74c/report.json",
+        "outputs/arena/native_1000/runs/0f035c5fbdb4115540750cd924baf445e826198913f8e593b2dc6b6521f00e97/report.json"
       ],
       "status": "experimental_not_formally_submitted"
     },
@@ -701,7 +705,7 @@
       "version": "a6e11527f11681e232e46a315354d75ad9cf685fb3d0b074dbf245b7c6991142",
       "source": "policy.cpp",
       "params": "params.json",
-      "timing_timeouts": 0,
+      "timing_timeouts": 2,
       "timing_errors": 0,
       "reports": [
         "outputs/arena/native_1000/runs/09e1415866329772de98668dec8b86a9dff7e01eafc2692f72df493b03b9115a/report.json",
@@ -716,7 +720,48 @@
         "outputs/arena/native_1000/runs/24bbc0dbd280b98ff28bfea263ea5e1ee4b3f6d829c871c59dbdf4b2d86a1778/report.json",
         "outputs/arena/native_1000/runs/00227bd66ce4d5566310c8dc45dac4a110b42c79d2e002828ed5b61627792832/report.json",
         "outputs/arena/native_1000/runs/768395f73da590c128ae579ca5dd35ad710521e0a1ea2c25aa6faaa5fd6276b8/report.json",
-        "outputs/arena/native_1000/runs/017df37d3d54a0a6bca62e05a645955adc7fb6bc7ec7c334e0d0e722ece66364/report.json"
+        "outputs/arena/native_1000/runs/017df37d3d54a0a6bca62e05a645955adc7fb6bc7ec7c334e0d0e722ece66364/report.json",
+        "outputs/arena/native_1000/runs/5944bcaf4cf8b32aece6fbdaaff49dfd022b2e903fdce71b9aaef62af3156404/report.json",
+        "outputs/arena/native_1000/runs/4425b0ce587d20fc4fa65a31c841843ffed0a7bd5af82849fa11d2607530b7e2/report.json",
+        "outputs/arena/native_1000/runs/1726ebf8ad2270a780636e34a8b80470723716382f0364f70634b2ffb0bd45b9/report.json",
+        "outputs/arena/native_1000/commits/a6e11527f11681e232e46a315354d75ad9cf685fb3d0b074dbf245b7c6991142/publication.json"
+      ],
+      "status": "disqualified_timing_or_error",
+      "formal_alias": "gpt-6-razor-v4",
+      "formal_report": "outputs/arena/native_1000/commits/a6e11527f11681e232e46a315354d75ad9cf685fb3d0b074dbf245b7c6991142/publication.json"
+    },
+    {
+      "version": "7ee98fb8edd78bf254921e98eab2e05da335c7998fa8c759de6c26de9860e3ba",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/1726ebf8ad2270a780636e34a8b80470723716382f0364f70634b2ffb0bd45b9/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "b6d963198dfbb93e428360f1b0e05cab6db0d0080f7fb2147d86e049e393cf32",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/432cf96921b55bf741abc611abc207ca36e06728b47fd1eff0f31f482d14c9b9/report.json",
+        "outputs/arena/native_1000/runs/680a6ccc32c50e6f31228a0d5b09a48fa0ca31c55d8da128e0583646aff694f2/report.json",
+        "outputs/arena/native_1000/runs/2777875bc1a96baf19270f7f67fda64402df0c1af2b97f0e47258f6ba79d5659/report.json",
+        "outputs/arena/native_1000/runs/161259cb145c0373be561cb02b297d779f53954f4055a8c834764f0441f72a25/report.json",
+        "outputs/arena/native_1000/runs/fcfcc57ff50929b2f04de0e712ba4e2aef067f870b058a4ff9a4ef84a035d924/report.json",
+        "outputs/arena/native_1000/runs/402fb55321c40bafec311ed6e6c731d0b1eb96ebfa3930a073341dad29facfb0/report.json",
+        "outputs/arena/native_1000/runs/01135a125660ad710067dfc105cfbaa4f0da8a899eaf449ad1c011845938e214/report.json",
+        "outputs/arena/native_1000/runs/fa345e8cce6bf6741bebf5b4973e37c7cca2005cca35af9d3b765fa53e444147/report.json",
+        "outputs/arena/native_1000/runs/f939d84a6fa19ac7f5f17afbb40eb70d95eaabe24c12eed90da6f1f72daf1f11/report.json",
+        "outputs/arena/native_1000/runs/3402d1bd1fe11c8bc99f2373307451ffcf1b1651645c2cc4f4d20202e015865d/report.json",
+        "outputs/arena/native_1000/runs/2615360930eec57fc63f6835dd883760dbdc134f30926df8e7b93ed798322e22/report.json",
+        "outputs/arena/native_1000/runs/e75587b1a30f3f0ee68728d6f496745b11f9c3835fa26d131c9f1a478e7c2188/report.json",
+        "outputs/arena/native_1000/runs/ada506463afae77969f7153ce74026e1b1c57c64c72461ef7142e0457bb8834b/report.json",
+        "outputs/arena/native_1000/runs/70e0e67d149432716577b16f31a7228da03748d22be39ea2eff3fb1d5c570c09/report.json"
       ],
       "status": "experimental_not_formally_submitted"
     }
