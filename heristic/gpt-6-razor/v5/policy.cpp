@@ -959,8 +959,9 @@ struct Policy {
      if(generated<384)expanded[generated++]=next;
     }
    }
-   // Twelve-step assembly uses fewer beam nodes than the ten-step base search.
-   count=std::min(harvestActive?64:96,generated);
+   // Keep the twelve-step assembly horizon while bounding each frontier to
+   // 32 routes; the pre-contact search keeps 48 routes for exploration.
+   count=std::min(harvestActive?32:48,generated);
    std::partial_sort(expanded,expanded+count,expanded+generated,[](const Route&a,const Route&b){return a.rank>b.rank;});
    std::copy(expanded,expanded+count,beam);
   }
@@ -1106,13 +1107,13 @@ struct Policy {
   double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
   sources.clear();keep.clear();border.clear();for(int i=0;i<N;i++)if(mine(i)&&canMoveNow(i))sources.push_back(i);
   std::sort(sources.begin(),sources.end(),[&](int x,int y){double ax=army(x)+(x==oldSource?5:0),ay=army(y)+(y==oldSource?5:0);return ax>ay;});
-  if(sources.size()>16){
-   // Preserve the twelve strongest mobile groups. Four further slots keep
+  if(sources.size()>10){
+   // Preserve the six strongest mobile groups. Four further slots keep
    // useful border armies from being crowded out by productive rear cities.
    if(o->players<=6){
-    keep.assign(sources.begin(),sources.begin()+12);
+    keep.assign(sources.begin(),sources.begin()+6);
     int scout=-1,scoutGain=0,scoutDistance=INF;
-    for(int j=12;j<int(sources.size());j++){
+    for(int j=6;j<int(sources.size());j++){
      int source=sources[j],key=ed[source],visionGain=0,capturable=0;
      bool half=false;
      if(canDepart(source,half)){
@@ -1145,10 +1146,10 @@ struct Policy {
     for(int j:extra)keep.push_back(sources[j]);
     sources.swap(keep);
    }else{
-    // Search ten strong mobile groups and four active frontier groups on
+    // Search six strong mobile groups and four active frontier groups on
     // mature crowded maps.
-    keep.assign(sources.begin(),sources.begin()+10);
-    for(int j=10;j<int(sources.size());j++){
+    keep.assign(sources.begin(),sources.begin()+6);
+    for(int j=6;j<int(sources.size());j++){
      int source=sources[j],key=ed[source];
      if(key>=INF){
       // Before enemy contact, use new vision and immediately capturable
