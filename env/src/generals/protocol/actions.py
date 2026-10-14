@@ -12,6 +12,9 @@ UNKNOWN = 255
 class Terrain(IntEnum):
     PLAIN = 0
     MOUNTAIN = 1
+    # Observation-only information: an unseen mountain OR city, not a known
+    # mountain. Never a value in a local engine's concrete MapLayout.
+    FOG_OBSTACLE = 2
 
 
 class Structure(IntEnum):

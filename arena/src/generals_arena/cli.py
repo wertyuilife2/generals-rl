@@ -58,6 +58,8 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     from .research import add_cli
     add_cli(commands)
+    from .online import add_cli as add_online_cli
+    add_online_cli(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
     init = actions.add_parser("init", help="create a league with a zero-rated WAIT reference")
@@ -99,6 +101,9 @@ def main(argv=None):
     web.add_argument("--no-worker", action="store_true", help="view/play while a separate league run handles evaluation")
     args = parser.parse_args(argv)
     try:
+        if args.command in ('online', 'online-account'):
+            from .online import command
+            return command(args)
         if args.command in ('commit', 'run', 'status'):
             from .research import command
             return command(args)
@@ -112,5 +117,7 @@ def main(argv=None):
     except (ValueError, TypeError, KeyError, ImportError, OSError, RuntimeError) as exc:
         parser.exit(2, f"error: {exc}\n")
     except KeyboardInterrupt:
+        if args.command in ('online', 'online-account'):
+            parser.exit(130, 'Interrupted; online connection closed.\n')
         parser.exit(130, "Interrupted; repeat the command to resume recorded progress.\n")
     return 0

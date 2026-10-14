@@ -17,12 +17,19 @@ def make_engine(state, *, backend='cpu'):
 
 
 def make_env(config=None, *, mode="vector", device="cpu", **options):
-    """Create a VecEnv for step simulation or a PlaySession for Tk play.
+    """Create a vector environment, desktop session, or observation/action backend.
 
     Vector options are passed to the selected backend's from_config constructor
     (e.g. batch_size, seed, auto_reset, episode_ticks and CPU-only threads).
     Realtime options are seed, watch, human_seat, visibility, kinds and speed.
+    match wraps the CPU engine behind MatchBackend; online uses the official
+    server and accepts no MapConfig. Neither starts a match until start().
     """
+    if mode == "online":
+        if config is not None or str(device) != 'cpu':
+            raise ValueError('online maps are server-owned; omit config and use device=cpu')
+        from .backends.online import OnlineBackend
+        return OnlineBackend(**options)
     config = MapConfig() if config is None else config
     if not isinstance(config, MapConfig):
         raise TypeError("config must be MapConfig")
@@ -34,4 +41,9 @@ def make_env(config=None, *, mode="vector", device="cpu", **options):
             raise ValueError("realtime mode uses the CPU reference engine; choose vector mode for CUDA")
         from .runtime.play import PlaySession
         return PlaySession(config, **options)
-    raise ValueError("mode must be vector or realtime")
+    if mode == 'match':
+        if str(device) != 'cpu':
+            raise ValueError('local match mode uses device=cpu')
+        from .backends.cpu.match import LocalMatchBackend
+        return LocalMatchBackend(config, **options)
+    raise ValueError("mode must be vector, realtime, match, or online")

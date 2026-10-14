@@ -18,6 +18,8 @@ class Observation:
     stats.cities contains only the observer's own total; all other entries are
     -1 (unknown), including opponents whose cities are partly visible. FULL
     observations and spectator snapshots expose every true city total.
+    Online observations may use Terrain.FOG_OBSTACLE (2) where visible=False:
+    this reveals only an obstacle outline, not whether it is a mountain or city.
     """
 
     player_id: int
