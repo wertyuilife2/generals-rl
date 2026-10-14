@@ -10,6 +10,7 @@ from ..execution import verified_replay
 from ..util import digest
 from .rating import ranks
 from .uncertainty import RatingUncertainty
+from .modes import validate_mode, mode_predicate
 
 
 def replay_kills(result, blob):
@@ -68,8 +69,9 @@ def version_deltas(rows):
 class LeaderboardStatistics:
     """Incremental in-memory aggregates with a disposable on-disk replay cache."""
 
-    def __init__(self, store):
+    def __init__(self, store, mode=None):
         self.store = store
+        self.mode = validate_mode(mode or store.default_mode())
         self.path = store.directory / 'statistics.sqlite3'
         self.lock = threading.Lock()
         self.sequence = -1
@@ -99,7 +101,7 @@ class LeaderboardStatistics:
 
     def leaderboard(self, progress=None):
         with self.lock:
-            report = self.store.leaderboard()
+            report = self.store.leaderboard(self.mode)
             count = report['completed_games']
             with self.store.connect() as db:
                 row = db.execute("SELECT value FROM meta WHERE key='rating_revision'").fetchone()
@@ -112,7 +114,7 @@ class LeaderboardStatistics:
             # a worker commits another match while this request is running.
             with self.store.connect() as db:
                 pending = db.execute("SELECT sequence,result,job_id FROM games WHERE status='complete' "
-                                     'AND sequence>? ORDER BY sequence LIMIT ?',
+                                     'AND sequence>? AND ' + mode_predicate(self.mode) + ' ORDER BY sequence LIMIT ?',
                                      (self.sequence, count - self.completed)).fetchall()
             if pending:
                 with sqlite3.connect(self.path, timeout=30) as cache:

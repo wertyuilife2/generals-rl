@@ -107,7 +107,7 @@ def test_queue_budget_idempotency_resume_rebuild_and_replay(tmp_path):
     assert reopened.jobs()[0]['status'] == 'complete'
     assert run_jobs(reopened) == 0
     report = reopened.leaderboard()
-    assert report['completed_games'] == 7
+    assert sum(board['completed_games'] for board in reopened.leaderboards().values()) == 7
     assert next(r for r in report['ranking'] if r['anchor'])['elo'] == 0
     assert reopened.rebuild() == report
     matches = reopened.matches()
@@ -146,6 +146,18 @@ def test_match_filters_combine_participants_counts_and_pagination(tmp_path):
     assert keys(entrant=a,opponent=a) == {'3'}
     assert keys(entrant=a,opponent=a,players=2) == set()
     assert keys(entrant="' OR 1=1 --") == set()
+    assert keys(include=[a,b]) == {'0','3','4'}
+    assert keys(include=[a,a,b], exclude=[c]) == {'0','3'}
+    assert keys(include=[a], exclude=[a]) == set()
+    assert keys(exclude=[a,b]) == {'5'}
+    assert keys(mode='1v1', include=[a]) == {'0','1'}
+    assert keys(mode='multiplayer', include=[a,b]) == {'3','4'}
+    assert keys(include=["' OR 1=1 --"]) == set()
+    filtered = store.matches(include=[a,b], exclude=[c], limit=1, offset=1)
+    assert filtered['total'] == 2 and len(filtered['matches']) == 1
+    for invalid in ({'mode':'duel'}, {'include':a}, {'exclude':[None]}):
+        with pytest.raises(ValueError):
+            store.matches(**invalid)
     first = store.matches(entrant=a,opponent=b,limit=2)
     second = store.matches(entrant=a,opponent=b,limit=2,offset=2)
     assert first['total'] == second['total'] == 3
@@ -161,6 +173,12 @@ def test_match_filters_combine_participants_counts_and_pagination(tmp_path):
             assert {m['game_id'] for m in json.load(response)['matches']} == {'0'}
         with urlopen(url+f'?entrant={a}&opponent={a}') as response:
             assert json.load(response)['total'] == 1
+        with urlopen(url+f'?include={a}&include={b}&exclude={c}&mode=multiplayer') as response:
+            data = json.load(response)
+            assert data['total'] == 1 and data['matches'][0]['game_id'] == '3'
+        with pytest.raises(HTTPError) as error:
+            urlopen(url+'?mode=invalid')
+        assert error.value.code == 400
     finally:
         server.shutdown()
         server.arena.close()
@@ -210,6 +228,43 @@ def test_retirement_hides_and_unschedules_without_deleting_history(tmp_path):
     assert old['entrant_id'] in {r['entrant_id'] for r in store.leaderboard()['ranking']}
 
 
+def test_http_retirement_filters_history_metadata_and_cached_replays(tmp_path):
+    store = league(tmp_path, player_counts=(2,))
+    old, _ = add(store, games=2)
+    run_jobs(store)
+    before = store.matches()
+    game_id = before['matches'][0]['game_id']
+    server = make_server(store, port=0)
+    server.arena.start(run_worker=False)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{server.server_address[1]}'
+    def get(path):
+        with urlopen(url + path) as response:
+            return json.load(response)
+    try:
+        assert get('/api/replay/' + game_id)['frames']  # Prime the response cache.
+        store.set_retired(old['entrant_id'])
+        assert store.matches() == before  # The audit history is preserved.
+        assert store.matches(include_retired=False)['total'] == 0
+        assert not store.match_is_visible(game_id)
+        assert get('/api/matches?include=' + old['entrant_id'])['total'] == 0
+        meta = get('/api/meta')
+        assert old['entrant_id'] not in {e['entrant_id'] for e in meta['entrants']}
+        assert all(j['entrant_id'] != old['entrant_id'] for j in meta['jobs'])
+        with pytest.raises(HTTPError) as error:
+            get('/api/replay/' + game_id)
+        assert error.value.code == 404
+        store.set_retired(old['entrant_id'], False)
+        assert get('/api/matches')['total'] == 2
+        assert get('/api/replay/' + game_id)['frames']
+    finally:
+        server.shutdown()
+        server.arena.close()
+        server.server_close()
+        thread.join(2)
+
+
 @pytest.mark.parametrize('players', [3, 8])
 def test_all_supported_seat_counts_can_finish_and_replay(tmp_path, players):
     store = league(tmp_path, player_counts=(players,), max_ticks=12)
@@ -256,7 +311,7 @@ def test_unattributed_cpp_infrastructure_failure_is_aborted_and_retryable(tmp_pa
     with store.connect(write=True) as db:
         db.execute("INSERT INTO entrants VALUES (?,?,?,?)", (
             'cpp', 'cpp', 'cpp', json.dumps({'entrant_id':'cpp', 'name':'cpp', 'kind':'cpp'})))
-        db.execute("INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?)", ('cpp', 0, 0, 0, 0, 0, 0, 0))
+        db.execute("INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?,?)", ('1v1', 'cpp', 0, 0, 0, 0, 0, 0, 0))
         db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
                    ('job', 'cpp', 1, 0, 'failed', 'host cache vanished', time.time()))
     store.insert_plans([{'game_id':'game'}], 'job')
@@ -393,6 +448,9 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
     try:
         response, html = request('/')
         assert b'GENERALS' in html and response.headers['Content-Security-Policy']
+        response, javascript = request('/history.js')
+        assert b'export function historyQuery' in javascript
+        assert 'javascript' in response.headers['Content-Type']
         _, raw = request('/api/meta')
         assert 'factory_kwargs' not in raw.decode()
         with pytest.raises(HTTPError) as error:
@@ -473,11 +531,10 @@ def test_single_bot_can_fill_eight_independent_seats(tmp_path):
     assert not game.done
 
 
-def test_mixed_player_counts_share_one_rating_and_duplicate_accounting(tmp_path):
+def test_mixed_player_counts_have_independent_ratings_and_duplicate_accounting(tmp_path):
     store = league(tmp_path, player_counts=(2,3))
     entrant,_ = add(store, games=3)
     target = entrant['entrant_id']
-    expected_ratings = {}
     for index, count in enumerate((2,3)):
         job = {'id':str(index),'entrant_id':target,'done':0,'budget':1}
         plan = make_block(store, job, players=count)[0]
@@ -486,15 +543,17 @@ def test_mixed_player_counts_share_one_rating_and_duplicate_accounting(tmp_path)
         game = RecordedGame(plan, store.config, controllers_for(store, plan))
         while not game.done:
             game.advance()
-        expected_ratings = update(expected_ratings, game.result(), store.anchor, games={target:index, store.anchor:index})
+        expected_ratings = update({}, game.result(), store.anchor)
         store.complete(game)
-    report = store.leaderboard()
-    assert report['completed_games'] == 2
-    row = next(row for row in report['ranking'] if row['entrant_id'] == target)
-    assert row['elo'] == expected_ratings[target]
-    assert row['games'] == 2 and row['appearances'] == 3
-    assert row['wins']+row['losses']+row['draws'] == 3
-    assert store.rebuild() == report
+        report = store.leaderboard('1v1' if count == 2 else 'ffa')
+        assert report['completed_games'] == 1
+        row = next(row for row in report['ranking'] if row['entrant_id'] == target)
+        assert row['elo'] == expected_ratings[target]
+        assert row['games'] == 1 and row['appearances'] == count-1
+        assert row['wins']+row['losses']+row['draws'] == count-1
+    before = store.leaderboards()
+    store.rebuild()
+    assert store.leaderboards() == before
 
 
 def test_parallel_and_sequential_execution_have_identical_ratings(tmp_path):

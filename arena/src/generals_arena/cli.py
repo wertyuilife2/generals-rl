@@ -46,15 +46,16 @@ def league_command(args):
                          progress=lambda done: print(f"League: {done} new games completed", file=sys.stderr))
         print(f"Completed {count} new games. Jobs: {json.dumps(store.jobs(), ensure_ascii=False)}")
     elif args.action == "rebuild":
-        store.rebuild(upgrade=args.current_policy)
-        print("Ratings rebuilt from completed matches.")
+        store.rebuild(upgrade=args.current_policy,
+                      progress=lambda done,total: print(f'Rating rebuild: {done}/{total}', file=sys.stderr, flush=True))
+        print("Independent 1v1 and FFA ratings rebuilt from completed matches.")
     else:
-        report = store.leaderboard(include_retired=args.all)
+        report = store.leaderboard(args.mode, include_retired=args.all)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
             reference = next(row['name'] for row in report['ranking'] if row['anchor'])
-            print(f"Unified rating / {report['completed_games']} games / {reference} = 0")
+            print(f"{report['mode'].upper()} rating / {report['completed_games']} games / {reference} = 0")
             for row in report["ranking"]:
                 print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
 
@@ -85,6 +86,7 @@ def main(argv=None):
     ranking.add_argument("directory", type=Path)
     ranking.add_argument("--json", action="store_true")
     ranking.add_argument("--all", action="store_true", help="include retired entrants")
+    ranking.add_argument('--mode', choices=('1v1', 'ffa'), default='1v1', help='independent rating pool')
     for action, help_text in (("retire", "hide an entrant and exclude it from future matchmaking"),
                               ("restore", "return a retired entrant to the active roster")):
         roster = actions.add_parser(action, help=help_text)

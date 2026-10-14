@@ -275,7 +275,7 @@ def test_timeout_surrenders_scores_and_can_be_committed(setup, tmp_path, monkeyp
     monkeypatch.setattr(research, 'PUBLICATION_GAMES', 4)
     publication = research.commit(slow,league=directory,name='slow',workers=2)
     assert publication['ok'] and publication['completed_games'] == 4
-    assert official.leaderboard()['completed_games'] == 4
+    assert all(board['completed_games'] == 2 for board in official.leaderboards().values())
 
 
 def test_violation_as_an_opponent_also_prevents_commit(setup,tmp_path):
@@ -452,16 +452,16 @@ def test_commit_alias_idempotency_versions_and_owned_artifacts(setup,tmp_path,mo
         assert report['name'] == f'gpt-6.1-nebula-v{i+1}'
         assert report['timing']['max_ns'] <= DECISION_NS
         reports.append(report)
-    assert official.leaderboard()['completed_games'] == 12
+    assert {mode:b['completed_games'] for mode,b in official.leaderboards().items()} == {'1v1':4,'ffa':8}
     assert research.commit(code,league=directory,parameters={'version':0}) == reports[0]
     with pytest.raises(ValueError,match='already uses alias'):
         research.commit(code,league=directory,name='renamed',parameters={'version':0})
     with pytest.raises(ValueError,match='different version'):
         research.commit(code,league=directory,name=reports[0]['name'],parameters={'version':8})
-    assert official.leaderboard()['completed_games'] == 12
+    assert {mode:b['completed_games'] for mode,b in official.leaderboards().items()} == {'1v1':4,'ffa':8}
     assert len(research.status(directory)['commits']) == 4
     assert research.run(['@'+reports[0]['name'],'baseline/random'],league=directory)['ok']
-    assert official.leaderboard()['completed_games'] == 12
+    assert {mode:b['completed_games'] for mode,b in official.leaderboards().items()} == {'1v1':4,'ffa':8}
     from generals_arena.league.service import process_lock
     from types import SimpleNamespace
     submission = directory/'commits'/reports[0]['version']
@@ -503,7 +503,7 @@ def test_commit_preflight_failure_and_interrupt_resume(setup,tmp_path,monkeypatc
     monkeypatch.setattr(research,'run_jobs',original)
     resumed = research.commit(code,league=directory)
     assert resumed['ok'] and resumed['completed_games']==3
-    assert official.leaderboard()['completed_games']==3
+    assert {mode:b['completed_games'] for mode,b in official.leaderboards().items()} == {'1v1':1,'ffa':2}
     assert len(official.jobs())==1
 
 
@@ -522,7 +522,10 @@ def test_real_cli_compiles_run_and_commits_full_default_budget(setup,tmp_path):
     report = json.loads(submitted.stdout)
     assert report['ok'] and report['completed_games']==report['publication_games']==1000
     assert report['name']=='testmodel-comet-v1' and report['timing']['calls']>0
-    assert official.leaderboard()['completed_games']==1000
+    assert all(board['completed_games'] == 500 for board in official.leaderboards().values())
+    assert report['publication_games_by_mode'] == {'1v1':500,'ffa':500}
+    assert set(report['ratings']) == set(report['ranks']) == {'1v1','ffa'}
+    assert all(v == {'budget':500,'done':500} for v in report['job']['modes'].values())
     assert json.loads(Path(report['report']).read_text())==report
     again = subprocess.run([*base,'commit',str(path),'--league',str(directory)],capture_output=True,text=True)
     assert again.returncode==0 and json.loads(again.stdout)==report

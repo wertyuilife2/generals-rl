@@ -18,7 +18,7 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     a = store.register({'name':'test-v1', 'kind':'baseline', 'policy':'aggressive'})['entrant_id']
     b = store.anchor
     idle = store.account('not-yet-played')['entrant']['entrant_id']
-    stats = LeaderboardStatistics(store)
+    stats = LeaderboardStatistics(store, 'ffa')
     def complete(key, ids, ticks, eliminations, kills, winner):
         plan = {'game_id':key, 'entrant_ids':ids}
         store.insert_plans([plan])
@@ -33,7 +33,8 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     assert first_a['win_rate'] == 1  # Winner was the second duplicate seat.
 
     complete('two', [a,b], 20, [20,None], [0,1], 1)
-    complete('timeout', [a,b], 30, [None,None], [0,0], None)
+    complete('three', [a,b,b], 20, [10,None,20], [0,2,0], 1)
+    complete('timeout', [a,b,b], 30, [None,None,None], [0,0,0], None)
     store.insert_plans([{'game_id':'failed', 'entrant_ids':[a,b]}])
     store.fail_game({'game_id':'failed', 'entrant_ids':[a,b]}, b'')
     store.insert_plans([{'game_id':'live', 'entrant_ids':[a,b]}], status='live')
@@ -43,11 +44,11 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     assert rows[a]['survival_index'] == pytest.approx((.5 + 0 + .5) / 3)
     assert rows[a]['kill_index'] == pytest.approx(.5 / 3)
     assert rows[a]['win_rate'] == pytest.approx(1 / 3)
-    assert rows[b]['survival_index'] == pytest.approx((.5 + 1 + .5) / 3)
-    assert rows[b]['kill_index'] == pytest.approx(1 / 3)
+    assert rows[b]['survival_index'] == pytest.approx((.5 + .75 + .5) / 3)
+    assert rows[b]['kill_index'] == pytest.approx(.5 / 3)
     assert all(rows[idle][key] is None for key in ('win_rate','survival_index','kill_index'))
     assert stats.leaderboard() == report
-    assert LeaderboardStatistics(store).leaderboard() == report
+    assert LeaderboardStatistics(store, 'ffa').leaderboard() == report
 
 
 def test_native_kills_do_not_transfer_to_the_winner_and_old_replay_is_cached(tmp_path):
@@ -82,11 +83,11 @@ def test_native_kills_do_not_transfer_to_the_winner_and_old_replay_is_cached(tmp
         store.complete_result(result, blob)
         before = store.replay(plan['game_id']), store.leaderboard(), store.manifest
         with patch('generals_arena.league.statistics.replay_kills', wraps=replay_kills) as replay:
-            stats = LeaderboardStatistics(store)
+            stats = LeaderboardStatistics(store, 'ffa')
             report = stats.leaderboard()
             assert replay.call_count == 1
             assert stats.leaderboard() == report
-            assert LeaderboardStatistics(store).leaderboard() == report
+            assert LeaderboardStatistics(store, 'ffa').leaderboard() == report
             assert replay.call_count == 1  # Survives restarting the web server.
         assert (store.replay(plan['game_id']), store.leaderboard(), store.manifest) == before
         store.verify_execution()

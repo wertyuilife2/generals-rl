@@ -12,6 +12,7 @@ from .execution import replay_frames
 from .league.service import LiveArena, process_lock
 from .league.store import LeagueStore
 from .league.statistics import LeaderboardStatistics
+from .league.modes import MODES, validate_mode
 from .util import digest
 
 STATIC = Path(__file__).with_name("web")
@@ -19,8 +20,9 @@ STATIC = Path(__file__).with_name("web")
 
 def make_server(store, host="127.0.0.1", port=8086):
     arena = LiveArena(store)
-    statistics = LeaderboardStatistics(store)
-    statistics.leaderboard()
+    statistics = {mode: LeaderboardStatistics(store, mode) for mode in MODES}
+    for stats in statistics.values():
+        stats.leaderboard()
 
     @lru_cache(maxsize=3)
     def replay_response(game_id):
@@ -99,29 +101,38 @@ def make_server(store, host="127.0.0.1", port=8086):
                     else:
                         self.respond({"error": "not found"}, 404)
                 elif path == "/api/meta":
-                    entries = store.entrants()
+                    retired = store.retired_entrant_ids()
+                    entries = {key: entry for key, entry in store.entrants().items() if key not in retired}
                     self.respond({"config": asdict(store.config), "anchor": store.reference,
                                   "league_id": digest(str(store.directory.resolve())),
                                   "rules_id": store.manifest["rules_id"],
                                   "entrants": [{k: e[k] for k in ("entrant_id", "name", "kind", "version")} for e in entries.values()],
                                   "map_ranges": {p: store.config.side_range(p) for p in store.config.player_counts},
-                                  "jobs": store.jobs(), "worker_error": arena.worker_error})
+                                  "jobs": [job for job in store.jobs() if job['entrant_id'] not in retired],
+                                  "worker_error": arena.worker_error})
                 elif path == "/api/leaderboard":
-                    self.respond(statistics.leaderboard())
+                    mode = validate_mode(query.get('mode', [store.default_mode()])[0])
+                    self.respond(statistics[mode].leaderboard())
                 elif path == "/api/matches":
                     self.respond(store.matches(limit=int(query.get("limit", ["20"])[0]),
                                                offset=int(query.get("offset", ["0"])[0]), players=players,
                                                entrant=query.get('entrant', [None])[0],
-                                               opponent=query.get('opponent', [None])[0]))
+                                               opponent=query.get('opponent', [None])[0],
+                                               include=query.get('include'), exclude=query.get('exclude'),
+                                               mode=query.get('mode', [None])[0], include_retired=False))
                 elif path.startswith("/api/replay/"):
-                    self.respond(replay_response(path.split("/")[-1]))
+                    game_id = path.split('/')[-1]
+                    if not store.match_is_visible(game_id):
+                        self.respond({'error': '对局不可见或不存在'}, 404)
+                    else:
+                        self.respond(replay_response(game_id))
                 elif path == "/api/me":
                     self.respond(store.entrants()[self.human()])
                 elif path == "/api/play/active":
                     self.respond(arena.active(self.human()))
                 elif path.startswith("/api/play/"):
                     self.respond(arena.view(path.split("/")[-1], self.human(), int(query["after"][0]) if "after" in query else None))
-                elif path in ("/", "/app.js", "/board.js", "/playback.js", "/input.js", "/svgIcons.js", "/style.css"):
+                elif path in ("/", "/app.js", "/history.js", "/board.js", "/playback.js", "/input.js", "/svgIcons.js", "/style.css"):
                     filename = "index.html" if path == "/" else path[1:]
                     mime = "text/html" if filename.endswith(".html") else "text/css" if filename.endswith(".css") else "text/javascript"
                     self.respond((STATIC / filename).read_bytes(), content_type=mime + "; charset=utf-8")

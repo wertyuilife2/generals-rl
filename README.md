@@ -41,8 +41,8 @@ generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
 
 打开 http://localhost:8086 查看已完成的 1000 局榜单、录像，或作为人类玩家参赛。
 当前仅保留 `outputs/arena/native_1000` 正式联赛；新建联赛和 C++ 策略接入见 Arena 文档。
-2–8 人共用一个 rating，允许重复 AI 实例。新算法默认增量评测 1000 局，C++ 研究评测串行执行。
-random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
+1v1 和 FFA 分别计算 rating。新算法每次 commit 精确评测 500 局 1v1 + 500 局 FFA；FFA 优先不同策略，默认最多 4 局并行。
+两种模式均以 WAIT 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
 当前不评测固定尺寸的 RL 模型；RL 训练部分保持独立。
 
 C++ 策略可以直接提交或自由测试，无需手动注册：
@@ -53,4 +53,4 @@ generals_arena run --player baseline/aggressive --player ./heristic/my_agent/pol
   --size 15:35 --games 100 --output ./results/test01
 ```
 
-`commit` 自动完成 1000 局正式评测，`run` 保存独立测试记录；详见 [接入文档](arena/RESEARCH.md)。
+`commit` 自动完成 500 局 1v1 + 500 局 FFA 正式评测，`run` 保存独立测试记录；详见 [接入文档](arena/RESEARCH.md)。

@@ -16,10 +16,22 @@ from .config import LeagueConfig
 from .rating import SCALE, PROVISIONAL_GAMES, ranks
 from .rating_policy import EVIDENCE_POLICIES, POLICY, score
 from .rank_model import comparisons, rotation_key
+from .modes import MODES, rating_mode, validate_mode, mode_predicate
 
 PAIR_SCHEMA = """CREATE TABLE IF NOT EXISTS rating_pairs(
+ mode TEXT NOT NULL,
  left_id TEXT NOT NULL, right_id TEXT NOT NULL, weight REAL NOT NULL, score REAL NOT NULL,
- PRIMARY KEY(left_id,right_id))"""
+ PRIMARY KEY(mode,left_id,right_id))"""
+
+RATING_SCHEMA = """CREATE TABLE ratings(mode TEXT NOT NULL,
+ entrant_id TEXT NOT NULL REFERENCES entrants(id), elo REAL NOT NULL,
+ games INTEGER NOT NULL, rated_games INTEGER NOT NULL, appearances INTEGER NOT NULL,
+ wins INTEGER NOT NULL, losses INTEGER NOT NULL, draws INTEGER NOT NULL,
+ PRIMARY KEY(mode,entrant_id))"""
+
+JOB_MODE_SCHEMA = """CREATE TABLE IF NOT EXISTS job_modes(
+ job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, mode TEXT NOT NULL,
+ budget INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(job_id,mode))"""
 
 SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -30,10 +42,8 @@ CREATE TABLE jobs(id TEXT PRIMARY KEY, entrant_id TEXT NOT NULL REFERENCES entra
  error TEXT, created REAL NOT NULL);
 CREATE TABLE games(id TEXT PRIMARY KEY, job_id TEXT REFERENCES jobs(id), status TEXT NOT NULL,
  plan TEXT NOT NULL, result TEXT, replay BLOB, sequence INTEGER UNIQUE, created REAL NOT NULL, finished REAL);
-CREATE TABLE ratings(entrant_id TEXT PRIMARY KEY REFERENCES entrants(id), elo REAL NOT NULL,
- games INTEGER NOT NULL, rated_games INTEGER NOT NULL, appearances INTEGER NOT NULL, wins INTEGER NOT NULL, losses INTEGER NOT NULL, draws INTEGER NOT NULL);
 CREATE INDEX games_status ON games(status, created);
-"""
+""" + RATING_SCHEMA + ';' + PAIR_SCHEMA + ';' + JOB_MODE_SCHEMA + ';'
 
 
 class LeagueStore:
@@ -45,7 +55,7 @@ class LeagueStore:
         with self.connect() as db:
             meta = {row["key"]: json.loads(row["value"]) for row in db.execute("SELECT * FROM meta")}
         self.manifest = meta["manifest"]
-        if self.manifest.get("schema") != 3:
+        if self.manifest.get("schema") not in (3, 4):
             raise ValueError("this is an archived league schema; initialize a new rank-rated league directory")
         self.config = LeagueConfig(**{"map_generation": None, **self.manifest["config"]})
         self.anchor = meta["anchor"]
@@ -255,9 +265,17 @@ class LeagueStore:
             result.update(record)
         return result
 
-    def add(self, spec, *, base_dir=Path("."), games=1000):
+    def add(self, spec, *, base_dir=Path("."), games=1000, mode_games=None):
         self.verify_execution()
         integer("games", games, 1)
+        if mode_games is not None:
+            for mode, amount in mode_games.items():
+                validate_mode(mode)
+                integer('mode games', amount, 1)
+                if not any((count == 2) == (mode == '1v1') for count in self.config.player_counts):
+                    raise ValueError('evaluation mode is not enabled')
+            if sum(mode_games.values()) != games:
+                raise ValueError('mode budgets must sum to games')
         if not isinstance(spec, dict):
             raise ValueError("entrant specification must be a JSON object")
         if spec.get("kind") == "rl":
@@ -278,6 +296,9 @@ class LeagueStore:
             job_id = uuid.uuid4().hex
             db.execute("INSERT INTO jobs(id,entrant_id,budget,created) VALUES (?,?,?,?)",
                        (job_id, entrant["entrant_id"], games, time.time()))
+            if mode_games:
+                db.executemany('INSERT INTO job_modes(job_id,mode,budget) VALUES (?,?,?)',
+                               [(job_id, mode, amount) for mode, amount in mode_games.items()])
         return entrant, job_id
 
     def register(self, spec, *, base_dir=Path('.')):
@@ -318,7 +339,14 @@ class LeagueStore:
 
     def jobs(self):
         with self.connect() as db:
-            return [dict(r) for r in db.execute("SELECT jobs.*, entrants.name FROM jobs JOIN entrants ON entrants.id=jobs.entrant_id ORDER BY created")]
+            jobs = [dict(r) for r in db.execute("SELECT jobs.*, entrants.name FROM jobs JOIN entrants ON entrants.id=jobs.entrant_id ORDER BY created")]
+            modes = {}
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='job_modes'").fetchone():
+                for row in db.execute('SELECT * FROM job_modes'):
+                    modes.setdefault(row['job_id'], {})[row['mode']] = dict(budget=row['budget'], done=row['done'])
+            for job in jobs:
+                job['modes'] = modes.get(job['id'], {})
+            return jobs
 
     def retry(self, job_id=None):
         with self.connect(write=True) as db:
@@ -356,14 +384,19 @@ class LeagueStore:
             row = db.execute("SELECT plan FROM games WHERE job_id=? AND status='pending' ORDER BY rowid LIMIT 1", (job_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def ratings(self):
-        with self.connect() as db:
-            return {r["entrant_id"]: r["elo"] for r in db.execute("SELECT * FROM ratings")}
+    def default_mode(self):
+        return '1v1' if 2 in self.config.player_counts else 'ffa'
 
-    def pair_counts(self, target):
-        counts = {}
+    def ratings(self, mode=None):
+        mode = validate_mode(mode or self.default_mode())
         with self.connect() as db:
-            for row in db.execute("SELECT plan FROM games WHERE status='complete'"):
+            return {r["entrant_id"]: r["elo"] for r in db.execute("SELECT * FROM ratings WHERE mode=?", (mode,))}
+
+    def pair_counts(self, target, mode=None):
+        counts = {}
+        where = ' AND ' + mode_predicate(mode) if mode else ''
+        with self.connect() as db:
+            for row in db.execute("SELECT plan FROM games WHERE status='complete'" + where):
                 ids = json.loads(row[0])["entrant_ids"]
                 if target in ids:
                     for key in set(ids):
@@ -373,18 +406,20 @@ class LeagueStore:
 
     def _score(self, db, result):
         ids = result["entrant_ids"]
-        rows = list(db.execute("SELECT * FROM ratings"))
+        mode = rating_mode(result)
+        result['rating_mode'] = mode
+        rows = list(db.execute("SELECT * FROM ratings WHERE mode=?", (mode,)))
         old = {r["entrant_id"]: r["elo"] for r in rows}
         games = {r["entrant_id"]: r["rated_games"] for r in rows}
         evidence = None
         if result.get('rating_policy') in EVIDENCE_POLICIES:
             db.execute(PAIR_SCHEMA)
             evidence = {(row[0], row[1]): (row[2], row[3])
-                        for row in db.execute('SELECT * FROM rating_pairs')}
+                        for row in db.execute('SELECT left_id,right_id,weight,score FROM rating_pairs WHERE mode=?', (mode,))}
         changes = score(old, result, self.anchor, self.config.k_factor, games, evidence)
         if evidence is not None:
-            db.executemany('INSERT OR REPLACE INTO rating_pairs VALUES (?,?,?,?)',
-                           [(left, right, *evidence[left, right])
+            db.executemany('INSERT OR REPLACE INTO rating_pairs VALUES (?,?,?,?,?)',
+                           [(mode, left, right, *evidence[left, right])
                             for left, right, _, _ in comparisons(result)])
         result["ranks"] = ranks(result)
         result["rating_changes"] = changes
@@ -395,10 +430,10 @@ class LeagueStore:
             win = int(winner is not None and winner in seats)
             loss = appearances - win if winner is not None else 0
             draw = appearances if winner is None else 0
-            db.execute("""INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(entrant_id)
+            db.execute("""INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(mode,entrant_id)
                 DO UPDATE SET elo=excluded.elo,games=games+1,rated_games=excluded.rated_games,appearances=appearances+excluded.appearances,
                 wins=wins+excluded.wins,losses=losses+excluded.losses,draws=draws+excluded.draws""",
-                       (key, changes[key]["after"], 1, changes[key]["rated_games"], appearances, win, loss, draw))
+                       (mode, key, changes[key]["after"], 1, changes[key]["rated_games"], appearances, win, loss, draw))
 
     def complete(self, game):
         from ..execution import result
@@ -446,6 +481,12 @@ class LeagueStore:
             db.execute("UPDATE games SET status='complete',result=?,replay=?,sequence=?,finished=? WHERE id=?",
                        (canonical(result), blob, sequence, time.time(), result["game_id"]))
             if row["job_id"]:
+                mode = rating_mode(result)
+                quota = db.execute('SELECT budget,done FROM job_modes WHERE job_id=? AND mode=?', (row['job_id'], mode)).fetchone()
+                if ((quota and quota['done'] >= quota['budget']) or
+                    (quota is None and db.execute('SELECT 1 FROM job_modes WHERE job_id=?', (row['job_id'],)).fetchone())):
+                    raise ValueError('evaluation mode budget exhausted')
+                db.execute('UPDATE job_modes SET done=done+1 WHERE job_id=? AND mode=?', (row['job_id'], mode))
                 db.execute("UPDATE jobs SET done=done+1,status=CASE WHEN done+1>=budget THEN 'complete' ELSE 'queued' END WHERE id=?", (row["job_id"],))
         return result
 
@@ -456,13 +497,14 @@ class LeagueStore:
             else:
                 db.execute("UPDATE games SET status='aborted',finished=? WHERE status='live' AND id=?", (time.time(), game_id))
 
-    def leaderboard(self, *, include_retired=False):
+    def leaderboard(self, mode=None, *, include_retired=False):
+        mode = validate_mode(mode or self.default_mode())
         with self.connect() as db:
             rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,
                 COALESCE(r.elo,0) elo,COALESCE(r.games,0) games,COALESCE(r.rated_games,0) rated_games,COALESCE(r.appearances,0) appearances,
                 COALESCE(r.wins,0) wins,COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
-                LEFT JOIN ratings r ON r.entrant_id=e.id ORDER BY elo DESC,e.name""")]
-            completed = db.execute("SELECT count(*) FROM games WHERE status='complete'").fetchone()[0]
+                LEFT JOIN ratings r ON r.entrant_id=e.id AND r.mode=? ORDER BY elo DESC,e.name""", (mode,))]
+            completed = db.execute("SELECT count(*) FROM games WHERE status='complete' AND " + mode_predicate(mode)).fetchone()[0]
         retired = self.retired_entrants()
         for row in rows:
             row["anchor"] = row["entrant_id"] == self.anchor
@@ -475,15 +517,43 @@ class LeagueStore:
                 row['disqualified'] = True
         if not include_retired:
             rows = [row for row in rows if not row.get('retired')]
-        return {"player_counts": self.config.player_counts, "ranking": rows, "anchor": self.anchor,
-                "scale": SCALE, "completed_games": completed}
+        return {"mode": mode, "player_counts": tuple(p for p in self.config.player_counts if (p == 2) == (mode == '1v1')), "ranking": rows, "anchor": self.anchor,
+                "scale": SCALE, "completed_games": completed,
+                "anchor_games": next(row['games'] for row in rows if row['anchor'])}
 
-    def matches(self, limit=50, offset=0, players=None, entrant=None, opponent=None):
+    def leaderboards(self, *, include_retired=False):
+        return {mode: self.leaderboard(mode, include_retired=include_retired) for mode in MODES}
+
+    def matches(self, limit=50, offset=0, players=None, entrant=None, opponent=None,
+                *, include=None, exclude=None, mode=None, include_retired=True):
         integer("limit", limit, 1)
         integer("offset", offset)
         if limit > 100:
             raise ValueError("limit must be <= 100")
+        if mode not in (None, 'all', '1v1', 'multiplayer', 'ffa'):
+            raise ValueError('mode must be all, 1v1 or ffa (multiplayer)')
+        def ids(value):
+            if value is None:
+                return set()
+            if not isinstance(value, (list, tuple, set)) or any(not isinstance(key, str) or not key for key in value):
+                raise ValueError('include and exclude must be lists of entrant IDs')
+            return set(value)
+        included, excluded = ids(include), ids(exclude)
+        if not include_retired:
+            excluded.update(self.retired_entrant_ids())
         where, values = "status IN ('complete','aborted','failed')", []
+        if mode == '1v1':
+            where += " AND json_array_length(plan, '$.entrant_ids')=2"
+        elif mode in ('multiplayer', 'ffa'):
+            where += " AND json_array_length(plan, '$.entrant_ids')>2"
+        if included:
+            where += """ AND (SELECT count(DISTINCT value) FROM json_each(plan, '$.entrant_ids')
+                WHERE value IN (SELECT value FROM json_each(?)))=?"""
+            values.extend((canonical(sorted(included)), len(included)))
+        if excluded:
+            where += """ AND NOT EXISTS (SELECT 1 FROM json_each(plan, '$.entrant_ids')
+                WHERE value IN (SELECT value FROM json_each(?)))"""
+            values.append(canonical(sorted(excluded)))
         if players is not None:
             where += " AND json_array_length(plan, '$.entrant_ids')=?"
             values.append(players)
@@ -499,6 +569,12 @@ class LeagueStore:
             rows = db.execute(f"SELECT id,status,plan,result,finished FROM games WHERE {where} ORDER BY finished DESC LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
         return {"total": total, "matches": [{**json.loads(r["result"] or r["plan"]), "status": r["status"], "finished": r["finished"]} for r in rows]}
 
+    def match_is_visible(self, game_id):
+        """Web visibility is evaluated on every request, including cached replays."""
+        with self.connect() as db:
+            row = db.execute('SELECT plan FROM games WHERE id=?', (game_id,)).fetchone()
+        return row is not None and not self.retired_entrant_ids().intersection(json.loads(row['plan'])['entrant_ids'])
+
     def replay(self, game_id):
         with self.connect() as db:
             row = db.execute("SELECT result,replay FROM games WHERE id=? AND status IN ('complete','failed')", (game_id,)).fetchone()
@@ -506,7 +582,7 @@ class LeagueStore:
             raise ValueError("completed replay not found")
         return json.loads(row[0]), row[1]
 
-    def rebuild(self, *, upgrade=False):
+    def rebuild(self, *, upgrade=False, progress=None):
         """Re-score recorded outcomes atomically; optionally adopt current rules.
 
         Migration rewrites scoring metadata only, never maps, actions or replay
@@ -514,11 +590,26 @@ class LeagueStore:
         """
         from collections import Counter
         from .service import process_lock
-        self.verify_execution()
+        next_manifest = self.config.manifest()
+        if upgrade:
+            # Rating/scheduler upgrades cannot silently adopt a different engine.
+            for key in ('engine_sha256', 'config', 'simulation_backend', 'human_observation', 'decision_timing'):
+                if canonical(self.manifest.get(key)) != canonical(next_manifest[key]):
+                    raise ValueError('rating upgrade cannot change engine or game configuration')
+            for name in ('game.py', 'observation.py', 'rating.py', 'views.py'):
+                if self.manifest['implementation'].get(name) != next_manifest['implementation'][name]:
+                    raise ValueError('rating upgrade cannot change simulation code')
+        else:
+            self.verify_execution()
         with process_lock(self, '.server.lock'), process_lock(self, '.worker.lock'), process_lock(self, '.registry.lock'):
             with self.connect(write=True) as db:
                 if db.execute("SELECT 1 FROM games WHERE status='live' LIMIT 1").fetchone():
                     raise ValueError('finish or abort live games before rebuilding ratings')
+                if 'mode' not in {row['name'] for row in db.execute('PRAGMA table_info(ratings)')}:
+                    db.execute('DROP TABLE ratings')
+                    db.execute('DROP TABLE IF EXISTS rating_pairs')
+                    db.execute(RATING_SCHEMA)
+                db.execute(JOB_MODE_SCHEMA)
                 if upgrade:
                     rows = db.execute('SELECT id,job_id,plan,result FROM games ORDER BY rowid').fetchall()
                     plans = {row['id']: json.loads(row['plan']) for row in rows}
@@ -527,6 +618,8 @@ class LeagueStore:
                         plan = plans[row['id']]
                         metadata = dict(rating_policy=POLICY,
                                         rating_group_size=plan.get('rating_group_size', sizes[rotation_key(plan, row['job_id'])]))
+                        if 'entrant_ids' in plan:
+                            metadata['rating_mode'] = rating_mode(plan)
                         plan.update(metadata)
                         result = json.loads(row['result']) if row['result'] else None
                         if result is not None:
@@ -536,12 +629,18 @@ class LeagueStore:
                 db.execute(PAIR_SCHEMA)
                 db.execute('DELETE FROM rating_pairs')
                 db.execute("DELETE FROM ratings")
-                for row in db.execute("SELECT result FROM games WHERE status='complete' ORDER BY sequence").fetchall():
+                completed = db.execute("SELECT result FROM games WHERE status='complete' ORDER BY sequence").fetchall()
+                for index, row in enumerate(completed, 1):
                     result = json.loads(row[0])
                     self._score(db, result)
                     db.execute("UPDATE games SET result=? WHERE id=?", (canonical(result), result["game_id"]))
+                    if progress and (index % 500 == 0 or index == len(completed)):
+                        progress(index, len(completed))
                 db.execute("INSERT OR REPLACE INTO meta VALUES ('rating_revision',?)", (canonical(uuid.uuid4().hex),))
+                if upgrade:
+                    db.execute("UPDATE meta SET value=? WHERE key='manifest'", (canonical(next_manifest),))
             if upgrade:
+                self.manifest = next_manifest
                 from ..research import refresh_publications
                 refresh_publications(self)
         return self.leaderboard()
