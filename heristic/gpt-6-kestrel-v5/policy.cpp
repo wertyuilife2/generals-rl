@@ -28,12 +28,18 @@ struct Policy {
  int coalitionNeed=0, coalitionETA=INF, coalitionDeadline=INF, coalitionSource=-1, coalitionCount=0;
  int enemyGeneral[8], oldTotals[8]{}; double growth[8]{};
  int armyCache[MAXN],fullMoveCache[MAXN],halfMoveCache[MAXN],defenseCache[MAXN],routeDelta[MAXN];
+ std::vector<int> sources,keep;
+ std::vector<std::pair<int,int>> border;
+ double weightedCost[MAXN],heapCost[MAXN*4];
+ int weightedForce[MAXN],weightedSteps[MAXN],weightedLoss[MAXN],weightedFirst[MAXN],heapCell[MAXN*4];
+ bool weightedDone[MAXN];
  bool geometryReady=false;
  const ArenaObservation *o=nullptr;
  Policy(int player,uint64_t seed):p(player),rng(seed) {
   std::fill(ter,ter+MAXN,255);std::fill(st,st+MAXN,255);std::fill(own,own+MAXN,-3);
   std::fill(a,a+MAXN,0);std::fill(seen,seen+MAXN,-10000);std::fill(lastOwn,lastOwn+MAXN,-3);
   std::fill(enemyGeneral,enemyGeneral+8,-1);
+  sources.reserve(MAXN);keep.reserve(MAXN);border.reserve(MAXN);
  }
  uint64_t random(){rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;return rng;}
  bool mine(int i)const{return i>=0 && o->owner[i]==p;}
@@ -94,14 +100,12 @@ struct Policy {
   std::fill(ed,ed+N,INF);int h=0,z=0;
   for(int i=0;i<N;i++)if(o->visible[i]&&own[i]>=0&&own[i]!=p){ed[i]=0;queue[z++]=i;}
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v>=0&&ter[v]!=1&&ed[v]==INF){ed[v]=ed[u]+1;queue[z++]=v;}}}
-  if(mapChanged)for(int i=0;i<N;i++){
-   unknown[i]=0;int x=i%W,y=i/W;for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){int xx=x+dx,yy=y+dy;if(xx>=0&&xx<W&&yy>=0&&yy<H&&ter[yy*W+xx]==255)unknown[i]++;}
-  }
   for(int i=0;i<N;i++){
    fogGain[i]=0;int x=i%W,y=i/W;
+   if(mapChanged)unknown[i]=0;
    for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
     int xx=x+dx,yy=y+dy;
-    if(xx>=0&&xx<W&&yy>=0&&yy<H){int c=yy*W+xx;if(!o->visible[c]&&ter[c]!=1)fogGain[i]++;}
+    if(xx>=0&&xx<W&&yy>=0&&yy<H){int c=yy*W+xx;if(!o->visible[c]&&ter[c]!=1)fogGain[i]++;if(mapChanged&&ter[c]==255)unknown[i]++;}
    }
   }
   geometryReady=true;
@@ -112,6 +116,14 @@ struct Policy {
   std::fill(closeOwnerArmy,closeOwnerArmy+8,0);
   std::fill(closeOwnerETA,closeOwnerETA+8,INF);
   std::fill(closeOwnerSource,closeOwnerSource+8,-1);
+  // The DP can only affect visible mobile enemies in the cached home area.
+  // Retain the normal zeroed threat state when no such enemy exists.
+  bool hasHomeThreat=false;
+  if(ed[g]<=12)for(int j=0;j<homeCount;j++){
+   int c=homeCells[j];
+   if(o->visible[c]&&own[c]>=0&&own[c]!=p&&a[c]>1){hasHomeThreat=true;break;}
+  }
+  if(hasHomeThreat){
   std::fill(attackCost,attackCost+N,INF);
   std::fill(nextAttackCost,nextAttackCost+N,INF);attackCost[g]=0;
   for(int j=0;j<homeCount;j++){
@@ -147,6 +159,7 @@ struct Policy {
     }
    }
    for(int j=0;j<homeCount;j++){int c=homeCells[j];attackCost[c]=nextAttackCost[c];}
+  }
   }
   int need=1;closeAttackerCount=0;
   for(int i=0;i<N;i++)if(threatETA[i]<INF){
@@ -216,6 +229,67 @@ struct Policy {
     if(f>force[v]||(f==force[v]&&spent<pathLoss[v])){force[v]=f;pathLoss[v]=spent;first[v]=(u==s?k:first[u]);parent[v]=u;}
    }
   }
+ }
+ // Positive route costs permit detours around expensive cities without cycles.
+ // Duels use this complement only for the largest mobile group.
+ Candidate weightedCampaign(int s,double income){
+  Candidate best;bool half=false;if(!canDepart(s,half))return best;
+  int initial=moveArmy(s,half);if(initial<12)return best;
+  double scale=income*2.5+2;
+  std::fill(weightedCost,weightedCost+N,1e30);std::fill(weightedDone,weightedDone+N,false);
+  int heapSize=0;
+  auto push=[&](int cell,double cost){
+   int j=heapSize++;
+   while(j>0){int par=(j-1)/2;if(heapCost[par]<cost||(heapCost[par]==cost&&heapCell[par]<=cell))break;
+    heapCost[j]=heapCost[par];heapCell[j]=heapCell[par];j=par;}
+   heapCost[j]=cost;heapCell[j]=cell;
+  };
+  weightedCost[s]=0;weightedForce[s]=initial;weightedSteps[s]=0;weightedLoss[s]=0;weightedFirst[s]=-1;push(s,0);
+  while(heapSize){
+   int u=heapCell[0];double cost=heapCost[0];--heapSize;
+   if(heapSize){int cell=heapCell[heapSize];double last=heapCost[heapSize];int j=0;
+    while(j*2+1<heapSize){int child=j*2+1;
+     if(child+1<heapSize&&(heapCost[child+1]<heapCost[child]||(heapCost[child+1]==heapCost[child]&&heapCell[child+1]<heapCell[child])))child++;
+     if(last<heapCost[child]||(last==heapCost[child]&&cell<=heapCell[child]))break;
+     heapCost[j]=heapCost[child];heapCell[j]=heapCell[child];j=child;}
+    heapCost[j]=last;heapCell[j]=cell;
+   }
+   if(weightedDone[u]||cost!=weightedCost[u])continue;
+   weightedDone[u]=true;if(weightedSteps[u]>=32)continue;
+   for(int k=0;k<4;k++){
+    int v=nb[u][k];if(v<0||v==s||ter[v]==1||weightedDone[v])continue;
+    int d=weightedSteps[u]+1,detach=int(u!=s),nextForce=weightedForce[u]-detach+routeDelta[v];if(nextForce<1)continue;
+    int loss=weightedLoss[u]+detach+(mine(v)?0:rememberedDefense(v)+int(ter[v]==255));double next=d+loss/scale;
+    if(next>weightedCost[v]||(next==weightedCost[v]&&nextForce<=weightedForce[v]))continue;
+    weightedCost[v]=next;weightedForce[v]=nextForce;weightedSteps[v]=d;weightedLoss[v]=loss;
+    weightedFirst[v]=u==s?k:weightedFirst[u];push(v,next);
+   }
+  }
+  for(int v=0;v<N;v++)if(!mine(v)&&weightedCost[v]<1e29){
+   bool enemy=own[v]>=0&&own[v]!=p,city=st[v]==1,king=st[v]==2&&enemy;if(!city&&!king)continue;
+   int d=weightedSteps[v],direction=weightedFirst[v],remaining=weightedForce[v];if(direction<0||(city&&d>24))continue;
+   bool immediateKing=king&&d==1&&initial>captureDefense(v);if(king&&d==1&&!immediateKing)continue;
+   if(king&&d>1&&remaining<=d/2+2)continue;
+   double reward;
+   if(king)reward=120+std::min<int64_t>(300,o->total_army[own[v]])*.20+std::min<int64_t>(200,o->total_land[own[v]])*.40;
+   else{reward=15+std::min(10.,army(s)*.05)+(enemy?5:0);if(d<=4&&remaining>=8)reward+=3+(enemy?2:0);if(remaining<4)reward*=.72;}
+   double score=reward/(d+.8+weightedLoss[v]/scale);if(king)score+=6./(1+d*.07);if(immediateKing)score+=100000;
+   if(v==oldTarget)score*=(o->players==2&&ed[s]<=8?1.05:1.13);if(s==oldSource)score*=1.025;if(city&&tick<95)score*=.75;
+   int dest=nb[s][direction];double departure=risk(s,dest,initial);if(departure>=1000&&!immediateKing)continue;
+   if(!mine(dest)){
+    int hold=initial-rememberedDefense(dest);bool counter=false;
+    for(int k=0;k<4;k++){
+     int e=nb[dest][k];if(e<0||e==s||!o->visible[e]||own[e]<0||own[e]==p)continue;
+     if(st[dest]==1&&hold>0){int attack=moveArmy(e),guard=hold;
+      if(own[e]<p){attack+=int(((tick+2)%2==0&&st[e]>0&&st[e]<3)||((tick+2)%50==0&&st[e]==0));guard+=int((tick+2)%2==0);}
+      if(attack>guard+2)counter=true;}
+    }
+    if(counter)score*=.35;score-=departure;
+    if(!king)for(int k=0;k<4;k++){int e=nb[dest][k];if(e>=0&&e!=s&&o->visible[e]&&own[e]>=0&&own[e]!=p&&a[e]>hold+2)score-=std::min(5.,a[e]*.025);}
+   }else score-=departure;
+   if(score>best.score)best={score,s,v,direction,half};
+  }
+  return best;
  }
  double risk(int source,int dest,int moving)const {
   double cost=0;int remain=moveArmy(source)+1-moving;
@@ -353,7 +427,7 @@ struct Policy {
  // home; these are observations of troops, not assumptions about an opponent.
  Candidate forecastDefend(){
   Candidate best;
-  if(tick<80)return best;
+  if(tick<80||ed[g]>6)return best;
   int top[8][3]{},cell[8][3];
   for(int e=0;e<8;e++)cell[e][0]=cell[e][1]=cell[e][2]=-1;
   for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&own[c]!=p&&o->alive[own[c]]&&gd[c]<=6){
@@ -490,6 +564,42 @@ struct Policy {
   }
   return best;
  }
+ // A single local transfer can preserve an already productive city. This is
+ // deliberately below general defence and strong attacks in the action score.
+ Candidate cityRelief() {
+  Candidate best;
+  if(o->players!=2)return best;
+  for(int city=0;city<N;city++)if(mine(city)&&st[city]==1){
+   int hold=moveArmy(city)+1,attack=0;
+   for(int k=0;k<4;k++){
+    int e=nb[city][k];
+    if(e>=0&&o->visible[e]&&own[e]>=0&&own[e]!=p)
+     attack=std::max(attack,moveArmy(e));
+   }
+   if(attack<=hold)continue;
+   for(int k=0;k<4;k++){
+    int source=nb[city][k];if(source<0||!mine(source))continue;
+    bool half=false;if(!canDepart(source,half))continue;
+    // An earlier opponent could reduce this source before its selected move.
+    // Use only an unexposed donor; the city itself may be recaptured safely.
+    bool exposed=false;
+    for(int j=0;j<4;j++){
+     int e=nb[source][j];
+     if(e>=0&&o->visible[e]&&own[e]>=0&&own[e]<p&&moveArmy(e)>0){exposed=true;break;}
+    }
+    if(exposed)continue;
+    if(!half&&hold+moveArmy(source,true)>=attack+2)half=true;
+    int moving=moveArmy(source,half);
+    if(moving<=0||hold+moving<attack+2)continue;
+    double departure=risk(source,city,moving);
+    if(departure>=1000)continue;
+    double score=4.25-std::min(.20,moving*.001)-departure;
+    int dir=(k+2)%4;
+    if(score>best.score)best={score,source,city,dir,half};
+   }
+  }
+  return best;
+ }
  // Mature domains contain hundreds of one- to ten-troop tiles. If the three
  // largest field stacks hold little of our army, redirect one useful interior
  // stack toward a real enemy front instead of adding another thin frontier.
@@ -596,15 +706,13 @@ struct Policy {
    return arena_move(defense.source,defense.dir,defense.half);
   }
   double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
-  std::vector<int> sources;for(int i=0;i<N;i++)if(mine(i)&&canMoveNow(i))sources.push_back(i);
+  sources.clear();keep.clear();border.clear();for(int i=0;i<N;i++)if(mine(i)&&canMoveNow(i))sources.push_back(i);
   std::sort(sources.begin(),sources.end(),[&](int x,int y){double ax=army(x)+(x==oldSource?5:0),ay=army(y)+(y==oldSource?5:0);return ax>ay;});
   if(sources.size()>16){
    // Preserve the twelve strongest mobile groups. Four further slots keep
    // useful border armies from being crowded out by productive rear cities.
    if(o->players<=6){
-    std::vector<int> keep(sources.begin(),sources.begin()+12);
-    std::vector<std::pair<int,int>> border;
-    border.reserve(sources.size()-12);
+    keep.assign(sources.begin(),sources.begin()+12);
     int scout=-1,scoutGain=0,scoutDistance=INF;
     for(int j=12;j<int(sources.size());j++){
      int source=sources[j],key=ed[source],visionGain=0,capturable=0;
@@ -639,10 +747,10 @@ struct Policy {
     for(int j:extra)keep.push_back(sources[j]);
     sources.swap(keep);
    }else{
-    std::vector<int> keep(sources.begin(),sources.begin()+12);
-    std::vector<std::pair<int,int>> border;
-    border.reserve(sources.size()-12);
-    for(int j=12;j<int(sources.size());j++){
+    // Search ten strong mobile groups and four active frontier groups on
+    // mature crowded maps.
+    keep.assign(sources.begin(),sources.begin()+10);
+    for(int j=10;j<int(sources.size());j++){
      int source=sources[j],key=ed[source];
      if(key>=INF){
       // Before enemy contact, use new vision and immediately capturable
@@ -672,7 +780,7 @@ struct Policy {
    // These tactical adjustments depend on the first step, not on the final
    // campaign target. Store hazards individually to preserve subtraction order
    // and therefore the original floating-point tie behavior exactly.
-   double stepRisk[4]{},stepHazard[4][4]{};int hazardCount[4]{};
+   double stepRisk[4]{},stepHazard[4][4]{};int hazardCount[4]{};bool cityCounter[4]{};
    for(int direction=0;direction<4;direction++){
     int dest=nb[s][direction];if(dest<0)continue;
     stepRisk[direction]=risk(s,dest,moving);
@@ -680,8 +788,17 @@ struct Policy {
      int remain=moving-rememberedDefense(dest);
      for(int k=0;k<4;k++){
       int e=nb[dest][k];
-      if(e>=0&&e!=s&&o->visible[e]&&own[e]>=0&&own[e]!=p&&a[e]>remain+2)
-       stepHazard[direction][hazardCount[direction]++]=std::min(5.,a[e]*.025);
+      if(e>=0&&e!=s&&o->visible[e]&&own[e]>=0&&own[e]!=p){
+       if(a[e]>remain+2)stepHazard[direction][hazardCount[direction]++]=std::min(5.,a[e]*.025);
+       if(o->players==2&&st[dest]==1&&remain>0){
+        int attack=moveArmy(e),hold=remain;
+        if(own[e]<p){
+         attack+=int(((tick+2)%2==0&&st[e]>0&&st[e]<3)||((tick+2)%50==0&&st[e]==0));
+         hold+=int((tick+2)%2==0);
+        }
+        if(attack>hold+2)cityCounter[direction]=true;
+       }
+      }
      }
     }
    }
@@ -740,10 +857,11 @@ struct Policy {
     double score=reward/den;
     if(king)score+=6.0/(1+d*.07);
     if(immediateKing)score+=100000;
-    if(v==oldTarget)score*=1.13;
+    if(v==oldTarget)score*=(o->players==2&&ed[s]<=8?1.05:1.13);
     if(s==oldSource)score*=1.025;
     if(city&&tick<95)score*=.75;
     int direction=first[v];
+    if(cityCounter[direction])score*=.35;
     // A lethal departure is infeasible; a numerical king bonus must not
     // cancel its risk penalty. Preserve immediate last-opponent captures.
     if(o->players<=6&&stepRisk[direction]>=1000&&!(alive<=2&&immediateKing))continue;
@@ -752,6 +870,9 @@ struct Policy {
     if(score>best.score)best={score,s,v,first[v],half};
     }
    }
+  }
+  if(o->players==2)for(int j=0;j<std::min(1,int(sources.size()));j++){
+   Candidate detour=weightedCampaign(sources[j],income);if(detour.score>best.score)best=detour;
   }
   // Mobilize productive interiors: marginal delivery per action, directed toward
   // a persistent campaign or the nearest unowned frontier.
@@ -783,9 +904,12 @@ struct Policy {
    }
   }
   if(o->players==2&&best.score<8){Candidate rally=fieldRally(best);if(rally.score>best.score)best=rally;}
-  else if(o->players>=3&&tick>=200&&o->total_cities[p]>=2&&best.score<3.0){
+  else if(o->players>=6&&alive>3&&tick>=200&&o->total_cities[p]>=2&&best.score<3.0){
    Candidate rally=fieldRally(best);rally.score=std::min(rally.score,3.0);
    if(rally.score>best.score)best=rally;
+  }
+  if(o->players==2&&best.score<4.25){
+   Candidate relief=cityRelief();if(relief.score>best.score)best=relief;
   }
   if(best.source<0||best.score<0.10)return 0;
   oldTarget=best.target;oldSource=nb[best.source][best.dir];lastTarget=oldSource;
