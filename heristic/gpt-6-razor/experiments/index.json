@@ -745,7 +745,7 @@
       "version": "b6d963198dfbb93e428360f1b0e05cab6db0d0080f7fb2147d86e049e393cf32",
       "source": "policy.cpp",
       "params": "params.json",
-      "timing_timeouts": 0,
+      "timing_timeouts": 1,
       "timing_errors": 0,
       "reports": [
         "outputs/arena/native_1000/runs/432cf96921b55bf741abc611abc207ca36e06728b47fd1eff0f31f482d14c9b9/report.json",
@@ -761,7 +761,32 @@
         "outputs/arena/native_1000/runs/2615360930eec57fc63f6835dd883760dbdc134f30926df8e7b93ed798322e22/report.json",
         "outputs/arena/native_1000/runs/e75587b1a30f3f0ee68728d6f496745b11f9c3835fa26d131c9f1a478e7c2188/report.json",
         "outputs/arena/native_1000/runs/ada506463afae77969f7153ce74026e1b1c57c64c72461ef7142e0457bb8834b/report.json",
-        "outputs/arena/native_1000/runs/70e0e67d149432716577b16f31a7228da03748d22be39ea2eff3fb1d5c570c09/report.json"
+        "outputs/arena/native_1000/runs/70e0e67d149432716577b16f31a7228da03748d22be39ea2eff3fb1d5c570c09/report.json",
+        "outputs/arena/native_1000/runs/3ab969c201f49031a778baa438532c3a611bb790c3f878fae17b57e8d5f26d7a/report.json",
+        "outputs/arena/native_1000/runs/c3bbf56f4659f1bb5a4f8bd4346a02cf2f7128cc98da4cc0536186f47dfc9dcd/report.json",
+        "outputs/arena/native_1000/runs/9b7135ef2096df33316730db6e6592172b85f3ba996c7ca4f420964ecf6d3612/report.json"
+      ],
+      "status": "disqualified_timing_or_error"
+    },
+    {
+      "version": "c7c12a4701010054b007bcba433bb67f55757f0ee08f010c9b24333cc28b5262",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/51e63ccf260563fc93ec6d85f768194680532838feebc0e7767b7b8747687659/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "a36d3ba414cbfd82864170e1deb7961bad69e539d6f7c4f5791b0c04118dc95a",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/38dbcb88ebdf5eb588a2f7278c0bd59b92cd3a385075842bfad6577acc53bf18/report.json"
       ],
       "status": "experimental_not_formally_submitted"
     }
