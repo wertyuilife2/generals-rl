@@ -160,6 +160,31 @@ extern "C" std::int64_t arena_act(void *, const ArenaObservation *o) {
             self.assertEqual(report['games'][0]['error_type'], 'OnlineProtocolError')
             self.assertTrue(wire.closed)
 
+    def test_series_pause_finishes_current_game_without_starting_another(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'series'
+            wire = Wire()
+            original = wire.emit
+
+            def request_pause(name, *args):
+                if name == 'clear_moves':
+                    (output / 'stop-after-game').touch()
+                return original(name, *args)
+
+            wire.emit = request_pause
+            with patch.dict('os.environ', {'GENERALS_BOT_USER_ID': 'secret'}):
+                with patch('generals.backends.online.transport.SocketIOTransport', return_value=wire) as factory:
+                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                        code = main(['online', str(self.bundle), '--room', 'test',
+                                     '--games', '2', '--output', str(output)])
+            self.assertEqual(code, 1)  # The requested series is intentionally incomplete.
+            self.assertEqual(factory.call_count, 1)
+            report = json.loads((output / 'report.json').read_text())
+            self.assertEqual(report['status'], 'paused')
+            self.assertEqual((report['completed_games'], report['wins'], report['failures']), (1, 1, 0))
+            self.assertNotIn('active_game', report)
+            self.assertTrue(wire.closed)
+
 
 if __name__ == '__main__':
     unittest.main()

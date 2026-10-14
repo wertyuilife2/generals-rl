@@ -55,6 +55,12 @@ def run_series(bundle, options, *, games, output, seed=42, policy=None):
     consecutive_network_failures = 0
     try:
         while report['completed_games'] < games:
+            # Only inspect this orchestration request between whole games.
+            # Controllers never read it and an active game is never abandoned.
+            if (output / 'stop-after-game').exists():
+                report['status'] = 'paused'
+                report['stop_reason'] = 'requested_between_games'
+                break
             index = report['attempted_games'] + 1
             record = output / f'game-{index:03d}.jsonl'
             row = {'attempt': index, 'seed': seed + index - 1,
