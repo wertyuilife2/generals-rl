@@ -122,8 +122,8 @@ class GameState:
         if np.any(self.structure[empty] != Structure.NONE) or np.any(self.army[empty] != 0):
             raise ValueError("empty cells cannot contain structures or armies")
         neutral = self.owner == NEUTRAL
-        if np.any(self.structure[neutral] != Structure.CITY) or np.any(self.army[neutral] > 40):
-            raise ValueError("neutral ownership is reserved for cities with 0–40 troops")
+        if np.any(self.structure[neutral] != Structure.CITY):
+            raise ValueError("neutral ownership is reserved for cities")
         if np.any(self.general_pos < 0) or np.any(self.general_pos >= self.layout.size) or np.unique(self.general_pos).size != self.player_count:
             raise ValueError("general_pos must contain unique in-bounds positions")
         live_ids = np.flatnonzero(self.alive)

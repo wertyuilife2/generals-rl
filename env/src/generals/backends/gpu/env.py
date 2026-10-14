@@ -80,7 +80,7 @@ class GPUEnv:
         bad = ((terrain > 1) | (structure > 2) | (owner < -2) | (owner >= self.players) | (army < 0)).any()
         bad |= ((terrain == 1) & ((structure != 0) | (owner != -1) | (army != 0))).any()
         bad |= ((owner == -1) & ((structure != 0) | (army != 0))).any()
-        bad |= ((owner == -2) & ((structure != 1) | (army > 40))).any()
+        bad |= ((owner == -2) & (structure != 1)).any()
         bad |= ((s["general_pos"] < 0) | (s["general_pos"] >= n)).any()
         sorted_pos = s["general_pos"].sort(dim=1).values
         bad |= (sorted_pos[:, 1:] == sorted_pos[:, :-1]).any()

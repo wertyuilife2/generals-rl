@@ -2,6 +2,7 @@
 from generals.protocol.actions import (Action, ActionKind, Direction, MoveMode, Structure, Terrain,
                       EMPTY, NEUTRAL, UNKNOWN, UNKNOWN_OWNER)
 from generals.protocol.config import MapConfig
+from generals.protocol.mapgen import MapGenerationConfig
 
 # Batched storage uses [batch, height*width], with row-major cell ids. Army and
 # ticks are signed int64 in every backend; encoded joint actions use [batch,P].

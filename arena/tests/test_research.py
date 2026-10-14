@@ -45,7 +45,7 @@ extern "C" void arena_destroy(void *p) { delete static_cast<Policy *>(p); }
 
 @pytest.fixture
 def setup(tmp_path):
-    config = LeagueConfig(player_counts=(2, 4), min_side=15, max_side=15, side_cap=15,
+    config = LeagueConfig(player_counts=(2, 4), map_generation=None, min_side=15, max_side=15, side_cap=15,
                           max_ticks=4, mountain_min=0, mountain_max=0, city_min=0, city_max=0)
     league = LeagueStore.create(tmp_path/'official', config)
     return league.directory, league
@@ -57,6 +57,25 @@ def native(tmp_path, body):
     controller = NativeController(bundle=bundle)
     controller.reset(0, 42)
     return controller
+
+
+def test_official_default_maps_run_through_native_arena(tmp_path):
+    from generals import MapGenerationConfig
+    from generals_arena.league.game import replay_frames
+    rules = LeagueConfig(max_ticks=3, map_generation=MapGenerationConfig(city_army_min=50, city_army_max=50))
+    official = LeagueStore.create(tmp_path/'official', rules)
+    for count in (2, 8):
+        report = research.run(['baseline/random'] * count, league=official.directory, games=2, workers=2)
+        assert report['ok'] and report['completed_games'] == 2
+        private = LeagueStore(report['league_directory'])
+        for row in private.matches()['matches']:
+            result, blob = private.replay(row['game_id'])
+            assert result['map']['generation']['city_army_min'] == 50
+            assert replay_frames(blob, result)[-1]['tick'] == 3
+    report = research.run(['baseline/random'] * 2, league=official.directory, size='20x25')
+    private = LeagueStore(report['league_directory'])
+    result = private.matches()['matches'][0]
+    assert result['map']['width'] == 20 and result['map']['height'] == 25
 
 
 def test_native_reextracts_policy_after_temporary_cache_is_removed(tmp_path):
