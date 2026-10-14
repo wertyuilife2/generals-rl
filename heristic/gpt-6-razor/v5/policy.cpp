@@ -959,9 +959,8 @@ struct Policy {
      if(generated<384)expanded[generated++]=next;
     }
    }
-   // Keep the twelve-step assembly horizon while bounding each frontier to
-   // 32 routes; the pre-contact search keeps 48 routes for exploration.
-   count=std::min(harvestActive?32:48,generated);
+   // Twelve-step assembly uses fewer beam nodes than the ten-step base search.
+   count=std::min(harvestActive?64:96,generated);
    std::partial_sort(expanded,expanded+count,expanded+generated,[](const Route&a,const Route&b){return a.rank>b.rank;});
    std::copy(expanded,expanded+count,beam);
   }
