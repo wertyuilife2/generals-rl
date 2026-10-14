@@ -674,7 +674,9 @@
         "outputs/arena/native_1000/runs/56bf5544aa58d1248b4697c541e40aa992cc0f46149a5bf8911c5e764f1d8ff5/report.json",
         "outputs/arena/native_1000/runs/dde0f17b53997affb894374022ba4720b0bb75d60eac0fef31b815f74163f89f/report.json",
         "outputs/arena/native_1000/runs/37e78acab3c764e2ced556b18671c3433b4c6737a6c2d530a449bf8314157dfd/report.json",
-        "outputs/arena/native_1000/runs/bd522825925a09441f3d8d2f3bb900bbbb243ad21f44a3fdf7d1324eec919e11/report.json"
+        "outputs/arena/native_1000/runs/bd522825925a09441f3d8d2f3bb900bbbb243ad21f44a3fdf7d1324eec919e11/report.json",
+        "outputs/arena/native_1000/runs/fba7748c84e00fc92023281eae96a6808a9ed1fd72ae1ac069c59f9976d457a5/report.json",
+        "outputs/arena/native_1000/runs/7099e22fabd43d757203cc75e979d92cc0219c98e5a7ae190eeeff84dd8b6755/report.json"
       ],
       "status": "disqualified_timing_or_error"
     },
@@ -895,6 +897,28 @@
         "outputs/arena/native_1000/runs/e65758e96ab4e2cf98027cc67ab2d6da9a4d45ab6fb318326a49482631e12973/report.json",
         "outputs/arena/native_1000/runs/37e78acab3c764e2ced556b18671c3433b4c6737a6c2d530a449bf8314157dfd/report.json",
         "outputs/arena/native_1000/runs/bd522825925a09441f3d8d2f3bb900bbbb243ad21f44a3fdf7d1324eec919e11/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "1bb592a5061cfa4290847114fc87f54f562211e14e0a6a72884b2e775e1e9c5f",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/fba7748c84e00fc92023281eae96a6808a9ed1fd72ae1ac069c59f9976d457a5/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "c7eab1b8b106a1426cb5919a10fccc4a679523de75486151828a35767e79aa29",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/7099e22fabd43d757203cc75e979d92cc0219c98e5a7ae190eeeff84dd8b6755/report.json"
       ],
       "status": "experimental_not_formally_submitted"
     }
