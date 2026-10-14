@@ -15,6 +15,9 @@
 
 namespace {
 constexpr int MAXN=4096, INF=1000000;
+// Which squares of a target's 3x3 vision are also revealed by a path cell
+// at each relative offset in [-2,2]^2. Immutable geometry, shared read-only.
+constexpr unsigned VISION_OVERLAP[25]={1,3,7,6,4,9,27,63,54,36,73,219,511,438,292,72,216,504,432,288,64,192,448,384,256};
 double parameter(const char *json,const char *name,double fallback){
  if(!json)return fallback;
  const char *key=std::strstr(json,name);if(!key)return fallback;
@@ -40,7 +43,8 @@ struct Policy {
  bool receiptHalf=false;
 
  int ter[MAXN],st[MAXN],own[MAXN],seen[MAXN],a[MAXN],lastOwn[MAXN];
- int enemyCount[MAXN],enemyNeighbors[MAXN][4];
+ int enemyCount[MAXN],enemyNeighbors[MAXN][4],cellX[MAXN],cellY[MAXN];
+ unsigned unknownMask[MAXN];
  int nb[MAXN][4],gd[MAXN],fd[MAXN],ed[MAXN],unknown[MAXN],fogGain[MAXN],reserve[MAXN],targetDist[MAXN];
  int dist[MAXN],force[MAXN],pathLoss[MAXN],first[MAXN],parent[MAXN],queue[MAXN];
  double threat[MAXN],pathExposure[MAXN],weightedExposure[MAXN];
@@ -134,7 +138,7 @@ struct Policy {
   learnGrowth(obs);
   o=obs;tick=int(o->tick);g=o->general_pos;
   aliveCount=0;for(int e=0;e<o->players;e++)aliveCount+=o->alive[e]!=0;
-  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
+  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;cellX[i]=x;cellY[i]=y;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
   bool mapChanged=!geometryReady;
   for(int i=0;i<N;i++)armyCache[i]=int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));
   for(int i=0;i<N;i++){
@@ -191,10 +195,10 @@ struct Policy {
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v>=0&&ter[v]!=1&&ed[v]==INF){ed[v]=ed[u]+1;queue[z++]=v;}}}
   for(int i=0;i<N;i++){
    fogGain[i]=0;int x=i%W,y=i/W;
-   if(mapChanged)unknown[i]=0;
+   if(mapChanged){unknown[i]=0;unknownMask[i]=0;}
    for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
     int xx=x+dx,yy=y+dy;
-    if(xx>=0&&xx<W&&yy>=0&&yy<H){int c=yy*W+xx;if(!o->visible[c]&&!blocked(c))fogGain[i]++;if(mapChanged&&ter[c]==255)unknown[i]++;}
+    if(xx>=0&&xx<W&&yy>=0&&yy<H){int c=yy*W+xx;if(!o->visible[c]&&!blocked(c))fogGain[i]++;if(mapChanged&&ter[c]==255){unknown[i]++;unknownMask[i]|=1u<<((dy+1)*3+dx+1);}}
    }
   }
   geometryReady=true;
@@ -925,14 +929,13 @@ struct Policy {
        if(o->players>2&&tick>=140)reward*=1.4;
       }else{
        reward=1.8+(enemy?2.1:0)+(gd[v]<8?.3:0);
-       int fresh=0,x=v%W,y=v/W;
-       for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
-        int xx=x+dx,yy=y+dy;if(xx<0||xx>=W||yy<0||yy>=H)continue;
-        int c=yy*W+xx;if(ter[c]!=255)continue;
-        bool revealed=false;
-        for(int j=1;j<depth;j++)if(std::abs(r.path[j]%W-xx)<=1&&std::abs(r.path[j]/W-yy)<=1){revealed=true;break;}
-        if(!revealed)fresh++;
+       unsigned freshMask=unknownMask[v];
+       for(int j=1;j<depth&&freshMask;j++){
+        int c=r.path[j],dx=cellX[c]-cellX[v],dy=cellY[c]-cellY[v];
+        if(dx>=-2&&dx<=2&&dy>=-2&&dy<=2)
+         freshMask&=~VISION_OVERLAP[(dy+2)*5+dx+2];
        }
+       int fresh=__builtin_popcount(freshMask);
        reward+=fresh*(tick<80?.32:.22);
        if(enemy&&moving>=20&&next.force>=8)reward+=fresh*.55;
        if(enemy&&guard>3)reward+=std::min(6.,guard*.06);
