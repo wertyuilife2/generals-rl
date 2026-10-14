@@ -28,7 +28,7 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     complete('four', [a,a,b,b], 10, [2,None,8,6], [0,3,0,0], 1)
     first = stats.leaderboard()
     first_a = next(r for r in first['ranking'] if r['entrant_id'] == a)
-    assert first_a['survival_index'] == pytest.approx(.6)
+    assert first_a['survival_index'] == pytest.approx(.5)
     assert first_a['kill_index'] == pytest.approx(.5)
     assert first_a['win_rate'] == 1  # Winner was the second duplicate seat.
 
@@ -40,10 +40,10 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     report = stats.leaderboard()
     rows = {r['entrant_id']: r for r in report['ranking']}
     assert report['completed_games'] == 3
-    assert rows[a]['survival_index'] == pytest.approx((.6 + 1 + 1) / 3)
+    assert rows[a]['survival_index'] == pytest.approx((.5 + 0 + .5) / 3)
     assert rows[a]['kill_index'] == pytest.approx(.5 / 3)
     assert rows[a]['win_rate'] == pytest.approx(1 / 3)
-    assert rows[b]['survival_index'] == pytest.approx((.7 + 1 + 1) / 3)
+    assert rows[b]['survival_index'] == pytest.approx((.5 + 1 + .5) / 3)
     assert rows[b]['kill_index'] == pytest.approx(1 / 3)
     assert all(rows[idle][key] is None for key in ('win_rate','survival_index','kill_index'))
     assert stats.leaderboard() == report
@@ -72,7 +72,7 @@ def test_native_kills_do_not_transfer_to_the_winner_and_old_replay_is_cached(tmp
         assert replay_kills(result, blob) == [1,1,0]
         samples = match_statistics(result, result['kills'])
         assert samples[a]['kill_index'] == samples[b]['kill_index'] == .5
-        assert samples[store.anchor]['survival_index'] == .5
+        assert samples[store.anchor]['survival_index'] == 0
         trace = json.loads(gzip.decompress(blob))
         trace['digests'][0] = 'corrupt'
         with pytest.raises(ValueError, match='diverged at tick 1'):
@@ -108,3 +108,26 @@ def test_version_delta_uses_numeric_predecessor_and_current_elo():
     assert rows[2]['previous_version'] == 'model-bird-v1'
     for index in (1,3,4,5,6,7):
         assert rows[index]['elo_delta'] is None
+
+
+@pytest.mark.parametrize('ticks,eliminations,winner,expected', [
+    (20, [20,None], 1, [0,1]),  # Final-tick loser is not a survivor.
+    (0, [0,None], 1, [0,1]),  # Immediate surrender uses the same ranking.
+    (30, [None,None], None, [.5,.5]),
+    (30, [10,None,None], None, [0,.75,.75]),
+    (20, [10,10,None], 2, [.25,.25,1]),
+    (80, [10,20,30,40,50,60,80,None], 7, [i/7 for i in range(8)]),
+])
+def test_survival_index_uses_normalized_placement_and_average_ties(
+        ticks, eliminations, winner, expected):
+    ids = [f'p{i}' for i in range(len(eliminations))]
+    kills = [0] * len(ids)
+    kills[-1] = sum(t is not None for t in eliminations)
+    result = dict(entrant_ids=ids, ticks=ticks, elimination_ticks=eliminations,
+                  winner_seat=winner)
+    actual = match_statistics(result, kills)
+    assert [actual[key]['survival_index'] for key in ids] == pytest.approx(expected)
+    # Increasing all elimination times without changing order is immaterial.
+    stretched = {**result, 'ticks':ticks*3,
+                 'elimination_ticks':[t*3 if t is not None else None for t in eliminations]}
+    assert match_statistics(stretched, kills) == actual

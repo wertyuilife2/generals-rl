@@ -6,7 +6,7 @@
 <main>
 <div id="notice" role="status" hidden></div>
 <div class="workspace">
-<section class="panel" id="ranking-panel"><div class="panel-heading"><div><h2>实力榜单</h2><p class="muted" id="pool-caption">正在读取联赛</p></div></div><div class="table-scroll"><table><thead><tr><th scope="col">排名 / 选手</th><th scope="col" title="Elo ± 95% 估计区间半宽；按独立地图合并重复席位和换位">Elo</th><th scope="col" aria-label="相对上一版本的 Elo 变化" title="当前 Elo 减去同名系列上一版本的当前 Elo（按 -vN 排序）">▲</th><th scope="col" title="夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜，超时计入分母">胜率</th><th scope="col" title="存活时长 ÷ 对局时长；存活到结束记为 100%">存活指数</th><th scope="col" title="亲自击杀的席位数 ÷ 其余席位数（含同策略席位）">击杀指数</th></tr></thead><tbody id="ranking"></tbody></table></div></section>
+<section class="panel" id="ranking-panel"><div class="panel-heading"><div><h2>实力榜单</h2><p class="muted" id="pool-caption">正在读取联赛</p></div></div><div class="table-scroll"><table><thead><tr><th scope="col">排名 / 选手</th><th scope="col" title="Elo ± 95% 估计区间半宽；按独立地图合并重复席位和换位">Elo</th><th scope="col" aria-label="相对上一版本的 Elo 变化" title="当前 Elo 减去同名系列上一版本的当前 Elo（按 -vN 排序）">▲</th><th scope="col" title="夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜，超时计入分母">胜率</th><th scope="col" title="（总席位数 − 存活名次）÷（总席位数 − 1）；并列取平均名次，再按同策略席位和各局取平均；单挑胜/负/平为 100%/0%/50%">存活指数</th><th scope="col" title="亲自击杀的席位数 ÷ 其余席位数（含同策略席位）">击杀指数</th></tr></thead><tbody id="ranking"></tbody></table></div></section>
 <section class="panel" id="history-panel" hidden>
 <form class="history-filters" id="history-filter" role="search" aria-label="筛选对局">
   <label for="history-entrant">选手<select id="history-entrant"><option value="">全部选手</option></select></label>

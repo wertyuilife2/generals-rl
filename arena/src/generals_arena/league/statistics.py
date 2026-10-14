@@ -8,6 +8,7 @@ import threading
 
 from ..execution import verified_replay
 from ..util import digest
+from .rating import ranks
 from .uncertainty import RatingUncertainty
 
 
@@ -28,7 +29,7 @@ def replay_kills(result, blob):
 
 def match_statistics(result, kills):
     """Each strategy has one sample per game, regardless of its seat count."""
-    ids, ticks = result['entrant_ids'], result['ticks']
+    ids = result['entrant_ids']
     if (len(kills) != len(ids) or
             any(type(k) is not int or not 0 <= k < len(ids) for k in kills) or
             sum(kills) != sum(t is not None for t in result.get('capture_ticks', result['elimination_ticks']))):
@@ -37,8 +38,10 @@ def match_statistics(result, kills):
     for seat, entrant in enumerate(ids):
         seats[entrant].append(seat)
     winner = result['winner_seat']
-    survival = [1. if tick is None else tick / ticks if ticks else 0.
-                for tick in result['elimination_ticks']]
+    # Normalize survival placement, not elapsed time: in a duel the losing
+    # general is normally captured on the final tick, but must still score 0.
+    # Average ranks give tied eliminations / remaining survivors equal credit.
+    survival = [(len(ids) - rank) / (len(ids) - 1) for rank in ranks(result)]
     return {entrant: {
         'win_rate': float(winner in group),
         'survival_index': sum(survival[seat] for seat in group) / len(group),
