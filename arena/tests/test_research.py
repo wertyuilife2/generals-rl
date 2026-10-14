@@ -2,6 +2,7 @@
 from dataclasses import asdict
 import json
 from pathlib import Path
+import shutil
 import time
 
 import pytest
@@ -56,6 +57,21 @@ def native(tmp_path, body):
     controller = NativeController(bundle=bundle)
     controller.reset(0, 42)
     return controller
+
+
+def test_native_reextracts_policy_after_temporary_cache_is_removed(tmp_path):
+    bundle = tmp_path/'policy.zip'
+    build_bundle(source(tmp_path/'source', 'return o->tick == 123456789 ? 0 : 0;'), bundle)
+    first = NativeController(bundle=bundle)
+    root = first.root
+    first.close()
+    shutil.rmtree(root)
+    second = NativeController(bundle=bundle)
+    try:
+        assert second.root == root
+        assert (root/'policy.so').is_file()
+    finally:
+        second.close()
 
 
 def test_native_receives_only_observation_and_previous_result(tmp_path):

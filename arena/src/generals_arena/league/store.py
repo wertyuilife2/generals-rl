@@ -292,7 +292,15 @@ class LeagueStore:
                     continue
                 failures = [json.loads(r[0] or '{}') for r in db.execute(
                     "SELECT result FROM games WHERE job_id=? AND status='failed'", (job['id'],))]
-                if job['kind'] != 'cpp' or (failures and all(
+                infrastructure = failures and all(
+                    r.get('error_detail', {}).get('player') is None for r in failures)
+                if infrastructure:
+                    # Keep the result and replay for audit, but distinguish an
+                    # unattributed host failure from a policy violation.  It
+                    # remains unrated and a replacement game will be planned.
+                    db.execute("UPDATE games SET status='aborted' WHERE job_id=? AND status='failed'",
+                               (job['id'],))
+                if job['kind'] != 'cpp' or infrastructure or (failures and all(
                         decision_timeout(r.get('error_detail', {})) for r in failures)):
                     db.execute("UPDATE jobs SET status='queued',error=NULL WHERE id=?", (job['id'],))
 

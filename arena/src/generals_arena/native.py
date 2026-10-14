@@ -157,8 +157,10 @@ def bundle_info(bundle):
     return metadata
 
 
-@lru_cache(maxsize=128)
 def _unpack(bundle, expected):
+    # The OS may purge its temporary directory while a long-running Arena
+    # process is still alive.  Re-check the extracted artifact on every new
+    # controller instead of caching a Path that may no longer exist.
     if file_digest(bundle) != expected:
         raise ValueError('policy bundle changed')
     metadata = bundle_info(bundle)

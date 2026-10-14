@@ -251,6 +251,36 @@ def test_failure_is_unrated_and_retryable_and_workers_exclusive(tmp_path):
     assert store.jobs()[0]['status'] == 'complete'
 
 
+def test_unattributed_cpp_infrastructure_failure_is_aborted_and_retryable(tmp_path):
+    store = league(tmp_path)
+    with store.connect(write=True) as db:
+        db.execute("INSERT INTO entrants VALUES (?,?,?,?)", (
+            'cpp', 'cpp', 'cpp', json.dumps({'entrant_id':'cpp', 'name':'cpp', 'kind':'cpp'})))
+        db.execute("INSERT INTO ratings VALUES (?,?,?,?,?,?,?,?)", ('cpp', 0, 0, 0, 0, 0, 0, 0))
+        db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
+                   ('job', 'cpp', 1, 0, 'failed', 'host cache vanished', time.time()))
+    store.insert_plans([{'game_id':'game'}], 'job')
+    store.fail_game({'game_id':'game', 'policy_error':'host cache vanished',
+                     'error_detail':{}}, b'audit replay')
+    store.retry('job')
+    assert next(j for j in store.jobs() if j['id'] == 'job')['status'] == 'queued'
+    with store.connect() as db:
+        row = db.execute("SELECT status,result,replay FROM games WHERE id='game'").fetchone()
+    assert row['status'] == 'aborted'
+    assert json.loads(row['result'])['policy_error'] == 'host cache vanished'
+    assert row['replay'] == b'audit replay'
+    with store.connect(write=True) as db:
+        db.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?)",
+                   ('policy-job', 'cpp', 1, 0, 'failed', 'policy crashed', time.time()))
+    store.insert_plans([{'game_id':'policy-game'}], 'policy-job')
+    store.fail_game({'game_id':'policy-game', 'policy_error':'policy crashed',
+                     'error_detail':{'player':0}}, b'policy replay')
+    store.retry('policy-job')
+    assert next(j for j in store.jobs() if j['id'] == 'policy-job')['status'] == 'failed'
+    with store.connect() as db:
+        assert db.execute("SELECT status FROM games WHERE id='policy-game'").fetchone()['status'] == 'failed'
+
+
 def test_no_rl_registration_or_loading(tmp_path):
     store = league(tmp_path)
     with patch('generals_arena.league.store.prepare_entrant', side_effect=AssertionError('must not load RL')):
