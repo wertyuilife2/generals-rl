@@ -928,6 +928,11 @@
       "arena_tested": false
     },
     {
+      "name": "forward-counter",
+      "source_directory": "heristic/gpt-6-razor/experiments/drafts-next-20261015/forward-counter",
+      "arena_tested": false
+    },
+    {
       "name": "wide",
       "source_directory": "heristic/gpt-6-razor/experiments/drafts-next-20261015/wide",
       "arena_tested": false
@@ -1630,6 +1635,48 @@
     }
   ],
   "first_tool_utc": "2026-10-15T11:07:29+00:00",
-  "recorded_utc": "2026-10-15T14:35:23.059040+00:00",
-  "elapsed_wall_seconds": 12474.05904
+  "recorded_utc": "2026-10-15T14:46:20.638300+00:00",
+  "elapsed_wall_seconds": 13131.6383,
+  "blocked_experiments": [
+    {
+      "name": "forward-counter",
+      "source_directory": "heristic/gpt-6-razor/experiments/drafts-next-20261015/forward-counter",
+      "completed_games": 0,
+      "reason": "Concurrent workspace backend changes: imported baseline requires build_extension, unavailable in the league-matching frozen environment; current workspace engine and observation/game hashes also differ from league manifest. No policy decision executed.",
+      "logs": [
+        "outputs/analysis/razor-next-20261015/forward-counter-strategic-k4.log",
+        "outputs/analysis/razor-next-20261015/forward-counter-strategic-k4-api.log"
+      ],
+      "strategy_unit_check": "two-order half-army interception passes; benchmark pending"
+    }
+  ],
+  "known_policy_timeouts": {
+    "9177e240eeafec485e8f07bc58c2ac555be928283700fae09b60043c4320bce7": 2,
+    "97b18eb6098cb7c0f2d1b86c05cdaf40473b48b7d5aa10a84f3ccd51b549ea52": 1,
+    "6e85dea0245e97dd09224fafc7f84505f8322fa85d2dbbf2796d2aad4d20b13b": 1
+  },
+  "total_recorded_timeouts": 4,
+  "v5_retirement": {
+    "name": "gpt-6-razor-v5",
+    "entrant_id": "99fbc2d38529f8e769d3f5d2973b3414e805f78571fac7d7b6905d28a4ca06a7",
+    "reason": "用户要求退役 v5，保留全部历史成绩与录像，由 v7 接替后续参赛。",
+    "retired_at": 1792075901.753112,
+    "verified_hidden_modes": [
+      "1v1",
+      "ffa"
+    ]
+  },
+  "formal_submission_attempt": {
+    "name": "gpt-6-razor-v7",
+    "source": "heristic/gpt-6-razor/v7/policy.cpp",
+    "params": "heristic/gpt-6-razor/v7/params.json",
+    "utc": "2026-10-15T14:52:38.522066+00:00",
+    "status": "blocked_before_preflight",
+    "formal_evaluations_started": 0,
+    "completed_games": 0,
+    "report": null,
+    "log": "outputs/analysis/razor-next-20261015/official-v7-submit.log",
+    "error": "league rules/source changed; use its original code or initialize a new league",
+    "original_runtime_check": "League manifest verified; black-box baseline preparation fails because current baseline package requires build_extension unavailable in preserved league environment."
+  }
 }
