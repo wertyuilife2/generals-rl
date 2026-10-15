@@ -7,14 +7,15 @@ from urllib.parse import quote
 
 from generals.protocol.match import MatchFrame, StaleFrameError
 from .protocol import ObservationDecoder, OnlineProtocolError, attack_arguments
-from .account import register_username, validate_server, validate_username
+from .account import register_username, validate_username
+from .endpoints import resolve_endpoint
 
 
 class OnlineBackend:
     supports_move_results = False
 
     def __init__(self, *, user_id, room=None, queue='custom', username=None,
-                 server='https://botws.generals.io', force_start=False,
+                 server=None, site=None, force_start=False,
                  start_timeout=120.0, update_timeout=15.0, tick_offset=0,
                  record=None, transport=None):
         if not isinstance(user_id, str) or not user_id.strip():
@@ -25,16 +26,17 @@ class OnlineBackend:
             raise ValueError('custom queue requires a room')
         if queue != 'custom' and (room is not None or force_start):
             raise ValueError('room and force_start apply only to custom games')
-        if username is not None:
-            validate_username(username)
         if not isinstance(force_start, bool):
             raise TypeError('force_start must be boolean')
-        server = validate_server(server)
+        self.endpoint = resolve_endpoint(site=site, server=server)
+        if username is not None:
+            validate_username(username, site=self.endpoint.site)
         for name, value in (('start_timeout', start_timeout), ('update_timeout', update_timeout)):
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value <= 0:
                 raise ValueError(f'{name} must be positive and finite')
         self._user_id, self.username = user_id, username
-        self.room, self.queue, self.server = room, queue, server.rstrip('/')
+        self.room, self.queue, self.server = room, queue, self.endpoint.server
+        self.site = self.endpoint.site
         self.force_start = bool(force_start)
         self.start_timeout, self.update_timeout = start_timeout, update_timeout
         self.decoder = ObservationDecoder(tick_offset=tick_offset)
@@ -48,9 +50,9 @@ class OnlineBackend:
 
     @property
     def replay_url(self):
-        if self.decoder.replay_id is None:
+        if self.decoder.replay_id is None or self.endpoint.website is None:
             return None
-        return 'https://bot.generals.io/replays/' + quote(self.decoder.replay_id, safe='')
+        return self.endpoint.website + '/replays/' + quote(self.decoder.replay_id, safe='')
 
     def _log(self, kind, **data):
         if self._record is not None:
@@ -82,7 +84,7 @@ class OnlineBackend:
         name, args = event
         if name in ('disconnect', 'connect_error'):
             raise ConnectionError('online connection ended; automatic replay/reconnection is disabled')
-        if name in ('error', 'queue_error') or name.startswith('error_'):
+        if name in ('error', 'queue_error', 'gio_error') or name.startswith('error_'):
             message = str(args[0] if args else name).replace(self._user_id, '[REDACTED]')
             raise OnlineProtocolError(f'online server: {message}')
         if name not in ('game_start', 'game_update', 'game_won', 'game_lost'):
@@ -136,21 +138,20 @@ class OnlineBackend:
             if self.record_path is not None:
                 self.record_path.parent.mkdir(parents=True, exist_ok=True)
                 self._record = self.record_path.open('x', encoding='utf-8')
-                self._log('start', schema=1, backend='online', server=self.server,
+                self._log('start', schema=1, backend='online', server=self.server, site=self.site,
                           tick_offset=self.decoder.tick_offset)
             if self.transport is None:
                 from .transport import SocketIOTransport
                 self.transport = SocketIOTransport()
             self.transport.connect(self.server)
             if self.username is not None:
-                register_username(self.transport, self._user_id, self.username, timeout=self.update_timeout)
+                register_username(self.transport, self._user_id, self.username,
+                                  timeout=self.update_timeout, server=self.server)
             self._joined = True
-            if self.queue == 'custom':
-                self.transport.emit('join_private', self.room, self._user_id)
-                if self.force_start:
-                    self.transport.emit('set_force_start', self.room, True)
-            else:
-                self.transport.emit('join_1v1' if self.queue == '1v1' else 'play', self._user_id)
+            event, args = self.endpoint.join_event(self.queue, self.room, self._user_id)
+            self.transport.emit(event, *args)
+            if self.force_start:
+                self.transport.emit('set_force_start', self.room, True)
             return self._wait(-1, self.start_timeout)
         except BaseException:
             self.close()

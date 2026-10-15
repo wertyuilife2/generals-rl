@@ -37,9 +37,10 @@ def _read(path):
             value.get('status') not in ('pending', 'registered') or
             not isinstance(value.get('user_id'), str) or not value['user_id']):
         raise ValueError('unsupported account file; existing credentials were not changed')
-    from generals.backends.online.account import validate_server, validate_username
-    validate_server(value.get('server', ''))
-    validate_username(value.get('username'))
+    from generals.backends.online.account import validate_username
+    from generals.backends.online.endpoints import resolve_endpoint
+    endpoint = resolve_endpoint(server=value.get('server', ''))
+    validate_username(value.get('username'), site=endpoint.site)
     return value
 
 
@@ -94,10 +95,12 @@ def _write(path, value, *, initial=False):
 
 
 def initialize_account(profile, username, *, directory=None,
-                       server='https://botws.generals.io', timeout=15, transport=None):
-    from generals.backends.online.account import register_username, validate_server, validate_username
+                       server=None, site=None, timeout=15, transport=None):
+    from generals.backends.online.account import register_username, validate_username
+    from generals.backends.online.endpoints import resolve_endpoint
     from generals.backends.online.transport import SocketIOTransport
-    username, server = validate_username(username), validate_server(server)
+    endpoint = resolve_endpoint(site=site, server=server)
+    username, server = validate_username(username, site=endpoint.site), endpoint.server
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not isfinite(timeout) or timeout <= 0:
         raise ValueError('registration timeout must be positive and finite')
     path = account_path(profile, directory)
@@ -116,12 +119,13 @@ def initialize_account(profile, username, *, directory=None,
             wire = transport if transport is not None else SocketIOTransport(timeout=timeout)
             try:
                 wire.connect(server)
-                register_username(wire, account['user_id'], username, timeout=timeout)
+                register_username(wire, account['user_id'], username, timeout=timeout, server=server)
                 account['status'] = 'registered'
                 account['registered_at'] = datetime.now(timezone.utc).isoformat()
                 _write(path, account)
             finally:
                 wire.close()
         return {'ok': True, 'account': profile, 'username': username, 'server': server,
+                'site': endpoint.site,
                 'status': 'registered', 'already_registered': already_registered,
                 'credential_file': str(path.resolve())}

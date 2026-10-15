@@ -13,6 +13,7 @@ import numpy as np
 from generals import Action, Direction, MapConfig, MoveMode, make_env
 from generals.backends.online import OnlineBackend, OnlineProtocolError, UnsupportedGameError
 from generals.backends.online.protocol import ObservationDecoder, attack_arguments, patch
+from generals.backends.online.endpoints import MAIN_CLIENT_KEY, MAIN_SERVER, resolve_endpoint
 from generals.protocol.match import StaleFrameError
 from generals.runtime.match import run_match
 
@@ -182,6 +183,49 @@ class DecoderTests(unittest.TestCase):
 
 
 class OnlineSessionTests(unittest.TestCase):
+    def test_main_custom_uses_main_wire_arguments_and_replay_site(self):
+        backend, wire = session(site='main', force_start=True)
+        with backend:
+            backend.start()
+            self.assertEqual(wire.server, 'https://ws.generals.io')
+            self.assertEqual(wire.sent, [
+                ('join_private', ('test', 'private-credential', MAIN_CLIENT_KEY, None)),
+                ('set_force_start', ('test', True)),
+            ])
+            self.assertEqual(backend.replay_url, 'https://generals.io/replays/abc%2F123')
+        self.assertEqual(wire.sent[-1], ('leave_game', ()))
+
+    def test_site_public_queues_and_explicit_main_origin_use_matching_protocol(self):
+        for selection in ({'site': 'main'}, {'server': MAIN_SERVER + '/'}, {'site': 'bot'}):
+            for queue in ('1v1', 'ffa'):
+                with self.subTest(selection=selection, queue=queue):
+                    wire = FakeTransport([('game_start', (start_packet(),)),
+                                          ('game_update', (update_packet(),))])
+                    with OnlineBackend(user_id='secret', queue=queue, transport=wire, **selection) as backend:
+                        backend.start()
+                        args = ('secret',)
+                        if backend.site == 'main':
+                            args += (MAIN_CLIENT_KEY, None, None)
+                            if queue == '1v1':
+                                args += (True,)
+                        self.assertEqual(wire.sent, [('join_1v1' if queue == '1v1' else 'play', args)])
+
+    def test_main_server_rejection_is_redacted_and_closes_session(self):
+        wire = FakeTransport([('gio_error', ('rejected secret',))])
+        with self.assertRaisesRegex(OnlineProtocolError, r'rejected \[REDACTED\]'):
+            OnlineBackend(user_id='secret', queue='1v1', site='main', transport=wire).start()
+        self.assertTrue(wire.closed)
+        self.assertEqual([event for event, _ in wire.sent], ['join_1v1', 'cancel'])
+
+    def test_endpoint_selection_rejects_ambiguity_and_does_not_invent_replay_links(self):
+        for options in ({'site': 'other'}, {'site': 'main', 'server': MAIN_SERVER}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                resolve_endpoint(**options)
+        backend, _ = session(server='http://localhost:8000')
+        with backend:
+            backend.start()
+            self.assertIsNone(backend.replay_url)
+
     def test_actions_replace_queue_and_wait_clears_it_without_fake_receipts(self):
         backend, wire = session()
         with backend:
@@ -370,6 +414,7 @@ class TransportTests(unittest.TestCase):
 
     def test_new_error_events_and_connect_failures_are_surfaced(self):
         wire, _ = self.make_wire()
+        self.assertIn('gio_error', [call.args[0] for call in wire.client.on.call_args_list])
         wire._other_event('error_join', 'bad room')
         self.assertEqual(wire.receive(0), ('error_join', ('bad room',)))
         wire.client.connect.side_effect = RuntimeError('transport failed')

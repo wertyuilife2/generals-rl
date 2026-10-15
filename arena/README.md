@@ -9,6 +9,10 @@ C++ 启发式使用 [统一接入接口](RESEARCH.md)：`generals_arena commit �
 Arena 管理源码版本、10ms 限时、评分和录像。可直接使用
 [60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)，其中最多三次正式评测是该研究任务的约束。
 
+官方线上接入使用 `generals_arena online --site bot|main`，支持 Bot 站和主站的独立账号、
+自定义房间、1v1/FFA 队列及连续采样。策略仍使用原 C ABI，线上结果不更新本地 rating；
+详见 [线上 backend 文档](../env/src/generals/backends/online/README.md)。
+
 ## 快速开始
 
 在仓库根目录运行（已有 `.venv` 时先 `source .venv/bin/activate`）：

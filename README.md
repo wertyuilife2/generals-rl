@@ -54,3 +54,7 @@ generals_arena run --player baseline/aggressive --player ./heristic/my_agent/pol
 ```
 
 `commit` 自动完成 500 局 1v1 + 500 局 FFA 正式评测，`run` 保存独立测试记录；详见 [接入文档](arena/RESEARCH.md)。
+
+同一 C++ 策略可通过 `generals_arena online --site bot|main` 接入官方 Bot 站或主站，
+保持原有观测与动作接口。账号存放在 Git 忽略的 `config/secret/`；注册、房间和公开队列
+用法见 [线上 backend 文档](env/src/generals/backends/online/README.md)。
