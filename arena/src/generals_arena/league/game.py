@@ -9,7 +9,7 @@ from generals.core.recording import state_digest, state_from_dict, state_to_dict
 from generals.core.state import Action, compute_stats
 from generals import MapConfig, make_engine
 
-from .observation import local_observation
+from .observation import local_observation, _kernel as observation_kernel
 
 
 def board_view(observation):
@@ -35,6 +35,7 @@ class RecordedGame:
         self.map_config = MapConfig(**plan["map"])
         self.state = generate_map(self.map_config, plan["map_seed"])
         self.engine = make_engine(self.state)
+        observation_kernel()  # Compilation belongs to setup, never a measured tick.
         self.stats = compute_stats(self.state)
         self.initial = state_to_dict(self.state)
         self.initial_digest = state_digest(self.state)

@@ -1,8 +1,15 @@
 """Arena-local observation construction; the environment/RL API is unchanged."""
-import numpy as np
+from functools import lru_cache
+from pathlib import Path
 
 from generals.core.observation import Observation
-from generals.core.state import PlayerStats, UNKNOWN, UNKNOWN_OWNER
+
+
+@lru_cache(maxsize=1)
+def _kernel():
+    from generals.backends._build import build_extension
+    module, _ = build_extension(Path(__file__).with_suffix('.cpp'), name='_generals_arena_observation')
+    return module.observe
 
 
 def local_observation(state, seat, stats):
@@ -11,28 +18,12 @@ def local_observation(state, seat, stats):
     Every published board array owns a fresh buffer. Public totals are immutable
     PlayerStats arrays; other players' city counts remain hidden.
     """
-    owned = state.owner == seat
-    horizontal = owned.copy()
-    horizontal[:, 1:] |= owned[:, :-1]
-    horizontal[:, :-1] |= owned[:, 1:]
-    visible = horizontal.copy()
-    visible[1:] |= horizontal[:-1]
-    visible[:-1] |= horizontal[1:]
-    cities = np.full_like(stats.cities, -1)
-    cities[seat] = stats.cities[seat]
-    arrays = {
-        "terrain": np.where(visible, state.layout.terrain, np.uint8(UNKNOWN)),
-        "structure": np.where(visible, state.structure, np.uint8(UNKNOWN)),
-        "owner": np.where(visible, state.owner, np.int16(UNKNOWN_OWNER)),
-        "army": np.where(visible, state.army, np.int64(-1)),
-        "visible": visible,
-        "alive": state.alive.copy(),
-    }
-    for array in arrays.values():
-        array.flags.writeable = False
+    terrain, structure, owner, army, visible, alive = _kernel()(
+        state.layout.terrain, state.structure, state.owner, state.army, state.alive, seat)
     return Observation(
-        player_id=seat, tick=state.tick, **arrays,
+        player_id=seat, tick=state.tick, terrain=terrain, structure=structure,
+        owner=owner, army=army, visible=visible, alive=alive,
         general_pos=int(state.general_pos[seat]),
-        stats=PlayerStats(stats.army, stats.territory, cities),
+        stats=stats._for_player(seat),
         visibility="local", terminated=state.terminated, winner_id=state.winner_id,
     )

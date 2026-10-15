@@ -14,4 +14,4 @@ where = ["src"]
 include = ["generals_baselines*"]
 
 [tool.setuptools.package-data]
-generals_baselines = ["policy.cpp"]
+generals_baselines = ["policy.cpp", "host.cpp"]

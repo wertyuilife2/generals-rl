@@ -73,7 +73,17 @@ class Journal:
             self.committed[:] = 0
 
     def record(self, game):
-        self.actions[game.state.tick-1] = [Action(*a).encode() for a in game.actions[-1]]
+        # Rows were serialized from validated Action objects by RecordedGame.
+        # Preserve their encoding without reconstructing/validating each Action.
+        codes = []
+        for kind, source, direction, mode in game.actions[-1]:
+            if kind == 0:
+                codes.append(0)
+            else:
+                if source < 0:
+                    raise ValueError('cannot encode a negative source cell')
+                codes.append(1 + source * 8 + direction * 2 + mode)
+        self.actions[game.state.tick-1] = codes
         self.committed[:] = self.records
         self.header[0] = game.state.tick  # Publish after the entire action row.
 

@@ -397,9 +397,37 @@ python arena/benchmarks/verify_league.py outputs/arena/native_1000 --workers 1
 python arena/benchmarks/simulation.py --repeat 5
 ```
 
-默认 fixture 为范围内的 35×33 地图，校验每步动作和状态摘要。
-需要版本间性能比较时，`--reference` / `--reference-arena` 可从 Git 导出指定版本到临时目录，
-无需在工作区保留旧运行代码副本。
+默认 fixture 为 35×33、8 人，校验每步动作和状态摘要，并输出最终 RNG 指纹。
+`--reference` / `--reference-arena` / `--reference-env` 分别从 Git 导出 baseline、Arena、环境版本；
+`--reference-tree PATH` 可读取隔离源码快照中的三个 `src/` 目录。编译、地图初始化和最终录像压缩
+均在计时区间外，`advance()` 内的观测、策略、环境、回调及逐 tick 录像记录全部计时。
+
+2026-10-15 在 Apple M4 Pro / Python 3.13.1 / NumPy 2.3.5 上优化策略计算以外的开销：
+原生融合可见性和观测字段生成，直接绑定 NumPy 数组调用原有 baseline / Arena C ABI，
+减少统计快照、动作转换、环境结果转换和动作日志的重复工作。baseline 的 `policy.cpp`、
+CPU 规则内核和 SDK 计时/watchdog 均未修改；观测仍独立且只读，统计仍有不可写的底层存储。
+原生绑定需要 Python 开发头文件和 NumPy 自带头文件，首次编译在游戏初始化时完成。
+
+以下为相同种子、每轮交替先后顺序的五轮中位数；每个场景独立运行，表中时间是整局推进耗时：
+
+| 场景 | tick 数 | 优化前 | 优化后 | 提速 |
+|---|---:|---:|---:|---:|
+| 35×33 / 8 baseline，原有 fixture | 1,944 | 565.9 ms | 263.9 ms | 2.14× |
+| 17×15 / 2 baseline | 160 | 17.69 ms | 6.78 ms | 2.61× |
+| 25×25 / 4 baseline | 689 | 126.0 ms | 48.55 ms | 2.60× |
+| 35×35 / 8 baseline | 2,000 | 520.0 ms | 243.7 ms | 2.13× |
+| 25×25 / 2 baseline + 2 原生 WAIT，含动作 journal | 747 | 165.2 ms | 54.36 ms | 3.04× |
+
+最后一行使用执行层 `RecordedGame`、原有原生计时/watchdog 及每 tick journal；其余使用
+`simulation.py` 相同的规则层推进循环。均不含数据库、跨进程启动或最终压缩，不能当作整个联赛
+的端到端提速。每轮比较完整动作/状态轨迹、最终 RNG、策略记忆/路径、比赛结果；混合局另比较
+journal 的全部动作编码。原始样本、工作区快照和对照脚本位于
+`outputs/arena-overhead-optimization/{paired.json,paired.log,before,compare.py}`。
+
+验证包括原 ctypes 与新绑定的逐步差分、RNG 和路径记忆、非连续观测、64 位大整数、
+运行中修改策略参数、不可写统计、1 行/1 列地图、超时与崩溃恢复。环境 183 项通过、28 项 CUDA
+跳过；baseline 26 项通过；Arena 原有及新增测试累计 174 项通过；RL 54 项通过、1 项 CUDA 跳过。
+三包独立 wheel 在隔离目录完成冷编译、观测对照和原生策略/baseline 混合对局。
 
 ## 全算法重新评测
 

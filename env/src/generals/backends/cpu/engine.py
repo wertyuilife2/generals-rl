@@ -53,8 +53,8 @@ class CPUEngine:
         stats = PlayerStats(stats[:, 0], stats[:, 1], stats[:, 2])
         reasons = ('SKIPPED', 'WAIT', 'MOVED', 'OUT_OF_BOUNDS', 'NOT_OWNER', 'MOUNTAIN')
         moves = []
-        for seat, row in enumerate(result.moves[0]):
-            active, valid, _, target, moved, captured, eliminated, owned, reason = map(int, row)
+        for seat, row in enumerate(result.moves[0].tolist()):
+            active, valid, _, target, moved, captured, eliminated, owned, reason = row
             if active:
                 moves.append(MoveResult(seat, actions[seat], bool(valid), reasons[reason],
                     actions[seat].source, target, moved, bool(captured),

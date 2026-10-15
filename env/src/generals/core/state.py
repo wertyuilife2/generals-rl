@@ -155,8 +155,21 @@ class PlayerStats:
 
     def __post_init__(self) -> None:
         for name in ("army", "territory", "cities"):
-            values = _integer_array(getattr(self, name), np.int64, name)
+            values = getattr(self, name)
+            # Native totals already have the required integer representation.
+            # Copy directly to immutable bytes: no bounds scan or intermediate
+            # array is needed, and later engine writes cannot change snapshots.
+            if type(values) is not np.ndarray or values.dtype != np.dtype(np.int64):
+                values = _integer_array(values, np.int64, name)
             object.__setattr__(self, name, _readonly(values))
+
+    def _for_player(self, seat):
+        """Share immutable public totals; publish a separate masked city vector."""
+        cities = np.full(self.cities.shape, -1, dtype=np.int64)
+        cities[seat] = self.cities[seat]
+        result = object.__new__(PlayerStats)
+        result.__dict__.update(army=self.army, territory=self.territory, cities=_readonly(cities))
+        return result
 
 
 def compute_stats(state: GameState) -> PlayerStats:

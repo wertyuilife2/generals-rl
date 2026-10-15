@@ -13,7 +13,8 @@ def state_digest(state):
     digest = sha256()
     digest.update(state.layout.topology_id.encode())
     for name in ("structure", "owner", "army", "alive", "general_pos"):
-        digest.update(np.asarray(getattr(state, name), dtype="<i8").tobytes())
+        # hashlib consumes a contiguous buffer directly; no second bytes copy.
+        digest.update(np.ascontiguousarray(getattr(state, name), dtype="<i8"))
     digest.update(json.dumps([state.tick, bool(state.terminated), state.winner_id]).encode())
     return digest.hexdigest()
 

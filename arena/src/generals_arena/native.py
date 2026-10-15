@@ -248,6 +248,13 @@ def _library(path):
     return lib
 
 
+@lru_cache(maxsize=1)
+def _host():
+    from generals.backends._build import build_extension
+    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_arena_host',
+                           headers=(SDK/'arena_policy.h',))[0]
+
+
 def metrics(values):
     data = {name: int(values[i]) for i, name in enumerate(METRIC_FIELDS)}
     return {key: data[key] for key in METRIC_FIELDS[:6]} | {
@@ -291,6 +298,8 @@ class NativeController:
         self.values[:] = 0
         self._activate(1)
         self.lib = _library(self.root/'policy.so')
+        self._native_act = _host().act
+        self._act_address = C.cast(self.lib.arena_host_act, C.c_void_p).value
         self.instance = self.lib.arena_host_create(self.player_id, int(seed),
             (self.root/'params.json').read_bytes(), self.values.ctypes.data_as(C.POINTER(C.c_int64)))
         self._idle()
@@ -303,21 +312,11 @@ class NativeController:
     def act(self, obs):
         if self.instance is None:
             raise RuntimeError('policy must be reset before acting')
-        fields = [(obs.terrain, np.uint8, C.c_uint8), (obs.structure, np.uint8, C.c_uint8),
-                  (obs.owner, np.int16, C.c_int16), (obs.army, np.int64, C.c_int64),
-                  (obs.visible, np.uint8, C.c_uint8), (obs.alive, np.uint8, C.c_uint8),
-                  (obs.stats.army, np.int64, C.c_int64), (obs.stats.territory, np.int64, C.c_int64),
-                  (obs.stats.cities, np.int64, C.c_int64)]
-        arrays = [np.ascontiguousarray(value, dtype=dtype) for value, dtype, _ in fields]
-        previous = Move(*self.previous) if self.previous is not None else None
-        native_obs = Observation(obs.width, obs.height, len(obs.alive), obs.player_id,
-            obs.tick, obs.general_pos,
-            *(array.ctypes.data_as(C.POINTER(kind)) for array, (_, _, kind) in zip(arrays, fields)),
-            C.pointer(previous) if previous is not None else None)
         self._activate(2, obs.tick)
-        encoded = self.lib.arena_host_act(self.instance, C.byref(native_obs),
-                                         self.values.ctypes.data_as(C.POINTER(C.c_int64)))
-        self._idle()
+        try:
+            encoded = self._native_act(self.instance, self._act_address, obs, self.previous, self.values)
+        finally:
+            self._idle()
         self._check(obs.tick, 'decision')
         if not 0 <= encoded <= obs.size*8:
             self.values[5] += 1

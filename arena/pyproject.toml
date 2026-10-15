@@ -21,4 +21,5 @@ where = ["src"]
 include = ["generals_arena*"]
 
 [tool.setuptools.package-data]
-generals_arena = ["web/*.html", "web/*.css", "web/*.js", "sdk/*.h", "sdk/*.cpp"]
+generals_arena = ["web/*.html", "web/*.css", "web/*.js", "sdk/*.h", "sdk/*.cpp", "host.cpp"]
+"generals_arena.league" = ["observation.cpp"]
