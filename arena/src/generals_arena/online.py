@@ -5,12 +5,19 @@ from pathlib import Path
 import tempfile
 
 
+def _site_arguments(parser):
+    destination = parser.add_mutually_exclusive_group()
+    destination.add_argument('--site', choices=('bot', 'main'),
+                             help='official site; online inherits the saved account server, otherwise bot')
+    destination.add_argument('--server', help='explicit Socket.IO origin instead of --site')
+
+
 def add_cli(commands):
     setup = commands.add_parser('online-account', help='create and register a saved Bot account without joining a game')
     setup.add_argument('--account', required=True, help='local account profile, e.g. razor')
-    setup.add_argument('--username', required=True, help='public name, beginning with [Bot]')
+    setup.add_argument('--username', required=True, help='public name; bot site requires [Bot] prefix, main site forbids that prefix')
     setup.add_argument('--account-dir', type=Path, help='private credential directory; defaults to config/secret (run from the project root)')
-    setup.add_argument('--server', default='https://botws.generals.io')
+    _site_arguments(setup)
     setup.add_argument('--timeout', type=float, default=15)
     parser = commands.add_parser('online', help='play one official-server game using a C++ policy')
     parser.add_argument('policy', help='C++ file/directory, policy.zip, @alias, or policy/<hash>')
@@ -20,12 +27,12 @@ def add_cli(commands):
     parser.add_argument('--queue', choices=('custom', '1v1', 'ffa'), default='custom')
     parser.add_argument('--room', help='custom room id (required for the default custom queue)')
     parser.add_argument('--force-start', action='store_true', help='force start a custom room')
-    parser.add_argument('--username', help='register a NEW [Bot] name once; omit on subsequent runs')
+    parser.add_argument('--username', help='register a NEW name once using the selected site rules; omit on subsequent runs')
     identity = parser.add_mutually_exclusive_group()
-    identity.add_argument('--user-id-env', default='GENERALS_BOT_USER_ID', help='credential environment variable name')
+    identity.add_argument('--user-id-env', help='credential variable; defaults to GENERALS_MAIN_USER_ID on main, GENERALS_BOT_USER_ID otherwise')
     identity.add_argument('--account', help='saved account created by online-account')
     parser.add_argument('--account-dir', type=Path, help='private saved-account directory; defaults to config/secret (run from the project root)')
-    parser.add_argument('--server', help='defaults to the saved account server or https://botws.generals.io')
+    _site_arguments(parser)
     parser.add_argument('--seed', type=int, default=42, help='private controller RNG seed; never a map seed')
     parser.add_argument('--start-timeout', type=float, default=120)
     parser.add_argument('--update-timeout', type=float, default=15)
@@ -62,13 +69,13 @@ def command(args):
     if args.command == 'online-account':
         from .online_accounts import initialize_account
         result = initialize_account(args.account, args.username, directory=args.account_dir,
-                                    server=args.server, timeout=args.timeout)
+                                    server=args.server, site=args.site, timeout=args.timeout)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     from generals import make_env
     from generals.runtime.match import run_match
     from .native import NativeController
-    from generals.backends.online.account import DEFAULT_SERVER, validate_server
+    from generals.backends.online.endpoints import resolve_endpoint
     if args.games < 1:
         raise ValueError('--games must be positive')
     if args.games > 1 and args.output is None:
@@ -80,17 +87,22 @@ def command(args):
         account = load_account(args.account, args.account_dir)
         if args.username is not None:
             raise ValueError('saved accounts are already registered; omit --username')
-        if args.server is not None and validate_server(args.server) != account['server']:
+        endpoint = (resolve_endpoint(site=args.site, server=args.server)
+                    if args.site is not None or args.server is not None
+                    else resolve_endpoint(server=account['server']))
+        if endpoint.server != account['server']:
             raise ValueError('saved account is bound to a different server')
-        user_id, server = account['user_id'], account['server']
+        user_id = account['user_id']
     else:
         if args.account_dir is not None:
             raise ValueError('--account-dir requires --account')
-        user_id, server = os.environ.get(args.user_id_env), args.server or DEFAULT_SERVER
+        endpoint = resolve_endpoint(site=args.site, server=args.server)
+        variable = args.user_id_env or ('GENERALS_MAIN_USER_ID' if endpoint.site == 'main' else 'GENERALS_BOT_USER_ID')
+        user_id = os.environ.get(variable)
         if not user_id:
-            raise ValueError(f'set {args.user_id_env} or select a saved --account')
+            raise ValueError(f'set {variable} or select a saved --account')
     options = dict(mode='online', user_id=user_id, room=args.room, queue=args.queue,
-        username=args.username, server=server, force_start=args.force_start,
+        username=args.username, server=endpoint.server, force_start=args.force_start,
         start_timeout=args.start_timeout, update_timeout=args.update_timeout,
         tick_offset=args.tick_offset)
     if args.output is not None:

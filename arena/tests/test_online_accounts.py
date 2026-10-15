@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from generals.backends.online.protocol import OnlineProtocolError
+from generals.backends.online.endpoints import MAIN_CLIENT_KEY, MAIN_SERVER
 from generals_arena.cli import main
 from generals_arena.online_accounts import account_path, initialize_account, load_account
 
@@ -115,6 +116,58 @@ class AccountTests(unittest.TestCase):
         self.assertTrue(json.loads(output.getvalue())['ok'])
         self.assertNotIn(load_account('razor', self.directory)['user_id'], output.getvalue())
         self.assertEqual([name for name, _ in wire.sent], ['set_username'])
+
+    def test_main_account_is_separate_and_uses_main_registration_protocol(self):
+        self.create()
+        bot = load_account('razor', self.directory)
+        wire = RegistrationWire()
+        output = io.StringIO()
+        with patch('generals.backends.online.transport.SocketIOTransport', return_value=wire):
+            with redirect_stdout(output):
+                code = main(['online-account', '--site', 'main', '--account', 'razor-main',
+                             '--username', 'GPT6 Razor Bot', '--account-dir', str(self.directory)])
+        self.assertEqual(code, 0)
+        account = load_account('razor-main', self.directory)
+        self.assertEqual(account['server'], MAIN_SERVER)
+        self.assertEqual(wire.server, MAIN_SERVER)
+        self.assertEqual(wire.sent, [('set_username', (account['user_id'], 'GPT6 Razor Bot', MAIN_CLIENT_KEY, None))])
+        self.assertNotEqual(account['user_id'], bot['user_id'])
+        self.assertEqual(load_account('razor', self.directory), bot)
+        self.assertNotIn(account['user_id'], output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())['site'], 'main')
+
+    def test_main_site_cannot_reuse_bot_profile_for_registration_or_play(self):
+        self.create()
+        original = account_path('razor', self.directory).read_bytes()
+        with redirect_stderr(io.StringIO()), patch('generals.backends.online.transport.SocketIOTransport') as transport:
+            for command in (
+                ['online-account', '--username', 'GPT6 Razor Bot'],
+                ['online', 'unused.cpp', '--room', 'test'],
+            ):
+                with self.subTest(command=command), self.assertRaises(SystemExit) as result:
+                    main([*command, '--site', 'main', '--account', 'razor',
+                          '--account-dir', str(self.directory)])
+                self.assertEqual(result.exception.code, 2)
+            transport.assert_not_called()
+        self.assertEqual(account_path('razor', self.directory).read_bytes(), original)
+
+    def test_main_registration_server_rejection_preserves_pending_identity(self):
+        wire = RegistrationWire()
+        wire.events = deque([('gio_error', ('Account Disabled',))])
+        with self.assertRaisesRegex(OnlineProtocolError, 'server rejected'):
+            initialize_account('razor', 'GPT6 Razor Bot', directory=self.directory,
+                               transport=wire, site='main')
+        self.assertTrue(wire.closed)
+        pending = json.loads(account_path('razor', self.directory).read_text())
+        self.assertEqual(pending['status'], 'pending')
+        self.assertEqual(pending['server'], MAIN_SERVER)
+
+    def test_main_rejects_reserved_bot_prefix_before_saving_or_connecting(self):
+        wire = RegistrationWire()
+        with self.assertRaisesRegex(ValueError, 'cannot start with'):
+            self.create(wire, site='main')
+        self.assertFalse(account_path('razor', self.directory).exists())
+        self.assertEqual(wire.sent, [])
 
     def test_play_binds_saved_identity_to_its_registered_server(self):
         self.create()

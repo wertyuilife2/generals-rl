@@ -26,7 +26,7 @@ class SocketIOTransport:
             websocket_extra_options={'sslopt': {'context': context}})
         self.timeout = timeout
         for name in ('game_start', 'game_update', 'game_won', 'game_lost',
-                     'error_set_username', 'error', 'queue_error', 'connect_error', 'disconnect'):
+                     'error_set_username', 'error', 'gio_error', 'queue_error', 'connect_error', 'disconnect'):
             self.client.on(name, self._handler(name))
         self.client.on('*', self._other_event)
 

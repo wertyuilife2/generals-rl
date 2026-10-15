@@ -29,7 +29,7 @@ class Wire:
         self.closed = False
 
     def connect(self, server):
-        pass
+        self.server = server
 
     def receive(self, timeout=0):
         return self.events.popleft() if self.events else None
@@ -122,6 +122,54 @@ extern "C" std::int64_t arena_act(void *, const ArenaObservation *o) {
                     main(['online', str(self.bundle), '--room', 'test'])
                 self.assertEqual(result.exception.code, 2)
                 transport.assert_not_called()
+
+    def test_main_cli_uses_main_identity_and_saved_account_infers_site(self):
+        for selection in (
+            ['--site', 'main'],
+            ['--server', 'https://ws.generals.io'],
+            ['--account', 'razor-main'],
+        ):
+            with self.subTest(selection=selection):
+                wire = Wire()
+                account = {'user_id': 'main-secret', 'server': 'https://ws.generals.io'}
+                output = io.StringIO()
+                with patch.dict('os.environ', {'GENERALS_MAIN_USER_ID': 'main-secret',
+                                                'GENERALS_BOT_USER_ID': 'bot-secret'}, clear=True), \
+                        patch('generals_arena.online_accounts.load_account', return_value=account), \
+                        patch('generals.backends.online.transport.SocketIOTransport', return_value=wire), \
+                        redirect_stdout(output):
+                    code = main(['online', str(self.bundle), '--room', 'test', *selection])
+                self.assertEqual(code, 0)
+                self.assertEqual(wire.server, 'https://ws.generals.io')
+                self.assertEqual(wire.sent[0][1][1], 'main-secret')
+                self.assertEqual(json.loads(output.getvalue())['replay_url'], 'https://generals.io/replays/test')
+                self.assertNotIn('main-secret', output.getvalue())
+
+    def test_main_cli_does_not_fall_back_to_bot_credential(self):
+        with patch.dict('os.environ', {'GENERALS_BOT_USER_ID': 'bot-secret'}, clear=True), \
+                redirect_stderr(io.StringIO()), \
+                patch('generals.backends.online.transport.SocketIOTransport') as transport:
+            with self.assertRaises(SystemExit) as result:
+                main(['online', str(self.bundle), '--site', 'main', '--room', 'test'])
+            self.assertEqual(result.exception.code, 2)
+            transport.assert_not_called()
+
+    def test_main_series_keeps_main_site_metadata_and_replay_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'series'
+            wire = Wire()
+            with patch.dict('os.environ', {'GENERALS_MAIN_USER_ID': 'main-secret'}), \
+                    patch('generals.backends.online.transport.SocketIOTransport', return_value=wire), \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                code = main(['online', str(self.bundle), '--site', 'main', '--room', 'test',
+                             '--output', str(output)])
+            self.assertEqual(code, 0)
+            report = json.loads((output / 'report.json').read_text())
+            self.assertEqual((report['site'], report['server']), ('main', 'https://ws.generals.io'))
+            self.assertEqual(report['games'][0]['result']['replay_url'], 'https://generals.io/replays/test')
+            records = (output / 'game-001.jsonl').read_text()
+            self.assertEqual(json.loads(records.splitlines()[0])['site'], 'main')
+            self.assertNotIn('main-secret', records)
 
     def test_series_records_each_completed_game_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:

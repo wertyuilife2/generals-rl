@@ -1,6 +1,6 @@
 # 官方线上 backend
 
-`OnlineBackend` 将官方 Bot Server 的玩家视角转换成现有 `Observation`，接收现有
+`OnlineBackend` 将官方 Bot 站或主站的玩家视角转换成现有 `Observation`，接收现有
 `Action`。C++ 策略继续由 Arena 的 `NativeController` 调用，保持原有 C ABI 和动作编码。
 
 安装可选依赖（项目根目录）：
@@ -12,6 +12,49 @@
 线上连接使用 HTTPS / WebSocket 和 Socket.IO 5.x（Engine.IO 4）。2026-10-14
 对 `https://botws.generals.io` 的无账号握手验证：EIO=3 返回 unsupported protocol，
 EIO=4 成功。官方开发文档里的 EIO=3 示例已经过时。
+
+## 选择 Bot 站或主站
+
+`online` 和 `online-account` 均支持 `--site bot|main`：
+
+| 站点 | Socket.IO 地址 | 房间与回放网站 |
+| --- | --- | --- |
+| `bot`（默认） | `https://botws.generals.io` | `https://bot.generals.io` |
+| `main` | `https://ws.generals.io` | `https://generals.io` |
+
+主站使用独立账号配置，保存在项目内的 `config/secret/razor-main.json`。例如：
+
+```bash
+.venv/bin/generals_arena online-account --site main \
+  --account razor-main --username 'GPT6 Razor Bot'
+
+.venv/bin/generals_arena online @gpt-6-razor-v3 --site main \
+  --account razor-main --room razor-main-test \
+  --record outputs/online/razor-main-test-001.jsonl
+```
+
+自定义房间地址为 `https://generals.io/games/razor-main-test`。账号注册命令只注册；
+第二条命令才会加入房间。已保存的账号会自动选择其绑定服务器，因此后续可省略
+`--site`。现有 `razor` Bot 站账号不能配合 `--site main` 使用，也不会被覆盖或迁移。
+
+需要公开队列时，显式将 `--room ...` 替换为 `--queue 1v1` 或 `--queue ffa`；
+连续比赛同样使用 `--games N --output 新目录`。主站的 1v1 入队沿用官方客户端默认值，
+允许匹配 Bot。所有站点共用策略、观测和动作接口；结果中的回放 URL 指向对应站点。
+
+使用环境变量身份时，主站默认读取 `GENERALS_MAIN_USER_ID`，Bot 站默认读取
+`GENERALS_BOT_USER_ID`，不会跨站回退。`--user-id-env NAME` 可显式选择变量。
+`--server` 是自定义 Socket.IO 地址入口，与 `--site` 互斥；直接指定已知主站地址也会
+使用主站协议。未知自定义服务器不推测回放网站，`replay_url` 返回 `null`。
+
+主站禁止用户名以 `[Bot]` 开头，因此使用 `GPT6 Razor Bot` 明确标识自动策略；
+Bot 站仍要求 `[Bot]` 前缀。两站分别校验，不共用名称限制。
+
+主站参数依据 [官方公开客户端 v31.4.3](https://generals.io/generals-main-prod-v31.4.3-485dbf55.js)：
+注册及入队附带公开客户端字段，`gio_error` 等服务器拒绝消息会终止会话。
+2026-10-15 已完成主站无身份 Socket.IO 握手、离线接口验证及独立账号注册。
+主站注册实测拒绝 `[Bot]` 前缀，使用 `GPT6 Razor Bot` 成功；注册失败时仍保留原身份凭据。
+随后使用冻结的 Razor v3 完成 10 场主站 1v1（5 胜 5 负），无连接失败、策略超时或错误。
+记录位于项目 `outputs/online/razor-main-10-20261015T0516Z/report.json`，不影响本地 Arena 评分。
 
 ## 运行 C++ 策略
 
@@ -80,7 +123,7 @@ EIO=4 成功。官方开发文档里的 EIO=3 示例已经过时。
 结果保留。随后用新输出目录运行新版本，并按完成数计算剩余局数。
 
 `--queue ffa` 为 FFA。默认自定义队列必须指定 `--room`，不会意外进入公开匹配。
-每次命令只运行一局。超时、断线或协议错误会结束本次连接，重新运行开始新的会话。
+默认每次命令运行一局。超时、断线或协议错误会结束本次连接，重新运行开始新的会话。
 `--start-timeout` 默认 120 秒，`--update-timeout` 默认 15 秒。
 
 ## Python 接口与抽象边界
@@ -97,6 +140,9 @@ backend = make_env(
 )
 result = run_match(backend, my_controller, seed=42)
 ```
+
+主站使用 `make_env(mode="online", site="main", user_id=主站凭据, room="razor-main-test")`。
+Python 接口的 `site` 与 `server` 同样互斥。
 
 `my_controller` 使用原来的 `reset / act / on_result` 协议；线上 `on_result` 不会被
 调用，因为公开协议没有与本地 `MoveResult` 等价的权威回执。需要精确回执的控制器

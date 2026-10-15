@@ -6,6 +6,7 @@ import sys
 from time import monotonic, sleep
 
 from generals import make_env
+from generals.backends.online.endpoints import resolve_endpoint
 from generals.runtime.match import run_match
 from .native import NativeController, file_digest
 
@@ -42,12 +43,13 @@ def run_series(bundle, options, *, games, output, seed=42, policy=None):
         raise ValueError('games must be positive')
     if options.get('username') is not None:
         raise ValueError('register the account before running a series')
+    endpoint = resolve_endpoint(site=options.get('site'), server=options.get('server'))
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     report = {'schema': 1, 'policy': policy, 'bundle_sha256': file_digest(bundle),
               'requested_games': games, 'completed_games': 0, 'attempted_games': 0,
               'wins': 0, 'losses': 0, 'failures': 0, 'status': 'running',
-              'server': options.get('server'), 'queue': options.get('queue'),
+              'site': endpoint.site, 'server': endpoint.server, 'queue': options.get('queue'),
               'seed': seed, 'started_at': _now(), 'games': [],
               'report': str((output / 'report.json').resolve())}
     path = output / 'report.json'
