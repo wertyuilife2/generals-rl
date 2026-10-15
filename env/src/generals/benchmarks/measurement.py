@@ -31,7 +31,7 @@ def actions_on_device(history, device):
 
 
 def create_step_env(case, initial, history, *, backend, gpu_group_threads=None,
-                    gpu_envs_per_block=None):
+                    gpu_envs_per_block=None, mps_threads_per_group=128):
     env, metadata = None, {}
     try:
         cfg = case.map_config
@@ -43,19 +43,24 @@ def create_step_env(case, initial, history, *, backend, gpu_group_threads=None,
             actions = actions_on_device(history, "cpu")
             metadata.update(name="cpu-step", threads=env.unwrapped.threads, **env.unwrapped.metadata)
             metadata["wrapper_sha256"] = sha256(Path(__import__("generals.backends.cpu.env", fromlist=["x"]).__file__).read_bytes()).hexdigest()
-        elif backend == "gpu":
+        elif backend in ("gpu", "mps"):
             import torch
             from generals.vector import VecEnv
+            device = "mps" if backend == "mps" else case.device
             env = VecEnv({name: torch.from_numpy(value) for name, value in initial.items()},
-                         width=cfg.width, height=cfg.height, device=case.device, seed=case.seed,
-                         backend=backend, kernel_backend="cuda", auto_reset=True, episode_ticks=case.episode_ticks)
-            env.unwrapped.configure_step(group_threads=gpu_group_threads,
-                                         envs_per_block=gpu_envs_per_block)
+                         width=cfg.width, height=cfg.height, device=device, seed=case.seed,
+                         backend=backend, auto_reset=True, episode_ticks=case.episode_ticks)
+            if backend == "gpu":
+                env.unwrapped.configure_step(group_threads=gpu_group_threads,
+                                             envs_per_block=gpu_envs_per_block)
+            else:
+                env.unwrapped.configure_step(threads_per_group=mps_threads_per_group)
             actions = actions_on_device(history, env.device)
-            metadata.update(name="gpu-step", gpu=torch.cuda.get_device_name(env.device),
-                            torch=torch.__version__, cuda_runtime=torch.version.cuda)
+            metadata.update(name=f"{backend}-step", torch=torch.__version__)
+            if backend == "gpu":
+                metadata.update(gpu=torch.cuda.get_device_name(env.device), cuda_runtime=torch.version.cuda)
         else:
-            raise ValueError("step benchmark supports cpu and gpu")
+            raise ValueError("step benchmark supports cpu, gpu and mps")
         return env, actions, metadata
     except BaseException:
         if env is not None:

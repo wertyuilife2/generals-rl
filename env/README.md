@@ -1,6 +1,6 @@
 # generals-env
 
-游戏环境子项目，源码包名为 `generals`，发行包名为 `generals-env`。支持 CPU/CUDA 批量模拟及 Tk 桌面游玩。
+游戏环境子项目，源码包名为 `generals`，发行包名为 `generals-env`。支持 CPU/CUDA/MPS 批量模拟及 Tk 桌面游玩。
 
 从仓库根目录安装和启动：
 
@@ -16,6 +16,12 @@ CPU 原生后端支持 Linux 与 macOS。Linux 需要支持 OpenMP 的 C++17 编
 Apple clang 与已安装的 `libomp`，非标准位置可用 `GENERALS_LIBOMP_PREFIX` 指定。
 首次使用自动编译，后续复用缓存。单局调用 `generals.make_engine(state)`，批量调用 `VecEnv`；
 二者执行同一个 `backends/cpu/step.cpp`，Arena 不再维护执行后端。Python `CoreEngine` 继续作为独立规则参考。
+
+Apple Silicon 可通过 `make_env(..., device="mps")` 选择原生 Metal 后端，需要支持
+`torch.mps.compile_shader` 的 PyTorch（本机验证版本为 2.14.1）。普通 `step(actions)`
+与 CUDA 接口相同；性能比较统一复用 `benchmarks/step.py`，每 tick 等待完成，排除动作生成。
+安装依赖入口为 `python -m pip install -e './env[gpu]'`；MPS 本身不需要 CUDA 或 libomp。
+API、缓存约束及可复现吞吐测量见 [统一文档](../doc/README.md#api)。
 
 ## 随机地图生成
 

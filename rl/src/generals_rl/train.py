@@ -164,7 +164,7 @@ def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=Non
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, help="JSON overrides for task, runner, self_play and evaluation")
-    parser.add_argument("--backend", choices=("cpu", "gpu"))
+    parser.add_argument("--backend", choices=("cpu", "gpu", "mps"))
     parser.add_argument("--device")
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--opponent", choices=("self_play", "random", "wait"))
@@ -190,6 +190,8 @@ def main(argv=None):
             config["task"][field] = value
     if args.backend == "gpu" and args.device is None:
         config["task"]["device"] = "cuda:0"
+    if args.backend == "mps" and args.device is None:
+        config["task"]["device"] = "mps"
     if args.no_eval:
         config.setdefault("evaluation", {})["enabled"] = False
     iterations = None if args.steps_per_env is not None else (args.iterations if args.iterations is not None else 1000)

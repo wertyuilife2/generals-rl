@@ -162,6 +162,19 @@ def gpu_profile(env, actions, expected, kinds, trace_path):
             ]}
 
 
+def mps_profile(env, actions, expected, kinds):
+    import torch
+    with torch.mps.profiler.profile(mode="interval", wait_until_completed=True):
+        durations = timed_steps(env, actions)
+    return {"method": "Metal OS Signposts (Instruments); synchronized public step wall time",
+            "mean_profiled_step_us": float(np.mean(durations)) / 1000,
+            "step_latency_ns": durations, "by_tick_kind": by_tick_kind(durations, kinds),
+            "verification": verify_final(env, expected),
+            "limitations": ["GPU intervals are emitted to Instruments, not included in this JSON.",
+                           "This JSON measures step plus completion; it is not isolated kernel time.",
+                           "Use the separate unprofiled baseline for throughput."]}
+
+
 def profile_case(case, *, backend, prepared=None, trace_path=None, cpu_sample_stride=32, **kwargs):
     cpu_sample_stride = _integer("cpu_sample_stride", cpu_sample_stride, 1)
     for name, default, minimum in (("steps", 1000, 1), ("warmup", 1000, 0), ("repeats", 3, 1)):
@@ -177,7 +190,8 @@ def profile_case(case, *, backend, prepared=None, trace_path=None, cpu_sample_st
     prepared = prepared or prepare_workload(case, steps, warmup)
     baseline = measure_step_case(case, backend=backend, prepared=prepared, **kwargs)
     env, actions, _ = create_step_env(case, prepared.initial, prepared.history, backend=backend,
-        **{name: kwargs[name] for name in ("gpu_group_threads", "gpu_envs_per_block") if name in kwargs})
+        **{name: kwargs[name] for name in ("gpu_group_threads", "gpu_envs_per_block",
+                                          "mps_threads_per_group") if name in kwargs})
     try:
         compile_step(env, actions[0])
         warm_steps(env, actions[:warmup])
@@ -186,6 +200,8 @@ def profile_case(case, *, backend, prepared=None, trace_path=None, cpu_sample_st
         expected = prepared.fingerprints["expected_final_state_sha256"]
         if backend == "cpu":
             profile = cpu_profile(env, actions[:steps], expected, prepared.tick_kinds, cpu_sample_stride)
+        elif backend == "mps":
+            profile = mps_profile(env, actions[:steps], expected, prepared.tick_kinds)
         else:
             profile = gpu_profile(env, actions[:steps], expected, prepared.tick_kinds, trace_path)
         profile["profiled_over_baseline_latency_ratio"] = (

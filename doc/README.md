@@ -1,8 +1,8 @@
 # Generals 环境开发与使用说明
 
-更新日期：2026-10-10。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。
+更新日期：2026-10-15。本文说明 CPU/OpenMP、GPU/CUDA 和 Apple Silicon/Metal 实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。
 
-项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则源自原 JS 游戏，交互参考 generals.io；不保证与官网或原 JS 的随机决策逐步相同。强化学习算法独立放在 `rl/`，本文说明环境本身及其接口。
+项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP、GPU/CUDA 和 MPS/Metal 批量环境。规则源自原 JS 游戏，交互参考 generals.io；不保证与官网或原 JS 的随机决策逐步相同。强化学习算法独立放在 `rl/`，本文说明环境本身及其接口。
 
 - [安装与运行](#quickstart)
 - [游戏规则、地图与 AI](#rules)
@@ -25,7 +25,8 @@
 | AI 策略 / 无界面 AI 模拟 | 额外需要 Linux/macOS 与 C++17 编译器，baseline 在 C++ 中执行 |
 | GUI | 额外需要 Tk 和图形桌面；Linux/X11 已实测，内置 AI 目前要求 Linux/macOS |
 | CPU 单局 / 批量模拟 | 支持 Linux/macOS；需要 C++17/OpenMP，macOS 需 clang 与 libomp；编译器可用 `CXX` 指定 |
-| GPU 批量模拟 | Linux、PyTorch ≥2.13、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件 |
+| CUDA 批量模拟 | Linux、PyTorch ≥2.13、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件 |
+| MPS 批量模拟 | Apple Silicon/macOS、MPS-enabled PyTorch，须提供 `torch.mps.compile_shader`；已验证 PyTorch 2.14.1 / macOS 15.7.7，不需要 nvcc 或 libomp |
 
 在仓库根目录安装到现有 conda 环境：
 
@@ -34,7 +35,7 @@ conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-`--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
+`--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；CUDA/MPS 的可选依赖入口均为 `python -m pip install -e './env[gpu]'`，CUDA 仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
 
 不安装包时，可在仓库根目录设置源码路径运行（Windows 的路径分隔符用 `;`）：
 
@@ -129,11 +130,12 @@ env/
       batch.py               CPU/GPU 共用的冷初始化和状态转换
     backends/cpu/            C++/OpenMP 单 tick 执行、NumPy/ctypes 缓冲区
     backends/gpu/            CUDA 单 tick 内核、Torch 状态与原生启动桥
+    backends/mps/            Metal 单 tick 内核、设备常驻状态
     controllers/             人类队列及按需加载 baseline 的交互工厂
     runtime/                 Runner 与 PlaySession
     gui/                     Tk 展示与输入
-    benchmarks/              workload、step 计时、CPU/CUDA profiling
-  benchmarks/                benchmark_step.py、profile_step.py 两个入口
+    benchmarks/              workload、step 计时、CPU/CUDA/MPS profiling
+  benchmarks/                benchmark_step.py、profile_step.py
   tests/                     规则、设备、接口、GUI 和工具测试
 baselines/                   独立的手写策略包 generals_baselines
 arena/                       统一对战、版本登记、结果记录与 Elo 排名
@@ -148,7 +150,11 @@ CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分
 
 GPU 使用 CUDA 单 tick 内核：棋盘常驻设备张量，统计和增长索引跨调用缓存；默认根据 batch 选择 32×4（B≤2048）、8×16（2048<B<32768）、32×8（B≥32768），组内 leader 执行顺序行动。共享库与 launch 参数持久保存，正常 step 经 CPython 原生桥更新动作指针和当前 stream；宽高/玩家数为编译常量，缓存已占领结构的增长索引、统计和计数，总格点数至少 2000 万时还使用 32 位格点元数据缓存。不发生逐 tick CPU 地图处理或状态上传。
 
-`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只接受默认配置或兼容参数 `kernel_backend="cuda"`。
+MPS 使用 `torch.mps.compile_shader` 编译原生 Metal，每次调用严格推进一个完整 tick，接收外部预先生成的动作。棋盘使用连续的 16 字节格点记录，将 int64 兵力、归属、结构和地形放在一起；玩家字段与输出保留按字段排列。状态、初态、输出和私有缓存各使用一个 Metal 缓冲区，减少逐步参数绑定；状态与初态各自共享版本计数，原地编辑后自动重建缓存。宽、高、人数和 batch 为编译常量。
+
+每个线程负责一局，增量维护统计、已占格列表和已占结构增长列表；全领土增长与继承只遍历已占格，自动重置仍完整恢复初态。列表不重复记录易手领土，支持完整 4096 格棋盘。兵力、tick 和统计始终使用 64 位整数。格点记录由原来的 12 字节字段数据增加到 16 字节，并额外保存每格 2 字节的已占格索引，以改善访存局部性。性能统一通过现有 `benchmarks/step.py` 测量，每 tick 等待执行完成。
+
+`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。CUDA 编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；MPS shader 在进程内按形状缓存。首次编译不计入基准。缺少依赖时明确报错。CUDA 接受默认配置或 `kernel_backend="cuda"`，MPS 接受默认配置或 `kernel_backend="metal"`。
 
 公开根包为 `make_engine, make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
 
@@ -205,6 +211,19 @@ with make_env(MapConfig(25, 25, 4), device="cuda", batch_size=10000,
     env.check_errors()
 ```
 
+Apple Silicon 选择 `device="mps"`，也可显式设置 `backend="mps"`；`backend="gpu", device="mps"` 同样有效：
+
+```python
+import torch
+from generals import MapConfig, make_env
+
+with make_env(MapConfig(25, 25, 4), device="mps", batch_size=8192,
+              auto_reset=True, episode_ticks=2048, seed=42) as env:
+    actions = torch.zeros((env.batch_size, env.players), dtype=torch.int64, device=env.device)
+    result = env.step(actions)   # 联合动作的一次完整 tick，可接神经网络
+    env.synchronize()
+```
+
 默认 `mode="vector"`，返回 `VecEnv`。实时入口为 `make_env(MapConfig(players=4), mode="realtime", seed=42).run()`，返回的类型是 `generals.runtime.play.PlaySession`；`watch=True` 启用观战，实时模式使用 CPU 参考引擎。
 
 批量后端支持每图最多 4096 格、2–8 玩家，同批次宽、高和人数相同，各自地形/初态可以不同。`VecEnv.from_states(states, device=...)` 导入已有 `GameState`；`VecEnv(initial, width=..., height=..., device=...)` 接受对应 NumPy/Torch 字段字典；`to_states()` 显式导出独立 CPU 状态副本。
@@ -251,9 +270,9 @@ mode: 全部留一=0，半兵=1
 
 默认 `auto_reset=False`，自然结束或达到有效 `episode_ticks` 上限后冻结对应环境；0 表示不设时限。开启自动重置后，step 内恢复各环境缓存的初态，**`state` 已是新局，而 `stats/done/moves` 仍描述结束 tick**。需要终止棋盘或终止观测时，关闭自动重置，读取后再 `reset(mask)`。`mask` 为对应设备的 `bool[B]`；显式 reset 恢复初态及初始 RNG，清空所选环境诊断和计数，未选环境不变。
 
-CPU step 同步完成，CUDA 在当前 stream 上异步提交。计时使用 `synchronize()` 等待完成；`check_errors()` 检查协议错误字段并可能同步，不由 `synchronize()` 代替。CPU 数值错误冻结受影响环境，失败 tick 不保证完整，检查后显式重置；GPU 不再提供溢出检查或相应冻结保证。实例的 step/reset 串行调用；跨 CUDA stream 使用时调用方负责建立依赖。
+CPU step 同步完成，CUDA 在当前 stream 上异步提交，MPS 在 PyTorch Metal stream 上异步提交。计时使用 `synchronize()` 等待完成；`check_errors()` 检查协议错误字段并可能同步，不由 `synchronize()` 代替。CPU 数值错误冻结受影响环境，失败 tick 不保证完整，检查后显式重置；GPU 不再提供溢出检查或相应冻结保证。实例的 step/reset 串行调用；跨 CUDA stream 使用时调用方负责建立依赖。
 
-直接编辑 CPU 状态后调用 `invalidate_cache()`；GPU 正常 PyTorch 原地修改会通过版本计数失效缓存，原生 CUDA 写入、`.data` 或 inference-mode 编辑须显式失效。不能替换底层存储、shape 或 dtype，也不要与在途 step 并发改写。只读特征无需失效缓存。使用上下文管理器或 `close()` 释放环境引用。
+直接编辑 CPU 状态后调用 `invalidate_cache()`；CUDA/MPS 正常 PyTorch 原地修改会通过版本计数失效缓存，原生设备写入、`.data` 或 inference-mode 编辑须显式失效。不能替换底层存储、shape、stride 或 dtype，也不要与在途 step 并发改写。MPS 公开形状与 CUDA 相同，但多维张量通常不连续；需要平铺时用 `reshape()`，不要假设 `view()` 可用。只读特征无需失效缓存。使用上下文管理器或 `close()` 释放环境引用。
 
 <a id="features"></a>
 ## 6. 观测、路径与 RL 扩展
@@ -284,7 +303,7 @@ summary = Runner(state, controllers, seed=42, visibility="local", max_ticks=2000
 <a id="benchmark"></a>
 ## 7. 逐 step benchmark 与 profiling
 
-### 唯一计时口径
+### 单步计时口径
 
 只测公开 `VecEnv` 的一整个 batch tick：
 
@@ -315,7 +334,7 @@ for action in prepared_actions:
 以下在仓库根目录运行；无需安装时，两个脚本会自行定位 `env/src`。输出用新路径，不能覆盖已有文件：
 
 ```bash
-# CPU/GPU 同一负载对比；也可 --backend cpu 或 gpu
+# CPU/CUDA 同一负载对比；也可 --backend cpu 或 gpu
 OMP_WAIT_POLICY=ACTIVE OMP_PROC_BIND=spread OMP_PLACES=threads conda run -n generals-rl python env/benchmarks/benchmark_step.py --backend both --threads 26 --sizes 25 --players 4 --batch-sizes 1000 10000 100000 --output outputs/step.json
 
 # 同样的逐步基准，加一次单独的 CPU/GPU profile
@@ -323,13 +342,16 @@ OMP_WAIT_POLICY=ACTIVE OMP_PROC_BIND=spread OMP_PLACES=threads conda run -n gene
 
 # 已安装包也可直接使用同一个 benchmark 实现
 conda run -n generals-rl python -m generals benchmark --backend cpu --threads 26 --output outputs/cpu-step.json
+
+# Apple Silicon：CPU/MPS 完全相同的动作轨迹，每 tick 等待完成
+.venv/bin/python env/benchmarks/benchmark_step.py --backend both --device mps --threads 10 --sizes 25 --players 4 --batch-sizes 2048 8192 32768 --steps 1000 --warmup 128 --repeats 5 --episode-ticks 500 --output outputs/mps-step.json
 ```
 
 默认参数：25×25、4 玩家、10,000 环境、1000 测量 tick、每轮 1000 预热 tick、3 轮、horizon=500、seed=42。`--sizes`、`--players`、`--batch-sizes` 支持列表，`--sizes` 也支持 `40x25`。批量先比较 1k/10k/100k，再按结果显式细分。CPU/GPU 依次测量，不同时争用计算资源。
 
 CPU 默认 `--threads 0` 由 OpenMP 可用处理器数决定；本机此前扫描的最佳设置是 26 线程、静态调度、`ACTIVE/spread/threads`。这是本机测量结果，并非所有硬件的最优值。库不会修改进程的 OpenMP 设置。
 
-GPU 使用上述自适应线程配置，`--gpu-group-threads` 和 `--gpu-envs-per-block` 可覆盖。GPU 原生桥只使用当前 Python 头文件和 C++ 编译器，不需要 pybind11 或 libtorch 开发依赖。`--steps`、`--warmup`、`--repeats`、`--episode-ticks`、`--seed` 和 `--device` 控制测量条件。工具只比较当前 CPU/GPU 实现。
+CUDA 使用上述自适应线程配置，`--gpu-group-threads` 和 `--gpu-envs-per-block` 可覆盖。CUDA 原生桥只使用当前 Python 头文件和 C++ 编译器，不需要 pybind11 或 libtorch 开发依赖。`--steps`、`--warmup`、`--repeats`、`--episode-ticks`、`--seed` 和 `--device` 控制测量条件。`--backend mps` 单独测试 Metal；`--backend both --device mps` 比较 CPU/MPS。MPS 默认每线程组 128 个环境，可通过 `--mps-threads-per-group` 或 `env.unwrapped.configure_step(threads_per_group=...)` 调整；此参数只改变启动配置，不合并 tick。
 
 报告包括硬件、OpenMP 亲和设置、代码哈希、编译参数、初态/动作/末态指纹、计数、逐步延迟和 CPU/GPU 加速比。profile 报告中的 `summary` 始终来自**无插桩基准**；`profile` 字段是诊断采集结果，不能拿来比较吞吐。
 
@@ -339,12 +361,13 @@ GPU 使用上述自适应线程配置，`--gpu-group-threads` 和 `--gpu-envs-pe
 |---|---|---|
 | CPU | 单独编译 profiler，直接包含当前 `backends/cpu/step.cpp`；默认按 tick 轮转采样 1/32 的环境 | native 区间、worker span、缓存准备、增长、行动/淘汰、输出/计数、自动重置、缓存回写 |
 | GPU | PyTorch/CUPTI 捕获真实 CUDA step；每个 tick 一个 CPU annotation | 实际 kernel 时长、CUDA API、传输、kernel 外时间、逐 tick Chrome trace |
+| MPS | `torch.mps.profiler` 发出 Metal OS Signposts | JSON 保存每 tick 完成墙钟时间；设备时间线需用 Instruments 采集，不在 JSON 中伪报 kernel 时长 |
 
 CPU 标记在普通构建中编译为空，不需要复制规则或字符串替换源码；采样计数按 cache line 隔离，避免 profiler 自己引入 worker 之间的伪共享。`--cpu-sample-stride` 可调整采样密度；逐阶段计时是采样 worker 时间，不能当成整批墙钟时间相加。阶段时钟会放大小阶段的占比；native 与最长 worker 的差值包含 OpenMP 进入/汇合和调度，不能简单称为纯 barrier 开销。另直接记录进入并行区到首个 worker、worker 开始时间跨度和最后 worker 完成后的汇合尾部。profile 提供与无插桩基准的耗时比，明确扰动程度。
 
 GPU 先在测量 marker 外预热 profiler 回调、恢复初态，再采集逐步调用。初始化、reset 和读回事件不会混入被测 tick 的汇总。trace 保存为输出 JSON 同目录的 `*_25x25_p4_b10000.cuda.trace.json` 等文件，可用 Perfetto 打开。GPU annotation 不是第二次 step；kernel 时间取区间并集，避免重复计算。CUDA launch/synchronize 与 GPU 执行重叠，不能相加；kernel 外时间还包含主机工作、空闲间隔和 profiler 开销。
 
-两种 profile 都按真实轨迹将 tick 归类，优先级为：有任一环境 reset、首次冷启动、任一环境全图增长（50 tick）、任一环境结构增长（2 tick）、仅行动。类别互斥，保存各类步数/平均/P50/P95及总耗时占比。CPU 数值分析可结合逐步 native 行数据；GPU 可同时查看每类 kernel 时间。
+三种 profile 都按真实轨迹将 tick 归类，优先级为：有任一环境 reset、首次冷启动、任一环境全图增长（50 tick）、任一环境结构增长（2 tick）、仅行动。类别互斥，保存各类步数/平均/P50/P95及总耗时占比。CPU 数值分析可结合逐步 native 行数据；CUDA 可同时查看每类 kernel 时间。MPS 使用同一 `profile_step.py --backend mps` 入口。
 
 本机 `perf_event_paranoid=4`，无法使用 perf 硬件计数器。当前 profile 能区分主机提交/完成等待、真实设备工作和规则阶段，**不能证明**内存带宽饱和、cache miss 或具体 warp stall；trace 中寄存器/occupancy 信息也不是实测硬件利用率。
 
@@ -352,6 +375,26 @@ GPU 先在测量 marker 外预热 profiler 回调、恢复初态，再采集逐�
 
 <a id="results"></a>
 ## 8. 当前性能验证
+
+### Apple M4 Pro / MPS，2026-10-15
+
+本机 Apple M4 Pro（20 核 GPU、14 核 CPU、24 GB 统一内存），macOS 15.7.7、Python 3.13.1、PyTorch 2.14.1。测量统一使用 `benchmarks/step.py` 的 `env.step(action) + synchronize()`，逐 tick 等待完成，排除动作生成；所有后端使用同一份初态和动作轨迹，验证完整末态、统计、动作诊断、done/errors、计数及 RNG。
+
+本轮采用相同初态和冻结动作，1000 测量 tick、128 预热 tick、horizon=500、seed=42、线程组 128。优化前后逐轮交错运行，交替先后顺序；25×25 重复 5 轮，其余地图重复 3 轮，报告各轮平均单步延迟的中位数换算吞吐。CPU 以 10 个 OpenMP 线程另测 3 轮。所有地图独立生成，不循环铺排地图池。
+
+| 地图 / 玩家 | 环境数 | MPS 优化前 | MPS 优化后 | 提速 | CPU 对照 |
+|---|---:|---:|---:|---:|---:|
+| 25×25 / 4 | 2,048 | 13.99M | **15.27M** | 1.09× | 31.15M |
+| 25×25 / 4 | 8,192 | 31.45M | **47.31M** | 1.50× | 36.90M |
+| 25×25 / 4 | 32,768 | 34.18M | **55.64M** | 1.63× | 22.27M |
+| 9×9 / 2 | 8,192 | 36.42M | **50.65M** | 1.39× | 99.32M |
+| 35×35 / 8 | 8,192 | 19.39M | **26.42M** | 1.36× | 15.23M |
+
+单位均为完整环境 tick/s，包含 Python 验证、Metal 提交、规则、所有公开输出、自动重置和每 tick 完成同步；不包含动作生成、观测或训练。32,768 环境的 55.64M/s 对应约 589 µs/batch，并非每秒调用 55.64M 次 Python API。小 batch 和 9×9 场景中 CPU 仍更快。
+
+交错实验直接调用现有 `measure_step_case()`，未改计时函数和工作负载生成器；各版本及 CPU 的初态、动作、最终状态指纹完全一致，每轮也核验统计、动作诊断、done/errors、计数和 RNG。原始报告、逐步延迟、源码快照及实验驱动保存在本地 `outputs/mps-step-optimization/paired-*.json`、`paired.log` 和 `compare_step.py`。调优中测试过的全脏格稀疏重置、SIMD 多线程协作均因整体单步变慢而撤回；保留的优化不包含随机策略或多 tick rollout。
+
+### i7-14700KF / RTX 4090，历史清理验证
 
 清理前后的对照使用相同冻结地图和 1000 tick 动作轨迹，25×25、4 玩家、seed=42、每 500 tick 自动重置。只测每 tick 的 `env.step(action)` 和完成同步，排除决策、初始化及预热。CPU 使用 26 线程，GPU 使用默认自适应配置；硬件为 i7-14700KF / RTX 4090。
 
@@ -368,7 +411,11 @@ GPU 先在测量 marker 外预热 profiler 回调、恢复初态，再采集逐�
 conda run -n generals-rl python -m unittest discover -s env/tests -v
 ```
 
-GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。本轮 163 项环境测试（含 Linux GUI 和 CUDA）通过；独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。规则覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
+2026-10-15 的 Apple Silicon 验证：环境套件 200 项，172 通过、28 项 CUDA 测试因无设备跳过；RL 套件 55 项，54 通过、1 项 CUDA 测试跳过。12 项真实 Metal 测试覆盖 CPU 逐 tick 对照、运行中切换线程组、领土反复易手、满容量索引、继承、冻结、部分重置、打包状态修改失效、inference 张量、64 位整数、最大棋盘、观测与合法掩码。RL 额外验证 CPU/MPS MDP 一致性，以及真实历史池 self-play 的两阶段更新、有限 loss 和 checkpoint。wheel 检查确认包含 `kernel.metal`。macOS 运行 RL 套件使用 `TMPDIR=/private/tmp`，避免系统临时路径 `/var` 与 `/private/var` 别名影响既有恢复测试。
+
+MPS profile 入口通过同轨迹核验，结果在 `outputs/mps-step-optimization/profile-smoke.json`。文档训练命令另完成 2 次实际更新、256 个环境 tick 和 checkpoint 保存，产物在 `outputs/mps/training-smoke/`；这只是集成 smoke，不作为训练速度基准。本轮测试日志保存在 `outputs/mps-step-optimization/{env-tests,rl-tests}.log`。
+
+GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。此前 Linux 清理验证的 163 项环境测试（含 GUI 和 CUDA）通过；独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。规则覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
 
 本次清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证结论。恢复历史实现时应解压到独立目录。
 

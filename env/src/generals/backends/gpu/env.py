@@ -15,6 +15,14 @@ from generals.protocol.vector import BatchStep
 
 
 class GPUEnv:
+    kernel_kind = "cuda"
+
+    def _resolve_device(self, device):
+        requested = torch.device(device)
+        if requested.type != "cuda" or not torch.cuda.is_available():
+            raise ValueError("GPUEnv requires an available CUDA device")
+        return torch.device("cuda", torch.cuda.current_device() if requested.index is None else requested.index)
+
     def __init__(self, initial: Mapping[str, torch.Tensor], *, width: int, height: int,
                  device="cuda", seed=42, kernel_backend=None, auto_reset=False, episode_ticks=0):
         self._closed = False
@@ -25,13 +33,10 @@ class GPUEnv:
         self.episode_ticks = _integer("episode_ticks", episode_ticks, 0)
         if self.episode_ticks > np.iinfo(np.int64).max:
             raise ValueError("episode_ticks must fit int64")
-        if kernel_backend not in (None, "cuda"):
-            raise ValueError("kernel_backend must be cuda")
-        self.kernel_backend = "cuda"
-        requested = torch.device(device)
-        if requested.type != "cuda" or not torch.cuda.is_available():
-            raise ValueError("GPUEnv requires an available CUDA device")
-        self.device = torch.device("cuda", torch.cuda.current_device() if requested.index is None else requested.index)
+        if kernel_backend not in (None, self.kernel_kind):
+            raise ValueError(f"kernel_backend must be {self.kernel_kind}")
+        self.kernel_backend = self.kernel_kind
+        self.device = self._resolve_device(device)
         if set(initial) != set(STATE_DTYPES):
             raise ValueError(f"initial state must have fields {tuple(STATE_DTYPES)}")
         if not isinstance(initial["army"], torch.Tensor) or initial["army"].ndim != 2:

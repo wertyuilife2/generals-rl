@@ -168,6 +168,25 @@ class MDPComponentTests(unittest.TestCase):
         torch.testing.assert_close(result.total, torch.tensor([3.68, -4.32, -.02]))
         torch.testing.assert_close(result.total, sum(result.terms.values()))
 
+    @unittest.skipUnless(torch.backends.mps.is_available(), "MPS device unavailable")
+    def test_cpu_mps_backends_share_mdp_observation_and_action_contract(self):
+        from generals.backends.mps import MPSEnv
+
+        states = [example_state(), hidden_world_variant(example_state())]
+        cpu = self.backend(states)
+        gpu = MPSEnv.from_states(states)
+        self.addCleanup(gpu.close)
+        pids = torch.tensor([0, 1])
+        cpu_batch = GameBatch.from_backend(cpu, "cpu")
+        gpu_batch = GameBatch.from_backend(gpu, "mps")
+        encoder = LocalObservationEncoder(episode_ticks=64)
+        for privileged in (False, True):
+            torch.testing.assert_close(encoder.encode(cpu_batch, pids, privileged),
+                                       encoder.encode(gpu_batch, pids.to('mps'), privileged).cpu())
+        actions = EncodedActionSpace(5, 5)
+        torch.testing.assert_close(actions.mask(cpu_batch, pids),
+                                   actions.mask(gpu_batch, pids.to('mps')).cpu())
+
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA device unavailable")
     def test_cpu_gpu_backends_share_mdp_observation_and_action_contract(self):
         from generals.backends.gpu.env import GPUEnv
