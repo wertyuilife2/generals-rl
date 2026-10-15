@@ -8,6 +8,7 @@ struct Program {
  Order orders[40];
 };
 Program proposals[18],mission;
+double proposalScore[18]{};
 int proposalCount=0,missionTick=-1;
 int missionReceiptCell=-1,missionReceiptForce=0;
 std::int64_t missionAction=0;
@@ -87,16 +88,29 @@ Program oneStep(const Candidate &c,int kind=0)const {
  if(c.source>=0&&c.dir>=0){q.count=1;q.orders[0]={c.source,nb[c.source][c.dir],c.half};}
  return q;
 }
+// Prune proposals by the same utility that selects the actual order. Raw
+// campaign prizes cannot displace a safer alternative before its safety cost
+// has been evaluated; this also applies when two plans share their first move.
+double programScore(const Program &q)const {
+ if(q.cursor>=q.count)return -1e30;
+ const Order &x=q.orders[q.cursor];
+ if(!legalOrder(x,q.kind==3))return -1e30;
+ double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
+ if(after>baselineDanger+1&&after>60&&q.kind!=3)return -1e30;
+ double transferRisk=(q.kind==2||q.kind==6)?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
+ double continuedRisk=(q.born<tick&&(q.kind==1||q.kind==8))?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
+ return q.value-after-transferRisk-continuedRisk;
+}
 void offer(const Program &q){
- if(q.cursor>=q.count||!legalOrder(q.orders[q.cursor],q.kind==3))return;
+ double value=programScore(q);if(value<=-1e29)return;
  const Order &x=q.orders[q.cursor];
  for(int i=0;i<proposalCount;i++){
   const Order &y=proposals[i].orders[proposals[i].cursor];
-  if(x.s==y.s&&x.t==y.t&&x.half==y.half){if(q.value>proposals[i].value)proposals[i]=q;return;}
+  if(x.s==y.s&&x.t==y.t&&x.half==y.half){if(value>proposalScore[i]){proposals[i]=q;proposalScore[i]=value;}return;}
  }
- if(proposalCount<18){proposals[proposalCount++]=q;return;}
- int worst=0;for(int i=1;i<18;i++)if(proposals[i].value<proposals[worst].value)worst=i;
- if(q.value>proposals[worst].value)proposals[worst]=q;
+ if(proposalCount<18){proposalScore[proposalCount]=value;proposals[proposalCount++]=q;return;}
+ int worst=0;for(int i=1;i<18;i++)if(proposalScore[i]<proposalScore[worst])worst=i;
+ if(value>proposalScore[worst]){proposals[worst]=q;proposalScore[worst]=value;}
 }
 
 // Price access to the future army, including a shorter way to recover an
@@ -606,13 +620,7 @@ std::int64_t decideV7(const ArenaObservation *obs){
  // Safe alternatives are preferred before comparing economic benefits.
  double bestScore=-.01-baselineDanger;int best=-1;
  for(int j=0;j<proposalCount;j++){
-  Program &q=proposals[j];const Order &x=q.orders[q.cursor];
-  if(!legalOrder(x,q.kind==3))continue;
-  double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
-  if(after>baselineDanger+1&&after>60&&q.kind!=3)continue;
-  double transferRisk=(q.kind==2||q.kind==6)?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
-  double continuedRisk=(q.born<tick&&(q.kind==1||q.kind==8))?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
-  double score=q.value-after-transferRisk-continuedRisk;
+  double score=proposalScore[j];
   if(score>bestScore){bestScore=score;best=j;}
  }
  if(best<0){mission=Program();missionTick=tick;return 0;}
