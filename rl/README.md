@@ -13,7 +13,9 @@ python -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -e ./env -e ./baselines -e ./arena -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
 ```
 
-GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `GENERALS_NVCC` 指定编译器路径。
+CUDA 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `GENERALS_NVCC` 指定编译器路径。
+Apple Silicon 可用 `--backend mps`，模拟使用原生 Metal 内核，模型也在 MPS 上运行。
+需要支持 `torch.mps.compile_shader` 的 PyTorch；已验证 2.14.1 的实际两阶段训练与历史池 self-play。
 
 ## 训练与评估
 
@@ -25,6 +27,10 @@ GPU 模拟另外需要 CUDA 编译工具链；让 `nvcc` 位于 PATH，或用 `G
 # CPU baseline，默认历史池 self-play
 .venv/bin/python -m generals_rl.train --config rl/configs/baseline.json \
   --iterations 1000 --output outputs/moe_cts/baseline
+
+# Apple Silicon：原生 Metal 模拟 + MPS 模型 smoke
+.venv/bin/python -m generals_rl.train --config rl/configs/smoke.json \
+  --backend mps --iterations 2 --no-eval --output outputs/moe_cts/mps_smoke
 
 # GPU：16384 个环境，每环境精确采样 1M tick
 .venv/bin/python -m generals_rl.train --config rl/configs/gpu.json \

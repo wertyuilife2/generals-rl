@@ -33,10 +33,12 @@ class TaskConfig:
         MapConfig(self.width, self.height, self.players, self.mountain_density, self.city_density)
         if self.num_envs < 1 or self.max_episode_steps < 1 or self.history_length < 1:
             raise ValueError("num_envs, episode steps, and history must be positive")
-        if self.backend not in ("cpu", "gpu"):
-            raise ValueError("backend must be cpu or gpu")
-        if self.backend != "cpu" and torch.device(self.device).type != "cuda":
-            raise ValueError("GPU simulation requires a CUDA task device")
+        if self.backend not in ("cpu", "gpu", "mps"):
+            raise ValueError("backend must be cpu, gpu or mps")
+        if self.backend == "gpu" and torch.device(self.device).type not in ("cuda", "mps"):
+            raise ValueError("GPU simulation requires a CUDA or MPS task device")
+        if self.backend == "mps" and torch.device(self.device).type != "mps":
+            raise ValueError("MPS simulation requires an MPS task device")
         if not 0 <= self.learner_seat < self.players:
             raise ValueError("learner seat is out of range")
 
@@ -64,7 +66,7 @@ class GeneralsTask:
         self.device = torch.device(config.device)
         self.num_envs = config.num_envs
         sim_device = "cpu" if config.backend == "cpu" else config.device
-        options = {"threads": config.threads} if config.backend == "cpu" else {"kernel_backend": "cuda"}
+        options = {"threads": config.threads} if config.backend == "cpu" else {}
         self.backend = backend if backend is not None else make_env(
             MapConfig(config.width, config.height, config.players,
                       config.mountain_density, config.city_density),

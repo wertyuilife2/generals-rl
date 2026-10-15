@@ -1,6 +1,6 @@
 # Generals 游戏环境
 
-2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`，跨策略/版本的对战与 Elo 排名位于 `arena/`。
+2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA/MPS 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`，跨策略/版本的对战与 Elo 排名位于 `arena/`。
 
 从仓库根目录，在已有 `generals-rl` conda 环境中安装和启动：
 
@@ -9,7 +9,7 @@ conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面。CPU 批量后端使用 Linux C++/OpenMP，GPU 使用可选的 PyTorch/CUDA。
+基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面。CPU 批量后端支持 Linux/macOS C++/OpenMP；GPU 使用可选的 PyTorch，支持 CUDA 和 Apple Silicon 原生 Metal（`device="mps"`）。
 
 没有图形桌面时可运行 AI 模拟：
 
@@ -26,7 +26,7 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 - [当前实现的性能验证](doc/README.md#results)
 - [测试与历史存档](doc/README.md#verification)
 
-后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
+性能比较统一以每 tick 的 `env.step(action)` 加完成同步为准，使用相同预生成动作并排除决策时间。CPU、CUDA、MPS 均复用 `env/src/generals/benchmarks/step.py`；新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
 
 强化学习 baseline 已在 `rl/` 实现：直接复制指定版本的 rsl_rl，以最小补丁支持离散 MoE CTS，解耦 MDP 的观测、动作、奖励与对手，并提供后续 MCTS 的整 tick 分支模拟接口。安装、训练、补丁说明和测试见 [RL 使用说明](rl/README.md)。
 
