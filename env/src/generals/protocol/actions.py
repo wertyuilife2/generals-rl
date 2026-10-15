@@ -41,6 +41,8 @@ class ActionKind(IntEnum):
 
 
 def _as_int(value: object, name: str) -> int:
+    if type(value) is int:
+        return value
     if isinstance(value, bool) or not isinstance(value, Integral):
         raise TypeError(f"{name} must be an integer")
     return int(value)
@@ -63,6 +65,11 @@ class Action:
 
     @classmethod
     def wait(cls) -> "Action":
+        if cls is Action:
+            result = object.__new__(cls)
+            result.__dict__.update(kind=ActionKind.WAIT, source=-1, direction=Direction.UP,
+                                   mode=MoveMode.ALL_BUT_ONE)
+            return result
         return cls(ActionKind.WAIT)
 
     @classmethod
@@ -86,4 +93,15 @@ class Action:
             return cls.wait()
         source, remainder = divmod(encoded - 1, 8)
         direction, mode = divmod(remainder, 2)
+        if cls is Action:
+            # Encoding validation proves every field's invariant. Construct a
+            # fresh immutable value without validating those fields a second time.
+            result = object.__new__(cls)
+            result.__dict__.update(kind=ActionKind.MOVE, source=source,
+                                   direction=_DIRECTIONS[direction], mode=_MODES[mode])
+            return result
         return cls.move(source, Direction(direction), MoveMode(mode))
+
+
+_DIRECTIONS = tuple(Direction)
+_MODES = tuple(MoveMode)

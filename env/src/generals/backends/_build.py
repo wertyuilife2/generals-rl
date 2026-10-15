@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import sysconfig
 import tempfile
 
 _openmp_runtime = None
@@ -69,3 +70,24 @@ def build_shared(source, *, name, flags=None):
     return ctypes.CDLL(str(target)), {'compiler': version, 'compiler_flags': flags,
                                      'source_sha256': sha256(source.read_bytes()).hexdigest(),
                                      'build_sha256': key}
+
+
+def build_extension(source, *, name, headers=()):
+    """Load a small CPython/NumPy bridge, isolated from the policy/engine ABI."""
+    import importlib.util
+    from importlib.machinery import ExtensionFileLoader
+    import numpy as np
+    flags = ['-fPIC', '-shared', '-I' + sysconfig.get_path('include'), '-I' + np.get_include(),
+             '-DPYTHON_BUILD_ID=' + str(sys.hexversion),
+             '-DPYTHON_SOABI="' + str(sysconfig.get_config_var('SOABI')) + '"',
+             '-DNUMPY_BUILD_ID="' + np.__version__ + '"']
+    if headers:
+        flags.append('-DGENERALS_HEADERS_ID="' + sha256(b''.join(Path(p).read_bytes() for p in headers)).hexdigest() + '"')
+    if sys.platform == 'darwin':
+        flags += ['-undefined', 'dynamic_lookup']
+    lib, metadata = build_shared(source, name=name, flags=flags)
+    spec = importlib.util.spec_from_file_location(name, lib._name,
+                                                loader=ExtensionFileLoader(name, lib._name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, metadata

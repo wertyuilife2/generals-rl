@@ -72,3 +72,22 @@ def test_exact_large_integer_totals_and_hidden_city_counts():
     for seat in range(2):
         assert_same(local_observation(state, seat, stats), observe(state, seat))
         assert local_observation(state, seat, stats).stats.army[0] == 2**53 + 11
+
+
+@pytest.mark.parametrize('shape', [(1, 2), (2, 1), (1, 65), (64, 1), (7, 9)])
+def test_native_visibility_edges_and_noncontiguous_state(shape):
+    from generals.core.state import GameState, MapLayout
+    n = np.prod(shape)
+    owner = np.full(shape, -1, np.int16)
+    structure = np.zeros(shape, np.uint8)
+    army = np.zeros(shape, np.int64)
+    owner.flat[0], owner.flat[-1] = 0, 1
+    structure.flat[0] = structure.flat[-1] = 2
+    army.flat[0], army.flat[-1] = 2**53 + 11, 7
+    state = GameState(MapLayout(np.zeros(shape, np.uint8)), structure, owner, army,
+                      np.ones(2, bool), np.array([0, n - 1], np.int32))
+    for name in ('structure', 'owner', 'army'):
+        setattr(state, name, np.asfortranarray(getattr(state, name)))
+    stats = compute_stats(state)
+    for seat in range(2):
+        assert_same(local_observation(state, seat, stats), observe(state, seat))
