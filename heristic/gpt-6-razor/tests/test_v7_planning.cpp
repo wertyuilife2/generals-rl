@@ -9,7 +9,9 @@ struct Fixture {
  Fixture(){std::fill(visible,visible+25,1);std::fill(owner,owner+25,-1);owner[0]=0;army[0]=20;structure[0]=2;}
 };
 void originalSupplyChecks();
+void proposalChecks();
 int main(){
+ proposalChecks();
  originalSupplyChecks();
  {
   Fixture f;std::fill(f.owner,f.owner+25,0);std::fill(f.army,f.army+25,1);
@@ -94,4 +96,20 @@ void originalSupplyChecks(){
    assert(p->assemblyCredit(program,12,troops[12],25)==5);
   }
  }
+}
+
+void proposalChecks(){
+ std::uint8_t terrain[25]{},structure[25]{},visible[25],alive[2]={1,1};
+ std::int16_t owner[25];std::int64_t army[25],total[2]={321,30},land[2]={23,2},cities[2]={1,0};
+ std::fill(owner,owner+25,0);std::fill(army,army+25,1);std::fill(visible,visible+25,1);
+ army[0]=200;structure[0]=2;structure[12]=1;army[12]=100;owner[13]=owner[17]=1;army[13]=10;army[17]=20;
+ ArenaObservation obs{5,5,2,0,100,0,terrain,structure,owner,army,visible,alive,total,land,cities,nullptr};
+ auto p=std::make_unique<Policy>(0,123,"{}");p->update(&obs);p->buildAttacks();p->baselineDanger=p->dangerAfter(nullptr);
+ Policy::Program net;net.kind=1;net.born=100;net.count=1;net.orders[0]={12,13,false};net.value=10;
+ Policy::Program gross=net;gross.kind=2;gross.value=12;
+ assert(p->programScore(net)>p->programScore(gross));
+ p->offer(net);p->offer(gross);
+ assert(p->proposalCount==1&&p->proposals[0].kind==1);
+ p->proposalCount=0;p->offer(gross);p->offer(net);
+ assert(p->proposalCount==1&&p->proposals[0].kind==1);
 }
