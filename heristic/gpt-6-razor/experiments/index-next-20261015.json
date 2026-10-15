@@ -1,7 +1,7 @@
 {
   "series": "gpt-6-razor-v7",
-  "formal_evaluations_started": 0,
-  "publication": null,
+  "formal_evaluations_started": 1,
+  "publication": "outputs/arena/native_1000/commits/19113053431cc5968ed9971afafc8874b3837b21d4b19279ccc7a4fc811a83d8/publication.json",
   "versions": {
     "e8c514799dbc4a4d9666309086dfe37bcb61d2ebc4956005d130aa8ca60d2eb3": {
       "source_directory": "heristic/gpt-6-razor/experiments/e8c514799dbc4a4d9666309086dfe37bcb61d2ebc4956005d130aa8ca60d2eb3",
@@ -1666,17 +1666,62 @@
       "ffa"
     ]
   },
+  "blocked_formal_submission_attempts": [
+    {
+      "name": "gpt-6-razor-v7",
+      "source": "heristic/gpt-6-razor/v7/policy.cpp",
+      "params": "heristic/gpt-6-razor/v7/params.json",
+      "utc": "2026-10-15T14:52:38.522066+00:00",
+      "status": "blocked_before_preflight",
+      "formal_evaluations_started": 0,
+      "completed_games": 0,
+      "report": null,
+      "log": "outputs/analysis/razor-next-20261015/official-v7-submit.log",
+      "error": "league rules/source changed; use its original code or initialize a new league",
+      "original_runtime_check": "League manifest verified; black-box baseline preparation fails because current baseline package requires build_extension unavailable in preserved league environment."
+    }
+  ],
   "formal_submission_attempt": {
     "name": "gpt-6-razor-v7",
-    "source": "heristic/gpt-6-razor/v7/policy.cpp",
-    "params": "heristic/gpt-6-razor/v7/params.json",
-    "utc": "2026-10-15T14:52:38.522066+00:00",
-    "status": "blocked_before_preflight",
-    "formal_evaluations_started": 0,
-    "completed_games": 0,
-    "report": null,
-    "log": "outputs/analysis/razor-next-20261015/official-v7-submit.log",
-    "error": "league rules/source changed; use its original code or initialize a new league",
-    "original_runtime_check": "League manifest verified; black-box baseline preparation fails because current baseline package requires build_extension unavailable in preserved league environment."
+    "version": "19113053431cc5968ed9971afafc8874b3837b21d4b19279ccc7a4fc811a83d8",
+    "status": "complete",
+    "formal_evaluations_started": 1,
+    "completed_games": 1000,
+    "games_by_mode": {
+      "1v1": {
+        "budget": 500,
+        "done": 500
+      },
+      "ffa": {
+        "budget": 500,
+        "done": 500
+      }
+    },
+    "ratings": {
+      "1v1": 1866.833831377226,
+      "ffa": 1130.760619702181
+    },
+    "ranks": {
+      "1v1": 1,
+      "ffa": 2
+    },
+    "timing": {
+      "calls": 687852,
+      "errors": 0,
+      "limit_ns": 10000000,
+      "max_ns": 2378000,
+      "timeouts": 0,
+      "total_ns": 142754561000
+    },
+    "report": "outputs/arena/native_1000/commits/19113053431cc5968ed9971afafc8874b3837b21d4b19279ccc7a4fc811a83d8/publication.json",
+    "recorded_utc": "2026-10-15T15:21:39.788018+00:00"
+  },
+  "runtime_migration": {
+    "receipt": "outputs/arena/native_1000/runtime_migrations/73fb780fc8b043dd96b194476c4a2c42.json",
+    "verification": "outputs/analysis/runtime-compat-20261015/applied-verification-2.json",
+    "history_preserved": true,
+    "regression_tests_passed": 45,
+    "runtime_fix_git_commit": "2131b71",
+    "delivery_verification": "outputs/analysis/runtime-compat-20261015/delivery-verification.json"
   }
 }
