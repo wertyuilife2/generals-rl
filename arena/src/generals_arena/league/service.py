@@ -47,8 +47,10 @@ def controllers_for(store, plan):
             controllers.append(None)
             continue
         for package, expected in entrant["implementation"].items():
-            if package != "custom_version" and source_digest(package) != expected:
-                raise ValueError(f"registered source changed for {entrant['name']}; restore the recorded version")
+            if package != "custom_version":
+                from ..runtime_compat import compatible_implementation
+                if not compatible_implementation(store, entrant, package, expected, source_digest(package)):
+                    raise ValueError(f"registered source changed for {entrant['name']}; restore the recorded version")
         controllers.append(load_controller(entrant, rules))
     return controllers
 
