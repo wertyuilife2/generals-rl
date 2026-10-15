@@ -34,7 +34,8 @@ def test_upgrade_preserves_records_jobs_replays_and_rebuilds_evidence(tmp_path):
     assert {k:v for k,v in result.items() if k not in ignored} == {k:v for k,v in saved.items() if k not in ignored}
     assert replay == blob and store.jobs() == jobs
     assert result['rating_policy'] == POLICY and result['rating_group_size'] == 2
-    assert json.loads(publication.read_text())['ratings']['1v1'] == store.ratings()[a['entrant_id']]
+    assert json.loads(publication.read_text())['ratings']['1v1'] == (
+        store.ratings()[a['entrant_id']]-store.ratings()[store.anchor])
     # Existing in-memory derived statistics must notice a score-only revision.
     assert stats.leaderboard() == LeaderboardStatistics(store).leaderboard()
     pending = store.pending(job)

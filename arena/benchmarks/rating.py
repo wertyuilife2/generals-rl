@@ -10,13 +10,15 @@ import math
 import numpy as np
 
 from generals_arena.league.rating import expected
-from generals_arena.league.rating_policy import CUMULATIVE_POLICY, LEGACY_POLICY, ONLINE_POLICY, POLICY, score
+from generals_arena.league.mode_rating import initial_rating, probability
+from generals_arena.league.modes import rating_mode
+from generals_arena.league.rating_policy import CUMULATIVE_POLICY, LEGACY_POLICY, CALIBRATED_POLICY, FIXED_GOR_POLICY, POLICY, score
 from generals_arena.league.rank_model import comparisons, rotation_key
 from generals_arena.league.store import LeagueStore
 from generals_arena.util import write_json
 
 
-def anchor_calibration(ratings, evidence, anchor):
+def anchor_calibration(ratings, evidence, anchor, predict=expected):
     """Check the absolute origin separately from relative prediction accuracy."""
     pairs = [(right if left == anchor else left, total, total-wins if left == anchor else wins)
              for (left, right), (total, wins) in evidence.items() if anchor in (left,right)]
@@ -26,7 +28,7 @@ def anchor_calibration(ratings, evidence, anchor):
     observed = sum(wins for _,_,wins in pairs)/weight
 
     def predicted(offset):
-        return sum(total*expected(ratings.get(key,0)+offset,0) for key,total,_ in pairs)/weight
+        return sum(total*predict(ratings.get(key,0)+offset,0) for key,total,_ in pairs)/weight
 
     offset = None
     if 0 < observed < 1:
@@ -41,16 +43,21 @@ def anchor_calibration(ratings, evidence, anchor):
     return dict(effective_comparisons=weight, observed_pair_score=observed,
                 predicted_pair_score=predicted(0), required_offset_elo=offset,
                 opponents=[dict(entrant_id=key, weight=total, observed_pair_score=wins/total,
-                                predicted_pair_score=expected(ratings.get(key,0),0))
+                                predicted_pair_score=predict(ratings.get(key,0),0))
                            for key,total,wins in pairs])
 
 
 def evaluate(records, policy, anchor):
     ratings, counts, evidence = {}, Counter(), {}
     changes, loss, weight, violations = [], 0., 0., 0
+    mode = rating_mode(records[0]) if records else '1v1'
+    modern = policy in (FIXED_GOR_POLICY, POLICY)
+    relative = policy == POLICY and mode == '1v1'
+    initial = initial_rating(mode) if modern else 0.
+    predict = (lambda a,b: probability(mode,a,b)) if modern else expected
     for result in records:
         for left, right, amount, outcome in comparisons(result):
-            p = max(1e-12, min(1-1e-12, expected(ratings.get(left,0), ratings.get(right,0))))
+            p = max(1e-12, min(1-1e-12, predict(ratings.get(left,initial), ratings.get(right,initial))))
             loss -= amount*(outcome*math.log(p)+(1-outcome)*math.log1p(-p))
             weight += amount
         update = score(ratings, {**result,'rating_policy':policy}, anchor, 32, counts, evidence)
@@ -60,15 +67,17 @@ def evaluate(records, policy, anchor):
                     winner, loser = (left,right) if outcome == 1 else (right,left)
                     violations += int(update[winner]['delta'] < -1e-8 or update[loser]['delta'] > 1e-8)
         for key, change in update.items():
-            if key != anchor and counts[key] >= 200 and change.get('distinct_opponents',0):
+            if (key != anchor or relative or (modern and mode == 'ffa')) and counts[key] >= 200 and change.get('distinct_opponents',0):
                 changes.append(abs(change['delta']))
             ratings[key], counts[key] = change['after'], change['rated_games']
+    offset = ratings.get(anchor,0.) if relative else 0.
     return dict(prequential_log_loss=loss/weight if weight else None,
                 late_update_mean=float(np.mean(changes)) if changes else None,
                 late_update_p95=float(np.percentile(changes,95)) if changes else None,
                 late_update_max=max(changes, default=None), late_updates=len(changes),
-                duel_direction_violations=violations, ratings=ratings,
-                anchor_calibration=anchor_calibration(ratings,evidence,anchor))
+                duel_direction_violations=violations, ratings={key:value-offset for key,value in ratings.items()},
+                raw_ratings=ratings, rating_offset=offset,
+                anchor_calibration=None if relative or (modern and mode == 'ffa') else anchor_calibration(ratings,evidence,anchor,predict))
 
 
 def main():
@@ -90,7 +99,8 @@ def main():
         report['modes'][mode] = dict(games=len(matches), provisional_cutoff=200,
                       legacy=evaluate(matches,LEGACY_POLICY,store.anchor),
                       cumulative=evaluate(matches,CUMULATIVE_POLICY,store.anchor),
-                      previous=evaluate(matches,ONLINE_POLICY,store.anchor),
+                      previous=evaluate(matches,CALIBRATED_POLICY,store.anchor),
+                      fixed_gor=evaluate(matches,FIXED_GOR_POLICY,store.anchor),
                       current=evaluate(matches,POLICY,store.anchor))
     if args.output:
         write_json(args.output, report)

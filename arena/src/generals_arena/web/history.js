@@ -17,12 +17,24 @@ export function entrantColor({name, kind}) {
   const match = kind === 'human' ? null : name.match(/^(.+)-v(0|[1-9][0-9]*)$/);
   const series = match ? match[1] : name;
   const version = match ? Number(match[2]) : 0;
+  if (kind !== 'human' && name.toUpperCase() === 'WAIT')
+    return {series:'WAIT', version, hue:0, color:'#999999'};
+  if (kind === 'baseline') return {series:'baseline', version, hue:0, color:'#ffffff'};
   let hash = 2166136261;
   for (const character of series.toLowerCase()) hash = Math.imul(hash ^ character.codePointAt(0), 16777619);
   const hue = (hash >>> 0) % 360;
-  const lightness = [72,64,80,69,86,76,66,83][version % 8];
-  const saturation = 70 + (Math.floor(version / 8) % 4) * 7;
-  return {series, version, hue, color: `hsl(${hue} ${saturation}% ${lightness}%)`};
+  // New versions become deeper without wrapping or recoloring older versions.
+  // The lower bound keeps text readable against the dark panels.
+  const lightness = 58 + 28 * Math.exp(-Math.max(0,version-1)/5);
+  return {series, version, hue, color: `hsl(${hue} 76% ${lightness}%)`};
+}
+
+export function compareEntrants(a,b) {
+  const first = entrantColor(a), second = entrantColor(b);
+  return first.series.localeCompare(second.series,'en',{numeric:true,sensitivity:'base'})
+    || first.version - second.version
+    || a.name.localeCompare(b.name,'en',{numeric:true,sensitivity:'base'})
+    || (a.entrant_id || '').localeCompare(b.entrant_id || '');
 }
 
 export function placements(match) {

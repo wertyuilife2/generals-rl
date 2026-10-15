@@ -5,26 +5,29 @@ import random
 
 from ..util import digest
 from .modes import rating_mode
+from .mode_rating import initial_rating
 
 
 def choose_opponents(target, candidates, count, ratings, coverage, anchor, rng, block):
-    """60% nearby ratings, 25% underplayed opponents, 15% uniform exploration."""
+    """Duels: 80% nearby, 15% coverage, 5% uniform; FFA: 60/25/15.
+
+    The reference has no special matchmaking treatment.
+    """
     remaining = sorted(candidates)
     if not remaining:
         raise ValueError("register at least one bot")
     picked = []
     usage = {key: int(key == target) for key in remaining}
-    if block % 5 == 0 and anchor in remaining and anchor != target:
-        picked.append(anchor)
-        usage[anchor] += 1
+    proximity, exploration = (.8, .05) if count == 2 else (.6, .15)
+    default = initial_rating('1v1' if count == 2 else 'ffa')
     while len(picked) < count - 1:
         # Exhaust distinct strategies before adding a second copy. When the
         # roster is small, allocate repeats evenly, counting the target seat.
         minimum = min(usage.values())
         available = [key for key in remaining if usage[key] == minimum]
-        nearby = [math.exp(-min(700, abs(ratings.get(key, 0) - ratings.get(target, 0)) / 300)) for key in available]
+        nearby = [math.exp(-min(700, abs(ratings.get(key, default) - ratings.get(target, default)) / 300)) for key in available]
         underplayed = [1 / (1 + coverage.get(key, 0)) for key in available]
-        weights = [.6 * n / sum(nearby) + .25 * c / sum(underplayed) + .15 / len(available)
+        weights = [proximity * n / sum(nearby) + (1-proximity-exploration) * c / sum(underplayed) + exploration / len(available)
                    for n, c in zip(nearby, underplayed)]
         selected = rng.choices(available, weights=weights, k=1)[0]
         picked.append(selected)

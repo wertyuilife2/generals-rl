@@ -15,8 +15,10 @@ from ..util import canonical, integer
 from .config import LeagueConfig
 from .rating import SCALE, PROVISIONAL_GAMES, ranks
 from .rating_policy import EVIDENCE_POLICIES, POLICY, score
+from .mode_rating import CF_SCALE, FFA_MEAN, initial_rating
 from .rank_model import comparisons, rotation_key
 from .modes import MODES, rating_mode, validate_mode, mode_predicate
+from .titles import rating_title, title_bands
 
 PAIR_SCHEMA = """CREATE TABLE IF NOT EXISTS rating_pairs(
  mode TEXT NOT NULL,
@@ -59,6 +61,16 @@ class LeagueStore:
             raise ValueError("this is an archived league schema; initialize a new rank-rated league directory")
         self.config = LeagueConfig(**{"map_generation": None, **self.manifest["config"]})
         self.anchor = meta["anchor"]
+        # A pool count should scan a compact index, not parse every saved plan.
+        # Install for existing leagues as well as newly created ones.
+        with self.connect(write=True) as db:
+            db.execute("CREATE INDEX IF NOT EXISTS games_completed_players ON games "
+                       "(json_array_length(plan, '$.entrant_ids'), sequence) WHERE status='complete'")
+            # Filter/count/order history without reading the large result and
+            # replay rows. Only the requested page is fetched from the table.
+            db.execute("CREATE INDEX IF NOT EXISTS games_history ON games "
+                       "(sequence DESC, finished DESC, plan) "
+                       "WHERE status IN ('complete','aborted','failed')")
 
     @property
     def reference(self):
@@ -499,16 +511,26 @@ class LeagueStore:
 
     def leaderboard(self, mode=None, *, include_retired=False):
         mode = validate_mode(mode or self.default_mode())
+        current = self.manifest['rating'] in ('independent-gor-codeforces-v2', 'independent-relative-gor-codeforces-v3')
+        relative = self.manifest['rating'] == 'independent-relative-gor-codeforces-v3' and mode == '1v1'
+        mean_pool = current and mode == 'ffa'
         with self.connect() as db:
-            rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,
-                COALESCE(r.elo,0) elo,COALESCE(r.games,0) games,COALESCE(r.rated_games,0) rated_games,COALESCE(r.appearances,0) appearances,
+            rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,e.rowid registration_order,
+                COALESCE(r.elo,?) elo,COALESCE(r.games,0) games,COALESCE(r.rated_games,0) rated_games,COALESCE(r.appearances,0) appearances,
                 COALESCE(r.wins,0) wins,COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
-                LEFT JOIN ratings r ON r.entrant_id=e.id AND r.mode=? ORDER BY elo DESC,e.name""", (mode,))]
-            completed = db.execute("SELECT count(*) FROM games WHERE status='complete' AND " + mode_predicate(mode)).fetchone()[0]
+                LEFT JOIN ratings r ON r.entrant_id=e.id AND r.mode=? ORDER BY elo DESC,e.name""", (initial_rating(mode) if current else 0., mode))]
+            completed = db.execute("SELECT count(*) FROM games INDEXED BY games_completed_players "
+                                   "WHERE status='complete' AND " + mode_predicate(mode)).fetchone()[0]
         retired = self.retired_entrants()
+        offset = next(row['elo'] for row in rows if row['entrant_id'] == self.anchor) if relative else 0.
         for row in rows:
-            row["anchor"] = row["entrant_id"] == self.anchor
+            if relative:
+                row['raw_elo'] = row['elo']
+                row['elo'] -= offset
+            row["anchor"] = not mean_pool and row["entrant_id"] == self.anchor
             row["provisional"] = row["rated_games"] < PROVISIONAL_GAMES
+            if mode == '1v1':
+                row['rating_title'] = rating_title(row['elo'],row['rated_games'])
             if row['entrant_id'] in retired:
                 row['retired'] = True
         disabled = self.disabled_policy_ids()
@@ -517,9 +539,15 @@ class LeagueStore:
                 row['disqualified'] = True
         if not include_retired:
             rows = [row for row in rows if not row.get('retired')]
-        return {"mode": mode, "player_counts": tuple(p for p in self.config.player_counts if (p == 2) == (mode == '1v1')), "ranking": rows, "anchor": self.anchor,
-                "scale": SCALE, "completed_games": completed,
-                "anchor_games": next(row['games'] for row in rows if row['anchor'])}
+        return {"mode": mode, "player_counts": tuple(p for p in self.config.player_counts if (p == 2) == (mode == '1v1')), "ranking": rows,
+                "anchor": None if mean_pool else self.anchor,
+                "rating_model": ('codeforces' if mean_pool else 'egf-gor') if current else 'rank',
+                "rating_offset": offset,
+                "title_bands": title_bands() if mode == '1v1' else [],
+                "rating_mean": FFA_MEAN if mean_pool else None,
+                "scale": (CF_SCALE if mean_pool else None) if current else SCALE,
+                "completed_games": completed,
+                "anchor_games": next((row['games'] for row in rows if row['anchor']), 0)}
 
     def leaderboards(self, *, include_retired=False):
         return {mode: self.leaderboard(mode, include_retired=include_retired) for mode in MODES}
@@ -565,8 +593,11 @@ class LeagueStore:
             where += " AND (SELECT count(*) FROM json_each(plan, '$.entrant_ids') WHERE value=?)>=?"
             values.extend((key, minimum))
         with self.connect() as db:
-            total = db.execute(f"SELECT count(*) FROM games WHERE {where}", values).fetchone()[0]
-            rows = db.execute(f"SELECT id,status,plan,result,finished FROM games WHERE {where} ORDER BY finished DESC LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
+            source = f"FROM games INDEXED BY games_history WHERE {where}"
+            total = db.execute(f"SELECT count(*) {source}", values).fetchone()[0]
+            rows = db.execute(f"""SELECT id,status,plan,result,finished FROM games WHERE rowid IN (
+                SELECT rowid {source} ORDER BY sequence DESC,finished DESC LIMIT ? OFFSET ?
+                ) ORDER BY sequence DESC,finished DESC""", (*values, limit, offset)).fetchall()
         return {"total": total, "matches": [{**json.loads(r["result"] or r["plan"]), "status": r["status"], "finished": r["finished"]} for r in rows]}
 
     def match_is_visible(self, game_id):

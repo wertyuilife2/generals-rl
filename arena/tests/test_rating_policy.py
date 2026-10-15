@@ -6,7 +6,7 @@ import pytest
 
 from generals_arena.league.config import LeagueConfig
 from generals_arena.league.rating import LOGISTIC_SLOPE, expected, rate
-from generals_arena.league.rating_policy import POLICY, LEGACY_POLICY, ONLINE_POLICY, player_count, score
+from generals_arena.league.rating_policy import CALIBRATED_POLICY as POLICY, LEGACY_POLICY, ONLINE_POLICY, player_count, score
 from generals_arena.league.rank_model import fit
 from generals_arena.league.service import eligible_schedule
 from generals_arena.league.store import LeagueStore
@@ -153,6 +153,7 @@ def test_multiplayer_averages_each_opponent_strategy_and_is_seat_invariant():
 
 
 def test_automatic_duels_are_informative_and_new_rules_survive_rebuild(tmp_path):
+    from generals_arena.league.rating_policy import POLICY
     store = LeagueStore.create(tmp_path/'league', LeagueConfig(player_counts=(2,), max_ticks=1))
     a, _ = store.add({'name':'a','kind':'baseline','policy':'aggressive'}, games=2)
     for block in range(30):

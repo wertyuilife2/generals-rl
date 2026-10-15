@@ -186,6 +186,28 @@ def test_match_filters_combine_participants_counts_and_pagination(tmp_path):
         server_thread.join(2)
 
 
+def test_history_index_tracks_completed_and_unsequenced_games(tmp_path):
+    store = league(tmp_path)
+    with store.connect(write=True) as db:
+        # Existing leagues acquire the index when reopened.
+        db.execute('DROP INDEX games_history')
+        for name, status, sequence, finished in (
+                ('complete', 'complete', 0, 1), ('pending', 'pending', 1, None),
+                ('failed', 'failed', None, 3), ('aborted', 'aborted', None, 2)):
+            plan = json.dumps({'game_id': name, 'entrant_ids': [store.anchor, store.anchor]})
+            db.execute('INSERT INTO games(id,status,plan,sequence,created,finished) VALUES(?,?,?,?,0,?)',
+                       (name, status, plan, sequence, finished))
+    store = LeagueStore(store.directory)
+    assert [m['game_id'] for m in store.matches()['matches']] == ['complete', 'failed', 'aborted']
+    assert store.matches(entrant=store.anchor, opponent=store.anchor)['total'] == 3
+    with store.connect(write=True) as db:
+        db.execute("UPDATE games SET status='complete',finished=4 WHERE id='pending'")
+    assert store.matches(limit=1)['matches'][0]['game_id'] == 'pending'
+    assert store.matches(offset=1, limit=1)['matches'][0]['game_id'] == 'complete'
+    assert store.matches(mode='1v1')['total'] == 4
+    assert store.matches(mode='ffa')['total'] == 0
+
+
 def test_new_algorithm_only_schedules_its_budget(tmp_path):
     store = league(tmp_path)
     add(store, games=2)
@@ -244,6 +266,9 @@ def test_http_retirement_filters_history_metadata_and_cached_replays(tmp_path):
             return json.load(response)
     try:
         assert get('/api/replay/' + game_id)['frames']  # Prime the response cache.
+        with urlopen(Request(url + '/api/replay/' + game_id, headers={'Accept-Encoding': 'gzip'})) as response:
+            assert response.headers['Content-Encoding'] == 'gzip'
+            assert json.loads(gzip.decompress(response.read())) == get('/api/replay/' + game_id)
         store.set_retired(old['entrant_id'])
         assert store.matches() == before  # The audit history is preserved.
         assert store.matches(include_retired=False)['total'] == 0
@@ -432,6 +457,61 @@ def test_human_matchmaking_can_select_non_random_opponents(tmp_path):
     assert len(opponents) == 2
 
 
+def test_human_selected_opponents_duplicates_random_slots_and_account_isolation(tmp_path):
+    store = league(tmp_path, max_ticks=2)
+    bot, _ = add(store)
+    alice = store.account('select Alice')['entrant']['entrant_id']
+    bob = store.account('select Bob')['entrant']['entrant_id']
+    arena = LiveArena(store)
+    a = arena.create_game(alice, 4, [bot['entrant_id'], bot['entrant_id'], None])
+    assert [e['entrant_id'] for e in a['entrants']].count(bot['entrant_id']) >= 2
+    assert len(a['entrants']) == 4
+    b = arena.create_game(bob, opponents=[store.anchor])
+    assert {e['entrant_id'] for e in b['entrants']} == {bob, store.anchor}
+    assert arena.active(alice)['game_id'] == a['game_id']
+    assert arena.active(bob)['game_id'] == b['game_id']
+    assert arena.create_game(alice, 2, [store.anchor])['game_id'] == a['game_id']
+    with pytest.raises(PermissionError):
+        arena.command(a['game_id'], bob, {'id':1,'op':'append','action':0})
+    arena.thread.start()
+    try:
+        deadline = time.monotonic()+3
+        while any(not arena.active(key)['done'] for key in (alice,bob)) and time.monotonic()<deadline:
+            time.sleep(.02)
+        assert all(arena.active(key)['done'] and not arena.active(key)['error'] for key in (alice,bob))
+        assert store.leaderboard('1v1')['completed_games'] == 1
+        assert store.leaderboard('ffa')['completed_games'] == 1
+    finally:
+        arena.close()
+
+
+@pytest.mark.parametrize('players,opponents', [
+    (2,[]), (2,'random'), (2,[None,None]), (2,[{}]), (2,['missing']),
+    (9,[None]*8), (3,[None]*2),
+])
+def test_invalid_human_opponents_do_not_create_games(tmp_path, players, opponents):
+    store = league(tmp_path)
+    human = store.account('validation')['entrant']['entrant_id']
+    with pytest.raises(ValueError):
+        LiveArena(store).create_game(human, players, opponents)
+    assert store.matches()['total'] == 0
+
+
+def test_human_opponents_exclude_humans_retired_and_disqualified_bots(tmp_path):
+    store = league(tmp_path)
+    human = store.account('validation')['entrant']['entrant_id']
+    bot, _ = add(store)
+    store.set_retired(bot['entrant_id'])
+    arena = LiveArena(store)
+    for key in (human,bot['entrant_id']):
+        with pytest.raises(ValueError,match='eligible bot'):
+            arena.create_game(human, 2, [key])
+    with patch.object(store,'disabled_policy_ids',return_value={store.anchor}):
+        with pytest.raises(ValueError,match='eligible bot'):
+            arena.create_game(human, 2, [store.anchor])
+    assert store.matches()['total'] == 0
+
+
 def test_http_frontend_and_privacy_boundaries(tmp_path):
     # Leave enough time for HTTP assertions before submitting the first tick.
     store = league(tmp_path, tick_seconds=.2)
@@ -464,8 +544,9 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
         assert error.value.code == 403
         _, raw = request('/api/players', {'name':'web-player'})
         token = json.loads(raw)['token']
-        _, raw = request('/api/play', {'players':2}, {'Authorization':f'Bearer {token}'})
+        _, raw = request('/api/play', {'players':2,'opponents':[store.anchor]}, {'Authorization':f'Bearer {token}'})
         game = json.loads(raw)
+        assert store.anchor in [entry['entrant_id'] for entry in game['entrants']]
         with pytest.raises(HTTPError) as error:
             request('/api/replay/' + game['game_id'])
         assert error.value.code == 400

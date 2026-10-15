@@ -12,7 +12,7 @@ def league_command(args):
     if args.action == "init":
         config = json.loads(args.config.read_text()) if args.config else {}
         store = LeagueStore.create(args.directory, LeagueConfig(**config))
-        print(f"League initialized: {store.directory} (WAIT = 0 Elo)")
+        print(f"League initialized: {store.directory} (1v1: WAIT = 0 GoR; FFA: mean = 1000)")
         return
     store = LeagueStore(args.directory)
     if args.action == 'configure-maps':
@@ -54,8 +54,9 @@ def league_command(args):
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
         else:
-            reference = next(row['name'] for row in report['ranking'] if row['anchor'])
-            print(f"{report['mode'].upper()} rating / {report['completed_games']} games / {reference} = 0")
+            reference = next((row['name'] for row in report['ranking'] if row['anchor']), None)
+            origin = f'{reference} = 0' if reference else f"mean = {report['rating_mean']:g}"
+            print(f"{report['mode'].upper()} rating / {report['completed_games']} games / {origin}")
             for row in report["ranking"]:
                 print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
 
@@ -69,7 +70,7 @@ def main(argv=None):
     add_online_cli(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
-    init = actions.add_parser("init", help="create a league with a zero-rated WAIT reference")
+    init = actions.add_parser("init", help="create a league with GoR duels and mean-1000 Codeforces FFA ratings")
     init.add_argument("directory", type=Path)
     init.add_argument("--config", type=Path, help="optional league distribution JSON")
     add = actions.add_parser("add", help="register a new version and schedule a bounded evaluation job")

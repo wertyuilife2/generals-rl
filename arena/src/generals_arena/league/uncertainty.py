@@ -13,6 +13,7 @@ import numpy as np
 from .rating import expected, LOGISTIC_SLOPE, PROVISIONAL_GAMES
 from .rating_policy import EVIDENCE_POLICIES
 from .rank_model import comparisons
+from .mode_rating import probability, slope
 from ..util import canonical
 
 
@@ -58,34 +59,54 @@ class RatingUncertainty:
             if left in graph and right in graph:
                 graph[left].add(right)
                 graph[right].add(left)
-        connected, pending = {anchor}, [anchor]
+        mean_pool = report.get('rating_model') == 'codeforces'
+        modern = report.get('rating_model') in ('egf-gor', 'codeforces')
+        rated = {key for key in rows if self.blocks[key]}
+        origin = next(iter(sorted(rated)), None) if mean_pool else anchor
+        connected, pending = ({origin}, [origin]) if origin in graph else (set(), [])
         while pending:
             for key in graph[pending.pop()] - connected:
                 connected.add(key)
                 pending.append(key)
-        free = sorted(connected - {anchor})
+        # Multiple disconnected components have unidentified relative offsets.
+        free = sorted(connected if mean_pool else connected - {anchor})
         indices = {key: i for i, key in enumerate(free)}
         information = np.zeros((len(free), len(free)))
         for (left, right), weight in self.pairs.items():
             if left not in connected or right not in connected:
                 continue
-            p = expected(rows[left]['elo'], rows[right]['elo'])
-            value = weight * p * (1 - p) * LOGISTIC_SLOPE ** 2
+            # GoR is nonlinear in its absolute coordinate. The displayed WAIT
+            # offset must never be fed back into probabilities or derivatives.
+            a, b = (rows[key].get('raw_elo', rows[key]['elo']) for key in (left,right))
+            mode = 'ffa' if mean_pool else '1v1'
+            p = probability(mode, a, b) if modern else expected(a, b)
+            sa, sb = (slope(mode, a), slope(mode, b)) if modern else (LOGISTIC_SLOPE, LOGISTIC_SLOPE)
+            value = weight * p * (1 - p)
             i, j = indices.get(left), indices.get(right)
             if i is not None:
-                information[i, i] += value
+                information[i, i] += value * sa * sa
             if j is not None:
-                information[j, j] += value
+                information[j, j] += value * sb * sb
             if i is not None and j is not None:
-                information[i, j] -= value
-                information[j, i] -= value
+                information[i, j] -= value * sa * sb
+                information[j, i] -= value * sa * sb
         variance = None
-        if free and self.blocks[anchor] >= PROVISIONAL_GAMES:
+        identified = (len(free) > 1 and connected == rated) if mean_pool else self.blocks[anchor] >= PROVISIONAL_GAMES
+        if free and identified:
             try:
-                if np.linalg.cond(information) < 1e12:
-                    variance = np.diag(np.linalg.inv(information))
+                if mean_pool:
+                    # Invert on the sum-zero subspace, keeping the 1000 mean
+                    # fixed without treating any strategy as a perfect anchor.
+                    constraint = np.ones_like(information) / len(free)
+                    matrix = information + constraint
+                    covariance = np.linalg.inv(matrix) - constraint
+                else:
+                    matrix = information
+                    covariance = np.linalg.inv(matrix)
+                if np.linalg.cond(matrix) < 1e12:
+                    variance = np.diag(covariance)
             except np.linalg.LinAlgError:
-                pass  # Disconnected or numerically unidentified comparisons.
+                pass
         for key, row in rows.items():
             row['elo_ci'] = None
             row['ci_blocks'] = self.blocks[key]
@@ -98,4 +119,4 @@ class RatingUncertainty:
             if math.isfinite(error):
                 row['elo_ci'] = {'level': .95, 'lower': row['elo'] - error,
                                  'upper': row['elo'] + error, 'half_width': error,
-                                 'method': 'rank-fisher-independent-maps-v2'}
+                                 'method': ('mode-fisher-independent-maps-v3' if modern else 'rank-fisher-independent-maps-v2')}

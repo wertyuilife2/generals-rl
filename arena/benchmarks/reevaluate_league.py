@@ -35,7 +35,7 @@ def reset(store, games):
                 db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, canonical(wait)))
             for i, entry in enumerate(entrants.values()):
                 key = entry['entrant_id']
-                if entry['kind'] != 'human' and key != wait:
+                if entry['kind'] != 'human' and key not in store.retired_entrant_ids():
                     job_id = jobs.get(key, uuid.uuid4().hex)
                     db.execute('INSERT INTO jobs(id,entrant_id,budget,created) VALUES (?,?,?,?)',
                                (job_id, key, games, time.time()+i/1000))
@@ -97,7 +97,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('directory', type=Path)
     parser.add_argument('--reset', action='store_true', help='delete official results and ratings, without backup')
-    parser.add_argument('--games', type=int, default=1000, help='new target games for every non-WAIT bot')
+    parser.add_argument('--games', type=int, default=1000, help='new target games for every active bot')
     parser.add_argument('--workers', type=int, default=None)
     args = parser.parse_args()
     store = LeagueStore(args.directory)

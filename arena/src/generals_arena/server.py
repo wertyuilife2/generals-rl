@@ -1,6 +1,5 @@
 """Local web UI and JSON API. No web framework or build tool is required."""
 from dataclasses import asdict
-from functools import lru_cache
 import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -8,7 +7,7 @@ from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlsplit
 
-from .execution import replay_frames
+from .replay_cache import ReplayResponses
 from .league.service import LiveArena, process_lock
 from .league.store import LeagueStore
 from .league.statistics import LeaderboardStatistics
@@ -24,10 +23,7 @@ def make_server(store, host="127.0.0.1", port=8086):
     for stats in statistics.values():
         stats.leaderboard()
 
-    @lru_cache(maxsize=3)
-    def replay_response(game_id):
-        result, blob = store.replay(game_id)
-        return {"result": result, "frames": replay_frames(blob, result, compact=True)}
+    replays = ReplayResponses(store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "GeneralsArena/1"
@@ -38,15 +34,20 @@ def make_server(store, host="127.0.0.1", port=8086):
         def log_error(self, message, *args):
             print(message % args, file=sys.stderr)
 
-        def respond(self, value, status=200, content_type="application/json; charset=utf-8"):
+        def respond(self, value, status=200, content_type="application/json; charset=utf-8", *, compressed=False):
             data = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
+            accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
+            if compressed and not accepts_gzip:
+                data = gzip.decompress(data)
+                compressed = False
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
-            if len(data) > 2048 and "gzip" in self.headers.get("Accept-Encoding", ""):
-                data = gzip.compress(data, compresslevel=3)
+            if compressed or (len(data) > 2048 and accepts_gzip):
+                if not compressed:
+                    data = gzip.compress(data, compresslevel=3)
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(data)))
@@ -92,7 +93,7 @@ def make_server(store, host="127.0.0.1", port=8086):
                         store.verify_execution()
                         self.respond(store.account(data["name"]), 201)
                     elif path == "/api/play":
-                        self.respond(arena.create_game(self.human(), data.get("players")), 201)
+                        self.respond(arena.create_game(self.human(), data.get("players"), data.get("opponents")), 201)
                     elif path.startswith("/api/play/") and path.endswith("/commands"):
                         self.respond(arena.command(path.split("/")[3], self.human(), data))
                     elif path.startswith("/api/play/") and path.endswith("/action"):
@@ -103,10 +104,12 @@ def make_server(store, host="127.0.0.1", port=8086):
                 elif path == "/api/meta":
                     retired = store.retired_entrant_ids()
                     entries = {key: entry for key, entry in store.entrants().items() if key not in retired}
+                    disabled = store.disabled_policy_ids()
                     self.respond({"config": asdict(store.config), "anchor": store.reference,
                                   "league_id": digest(str(store.directory.resolve())),
                                   "rules_id": store.manifest["rules_id"],
-                                  "entrants": [{k: e[k] for k in ("entrant_id", "name", "kind", "version")} for e in entries.values()],
+                                  "entrants": [{**{k: e[k] for k in ("entrant_id", "name", "kind", "version")},
+                                                "disqualified": e['entrant_id'] in disabled} for e in entries.values()],
                                   "map_ranges": {p: store.config.side_range(p) for p in store.config.player_counts},
                                   "jobs": [job for job in store.jobs() if job['entrant_id'] not in retired],
                                   "worker_error": arena.worker_error})
@@ -125,14 +128,14 @@ def make_server(store, host="127.0.0.1", port=8086):
                     if not store.match_is_visible(game_id):
                         self.respond({'error': '对局不可见或不存在'}, 404)
                     else:
-                        self.respond(replay_response(game_id))
+                        self.respond(replays.get(game_id), compressed=True)
                 elif path == "/api/me":
                     self.respond(store.entrants()[self.human()])
                 elif path == "/api/play/active":
                     self.respond(arena.active(self.human()))
                 elif path.startswith("/api/play/"):
                     self.respond(arena.view(path.split("/")[-1], self.human(), int(query["after"][0]) if "after" in query else None))
-                elif path in ("/", "/app.js", "/history.js", "/board.js", "/playback.js", "/input.js", "/svgIcons.js", "/style.css"):
+                elif path in ("/", "/app.js", "/accounts.js", "/replay.js", "/history.js", "/matrix.js", "/queue.js", "/board.js", "/playback.js", "/input.js", "/svgIcons.js", "/style.css"):
                     filename = "index.html" if path == "/" else path[1:]
                     mime = "text/html" if filename.endswith(".html") else "text/css" if filename.endswith(".css") else "text/javascript"
                     self.respond((STATIC / filename).read_bytes(), content_type=mime + "; charset=utf-8")
