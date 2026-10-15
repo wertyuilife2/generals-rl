@@ -949,6 +949,213 @@
         "outputs/arena/native_1000/runs/4a1618386d720e6aa6380b255b8a507fa6d4d3f2dcab18052faa49a8074dff3a/report.json"
       ],
       "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "afc14f33e46cb91f1113bfafe84537236d948f6c1ef44be59fc5b041ea111f68",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/b2feafa1570366456dc3be26229e4259dbb613a3c6a0fb7799451642341308e4/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "ea596bdf1463b0ec56dd4f43962154f485faab7d6459b9ddf9596c0ef58dad82",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/3dc07da9ebed45886c451e68998aa33dc1886d4f7a0ba97abf9a8022819c6316/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "861c5d9c80c2aa2d47a43755e0e7380f02a138890d5c65d2e1da31f387512752",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/c52e72681dd35cb58c66ae3e08d8d93687b5eb0955ed403c180a06a1b7cf6537/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "5f1235b1a4a4cd26feeaa64bfd70c6c99a0cae57b076cb9ba399db9c58b01169",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/ba370ad109a21a408e5619b96d0be4f96b3e533b241576bcc6c7ca0377b420a6/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "25f1c4935c11cdfd38f70f18f3ca55f9e38855b7848a14c7f4e696365e3e5cc1",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/aae1c2b2b1b257d9c3353be5caa9f5ffda6bd8faf287a6b944ef25faa33aa38d/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "91b618338841a878ca67f4dced510d3c14c72edc4c9c85ef195d148d489c8d31",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/2c778f9b5366e97bb4fc2cd21c296e7dfc3de10b012f1258e2b2a06a44de47fd/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "39a5d5c4e47591f77881734509f27dcb8184a5f8a7c84b72f11cc2c9271f2270",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/04274b8c709defcc1886effb1f9827080a2a51453e917a5f782eabdf5e562f77/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "fb95c0603869b499f4d13ca671719e363f83a3bf3f8c306f3ca148398ae93e96",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/7380c08c046b8d73c3d850bb86ee0af2ff09421e9381e9f9a04b3b32d67f3f0e/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "4e18685159bc7c7154dee488ad72535e2d4ffa203d4a48ce79809b22e72bc694",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/cac102e6304fb19fdbca8e16a10a736b8a2178b93581323b8b0882504870d126/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "7b042f29adaeaf6023db3543d8372b49af052aa57af99925a79be80c00a1f072",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/e8be8e8385301952c0e7850da9b19eab2b2345c916f124560c24a48efde496c7/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "ca68e612b6f1db88f03021307b71ec533985f65d6a1bd25c4ef5a564408c0042",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 1,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/4eac625ffc6abf73ecaa42c1acdddb43d221f76c42cc650432bcaf9ac8649c89/report.json",
+        "outputs/arena/native_1000/runs/daabe70039de1d854134f4f7508946d8b75b4fbea7bdcacf5738c04f50f08757/report.json",
+        "outputs/arena/native_1000/runs/86d6dde6760dac55ce8bb9f2bcb05dcb179dc0f1f830c423e31a30c767e2ca65/report.json"
+      ],
+      "status": "disqualified_not_formally_submitted"
+    },
+    {
+      "version": "b1f6baad7ce7e1718684b1bab2058ffda347baaf1e0ee197cdf1f07c6b89895b",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/2d76b507c5bdd4ce1a0a83cf09bfa18a614fbea53ace785b2360c90fe3329d8c/report.json",
+        "outputs/arena/native_1000/runs/2ae154f691dd34e2dc0119120f9400709d52b887ed8081b707ca36f8a7577bcd/report.json",
+        "outputs/arena/native_1000/runs/fe1b6a69b38af81873159f1c46125ff29660caec58838f9300d7679930c12f4f/report.json",
+        "outputs/arena/native_1000/runs/05b45bfd223d0f748265c088fd31a6ca371d50dccc306c4f29bac494a2dd243b/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "79cfb0be88784c8fbb300f368f4f2d92f77e80176bbdc9cec44539bf7fe167d8",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/976035dcecf8044a5e561c3f7d771ee388d677a62defcaa799589af730aa46e5/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "529881d968a683afa3e0097cbe5d7e3e6bd8519e9c3ccab1d70c6444fe80fae0",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/036bbada5a21d69e3c676a41f0f2a0bcc9b699d6dc7583bf6d97f97358dd54ae/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "7177cef1ea0df1c4f75e0d82aad0b84d62617a74b78d353239064760c40c26e1",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/2c55a72233ca8681fcdfd635b46606defbdab51c8304466520dbc4cdf996a5cf/report.json"
+      ],
+      "status": "experimental_not_formally_submitted"
+    },
+    {
+      "version": "d7f71e54ca3b200b6b0b8e5f77070dc217cdd5621ee98a185595ba553192f5d5",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 1,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/a7a7fbb0e6f8a035e1635ca80d1a55d8bfdae8728b6f5fdc3443c505e6829db3/report.json"
+      ],
+      "status": "disqualified_not_formally_submitted"
+    },
+    {
+      "version": "9a1a9053095bc74f19e17a3e2dfeec9afedf3bb7d66f32649614ce28a110ba67",
+      "source": "policy.cpp",
+      "params": "params.json",
+      "timing_timeouts": 0,
+      "timing_errors": 0,
+      "reports": [
+        "outputs/arena/native_1000/runs/10fa0ee360ceb9409e569cb751adaf64fd9adb006a2420c133b992ce3e3ea7e8/report.json",
+        "outputs/arena/native_1000/runs/4b0818f60db73cd0a081d36cc50bba7543a2b8ca22fcedd5ea54ca2aa9131736/report.json",
+        "outputs/arena/native_1000/runs/d1ab76c14bdfa7f657bd4198c2d47c8be92c7b0e8030dad8da4816315347ea51/report.json",
+        "outputs/arena/native_1000/runs/430da771f8e965d045356bc10d1c9ad00798df98a93706cbd4ead950912d8dac/report.json",
+        "outputs/arena/native_1000/runs/8a7c2341148c50471c06cf48e07ec622bc5d029c3e848a903622d697d52e3786/report.json"
+      ],
+      "status": "formally_published",
+      "alias": "gpt-6-razor-v5",
+      "publication_report": "outputs/arena/native_1000/commits/9a1a9053095bc74f19e17a3e2dfeec9afedf3bb7d66f32649614ce28a110ba67/publication.json",
+      "publication_rating_policy": "independent-gor-codeforces-v2",
+      "publication_timing": {
+        "calls": 644519,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 5921000,
+        "timeouts": 0,
+        "total_ns": 91178353000
+      }
     }
   ]
 }

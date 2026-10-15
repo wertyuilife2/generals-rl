@@ -118,3 +118,55 @@ class RazorV5Regressions(RazorV4Regressions):
                 self.assertEqual(controller.decision_metrics['errors'], 0)
             finally:
                 controller.close()
+
+
+class RazorV5ReleaseRegressions(RazorV5Regressions):
+    version = 'v5-release'
+
+    def recorded_decision(self, name):
+        value = json.loads(gzip.decompress((ROOT / (name + '.json.gz')).read_bytes()))
+        arrays = {key: np.array(value[key], dtype=dtype) for key, dtype in (
+            ('terrain', np.uint8), ('structure', np.uint8), ('owner', np.int16),
+            ('army', np.int64), ('visible', bool), ('alive', bool))}
+        obs = Observation(player_id=value['player_id'], tick=value['tick'],
+            general_pos=value['general_pos'], **arrays,
+            stats=PlayerStats(**{k: np.array(v, dtype=np.int64) for k, v in value['stats'].items()}))
+        with tempfile.TemporaryDirectory() as tmp:
+            source = ROOT.parent / self.version
+            bundle = Path(tmp) / 'policy.zip'
+            build_bundle(source / 'policy.cpp', bundle,
+                         json.loads((source / 'params.json').read_text()))
+            controller = NativeController(bundle=bundle)
+            try:
+                controller.reset(obs.player_id, 42)
+                action = controller.act(obs)
+                self.assertEqual(controller.decision_metrics['timeouts'], 0)
+                self.assertEqual(controller.decision_metrics['errors'], 0)
+                return obs, action
+            finally:
+                controller.close()
+
+    def test_isolated_home_redirects_a_column_toward_the_cut_supply_route(self):
+        obs, action = self.recorded_decision('home_reconnection_observation')
+        self.assertEqual(action.kind, ActionKind.MOVE)
+        destination = action.source + (-obs.width, 1, obs.width, -1)[action.direction]
+        # Cell 23 is the observed enemy cut separating home from the domain.
+        # Our former action went north, away from that route. A direct capture
+        # or an assembling advance toward it is useful; either is acceptable.
+        distance = lambda c: abs(c % obs.width - 23 % obs.width) + abs(c // obs.width - 23 // obs.width)
+        self.assertLess(distance(destination), distance(action.source))
+        self.assertGreaterEqual(int(obs.army.flat[action.source]), 3)
+
+    def test_compact_recent_raider_does_not_release_the_home_garrison(self):
+        obs, action = self.recorded_decision('compact_raid_observation')
+        # Actual v3 emptied home again at this point, shortly before the raid.
+        self.assertFalse(action.kind == ActionKind.MOVE and action.source == obs.general_pos)
+
+    def test_immediate_general_capture_survives_strategic_interventions(self):
+        obs, action = self.recorded_decision('corridor_capture_observation')
+        self.assertEqual(action.kind, ActionKind.MOVE)
+        destination = action.source + (-obs.width, 1, obs.width, -1)[action.direction]
+        self.assertEqual(int(obs.structure.flat[destination]), 2)
+        self.assertNotEqual(int(obs.owner.flat[destination]), obs.player_id)
+        self.assertGreater(int(obs.army.flat[action.source]) - 1,
+                           int(obs.army.flat[destination]))
