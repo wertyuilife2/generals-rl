@@ -6,7 +6,12 @@
 <main>
 <div id="notice" role="status" hidden></div>
 <div class="workspace">
-<section class="panel" id="ranking-panel"><div class="panel-heading"><div><h2>实力榜单</h2><p class="muted" id="pool-caption">正在读取联赛</p></div><div class="history-mode" role="group" aria-label="排行榜模式"><button type="button" data-ranking-mode="1v1" aria-pressed="true">1v1</button><button type="button" data-ranking-mode="ffa" aria-pressed="false">FFA</button></div></div><div class="table-scroll"><table><thead><tr><th scope="col">排名 / 选手</th><th scope="col" title="Elo ± 95% 估计区间半宽；按独立地图合并重复席位和换位">Elo</th><th scope="col" aria-label="相对上一版本的 Elo 变化" title="当前 Elo 减去同名系列上一版本的当前 Elo（按 -vN 排序）">▲</th><th scope="col" title="夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜，超时计入分母">胜率</th><th scope="col" title="（总席位数 − 存活名次）÷（总席位数 − 1）；并列取平均名次，再按同策略席位和各局取平均；单挑胜/负/平为 100%/0%/50%">存活指数</th><th scope="col" title="亲自击杀的席位数 ÷ 其余席位数（含同策略席位）">击杀指数</th></tr></thead><tbody id="ranking"></tbody></table></div></section>
+<section class="panel" id="ranking-panel"><div class="panel-heading"><div><h2>实力榜单</h2><p class="muted" id="pool-caption">正在读取联赛</p></div><div class="history-mode" role="group" aria-label="排行榜模式"><button type="button" data-ranking-mode="1v1" aria-pressed="true">1v1</button><button type="button" data-ranking-mode="ffa" aria-pressed="false">FFA</button></div></div><div class="table-scroll ranking-scroll" id="ranking-scroll"><table><thead><tr id="ranking-head"><th scope="col">排名 / 选手</th><th scope="col" title="Elo ± 95% 估计区间半宽；按独立地图合并重复席位和换位">Elo</th><th scope="col" aria-label="相对上一版本的 Elo 变化" title="当前 Elo 减去同名系列上一版本的当前 Elo（按 -vN 排序）">▲</th><th scope="col" title="夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜，超时计入分母">胜率</th><th scope="col" title="（总席位数 − 存活名次）÷（总席位数 − 1）；并列取平均名次，再按同策略席位和各局取平均；单挑胜/负/平为 100%/0%/50%">存活指数</th><th scope="col" title="亲自击杀的席位数 ÷ 其余席位数（含同策略席位）">击杀指数</th></tr></thead><tbody id="ranking"></tbody></table></div>
+<div class="rank-tier-labels" id="rank-tier-labels" aria-label="评级分数线"></div>
+<section class="matrix-section" aria-labelledby="matrix-title">
+  <div class="panel-heading"><div><h2 id="matrix-title">胜率矩阵</h2><p class="muted" id="matrix-caption"></p></div><div class="matrix-legend" aria-label="胜率颜色图例：红色 0%，灰色 50%，绿色 100%"><span>0%</span><i></i><span>100%</span></div></div>
+  <div class="table-scroll matrix-scroll" id="win-matrix"></div>
+</section></section>
 <section class="panel" id="history-panel" hidden>
 <form class="history-filters" id="history-filter" role="search" aria-label="筛选对局">
   <div class="history-filter-bar">
@@ -22,9 +27,12 @@
 </form>
 <div id="history" aria-live="polite"></div><div class="pagination"><button class="subtle" id="prev-page">← 上一页</button><span id="page-info"></span><button class="subtle" id="next-page">下一页 →</button></div></section>
 <section class="panel" id="play-panel" hidden>
-<div class="panel-heading"><div><h2 id="play-title">以你的名字上榜</h2><p class="muted">与算法同榜，1v1 与 FFA 分别计分。随机匹配对手与出生位置。</p></div><span class="chip">RANKED</span></div>
-<div id="signup"><form id="signup-form"><label for="player-name">玩家名称</label><div class="input-row"><input id="player-name" required maxlength="48" placeholder="输入你的名字" autocomplete="nickname"><button class="primary" type="submit">创建玩家</button></div></form><p class="footnote">身份凭证保存在当前浏览器。请保留凭证，以便在其他浏览器继续累计分数。</p></div>
-<div id="player-lobby" hidden><div class="player-card"><span class="avatar">♜</span><div><strong id="player-label"></strong><p class="muted" id="player-rating"></p></div></div><p class="muted">点击自己的领地选择起点，用方向键 / WASD 或点击相邻格移动。移动可连续排队；再次点击选中格、Z 或 Shift 使用半兵。Q 清空队列，E 撤销，空格取消选择。</p><div class="input-row"><select id="play-players" aria-label="真人对局人数"></select><button class="primary" id="start-game">匹配并开始</button><button class="subtle" id="copy-token">复制身份凭证</button></div><p class="footnote" id="turn-description">每 0.5 秒提交至多一步（可配置）。关闭页面后对局继续，按最终结果计分。</p></div>
+<div class="panel-heading"><div><h2 id="play-title">人类对局</h2><p class="muted">选择账号与对手，出生位置随机。1v1 与 FFA 分别记录成绩。</p></div></div>
+<div id="account-controls" hidden><label for="play-account">当前账号</label><div class="input-row"><select id="play-account"></select><button class="subtle" id="new-account" type="button">新增账号</button></div></div>
+<div id="signup"><form id="signup-form"><label for="player-name">新账号名称</label><div class="input-row"><input id="player-name" required maxlength="48" placeholder="输入你的名字" autocomplete="nickname"><button class="primary" id="create-account" type="submit">创建账号</button><button class="subtle" id="cancel-signup" type="button" hidden>取消</button></div></form><p class="footnote">多个账号保存在当前浏览器，可随时切换。保留各账号的身份凭证，即可在其他浏览器恢复。</p></div>
+<div id="player-lobby" hidden><div class="player-card"><span class="avatar">♜</span><div><strong id="player-label"></strong><p class="muted" id="player-rating"></p></div><button class="subtle" id="copy-token">复制身份凭证</button></div>
+<div class="match-setup"><label for="play-players">对局人数</label><select id="play-players" aria-label="真人对局人数"></select><div id="play-opponents" class="opponent-slots"></div><p class="muted" id="opponents-hint"></p></div>
+<div class="input-row"><button class="primary" id="start-game">开始对局</button></div><p class="footnote" id="turn-description">每 0.5 秒提交至多一步（可配置）。关闭页面后对局继续，按最终结果计分。</p><p class="muted">点击自己的领地选择起点，用方向键 / WASD 或点击相邻格移动。移动可连续排队；再次点击选中格、Z 或 Shift 使用半兵。Q 清空队列，E 撤销，空格取消选择。</p></div>
 <details class="recover"><summary>已有身份凭证？</summary><form id="recover-form" class="input-row"><input id="recover-token" type="password" placeholder="粘贴身份凭证" aria-label="身份凭证" required><button class="subtle">恢复玩家</button></form></details>
 </section>
 <aside><section class="side-card"><p class="eyebrow">THE BATTLEFIELD</p><h3>不重复的战场</h3><div class="mini-map" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p id="map-description" class="muted"></p><div class="rule-line"><span>战争迷雾</span><b>局部视野</b></div><div class="rule-line"><span>评分参照</span><b id="rating-reference">WAIT</b></div><div class="rule-line"><span>1v1 / FFA</span><b>独立评级</b></div></section><section class="side-card"><div class="side-heading"><h3>评测队列</h3><span id="job-count" class="chip">0</span></div><div id="jobs"></div></section></aside>
@@ -32,6 +40,7 @@
 </main>
 <dialog id="board-dialog" aria-label="Generals 对局棋盘">
   <canvas id="board" tabindex="0" aria-label="棋盘：拖动平移，滚轮缩放，点击选择己方格，方向键移动"></canvas>
+  <p id="replay-loading" role="status" hidden>正在读取并校验回放…</p>
   <div class="game-header control-section"><div><p class="eyebrow" id="board-mode">REPLAY</p><h2 id="board-title">对局回放</h2></div><button id="close-board" aria-label="关闭棋盘">返回 ×</button></div>
   <div class="game-info-panel"><div class="leaderboard-header"><span>玩家 / 实例</span><span>兵力 ↓ · 领地</span></div><div id="game-players"></div><div class="turn-counter-panel"><span class="turn-label">Tick</span><strong id="turn-counter">0</strong></div><p class="muted" id="board-status"></p><p id="board-error" role="status"></p></div>
   <div class="zoom-controls"><button id="zoom-in" aria-label="放大">+</button><button id="zoom-out" aria-label="缩小">−</button><button id="zoom-reset" aria-label="地图居中">⟲</button></div>

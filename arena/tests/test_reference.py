@@ -11,7 +11,7 @@ def league(tmp_path):
     return LeagueStore.create(tmp_path/'league', LeagueConfig(max_ticks=2, min_side=15, max_side=15))
 
 
-def test_wait_is_fixed_and_nonparticipants_never_change_rating(tmp_path):
+def test_wait_is_display_origin_and_nonparticipants_keep_raw_rating(tmp_path):
     store = league(tmp_path)
     reference = store.reference
     assert reference == store.anchor
@@ -25,12 +25,17 @@ def test_wait_is_fixed_and_nonparticipants_never_change_rating(tmp_path):
                                'winner_seat':0, 'kills':[1,0]}, b'')
     complete('initial', [idle, random])
     before = {r['entrant_id']:r['elo'] for r in store.leaderboard()['ranking']}
+    raw_before = store.ratings()
     complete('calibration', [other, reference])
     after = {r['entrant_id']:r['elo'] for r in store.leaderboard()['ranking']}
     assert after[reference] == before[reference] == 0
-    assert after[idle] == before[idle] and after[random] == before[random]
+    raw_after = store.ratings()
+    assert raw_after[idle] == raw_before[idle] and raw_after[random] == raw_before[random]
+    assert after[idle]-before[idle] == pytest.approx(-raw_after[reference])
+    assert after[random]-before[random] == pytest.approx(-raw_after[reference])
+    assert after[idle]-after[random] == pytest.approx(before[idle]-before[random])
     assert after[other] > before[other]
-    assert store.ratings()[reference] == 0
+    assert raw_after[reference] < 0
     report = store.leaderboard()
     record = store.replay('calibration')
     assert store.rebuild() == report
@@ -41,31 +46,22 @@ def test_wait_is_fixed_and_nonparticipants_never_change_rating(tmp_path):
     store.verify_execution()
 
 
-def test_wait_is_rare_single_seat_and_absent_from_human_matchmaking(tmp_path):
+def test_wait_uses_ordinary_matchmaking_including_humans_and_ffa(tmp_path):
     store = league(tmp_path)
     entrant, _ = store.add({'name':'test-v1','kind':'baseline','policy':'aggressive'}, games=1000)
-    job = {'id':'coverage','entrant_id':entrant['entrant_id'],'done':0,'budget':2000}
-    included, total, coverage = 0, 0, {}
-    job['budget'] = 1000
-    while total < job['budget']:
-        plans = eligible_schedule(store, {**job, 'done':total}, coverage=coverage)
-        counts = [p['entrant_ids'].count(store.reference) for p in plans]
-        assert len(set(counts)) == 1
-        assert max(counts) <= 1
-        included += sum(counts)
-        total += len(plans)
-        for plan in plans:
-            for key in set(plan['entrant_ids']) - {entrant['entrant_id']}:
-                coverage[key] = coverage.get(key,0)+1
-    assert .03 <= included / total <= .04
-    assert eligible_schedule(store, job) == eligible_schedule(store, job)
     human = store.account('human')['entrant']['entrant_id']
+    job = {'id':'ordinary','entrant_id':entrant['entrant_id'],'done':0,'budget':1000}
+    included = 0
     for block in range(100):
-        plans = eligible_schedule(store, {**job,'id':str(block),'entrant_id':human}, human=True)
-        assert all(store.reference not in p['entrant_ids'] for p in plans)
-    for plan in eligible_schedule(store, {**job,'entrant_id':store.reference}):
-        assert plan['entrant_ids'].count(store.reference) == 1
-        assert len(plan['entrant_ids']) == 2
+        plans = eligible_schedule(store, {**job,'done':block}, players=2)
+        included += store.reference in plans[0]['entrant_ids']
+    assert 30 < included < 70  # WAIT and random have equal rating/coverage.
+    plans = eligible_schedule(store, {**job,'entrant_id':human}, human=True, players=4)
+    assert store.reference in plans[0]['entrant_ids']
+    plans = eligible_schedule(store, {**job,'entrant_id':store.reference}, players=8)
+    assert len(plans[0]['entrant_ids']) == 8
+    assert plans[0]['entrant_ids'].count(store.reference) >= 2
+    assert eligible_schedule(store, job) == eligible_schedule(store, job)
 
 
 def test_explicit_wait_seats_work_after_private_directory_is_renamed(tmp_path):

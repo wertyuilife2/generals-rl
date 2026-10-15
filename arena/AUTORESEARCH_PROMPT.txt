@@ -44,12 +44,12 @@ Python：/Users/bzy/project/generals-rl/.venv/bin/python
 - env/src/generals/core/engine.py：参考游戏规则。
 - env/src/generals/core/observation.py：合法观测及信息边界。
 - env/src/generals/protocol/actions.py：动作编码与含义。
-- arena/src/generals_arena/league/rating.py：名次与 rating。
+- arena/src/generals_arena/league/mode_rating.py：1v1 GoR 与 FFA Codeforces rating。
 
 正式比赛覆盖 2–8 人，使用 Arena 联赛配置中的随机地图规则。新默认对齐官方标准地图：1v1 每边 18–23，8 人每边 25–33，城市守军 40–50。使用局部视野，允许重复 AI。
-所有人数共用一个排行榜，按名次计算 rating，以 WAIT 为 0 分参照。
-新自动评测约 50% 为 1v1，1v1 的评分更新权重是多人的 2 倍；多人对重复席位先取平均，
-再对不同对手策略等权计分。WAIT 只参与少量 1v1 自动校准对局。
+1v1 和 FFA 分开排名、计分。每次正式 commit 精确执行 500 局 1v1 + 500 局 FFA。
+1v1 使用 GoR 胜率模型与动态更新幅度，WAIT 正常计分，榜单减去 WAIT 的原始评分使其显示为 0；FFA 使用 Codeforces 名次算法，均值为 1000。
+重复策略的席位先取平均，再对不同对手策略等权。WAIT 正常参与匹配，不限制出场频次。
 目标包括多人名次表现和夺冠能力，不限于二人局或某个固定对手。
 
 3. 实现与信息约束
@@ -131,7 +131,7 @@ league_directory 字段给出对局和录像数据库目录。可选 --output �
 
 多文件策略将文件路径替换成对应源码目录。固定参数通过可选 --params 参数.json 提交。
 Arena 自动快照源码及参数、编译、进行 8 局接口预检，然后登记到正式联赛，
-默认最多 4 局并行执行该版本的 1000 局比赛（可用 --workers 调整，局内策略仍单线程串行），更新统一 rating 并保存全部录像和计时记录。
+默认最多 4 局并行执行该版本的 1000 局比赛（可用 --workers 调整，局内策略仍单线程串行），分别更新 1v1 / FFA rating 并保存全部录像和计时记录。
 正式工件由 Arena 自己保存，后续修改开发工作区不会影响已提交版本。
 同一版本重复执行 commit 恢复原任务，不重复计分；不同实现使用新版本别名。
 预检通过后开始正式任务即计入一次全量评测；之后中断或失败仍占一次。

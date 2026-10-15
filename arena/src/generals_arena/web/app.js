@@ -1,26 +1,42 @@
 import { Battlefield } from './board.js';
 import { Playback } from './playback.js';
 import { MoveInput } from './input.js';
-import { historyQuery, placements, nextCondition, entrantColor } from './history.js';
+import { historyQuery, placements, nextCondition, entrantColor, compareEntrants } from './history.js';
+import { renderMatrix } from './matrix.js';
+import { renderQueue } from './queue.js';
+import { Accounts } from './accounts.js';
+import { ReplayTimeline } from './replay.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
 let meta, names = new Map(), colors = new Map(), page = 0, tab = 'ranking', player = null;
 let historyMode = 'all', historyRoster = '';
 const historyConditions = new Map();
 let historyRequest = 0;
+let historySignature = '';
 let rankingMode = '1v1', rankingRequest = 0;
-let token = '', tokenKey = null;
+let matrixSignature = '';
+let rankingSignature = '';
+let queueSignature = '';
+let metaSignature = '';
+let tierBoundaries = [];
+const tierLayoutObserver = new ResizeObserver(positionTierLabels);
+tierLayoutObserver.observe($('ranking-panel'));
+let token = '', accounts = null, accountLeague = null, accountBusy = false, showSignup = false;
+let accountSignature = '', opponentSignature = '';
+let opponentChoices = [];
 let live = null, board = null, sending = false;
 const outbox = [];
-let replay = null, frame = 0, dialogMode = null, polling = false;
+let replay = null, timeline = null, frame = 0, dialogMode = null, polling = false;
+let pollController = null;
+let replayController = null;
 const formatter = new Intl.NumberFormat('zh-CN');
 const number = n => formatter.format(n);
 function notice(message = '') { $('notice').hidden = !message; $('notice').textContent = message; }
-async function api(path, body, auth = true) {
+async function api(path, body, auth = true, credential = token, signal = undefined) {
   const headers = {};
-  if (token && auth) headers.Authorization = `Bearer ${token}`;
+  if (credential && auth) headers.Authorization = `Bearer ${credential}`;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body)});
+  const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body), signal});
   const data = await response.json();
   if (!response.ok) { const error=new Error(data.error || `HTTP ${response.status}`);error.status=response.status;throw error; }
   return data;
@@ -44,16 +60,20 @@ function playerName(id, name, className) {
   return button;
 }
 function renderMeta(value) {
+  const signature = JSON.stringify(value);
+  if (signature === metaSignature) return;
+  metaSignature = signature;
   meta = value;
-  const nextTokenKey = `generals-arena-token:${meta.league_id || meta.rules_id}`;
-  if (tokenKey !== nextTokenKey) {
-    tokenKey = nextTokenKey;
-    token = localStorage.getItem(tokenKey) || '';
+  const league = meta.league_id || meta.rules_id;
+  if (accountLeague !== league) {
+    accountLeague = league;
+    accounts = new Accounts(localStorage, league);
+    token = accounts.token;
     player = null; live = null;
+    accountSignature = '';
   }
   names = new Map(meta.entrants.map(e => [e.entrant_id, e.name]));
   colors = new Map(meta.entrants.map(e => [e.entrant_id, entrantColor(e).color]));
-  $('rating-reference').textContent = names.get(meta.anchor) || 'WAIT';
   const options = ['0', ...meta.config.player_counts.map(String)];
   if ([...$('play-players').options].map(n => n.value).join() !== options.join()) {
     const selected = $('play-players').value;
@@ -62,7 +82,7 @@ function renderMeta(value) {
       option.value=p;
       return option;
     }));
-    $('play-players').value=options.includes(selected) ? selected : '0';
+    $('play-players').value=options.includes(selected) ? selected : options[1];
   }
   for (const id of historyConditions.keys()) {
     if (!names.has(id)) { historyConditions.delete(id); page = 0; }
@@ -71,10 +91,7 @@ function renderMeta(value) {
   if (roster !== historyRoster) {
     historyRoster = roster;
     $('history-conditions').replaceChildren();
-    const ordered = [...meta.entrants].sort((a,b) => {
-      const first = entrantColor(a), second = entrantColor(b);
-      return first.series.localeCompare(second.series) || first.version - second.version;
-    });
+    const ordered = [...meta.entrants].sort(compareEntrants);
     for (const entry of ordered) {
       const button = el('button', 'history-condition');
       button.type = 'button'; button.dataset.entrant = entry.entrant_id;
@@ -88,52 +105,128 @@ function renderMeta(value) {
   const counts=meta.config.player_counts;
   const first=meta.map_ranges[counts[0]],last=meta.map_ranges[counts[counts.length-1]];
   $('map-description').textContent = `宽高按人数随机：${counts[0]} 人 ${first[0]}–${first[1]} 格，${counts[counts.length-1]} 人 ${last[0]}–${last[1]} 格。同一 AI 可有多个独立实例。`;
-  $('pool-caption').textContent = rankingMode === '1v1' ? '1v1 · 仅计算双人对局' : 'FFA · 仅计算 3–8 人对局';
   $('turn-description').textContent = `每 ${meta.config.tick_seconds} 秒执行至多一步。关闭页面后对局继续，按最终结果计分。`;
-  const active = meta.jobs.filter(j => j.status !== 'complete');
-  $('job-count').textContent = active.length;
-  $('jobs').replaceChildren();
-  for (const job of [...active, ...meta.jobs.filter(j => j.status === 'complete')].slice(0, 8)) {
-    const row = el('div', 'job'), title = el('div', 'job-title');
-    title.append(el('span', '', job.name), el('span', '', `${job.done} / ${job.budget}`));
-    const progress = el('progress'); progress.max = job.budget; progress.value = job.done;
-    row.append(title, progress, el('div', 'job-state', {queued:'等待 / 评测中',failed:'评测失败，可用 CLI 重试',complete:'已完成'}[job.status] || job.status));
-    if (job.modes && Object.keys(job.modes).length) row.append(el('div', 'job-state',
-      Object.entries(job.modes).map(([mode, value]) => `${mode.toUpperCase()} ${value.done}/${value.budget}`).join(' · ')));
-    if (job.error) row.append(el('div', 'job-error', job.error));
-    $('jobs').append(row);
+  const nextQueueSignature = JSON.stringify([meta.jobs,meta.worker_error]);
+  if (nextQueueSignature !== queueSignature) {
+    queueSignature = nextQueueSignature;
+    renderQueue($('jobs'),$('job-count'),meta.jobs,meta.worker_error,playerName);
   }
-  if (!meta.jobs.length) $('jobs').append(el('p', 'empty', '暂无评测任务。通过 CLI 登记算法后会自动加入队列。'));
-  if (meta.worker_error) $('jobs').append(el('p', 'job-error', meta.worker_error));
   renderPlayer();
 }
 async function loadRank() {
   const request = ++rankingRequest, mode = rankingMode;
   const data = await api(`/api/leaderboard?mode=${mode}`);
   if (request !== rankingRequest) return;
-  $('pool-caption').textContent = `${mode === '1v1' ? '1v1 · 双人对局' : 'FFA · 3–8 人对局'} · ${number(data.completed_games)} 局${data.completed_games && !data.anchor_games ? ' · 待 WAIT 校准' : ''}`;
+  const nextSignature = JSON.stringify([mode, data, player?.entrant_id]);
+  if (nextSignature === rankingSignature) return;
+  rankingSignature = nextSignature;
+  $('rating-reference').textContent = mode === 'ffa' ? '均值 1000' : `${names.get(data.anchor) || 'WAIT'} = 0`;
+  $('pool-caption').textContent = `${mode === '1v1' ? '1v1 · 双人对局' : 'FFA · 3–8 人对局'} · ${number(data.completed_games)} 局 · ${mode === 'ffa' ? 'Codeforces · 均值 1000' : 'GoR'}`;
+  const metrics = mode === '1v1' ? [
+    ['duel_win_rate','胜率','获胜局数 ÷ 与其他策略的 1v1 对局数；平局计入分母，自我对战不计入'],
+    ['draw_rate','和棋率','未分胜负局数 ÷ 与其他策略的 1v1 对局数'],
+    ['mean_win_ticks','获胜步数','仅对获胜对局的 tick 数取平均，包含对手投降；受地图和对手影响'],
+    ['mean_decision_ms','决策耗时','每局先计算单步平均决策耗时，再对有计时数据的对局等权平均；不含 Arena / IPC 开销'],
+  ] : [
+    ['win_rate','胜率','夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜'],
+    ['survival_index','存活指数','（总席位数 − 存活名次）÷（总席位数 − 1）；重复席位先平均，再对各局平均'],
+    ['kill_index','击杀指数','亲自击杀的席位数 ÷ 其余席位数；重复席位先平均，再对各局平均'],
+  ];
+  $('ranking-head').replaceChildren(...[
+    ['排名 / 选手',''],['Elo','Elo ± 95% 估计区间半宽'],['▲','当前 Elo 减去同系列上一版本的当前 Elo'],
+    ...metrics.map(([,label,title])=>[label,title]),
+  ].map(([label,title])=>{const th=el('th','',label);th.scope='col';th.title=title;return th;}));
   $('ranking').replaceChildren();
-  data.ranking.forEach((row, i) => {
-    const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div');
-    detail.append(playerName(row.entrant_id, row.name, 'player-name'), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
-    wrap.append(el('span', `rank-no${i < 3 ? ' top' : ''}`, String(i + 1).padStart(2, '0')), detail); name.append(wrap);
+  $('rank-tier-labels').replaceChildren();
+  tierBoundaries = [];
+  let previousTier = null, previousTierRow = null, rankedPosition = 0;
+  data.ranking.forEach(row => {
+    const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div'), heading = el('div', 'rank-player-heading');
+    heading.append(playerName(row.entrant_id, row.name, 'player-name'));
+    detail.append(heading);
+    const tier = row.rating_title, unrankedHuman = mode === '1v1' && row.kind === 'human';
+    if (unrankedHuman) {
+      detail.append(el('div','player-sub','人类'));
+    } else if (mode === '1v1' && tier) {
+      const badge = titleBadge(tier);
+      badge.title = tier.key === 'unranked' ? '人类玩家不参与评级分段'
+        : tier.key === 'unrated' ? `还需 ${tier.remaining_games} 场有效对局完成定级`
+        : tier.maximum === null ? '已达到最高等级'
+          : `距离下一等级还差 ${(tier.maximum-row.elo).toFixed(1)} 分`;
+      heading.append(badge);
+      const context = [row.kind === 'human' ? '人类' : '',row.anchor ? '零点' : '',row.disqualified ? '已停用' : ''].filter(Boolean);
+      if (context.length) detail.append(el('div','player-sub',context.join(' · ')));
+      if (!['unranked','unrated'].includes(tier.key)) {
+        if (previousTier && previousTier.key !== tier.key) {
+          previousTierRow.className = 'rank-tier-end';
+          previousTierRow.style.setProperty('--title-color',previousTier.color);
+          const label = el('div','rank-tier-label');
+          label.style.setProperty('--title-color',previousTier.color);
+          label.append(el('span','',previousTier.label),el('span','rank-tier-score',
+            previousTier.minimum === null ? `< ${previousTier.maximum}` : number(previousTier.minimum)));
+          $('rank-tier-labels').append(label);
+          tierBoundaries.push({row:previousTierRow,label});
+        }
+        previousTier = tier;
+        previousTierRow = tr;
+      }
+    } else {
+      detail.append(el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
+    }
+    const place = unrankedHuman ? null : ++rankedPosition;
+    wrap.append(el('span', `rank-no${place && place <= 3 ? ' top' : ''}`, place === null ? '' : String(place).padStart(2, '0')), detail); name.append(wrap);
     const change = Number.isFinite(row.elo_delta) ? Math.round(row.elo_delta * 10) / 10 : null;
     const delta = el('td', `elo-delta${change > 0 ? ' positive' : change < 0 ? ' negative' : ''}`,
       change === null ? '—' : `${change > 0 ? '+' : ''}${change.toFixed(1)}`);
     delta.title = row.previous_version ? `相对 ${row.previous_version} 的当前 Elo${change === null ? '（双方均完成对局后显示）' : ''}` : '暂无可比较的上一版本';
     const elo = el('td', 'elo'), estimate = el('span', 'elo-value', row.elo.toFixed(1));
     const ci = el('span', 'elo-ci', row.elo_ci ? `±${row.elo_ci.half_width.toFixed(1)}` : '± —');
-    ci.title = row.anchor ? '零分基准固定为 0' : row.elo_ci
+    ci.title = row.anchor ? '归一化参考：自身与自身的分差恒为 0；WAIT 的原始评分正常结算' : row.elo_ci
       ? `95% 估计区间 [${row.elo_ci.lower.toFixed(1)}, ${row.elo_ci.upper.toFixed(1)}] · ${row.ci_blocks} 组独立地图；基于名次模型的近似估计`
-      : '95% 估计区间：独立地图或基准校准样本不足';
+      : '95% 估计区间：独立地图样本不足，或对手关系尚未连通';
     ci.setAttribute('aria-label', ci.title);
     elo.append(estimate, ci);
-    tr.append(name, elo, delta,
-      ...['win_rate', 'survival_index', 'kill_index'].map(key =>
-        el('td', 'metric', Number.isFinite(row[key]) ? `${(100 * row[key]).toFixed(1)}%` : '—')));
+    tr.append(name, elo, delta, ...metrics.map(([key])=>{
+      const value=row[key];
+      const text = !Number.isFinite(value) ? '—' : key === 'mean_win_ticks' ? `${number(Math.round(value))} 步`
+        : key === 'mean_decision_ms' ? `${value < 1 ? (value*1000).toFixed(1)+' μs' : value.toFixed(2)+' ms'}`
+        : `${(100*value).toFixed(1)}%`;
+      const cell=el('td','metric',text);
+      if (mode === '1v1') cell.title = key === 'mean_win_ticks' ? `${row.duel_wins ?? 0} 场获胜对局`
+        : key === 'mean_decision_ms' ? `${row.timed_games ?? 0} 场有计时记录；缺失数据不记作 0`
+        : `${row.duel_games ?? 0} 场与其他策略的 1v1 对局`;
+      return cell;
+    }));
     $('ranking').append(tr);
     if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `${mode.toUpperCase()} · ${row.elo.toFixed(1)} Elo · ${row.games} 局`;
   });
+  positionTierLabels();
+  const signature = JSON.stringify([mode,data.win_matrix,data.ranking.map(row=>[row.entrant_id,row.name,row.kind,row.registration_order])]);
+  if (signature !== matrixSignature) {
+    matrixSignature = signature;
+    $('matrix-caption').textContent = mode === '1v1'
+      ? '行选手战胜列选手的比例 · 平局单列，悬停查看样本数'
+      : '行选手最终名次领先列选手的比例 · 重复席位先取平均，平局单列';
+    renderMatrix($('win-matrix'),data.win_matrix,data.ranking,playerName,(left,right)=>{
+      historyConditions.clear();
+      historyConditions.set(left,'include'); historyConditions.set(right,'include');
+      historyMode = mode;
+      filterHistory();
+      $('history-filter').scrollIntoView({block:'start',behavior:'smooth'});
+    });
+  }
+}
+function positionTierLabels() {
+  const panel = $('ranking-panel');
+  if (!tierBoundaries.length || panel.hidden) return;
+  const top = panel.getBoundingClientRect().top + panel.clientTop;
+  const positions = tierBoundaries.map(({row})=>row.getBoundingClientRect().bottom-top);
+  tierBoundaries.forEach(({label},i)=>{label.style.top = `${positions[i]}px`;});
+}
+function titleBadge(tier) {
+  const badge=el('span',`rating-title ${tier.key}`,tier.label);
+  badge.style.setProperty('--title-color',tier.color);
+  return badge;
 }
 async function loadHistory() {
   const request = ++historyRequest;
@@ -143,6 +236,9 @@ async function loadHistory() {
   if (request !== historyRequest) return; // A slower previous filter must not replace the latest results.
   const lastPage = Math.max(0, Math.ceil(data.total / 20) - 1);
   if (page > lastPage) { page = lastPage; return loadHistory(); }
+  const signature = JSON.stringify([query.toString(), historyRoster, data]);
+  if (signature === historySignature) return;
+  historySignature = signature;
   $('history').replaceChildren();
   for (const match of data.matches) {
     const row = el('article', 'match-row'), summary = el('div', 'match-summary');
@@ -170,6 +266,8 @@ async function loadHistory() {
         entry.delta === null ? '—' : `${entry.delta > 0 ? '+' : ''}${entry.delta.toFixed(1)}`);
       const pool = match.entrant_ids.length === 2 ? '1v1' : 'FFA';
       delta.title = entry.copies > 1 ? `${pool}：该策略本局 ${entry.copies} 个席位共用的 Elo 总变化，不按席位累加` : `本局 ${pool} Elo 变化`;
+      if (pool === '1v1' && match.rating_policy === 'gor-relative-codeforces-v9')
+        delta.title += '（本局原始评分变化，不含 WAIT 零点的平移）';
       if (entry.delta !== null) delta.append(el('small', '', entry.copies > 1 ? 'Elo 合计' : 'Elo'));
       item.append(rank, participant, delta); players.append(item);
     }
@@ -180,22 +278,72 @@ async function loadHistory() {
   $('prev-page').disabled = page === 0; $('next-page').disabled = (page + 1) * 20 >= data.total;
 }
 function renderPlayer() {
-  $('signup').hidden = !!player; $('player-lobby').hidden = !player;
-  if (player) { $('player-label').textContent = player.name; $('play-title').textContent = '准备好下一场对局'; }
+  $('signup').hidden = !!player && !showSignup; $('player-lobby').hidden = !player;
+  $('cancel-signup').hidden = !player;
+  $('account-controls').hidden = !accounts?.entries.length;
+  const signature = JSON.stringify(accounts?.entries.map(({entrant_id,name})=>[entrant_id,name]));
+  if (signature !== accountSignature) {
+    accountSignature = signature;
+    $('play-account').replaceChildren(...(accounts?.entries || []).map(entry => {
+      const option=el('option','',entry.name);option.value=entry.entrant_id;return option;
+    }));
+  }
+  const selectedAccount = player?.entrant_id || accounts?.active || '';
+  if ($('play-account').value !== selectedAccount) $('play-account').value = selectedAccount;
+  for (const id of ['play-account','new-account','create-account','cancel-signup']) $(id).disabled=accountBusy;
+  if (player && $('player-label').textContent !== player.name) {
+    $('player-label').textContent = player.name; $('play-title').textContent = '准备好下一场对局';
+  }
   if (meta) {
-    const bots = meta.entrants.filter(e => e.kind !== 'human').length;
-    $('start-game').disabled = bots === 0;
+    const bots = meta.entrants.filter(e => e.kind !== 'human' && !e.disqualified).length;
+    $('start-game').disabled = accountBusy || (!live || live.done) && bots === 0;
     const players = Number($('play-players').value);
-    $('start-game').textContent = live && !live.done ? '返回当前对局' : bots === 0 ? '需要一个算法对手' : players ? `开始 ${players} 人排位` : '随机匹配并开始';
+    const label = live && !live.done ? '返回当前对局' : bots === 0 ? '需要一个算法对手' : players ? `开始 ${players} 人对局` : '随机匹配并开始';
+    if ($('start-game').textContent !== label) $('start-game').textContent = label;
+    renderOpponents();
   }
 }
-async function restorePlayer() {
-  if (!token) return;
-  try { player = await api('/api/me'); live = await api('/api/play/active'); localStorage.setItem(tokenKey, token); }
-  catch (e) { player = null; token = ''; throw e; }
-  renderPlayer();
+function renderOpponents() {
+  const bots = meta.entrants.filter(e=>e.kind !== 'human' && !e.disqualified).sort(compareEntrants);
+  const players = Number($('play-players').value), active = !!live && !live.done;
+  const signature = JSON.stringify([players,bots.map(e=>[e.entrant_id,e.name]),active,accountBusy]);
+  $('play-players').disabled = active || accountBusy;
+  if (signature === opponentSignature) return;
+  opponentSignature = signature;
+  const ids = new Set(bots.map(e=>e.entrant_id));
+  opponentChoices = Array.from({length:Math.max(0,players-1)},(_,i)=>ids.has(opponentChoices[i])?opponentChoices[i]:null);
+  $('play-opponents').replaceChildren(...opponentChoices.map((choice,index)=>{
+    const label=el('label','opponent-slot'),select=el('select');
+    label.append(el('span','',`对手 ${index+1}`),select);
+    const random=el('option','','随机匹配');random.value='';select.append(random);
+    for (const bot of bots) {const option=el('option','',bot.name);option.value=bot.entrant_id;select.append(option);}
+    select.value=choice || '';select.disabled=active || accountBusy;
+    select.addEventListener('change',()=>{opponentChoices[index]=select.value || null;});
+    return label;
+  }));
+  $('opponents-hint').textContent = active ? '当前账号有进行中的对局，结束后可重新选择对手。'
+    : players ? '逐个选择算法，也可保留随机匹配。同一算法可重复出场。' : '人数与对手随机；选择固定人数后，可以指定每个对手。';
+}
+async function restorePlayer(credential = token) {
+  if (!credential || accountBusy) return;
+  accountBusy=true;renderPlayer();
+  try {
+    const [nextPlayer,nextLive] = await Promise.all([
+      api('/api/me',undefined,true,credential), api('/api/play/active',undefined,true,credential),
+    ]);
+    activatePlayer(nextPlayer,nextLive,credential);
+  } finally {accountBusy=false;renderPlayer();}
+}
+function activatePlayer(nextPlayer,nextLive,credential) {
+  accounts.remember(nextPlayer,credential);
+  pollController?.abort();
+  token=credential;player=nextPlayer;live=nextLive;
+  input.reset();outbox.length=0;showSignup=false;
+  $('player-rating').textContent='';
 }
 function showDialog(mode) {
+  if (mode === 'live') { replayController?.abort(); replayController = null; }
+  setReplayLoading(false);
   pauseReplay(); dialogMode = mode;
   $('board-dialog').classList.toggle('human-game', mode === 'live');
   $('board-error').textContent = '';
@@ -249,7 +397,8 @@ async function openLive() {
   if (!player) { showTab('play'); return; }
   $('start-game').disabled = true;
   try {
-    const value = await api('/api/play', {players: Number($('play-players').value)||null});
+    const players = Number($('play-players').value)||null;
+    const value = await api('/api/play', {players, opponents:players ? opponentChoices : null});
     const fresh=live?.game_id!==value.game_id || !input.board;
     if(fresh)input.reset();
     live=value;showDialog('live');updateLive(value,true);
@@ -258,24 +407,27 @@ async function openLive() {
   } finally { renderPlayer(); }
 }
 const input = new MoveInput(()=>draw(),command=>{
-  outbox.push({gameId:live.game_id,command});flushCommands();
+  outbox.push({gameId:live.game_id,credential:token,command});flushCommands();
 });
 async function flushCommands() {
   if(sending)return;
   sending=true;
   try {
     while(outbox.length) {
-      const {gameId,command}=outbox[0];
+      const pending=outbox[0], {gameId,credential,command}=pending;
       try {
-        const value=await api(`/api/play/${gameId}/commands`,command);
-        outbox.shift();
-        if(live?.game_id===gameId)updateLive(value);
+        const value=await api(`/api/play/${gameId}/commands`,command,true,credential);
+        if(outbox[0]===pending)outbox.shift();
+        if(token!==credential || live?.game_id!==gameId)continue;
+        updateLive(value);
         $('board-error').textContent='';
       } catch(error) {
+        if(token!==credential || live?.game_id!==gameId){if(outbox[0]===pending)outbox.shift();continue;}
         $('board-error').textContent=error.status?error.message:'连接中断，正在重试操作…';
         if(!error.status){setTimeout(flushCommands,300);break;}
         outbox.length=0;input.pending=[];
-        const value=await api(`/api/play/${gameId}`);
+        const value=await api(`/api/play/${gameId}`,undefined,true,credential);
+        if(token!==credential || live?.game_id!==gameId)continue;
         input.next=value.last_command_id+1;updateLive(value,true);break;
       }
     }
@@ -287,24 +439,41 @@ function move(direction,half=false,wait=false) {
   if(wait)input.issue('append',0);else input.move(direction,half);
 }
 async function openReplay(id) {
-  notice('正在校验并读取回放…');
-  const data = await api(`/api/replay/${id}`);
-  replay = data; frame = 0;
-  showDialog('replay'); $('timeline').max = data.frames.length - 1;
-  $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'surrender' ? '投降结算' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
-  seek(0); notice();
+  replayController?.abort();
+  const controller = replayController = new AbortController();
+  replay = timeline = board = null; battlefield.board = null;
+  playerNames = ''; $('game-players').replaceChildren();
+  showDialog('replay'); setReplayLoading(true); notice();
+  $('board-title').textContent = `对局回放 · ${id.slice(0,8)}`;
+  $('board-status').textContent = '';
+  $('turn-counter').textContent = '—'; $('replay-tick').textContent = '';
+  try {
+    const data = await api(`/api/replay/${id}`, undefined, false, '', controller.signal);
+    if (controller !== replayController) return;
+    replay = data; timeline = new ReplayTimeline(data.frames); frame = 0;
+    $('timeline').max = data.frames.length - 1;
+    $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
+    $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'surrender' ? '投降结算' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
+    setReplayLoading(false); seek(0); $('board').focus();
+  } catch (error) {
+    if (controller !== replayController || error.name === 'AbortError') return;
+    setReplayLoading(true);
+    $('board-dialog').setAttribute('aria-busy', 'false');
+    $('replay-loading').textContent = `回放加载失败：${error.message}`;
+  } finally {
+    if (controller === replayController) replayController = null;
+  }
 }
-function applyFrame(next) {
-  const f = replay.frames[next];
-  for (const [cell,owner,army,structure] of f.cells) { const y=Math.floor(cell/board.width),x=cell%board.width;board.owner[y][x]=owner;board.army[y][x]=army;board.structure[y][x]=structure; }
-  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;board.forfeited=f.forfeited;
+function setReplayLoading(loading) {
+  $('board-dialog').setAttribute('aria-busy', String(loading));
+  $('board').hidden = loading;
+  $('replay-loading').hidden = !loading;
+  $('replay-loading').textContent = '正在读取并校验回放…';
+  for (const id of ['toggle-replay', 'timeline', 'replay-speed']) $(id).disabled = loading;
 }
 function seek(next) {
-  next=Math.max(0,Math.min(replay.frames.length-1,next));
-  if (!board || next < frame || next === 0 || frame === 0) {board=structuredClone(replay.frames[0]);frame=0;}
-  for (let i=frame+1;i<=next;i++) applyFrame(i);
-  frame=next;$('timeline').value=frame;$('replay-tick').textContent=`Tick ${board.tick} / ${replay.result.ticks}`;
+  board=timeline.seek(next);frame=timeline.index;
+  $('timeline').value=frame;$('replay-tick').textContent=`Tick ${board.tick} / ${replay.result.ticks}`;
   draw();renderGamePlayers(replay.result.entrant_ids.map(id=>({name:names.get(id)||id.slice(0,8)})));
 }
 const playback = new Playback({
@@ -314,12 +483,13 @@ const playback = new Playback({
 });
 function pauseReplay(){playback.stop();}
 $('toggle-replay').addEventListener('click',()=>{
+  if (!replay || !timeline) return;
   if(playback.running){pauseReplay();return;}if(frame===replay.frames.length-1)seek(0);
   $('toggle-replay').textContent='暂停';playback.start();
 });
-$('timeline').addEventListener('input',()=>{pauseReplay();seek(Number($('timeline').value));});
+$('timeline').addEventListener('input',()=>{if(timeline){pauseReplay();seek(Number($('timeline').value));}});
 $('close-board').addEventListener('click',()=>{$('board-dialog').close();});
-$('board-dialog').addEventListener('close',()=>{pauseReplay();dialogMode=null;refresh().catch(e=>notice(e.message));});
+$('board-dialog').addEventListener('close',()=>{pauseReplay();pollController?.abort();replayController?.abort();replayController=null;dialogMode=null;replay=null;timeline=null;refresh().catch(e=>notice(e.message));});
 const battlefield = new Battlefield($('board'),(x,y,half)=>{
   if(dialogMode==='live'&&live&&!live.done)input.select(y*board.width+x,half);
 });
@@ -382,19 +552,45 @@ $('clear-history-filters').addEventListener('click', () => {
 });
 $('prev-page').addEventListener('click',()=>{page=Math.max(0,page-1);loadHistory().catch(e=>notice(e.message));});
 $('next-page').addEventListener('click',()=>{page++;loadHistory().catch(e=>notice(e.message));});
-$('signup-form').addEventListener('submit',async event=>{event.preventDefault();try{const data=await api('/api/players',{name:$('player-name').value},false);token=data.token;player=data.entrant;localStorage.setItem(tokenKey,token);notice();await refresh();renderPlayer();}catch(e){notice(e.message);}});
-$('recover-form').addEventListener('submit',async event=>{event.preventDefault();token=$('recover-token').value.trim();try{await restorePlayer();localStorage.setItem(tokenKey,token);$('recover-token').value='';notice('玩家身份已恢复');await refresh();}catch(e){notice(e.message);}});
+$('new-account').addEventListener('click',()=>{showSignup=true;renderPlayer();$('player-name').focus();});
+$('cancel-signup').addEventListener('click',()=>{showSignup=false;renderPlayer();});
+$('play-account').addEventListener('change',async()=>{
+  const account=accounts.entries.find(entry=>entry.entrant_id===$('play-account').value);
+  if(!account || account.entrant_id===player?.entrant_id)return;
+  try{await restorePlayer(account.token);notice();await loadRank();}catch(e){notice(e.message);}
+});
+$('play-players').addEventListener('change',renderPlayer);
+$('signup-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(accountBusy)return;accountBusy=true;renderPlayer();
+  try{
+    const data=await api('/api/players',{name:$('player-name').value},false);
+    activatePlayer(data.entrant,null,data.token);$('player-name').value='';notice();await refresh();
+  }catch(e){notice(e.message);}finally{accountBusy=false;renderPlayer();}
+});
+$('recover-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(accountBusy)return;
+  try{await restorePlayer($('recover-token').value.trim());$('recover-token').value='';notice('账号已恢复并加入列表');await refresh();}
+  catch(e){notice(e.message);}
+});
 $('copy-token').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(token);notice('身份凭证已复制。请保存在你自己的密码管理器中。');}catch(e){notice('浏览器未允许复制凭证。请允许剪贴板权限后重试。');}});
 $('start-game').addEventListener('click',()=>openLive().catch(e=>notice(e.message)));
-async function refresh(){renderMeta(await api('/api/meta'));if(player&&!$('board-dialog').open){live=await api('/api/play/active');renderPlayer();}await loadRank();if(tab==='history')await loadHistory();$('connection').textContent='联赛在线';}
+async function refresh(){
+  renderMeta(await api('/api/meta'));
+  if(player&&!accountBusy&&!$('board-dialog').open){
+    const credential=token,value=await api('/api/play/active',undefined,true,credential);
+    if(token===credential){live=value;renderPlayer();}
+  }
+  await loadRank();if(tab==='history')await loadHistory();
+  if($('connection').textContent!=='联赛在线')$('connection').textContent='联赛在线';
+}
 async function poll(){
   if(polling)return;
   if(!(player&&dialogMode==='live'&&live&&!live.done&&$('board-dialog').open))return;
   polling=true;
-  const id=live.game_id;
-  try{const value=await api(`/api/play/${id}?after=${Math.max(0,input.revision)}`);if(live?.game_id===id)updateLive(value);}
-  catch(e){$('board-error').textContent=e.message;}
-  finally{polling=false;setTimeout(poll,50);}
+  const id=live.game_id,credential=token,controller=new AbortController();pollController=controller;
+  try{const value=await api(`/api/play/${id}?after=${Math.max(0,input.revision)}`,undefined,true,credential,controller.signal);if(token===credential&&live?.game_id===id)updateLive(value);}
+  catch(e){if(e.name!=='AbortError'&&token===credential&&live?.game_id===id)$('board-error').textContent=e.message;}
+  finally{if(pollController===controller)pollController=null;polling=false;setTimeout(poll,50);}
 }
 (async()=>{
   try{await refresh();}catch(e){notice(e.message);$('connection').textContent='连接异常';return;}
@@ -404,4 +600,4 @@ async function poll(){
   }
 })();
 setInterval(poll,1000);
-setInterval(()=>{if(!$('board-dialog').open)refresh().catch(e=>{$('connection').textContent='连接中断';notice(e.message);});},5000);
+setInterval(()=>{if(!document.hidden&&!$('board-dialog').open)refresh().catch(e=>{$('connection').textContent='连接中断';notice(e.message);});},5000);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { historyQuery, placements, nextCondition, entrantColor } from '../../src/generals_arena/web/history.js';
+import { historyQuery, placements, nextCondition, entrantColor, compareEntrants } from '../../src/generals_arena/web/history.js';
 
 test('presence events retain multiple included/excluded players and pagination', () => {
   const query = historyQuery('multiplayer', new Map([
@@ -46,12 +46,24 @@ test('text toggles cycle inclusion, exclusion and unrestricted matching', () => 
   }
 });
 
-test('versions keep their family hue and use distinct shades independent of the roster', () => {
-  const versions = [1,2,3,4,5].map(v => entrantColor({name:`gpt-6-kestrel-v${v}`, kind:'cpp'}));
+test('versions keep their family hue and become darker without wrapping', () => {
+  const versions = [1,2,3,4,5,10,20].map(v => entrantColor({name:`gpt-6-kestrel-v${v}`, kind:'cpp'}));
   assert.equal(new Set(versions.map(c => c.hue)).size, 1);
-  assert.equal(new Set(versions.map(c => c.color)).size, 5);
+  assert.equal(new Set(versions.map(c => c.color)).size, versions.length);
+  const lightness = versions.map(c=>Number(c.color.match(/ ([\d.]+)%\)$/)[1]));
+  assert.ok(lightness.every((v,i)=>i === 0 || v < lightness[i-1]));
   assert.ok(versions.every(c => c.series === 'gpt-6-kestrel'));
   assert.notEqual(versions[0].hue, entrantColor({name:'gpt-6-razor-v1', kind:'cpp'}).hue);
   assert.deepEqual(entrantColor({name:'gpt-6-kestrel-v1', kind:'cpp'}), versions[0]);
   assert.equal(entrantColor({name:'player-v1', kind:'human'}).series, 'player-v1');
+});
+
+test('baselines are white, WAIT is gray and sorting uses numeric versions',()=>{
+  for (const name of ['random','aggressive-v1','defensive-v1','expansion-v1']) {
+    assert.equal(entrantColor({name,kind:'baseline'}).color,'#ffffff');
+  }
+  assert.equal(entrantColor({name:'WAIT',kind:'cpp'}).color,'#999999');
+  const names = ['razor-v10','kestrel-v2','razor-v1','kestrel-v1','razor-v2'];
+  assert.deepEqual(names.map(name=>({name,kind:'cpp'})).sort(compareEntrants).map(e=>e.name),
+    ['kestrel-v1','kestrel-v2','razor-v1','razor-v2','razor-v10']);
 });

@@ -56,13 +56,20 @@ def controllers_for(store, plan):
 
 
 def eligible_schedule(store, job, *, coverage=None, **options):
+    opponents = options.pop('opponents', None)
+    if opponents is not None:
+        if not options.get('human') or not isinstance(opponents, list) or not 1 <= len(opponents) <= 7:
+            raise ValueError('opponents must contain 1–7 bot IDs or null for random seats')
+        if options.get('players') is None:
+            options['players'] = len(opponents) + 1
+        if len(opponents) != options['players'] - 1:
+            raise ValueError('opponent count must equal players minus one')
     retired = store.retired_entrant_ids()
     if job['entrant_id'] in retired:
         raise ValueError('entrant is retired from the active league')
     disabled = store.disabled_policy_ids() | retired
     if job['entrant_id'] in disabled:
         raise ValueError('C++ policy is disqualified after a recorded violation')
-    reference = store.reference if store.entrants()[store.reference]['kind'] == 'cpp' else None
     quotas = job.get('modes', {})
     mode = None
     if quotas and not options.get('human'):
@@ -73,21 +80,16 @@ def eligible_schedule(store, job, *, coverage=None, **options):
         counts = tuple(p for p in store.config.player_counts if (p == 2) == (mode == '1v1'))
         options['players'] = player_count(SimpleNamespace(player_counts=counts, seed=store.config.seed), job)
     elif not options.get('human') and options.get('players') is None:
-        options['players'] = 2 if job['entrant_id'] == reference and 2 in store.config.player_counts else player_count(store.config, job)
+        options['players'] = player_count(store.config, job)
     if options.get('players') is not None:
         mode = '1v1' if options['players'] == 2 else 'ffa'
     coverage = store.pair_counts(job['entrant_id'], mode=mode) if coverage is None else coverage
-    # Front-load two independent reference maps, then add one every 50 target
-    # games. A 1000-game publication spends at most 40 games (4%) on WAIT.
-    # Coverage includes plans reserved in this window, not just finished games.
     progress = quotas.get(mode, job)
-    quota = min(2*(progress['budget']//50), 4+2*(progress['done']//50))
-    calibration = coverage.get(reference, 0) < quota
-    calibration = (reference is not None and reference not in disabled and not options.get('human')
-                   and job['entrant_id'] != reference and calibration)
-    # Keep WAIT out of the ordinary opponent pool, including proximity and
-    # underplayed weighting. Explicit runs still honor every requested seat.
-    entries = {key: e for key,e in store.entrants().items() if key not in disabled and key != reference}
+    entries = {key: e for key,e in store.entrants().items() if key not in disabled}
+    if opponents is not None:
+        for key in opponents:
+            if key is not None and (not isinstance(key, str) or key not in entries or entries[key]['kind'] == 'human'):
+                raise ValueError('opponent must be an active, eligible bot')
     if options.get('players') == 2 and any(key != job['entrant_id'] and e['kind'] != 'human'
                                          for key,e in entries.items()):
         entries.pop(job['entrant_id'], None)
@@ -97,13 +99,12 @@ def eligible_schedule(store, job, *, coverage=None, **options):
     plans = make_block(proxy, job, **options)
     if quotas:
         plans = plans[:progress['budget'] - progress['done']]
-    if calibration:
-        plans = plans[:quota - coverage.get(reference, 0)]
-    # Each calibration rotation group contains just one WAIT seat.
-    if calibration:
-        for plan in plans:
-            plan['entrant_ids'][plan['instance_ids'].index(1)] = reference
     for plan in plans:
+        if opponents is not None:
+            seats = [seat for seat, key in enumerate(plan['entrant_ids']) if key != job['entrant_id']]
+            for seat, key in zip(seats, opponents):
+                if key is not None:
+                    plan['entrant_ids'][seat] = key
         plan['rating_policy'] = POLICY
         plan['rating_group_size'] = len(plans)
         plan['rating_mode'] = rating_mode(plan)
@@ -136,8 +137,6 @@ def prepare_batch(store, job):
             mode = min(available, key=lambda m: (modes[m]['done']/modes[m]['budget'], MODES.index(m)))
         else:
             mode = '1v1' if player_count(store.config, planned_job) == 2 else 'ffa'
-            if job['entrant_id'] == store.reference and 2 in store.config.player_counts:
-                mode = '1v1'
         group = eligible_schedule(store, planned_job, coverage=coverage[mode])
         if not group:
             break
@@ -349,7 +348,7 @@ class LiveArena:
                 close_game(value['game'])
         self.store.abort_live()
 
-    def create_game(self, human, players=None):
+    def create_game(self, human, players=None, opponents=None):
         if players is not None:
             integer("players", players, 2)
         with self.lock:
@@ -362,7 +361,7 @@ class LiveArena:
             if sum(not value["finished"] for value in self.games.values()) >= 16:
                 raise ValueError("too many active human games; try again later")
             job = {"id": uuid.uuid4().hex, "entrant_id": human, "done": 0, "budget": 1}
-            plans = eligible_schedule(self.store, job, human=True, players=players)
+            plans = eligible_schedule(self.store, job, human=True, players=players, opponents=opponents)
             if not plans:
                 raise ValueError("register more bots before starting this game")
             plan = plans[0]

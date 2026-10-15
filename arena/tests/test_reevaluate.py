@@ -25,14 +25,14 @@ def test_reset_without_backup_and_resume_reuses_registered_jobs(tmp_path):
     assert store.ratings() == {}
     assert store.authenticate(account['token']) == account['entrant']['entrant_id']
     assert all(j['budget'] == 3 and j['done'] == 0 for j in store.jobs())
-    assert {j['name'] for j in store.jobs()} == {'bot','random'}
+    assert {j['name'] for j in store.jobs()} == {'bot','random','WAIT'}
     assert next(j for j in store.jobs() if j['name']=='bot')['id'] == job
     assert not (store.directory/'archives').exists()
     module.evaluate(store, 2)
-    assert sum(b['completed_games'] for b in store.leaderboards().values()) == 6
+    assert sum(b['completed_games'] for b in store.leaderboards().values()) == 9
     # Job identities survive, but this is a new evaluation; there are no old
     # records or ratings carried into its completed prefix.
-    assert len(store.matches()['matches']) == 6
+    assert len(store.matches()['matches']) == 9
     board = store.leaderboard()
     module.evaluate(store, 2)
     assert store.leaderboard() == board

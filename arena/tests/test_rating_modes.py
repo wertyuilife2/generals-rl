@@ -32,11 +32,14 @@ def test_ffa_cannot_change_duel_ratings_evidence_or_statistics(tmp_path):
     ffa = dict(game_id='ffa', entrant_ids=[a,b,store.anchor], rating_policy=POLICY)
     store.insert_plans([ffa]); finish(store, ffa, winner=2)
     assert stats['1v1'].leaderboard() == before
-    assert store.ratings('1v1')[a] > 0 > store.ratings('ffa')[a]
+    assert store.ratings('1v1')[a] > 0
+    assert store.ratings('ffa')[a] < 1000
     assert b not in store.ratings('1v1')
     assert store.pair_counts(a, '1v1') == {store.anchor:1}
     assert store.pair_counts(a, 'ffa') == {store.anchor:1,b:1}
-    assert all(store.ratings(mode)[store.anchor] == 0 for mode in MODES)
+    assert store.ratings('1v1')[store.anchor] < 0
+    assert next(r for r in before['ranking'] if r['anchor'])['elo'] == 0
+    assert store.ratings('ffa')[store.anchor] > 1000
     snapshot = store.leaderboards()
     store.rebuild()
     assert store.leaderboards() == snapshot
@@ -61,7 +64,7 @@ def test_exact_500_per_mode_even_across_partial_rotation_resumes(tmp_path):
             finish(store, plan)
         store = LeagueStore(store.directory)
     assert counts == {'1v1':500,'ffa':500}
-    assert all(0 < reference[mode] <= 20 for mode in MODES)
+    assert reference['ffa'] > 20  # No reference appearance cap.
     assert all(value == {'budget':500,'done':500} for value in job['modes'].values())
     assert len(store.matches(limit=100)['matches']) == 100
     assert store.matches()['total'] == 1000

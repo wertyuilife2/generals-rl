@@ -84,11 +84,11 @@ class LeagueConfig:
 
     def manifest(self):
         # Freeze simulation, distribution, scheduling, and scoring, not presentation code.
-        files = ("config.py", "game.py", "observation.py", "rating.py", "scheduler.py", "views.py")
+        files = ("config.py", "game.py", "observation.py", "rating.py", "rating_policy.py", "mode_rating.py", "scheduler.py", "views.py")
         value = {"schema": 4, "config": asdict(self),
                  "engine_sha256": source_digest("generals"),
                  "implementation": {name: file_digest(Path(__file__).with_name(name)) for name in files},
-                 "rating": "independent-duel-ffa-rank-v1",
+                 "rating": "independent-relative-gor-codeforces-v3",
                  "simulation_backend": "generals-native-cpu-v1",
                  "human_observation": "local-with-indistinguishable-fog-obstacles-v1",
                  "decision_timing": "joint_pre_growth_then_absolute_seat_order"}

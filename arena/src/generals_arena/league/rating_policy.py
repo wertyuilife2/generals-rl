@@ -9,8 +9,10 @@ from ..util import digest
 LEGACY_POLICY = 'rank-balanced-opponents-v4'
 CUMULATIVE_POLICY = 'rank-cumulative-bt-v5'
 ONLINE_POLICY = 'rank-online-information-v6'
-POLICY = 'rank-calibrated-outcome-v7'
-EVIDENCE_POLICIES = (CUMULATIVE_POLICY, ONLINE_POLICY, POLICY)
+CALIBRATED_POLICY = 'rank-calibrated-outcome-v7'
+FIXED_GOR_POLICY = 'gor-codeforces-v8'
+POLICY = 'gor-relative-codeforces-v9'
+EVIDENCE_POLICIES = (CUMULATIVE_POLICY, ONLINE_POLICY, CALIBRATED_POLICY, FIXED_GOR_POLICY, POLICY)
 DUEL_SHARE = .5
 DUEL_WEIGHT = 2.0
 
@@ -34,6 +36,13 @@ def score(ratings, result, anchor, k, games, evidence=None):
         return rate(ratings, result, anchor, k, games)
     if policy not in (*EVIDENCE_POLICIES, LEGACY_POLICY):
         raise ValueError(f'unknown recorded rating policy: {policy}')
+    if policy in (FIXED_GOR_POLICY, POLICY):
+        from .mode_rating import score_modes
+        if evidence is not None:
+            for left, right, amount, outcome in comparisons(result):
+                total, wins = evidence.get((left, right), (0., 0.))
+                evidence[left, right] = (total+amount, wins+amount*outcome)
+        return score_modes(ratings, result, anchor, games, fixed_anchor=policy == FIXED_GOR_POLICY)
     ids, places = result['entrant_ids'], scores(result)
     seats = defaultdict(list)
     for seat, key in enumerate(ids):
@@ -46,9 +55,9 @@ def score(ratings, result, anchor, k, games, evidence=None):
         for left, right, amount, outcome in current:
             total, wins = evidence.get((left, right), (0., 0.))
             evidence[left, right] = (total+amount, wins+amount*outcome)
-        if policy in (ONLINE_POLICY, POLICY):
+        if policy in (ONLINE_POLICY, CALIBRATED_POLICY):
             fitted, gains = update(ratings, seats, anchor, evidence, current)
-            if policy == POLICY:
+            if policy == CALIBRATED_POLICY:
                 online = fitted
                 # At most two full-surprise online steps, including the base
                 # step. Calibration cannot create an unbounded late refit.
@@ -74,9 +83,9 @@ def score(ratings, result, anchor, k, games, evidence=None):
                                 expected_rank=seed, rated_games=count+bool(opponents),
                                 weight=weight, distinct_opponents=len(opponents),
                                 effective_games=sum(total for pair, (total, _) in evidence.items() if key in pair))
-            if policy in (ONLINE_POLICY, POLICY):
+            if policy in (ONLINE_POLICY, CALIBRATED_POLICY):
                 changes[key]['update_gain'] = gains[key]
-            if policy == POLICY:
+            if policy == CALIBRATED_POLICY:
                 changes[key]['online_delta'] = online[key]-before
                 changes[key]['calibration_delta'] = after-online[key]
                 changes[key]['update_limit'] = limits[key]
