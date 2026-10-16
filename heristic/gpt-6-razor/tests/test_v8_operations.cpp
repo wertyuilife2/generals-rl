@@ -13,6 +13,61 @@ struct Board {
 
 int main(){
  {
+  Board b;b.owner[60]=1;b.structure[60]=2;b.army[60]=130;
+  b.owner[56]=b.owner[64]=0;b.army[56]=b.army[64]=80;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  p->sources={56,64};p->convergingAssaultPrograms();
+  assert(p->proposalCount>0&&p->proposals[0].kind==21);
+  // Two approach routes sharing one donor are one army, not two waves.
+  b.owner[64]=-1;b.army[64]=0;b.owner[58]=0;b.army[58]=30;
+  b.refresh(*p);p->proposalCount=0;p->sources={56,58};p->convergingAssaultPrograms();
+  assert(p->proposalCount==0);
+ }
+ {
+  Board b;b.owner[60]=1;b.structure[60]=1;b.army[60]=10;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  double hostile=p->assetUtility(60,70,1);
+  b.owner[60]=-2;b.refresh(*p);double neutral=p->assetUtility(60,70,1);
+  // The captured city's former owner is not itself a counterattacking army.
+  // Retaining an enemy city changes both players' future production.
+  assert(hostile>neutral*1.6);
+  b.owner[60]=1;b.owner[61]=1;b.army[61]=100;b.refresh(*p);
+  assert(p->assetUtility(60,70,1)<hostile*.5);
+ }
+ {
+  Board b;b.owner[56]=0;b.army[56]=80;
+  b.owner[58]=-2;b.structure[58]=1;b.army[58]=60;
+  b.owner[60]=1;b.structure[60]=1;b.army[60]=5;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  p->campaignSearch(56,79,16);
+  assert(p->dist[60]>4&&p->force[60]>60);
+  for(int c=60;c!=56;c=p->parent[c])assert(c>=0&&c!=58);
+  // Economic pricing of enemy casualties must never invent actual troops.
+  std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[58]=1;b.structure[58]=0;b.army[58]=40;b.refresh(*p);
+  p->campaignSearch(56,79,16);assert(p->force[60]>20&&p->force[60]<35);
+ }
+ for(int seat=0;seat<2;seat++){
+  Board b;b.obs.player=seat;b.owner[0]=seat;
+  b.owner[60]=1-seat;b.structure[60]=2;b.army[60]=130;
+  b.owner[59]=b.owner[61]=seat;b.army[59]=b.army[61]=80;
+  auto p=std::make_unique<Policy>(seat,1,"{}");b.refresh(*p);
+  p->coordinatedAssaultPrograms();
+  // Neither column wins alone. Two attacks work against every visible
+  // local response, including an earlier defender overrunning the first
+  // source and a later defender withdrawing its general's garrison.
+  assert(p->proposalCount>0&&p->proposals[0].kind==17);
+  // A reinforcement from one step away is an executable defense, not a
+  // hypothetical stationary garrison. It prevents this two-turn attack.
+  b.owner[49]=1-seat;b.army[49]=60;b.refresh(*p);p->proposalCount=0;
+  p->coordinatedAssaultPrograms();assert(p->proposalCount==0);
+  // A donor two steps away can merge and reinforce over the two replies.
+  b.owner[49]=1-seat;b.army[49]=1;b.owner[38]=1-seat;b.army[38]=80;
+  b.refresh(*p);p->proposalCount=0;p->coordinatedAssaultPrograms();
+  if(seat==1)assert(p->proposalCount==0);
+ }
+ {
   Board b;b.owner[1]=b.owner[11]=1;b.army[1]=80;b.army[11]=70;
   b.owner[22]=b.owner[23]=0;b.army[22]=b.army[23]=30;
   auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);

@@ -94,7 +94,8 @@ Program oneStep(const Candidate &c,int kind=0)const {
 double programScore(const Program &q)const {
  if(q.cursor>=q.count)return -1e30;
  const Order &x=q.orders[q.cursor];
- if(!legalOrder(x,q.kind==3))return -1e30;
+ if(q.kind!=17&&q.kind!=20&&q.kind!=21&&!legalOrder(x,q.kind==3))return -1e30;
+ if(q.kind==20&&!legalOrder(x,true))return -1e30;
  if(q.kind==14)return extractionSafe(q)?q.value+(q.born<tick?40.:0):-1e30;
  if(q.kind==10&&zoneETA[x.t]<=2&&zoneThreat[x.t]>moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t))+5)return -1e30;
  double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
@@ -110,7 +111,7 @@ void offer(Program q){
  Order &order=q.orders[q.cursor];
  // A route may reach a city several turns after it was planned. Revalidate
  // its departure reserve on every executed order, including continuations.
- if(q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=14&&st[order.s]==1&&reserve[order.s]>1&&!permitted(order)){
+ if(q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=14&&q.kind!=17&&q.kind!=20&&q.kind!=21&&st[order.s]==1&&reserve[order.s]>1&&!permitted(order)){
   order.half=true;if(!permitted(order))return;
  }
  double value=programScore(q);if(value<=-1e29)return;
@@ -363,7 +364,7 @@ void campaignPrograms(double income){
   int modes=(!requiredHalf&&usefulCityHalf(s))?2:1;
   for(int mode=0;mode<modes;mode++){
    bool half=requiredHalf||mode;int moving=moveArmy(s,half);if(moving<1)continue;
-   search(s,moving,32);
+   campaignSearch(s,moving,32);
    double highest=-1e30;int target=-1;
    for(int v=0;v<N;v++)if(!mine(v)&&dist[v]<INF&&first[v]>=0){
     int d=dist[v];bool enemy=own[v]>=0&&own[v]!=p,king=st[v]==2&&enemy,city=st[v]==1;
@@ -513,7 +514,7 @@ void deploymentPrograms(){
   // away a productive city. Tactical capture programs can still use full force.
   if(usefulCityHalf(s))half=true;
   int initial=moveArmy(s,half);if(initial<18)continue;
-  search(s,initial,32);double best=-1e30;int goal=-1;
+  campaignSearch(s,initial,32);double best=-1e30;int goal=-1;
   for(int v=0;v<N;v++)if(own[v]>=0&&own[v]!=p&&o->alive[own[v]]&&dist[v]<INF&&first[v]>=0&&dist[v]>=2){
    if(force[v]<10||force[v]<initial/3)continue;
    int d=dist[v],enemy=own[v];

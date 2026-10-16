@@ -106,7 +106,8 @@ void pressureMap(){
 double assetUtility(int c,int remaining,int arrival)const {
  int local=0;
  for(int k=0;k<enemyCount[c];k++)local=std::max(local,moveArmy(enemyNeighbors[c][k]));
- double holding=std::min(80.,16.+8.*ed[c]);
+ double holding=80.;
+ if(zoneThreat[c]>remaining+3&&zoneETA[c]<=6)holding=8.+6.*zoneETA[c];
  if(local>remaining+3)holding=std::min(holding,8.);
  else if(remaining>local+12)holding=std::min(90.,holding+16.);
  int pressure=zoneThreat[c],eta=zoneETA[c];
@@ -114,7 +115,8 @@ double assetUtility(int c,int remaining,int arrival)const {
  if(assetFlips[c]>0&&remaining<pressure+20)holding=std::min(holding,24./(1+.4*assetFlips[c]));
  int exits=0;for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&!blocked(v)&&st[v]!=1)exits++;}
  double value=(5.+holding*.29+exits*.55)/(1+.012*arrival);
- if(own[c]>=0&&own[c]!=p)value+=6.*std::min(1.,holding/24.);
+
+ if(own[c]>=0&&own[c]!=p)value+=holding*.29/(1+.012*arrival);
  if(remaining<4)value*=.70;
  if(assetFlips[c]>0&&remaining<pressure+20)value-=std::min(10.,1.5*assetFlips[c]);
  return value;

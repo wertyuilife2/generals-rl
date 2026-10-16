@@ -801,6 +801,8 @@ struct Policy {
  }
  #include "planning.h"
  #include "operations.h"
+#include "warfare.h"
+#include "tactics.h"
 #include "controller.h"
  int64_t act(const ArenaObservation *obs){return decideV8(obs);}
 
