@@ -24,12 +24,13 @@ double remainingAssemblyValue(const Program &plan){
  int useful=mobileAssemblyCredit(rest,plan.root,simulated[plan.root],need);
  double value=.70*useful/(rest.count+2.)/(1.+.08*ed[plan.root]);
  value=9.*(-std::expm1(-value/9.));
- if(ready(plan.root)<need&&simulated[plan.root]>=need)value+=1.;
+ if(ready(plan.root)<need&&simulated[plan.root]>=need)value+=std::sqrt(double(useful)/std::max(1,need));
  return value;
 }
 
 void resumeOperation(){
  if(activeOperation.kind==0)return;
+ if(activeOperation.kind==16&&expeditionCredit<1)return;
  if(operationPending){
   bool matching=o->previous&&o->previous->action==operationAction;
   bool received=matching&&o->previous->valid;
@@ -45,7 +46,7 @@ void resumeOperation(){
   activeOperation=Program();return;
  }
  bool expired=tick-activeOperation.born>48||tick-operationProgress>10;
- bool explored=activeOperation.kind==10&&intelGain[activeOperation.goal]<1.;
+ bool explored=(activeOperation.kind==10||activeOperation.kind==16)&&intelGain[activeOperation.goal]<1.;
  auto &next=activeOperation.orders[activeOperation.cursor];
  if(expired||explored||!mine(next.s)||blocked(next.t)){activeOperation=Program();return;}
  if(activeOperation.kind==14?extractionSafe(activeOperation):permitted(next)){
@@ -56,7 +57,7 @@ void resumeOperation(){
 }
 
 void rememberOperation(const Program &chosen,const Order &action,std::int64_t encoded){
- if(chosen.kind!=10&&chosen.kind!=11&&chosen.kind!=12&&chosen.kind!=14&&chosen.kind!=15)return;
+ if(chosen.kind!=10&&chosen.kind!=11&&chosen.kind!=12&&chosen.kind!=14&&chosen.kind!=15&&chosen.kind!=16&&chosen.kind!=19)return;
  activeOperation=chosen;operationIssued=tick;operationSource=action.s;
  operationDestination=action.t;operationBefore=army(action.s);operationSent=moveArmy(action.s,action.half);
  operationAction=encoded;operationPending=true;
@@ -65,7 +66,7 @@ void rememberOperation(const Program &chosen,const Order &action,std::int64_t en
 
 std::int64_t decideV8(const ArenaObservation *obs){
  if(obs->width*obs->height>MAXN||obs->general_pos<0)return 0;
- update(obs);assetHistory();strategicMode();pressureMap();intelligenceMap();supplyMap();buildKingRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
+ update(obs);updateExpeditionCredit();assetHistory();strategicMode();pressureMap();intelligenceMap();supplyMap();buildKingRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
  resumeOperation();
  // Finish a concrete, validated program unless new information or a better
  // opportunity justifies interruption. Skipped online ticks invalidate it.
@@ -111,9 +112,15 @@ std::int64_t decideV8(const ArenaObservation *obs){
  homeCounterPrograms();
  interceptionPrograms();
  fieldEngagementPrograms();
+ coordinatedAssaultPrograms();
+ convergingAssaultPrograms();
+ // Small-scout trials are archived; no routine scouting order is forced.
  reconnaissancePrograms();
+ // Expedition proposals remain archived for isolated research.
  mobilizationPrograms();
  extractionPrograms();
+ unlockGarrisonPrograms();
+ localBattlePrograms();
 
  // A common post-action safety gate covers every mode and every player count.
  // Safe alternatives are preferred before comparing economic benefits.
@@ -124,6 +131,7 @@ std::int64_t decideV8(const ArenaObservation *obs){
  }
  if(best<0){mission=Program();missionTick=tick;return 0;}
  Program chosen=proposals[best];Order action=chosen.orders[chosen.cursor++];
+ if(chosen.kind==16||chosen.kind==18)expeditionCredit-=1;
  // Continuation preference is applied afresh, never compounded every turn.
  if(chosen.born<tick)chosen.value/=1.09;
  mission=chosen;missionTick=tick;oldTarget=chosen.goal;oldSource=action.t;lastTarget=action.t;
