@@ -822,7 +822,6 @@ struct Policy {
 #include "warfare.h"
 #include "tactics.h"
 #include "strategy.h"
-#include "forecast.h"
 #include "controller.h"
  int64_t act(const ArenaObservation *obs){return decideV8(obs);}
 

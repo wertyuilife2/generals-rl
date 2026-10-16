@@ -12,38 +12,6 @@ struct Board {
 };
 
 int main(){
- for(int seat=0;seat<2;seat++){
-  Board b;b.obs.player=seat;b.owner[0]=seat;b.army[0]=10;
-  b.owner[1]=1-seat;b.army[1]=60;
-  b.owner[119]=seat;b.army[119]=80;
-  b.owner[120]=1-seat;b.army[120]=40;b.structure[120]=2;
-  auto p=std::make_unique<Policy>(seat,1,"{}");b.refresh(*p);p->forecastEnemy=1-seat;
-  for(int c=0;c<Board::S;c++){
-   p->forecastInitial.owner[c]=p->own[c];
-   p->forecastInitial.army[c]=p->mine(c)?p->ready(c):p->rememberedDefense(c);
-   p->forecastInitial.revealed[c]=1;
-   p->forecastProjection[0][c]=p->forecastProjection[1][c]=0;
-  }
-  Policy::Program q;q.goal=120;q.root=119;q.count=1;q.orders[0]={119,120,false};bool held=false;
-  double value=p->forecastRun(&q,0,1,held);
-  // Both preselect a general capture. Absolute seat order decides the race;
-  // the second player cannot execute its order after being eliminated.
-  assert(seat==0?value>90000:value<-90000);
- }
- {
-  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
-  for(int c=55;c<66;c++)b.terrain[c]=0;
-  b.owner[55]=b.owner[56]=0;b.army[55]=80;b.army[56]=10;b.structure[56]=1;
-  b.owner[60]=1;b.army[60]=60;
-  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->assetProtectionPrograms();
-  assert(p->proposalCount==0); // One transfer can wait while the enemy is far.
-  b.owner[60]=-1;b.army[60]=0;b.owner[58]=1;b.army[58]=60;
-  auto action=p->act(&b.obs);
-  // Scheduling must actually invoke the defense planner at its deadline.
-  assert(action==arena_move(55,1,false)&&p->mission.kind==12);
-  b.obs.tick++;b.army[55]=1;b.army[56]=89;b.army[58]=1;p->act(&b.obs);
-  assert(p->activeOperation.kind!=12);
- }
  {
   Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
   for(int c=55;c<66;c++)b.terrain[c]=0;

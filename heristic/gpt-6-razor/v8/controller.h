@@ -31,10 +31,6 @@ double remainingAssemblyValue(const Program &plan){
 void resumeOperation(){
  if(activeOperation.kind==0)return;
  if(activeOperation.kind==23&&mine(activeOperation.goal)){activeOperation=Program();operationPending=false;return;}
- if(activeOperation.kind==12&&(!mine(activeOperation.goal)||zoneETA[activeOperation.goal]>6||
-    ready(activeOperation.goal)>=zoneThreat[activeOperation.goal]-futureGrowth(zoneETA[activeOperation.goal])+2)){
-  activeOperation=Program();operationPending=false;return;
- }
  if((activeOperation.kind==16||activeOperation.kind==24)&&expeditionCredit<1)return;
  if(operationPending){
   bool matching=o->previous&&o->previous->action==operationAction;
@@ -135,9 +131,7 @@ std::int64_t decideV8(const ArenaObservation *obs){
  if(planningTimeLeft())occupationPrograms();
  if(planningTimeLeft())informationPrograms();
  if(planningTimeLeft())frontFormationPrograms();
- if(planningTimeLeft())assetProtectionPrograms();
  if(planningTimeLeft())localBattlePrograms();
- if(planningTimeLeft())forecastPrograms();
 
  // A common post-action safety gate covers every mode and every player count.
  // Safe alternatives are preferred before comparing economic benefits.
