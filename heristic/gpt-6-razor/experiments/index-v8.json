@@ -2332,19 +2332,20 @@
       "source_directory": "heristic/gpt-6-razor/experiments/ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
       "source_identity_verified": true,
       "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a0b46a70aeffbed30523ddfbb78da63cd72575dcb8f912119724d9764a24b554/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/df029c4ac8c0f468a6c6cc95ce04bd8aa550975e56b6ccf1e061008a3e920734/report.json"
       ],
       "native_summary": {
-        "completed_games": 160,
+        "completed_games": 560,
         "timeouts": 0,
         "errors": 0,
-        "max_ns": 1860000,
+        "max_ns": 2279000,
         "invalid_actions": 0
       },
-      "completed_games": 160,
+      "completed_games": 560,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 1860000,
+      "max_ns": 2279000,
       "invalid_actions": 0,
       "online_reports": [],
       "online_completed_games": 0,
@@ -2401,17 +2402,19 @@
       "source_directory": "heristic/gpt-6-razor/experiments/5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
       "source_identity_verified": true,
       "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
-        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json"
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json"
       ],
       "native_summary": {
-        "completed_games": 560,
+        "completed_games": 656,
         "timeouts": 0,
         "errors": 0,
         "max_ns": 5777000,
         "invalid_actions": 0
       },
-      "completed_games": 560,
+      "completed_games": 656,
       "timeouts": 0,
       "errors": 0,
       "max_ns": 5777000,
@@ -7062,6 +7065,93 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-repeated-transfer-fresh-control",
+      "version": "ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a0b46a70aeffbed30523ddfbb78da63cd72575dcb8f912119724d9764a24b554/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6275,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.3725,
+          "pair_score": 0.6275,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 210524,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2279000,
+        "timeouts": 0,
+        "total_ns": 155198141000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-persistent-home-exposure-ffa",
+      "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.475,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.025,
+          "pair_score": 0.6583333333333333,
+          "scored_games": 80,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 49591,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2993000,
+        "timeouts": 0,
+        "total_ns": 50448875000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-persistent-home-exposure-eight",
+      "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json",
+      "ok": true,
+      "completed_games": 16,
+      "metrics": {
+        "8": {
+          "game_win_rate": 0.125,
+          "games": 16,
+          "invalid_actions": 0,
+          "mean_rank": 4.03125,
+          "pair_score": 0.5669642857142857,
+          "scored_games": 16,
+          "tick_limit_games": 3
+        }
+      },
+      "timing": {
+        "calls": 14301,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2438000,
+        "timeouts": 0,
+        "total_ns": 20655888000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -7126,8 +7216,9 @@
       "max_ns": 2154000,
       "hard_limit_qualified": true,
       "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
-      "note": "Fresh 400-game v7 schedule, 253 wins. The 80% goal is not met. A same-schedule comparison with the independent repeated-transfer candidate is pending; different-seed earlier results are not a paired effect estimate.",
-      "source_hard_limit_qualified": true
+      "note": "Fresh 400-game v7 schedule: 253 wins. Independent repeated-transfer candidate scores 251 on the same schedule. The candidates change different mechanisms, so this is not an isolated estimate of exposure memory. Neither reaches 80%; no human-level result is established.",
+      "source_hard_limit_qualified": true,
+      "same_schedule_comparison": "outputs/analysis/razor-v8-online-20261017/exposure-vs-transfer-fresh-paired.json"
     },
     "disqualified_holdout": {
       "version": "42443fddbe4280729c7a287dedd3d64df90add94114d8010af885d62a46e251c",
@@ -8319,7 +8410,77 @@
           "tick": 389,
           "note": "The earlier-seat enemy general captured our adjacent source before its submitted move. This is retained as one invalid action; native errors/timeouts remain zero in that trial."
         },
-        "pending_design_issue": "Persistent city occupation and reconnaissance still lack a shared action schedule. The exposed-home trial credits one short owned-route column, but does not fully certify protected intermediate cities or every interception on the return path."
+        "pending_design_issue": "Persistent city occupation and reconnaissance still lack a shared action schedule. The exposed-home trial credits one short owned-route column, but does not fully certify protected intermediate cities or every interception on the return path.",
+        "fresh_candidate_comparison": {
+          "games": 400,
+          "seed": 261017701,
+          "matched_initial_states": true,
+          "control_version": "ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
+          "new_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "control_wins": 251,
+          "new_wins": 253,
+          "changed_to_win": 56,
+          "changed_to_loss": 54,
+          "two_sided_exact_mcnemar_p": 0.9240973917982829,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a0b46a70aeffbed30523ddfbb78da63cd72575dcb8f912119724d9764a24b554/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
+          "note": "253 versus 251 wins, 56 improved and 54 worsened outcomes. This compares different independent candidate designs; it is not an isolated estimate of the exposed-home change. No reliable superiority or 80% win rate is established."
+        },
+        "exposure_human_probe": {
+          "path": "outputs/analysis/razor-v8-online-20261017/persistent-exposure-human.json",
+          "finding": "On the recorded QueueT game3 observations, the candidate starts home reinforcement at tick150 and keeps preparing at170/176, before the second visible column at178. On game5 observations it returns the nearby 13/17 troop columns at206/218.",
+          "scope": "Alternative decisions on historical observations only. They were not executed in these human games; no alternate survival or win outcome is claimed."
+        },
+        "broad_checks": [
+          {
+            "label": "goal-persistent-home-exposure-ffa",
+            "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
+            "metrics": {
+              "4": {
+                "game_win_rate": 0.475,
+                "games": 80,
+                "invalid_actions": 0,
+                "mean_rank": 2.025,
+                "pair_score": 0.6583333333333333,
+                "scored_games": 80,
+                "tick_limit_games": 0
+              }
+            },
+            "timing": {
+              "calls": 49591,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 2993000,
+              "timeouts": 0,
+              "total_ns": 50448875000
+            }
+          },
+          {
+            "label": "goal-persistent-home-exposure-eight",
+            "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json",
+            "metrics": {
+              "8": {
+                "game_win_rate": 0.125,
+                "games": 16,
+                "invalid_actions": 0,
+                "mean_rank": 4.03125,
+                "pair_score": 0.5669642857142857,
+                "scored_games": 16,
+                "tick_limit_games": 3
+              }
+            },
+            "timing": {
+              "calls": 14301,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 2438000,
+              "timeouts": 0,
+              "total_ns": 20655888000
+            }
+          }
+        ]
       }
     },
     "paired_reconnaissance_comparison": {
@@ -8432,7 +8593,8 @@
     "validation": {
       "tests": 14,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log"
+      "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log",
+      "elapsed_seconds": 54.786
     },
     "note": "Persistent exposed-general knowledge trial. The parent online source timed out and remains disqualified. A clean new-source test does not establish that the earlier timeout cause has been fixed. These results do not meet the research objective or justify spending the remaining formal evaluation."
   },
@@ -8470,6 +8632,7 @@
       "reason": "Repeated protected-donor transfers and conserved assembly credit; awaiting serial validation after the active online match batch.",
       "subsequently_evaluated": true,
       "subsequent_reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a0b46a70aeffbed30523ddfbb78da63cd72575dcb8f912119724d9764a24b554/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/df029c4ac8c0f468a6c6cc95ce04bd8aa550975e56b6ccf1e061008a3e920734/report.json"
       ]
     },
@@ -8497,8 +8660,10 @@
       "reason": "Independent persistent exposed-general knowledge trial prompted by QueueT two-wave observations. Nearby deployable troops along an owned route credit defense; remote armies do not. Not compiled or tested yet.",
       "subsequently_evaluated": true,
       "subsequent_reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
-        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json"
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json"
       ]
     }
   ],
