@@ -97,7 +97,7 @@ void rememberOperation(const Program &chosen,const Order &action,std::int64_t en
 std::int64_t decideV8(const ArenaObservation *obs){
  if(obs->width*obs->height>MAXN||obs->general_pos<0)return 0;
  planningStart=std::chrono::steady_clock::now();
- update(obs);updateExpeditionCredit();assetHistory();observeCityResponses();observeColumns();buildOpponentAssembly();strategicMode();pressureMap();intelligenceMap();supplyMap();buildKingRelief();buildCityRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
+ update(obs);updateExpeditionCredit();assetHistory();observeCityResponses();observeColumns();buildOpponentAssembly();strategicMode();pressureMap();assignMainColumn();intelligenceMap();supplyMap();buildKingRelief();buildCityRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
  resumeOperation();
  // Finish a concrete, validated program unless new information or a better
  // opportunity justifies interruption. Skipped online ticks invalidate it.

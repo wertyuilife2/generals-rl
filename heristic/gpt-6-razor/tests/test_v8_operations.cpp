@@ -13,6 +13,35 @@ struct Board {
 
 int main(){
  {
+  // Human replay pattern: the strongest available field column is below
+  // the enemy's predicted concentration. That is no reason to split it into
+  // two still weaker scouts; merging the departing half with another stack
+  // remains possible.
+  Board b;b.owner[59]=b.owner[60]=0;b.army[59]=77;b.army[60]=2;
+  b.owner[63]=1;b.army[63]=110;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->assignMainColumn();
+  assert(p->mainColumn==59&&p->mainColumnNeed>38);
+  assert(!p->scoutDepartureAllowed({59,60,true}));
+  assert(p->scoutDepartureAllowed({59,60,false}));
+  b.army[60]=30;b.refresh(*p);p->assignMainColumn();
+  assert(p->scoutDepartureAllowed({59,60,true}));
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=100;b.army[56]=1;
+  b.owner[65]=1;b.army[65]=60;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->assignMainColumn();
+  Policy::Program q;q.kind=16;q.root=55;q.goal=56;q.count=1;q.value=10.;q.orders[0]={55,56,true};
+  // Two fifty-troop scouts do not replace the hundred-troop counter-column.
+  assert(p->mainColumn==55&&p->mainColumnNeed>51);
+  assert(p->programScore(q)<-1e29);
+  q.orders[0].half=false;assert(p->programScore(q)>0.);
+  // A split that joins another army and keeps a capable column is allowed.
+  b.army[56]=40;b.refresh(*p);p->assignMainColumn();q.orders[0].half=true;
+  assert(p->programScore(q)>0.);
+ }
+ {
   Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
   for(int c=55;c<66;c++)b.terrain[c]=0;
   b.owner[55]=b.owner[56]=0;b.army[55]=b.army[56]=40;

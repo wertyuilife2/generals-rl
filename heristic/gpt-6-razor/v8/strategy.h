@@ -140,6 +140,7 @@ void informationPrograms(){
  for(int c=0;c<N;c++)if(mine(c)&&scoutingDistance[c]<=10){
   bool half=false;if(!canDepart(c,half))continue;
   if(ready(c)>36||st[c]>0)half=true;
+  if(c==mainColumn&&ready(c)-moveArmy(c,true)<mainColumnNeed)half=false;
   int mobile=moveArmy(c,half);if(mobile<8)continue;
   double value=std::min(1.,mobile/20.)/(1.+scoutingDistance[c]+.015*mobile);
   int j=count;if(j==4){j=3;if(value<=priorities[j])continue;}else count++;
@@ -150,6 +151,7 @@ void informationPrograms(){
   if(!planningTimeLeft())break;
   int source=roots[ri];bool half=false;canDepart(source,half);
   if(ready(source)>36||st[source]>0)half=true;
+  if(source==mainColumn&&ready(source)-moveArmy(source,true)<mainColumnNeed)half=false;
   int mobile=moveArmy(source,half);taskRoutes(source,mobile,true);
   int goals[8],goalCount=0;double ranks[8];
   for(int c=0;c<N;c++)if(!mine(c)&&opSteps[c]>0&&opSteps[c]<=std::min(16,int(expeditionCredit))&&opForce[c]>=6&&intelGain[c]>=2){

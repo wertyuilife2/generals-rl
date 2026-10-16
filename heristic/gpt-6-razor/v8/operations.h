@@ -21,6 +21,31 @@ int conversionSince=-1000;
 double observedColumnFraction[8]{};
 int columnObservationTick=-1;
 int opponentAssembly[MAXN]{};
+int mainColumn=-1,mainColumnNeed=0;
+
+// Assign the existing front column a military role before choosing scouts.
+// A reconnaissance split should leave one force able to answer the observed
+// front, or combine with a second stack to preserve that capability.
+void assignMainColumn(){
+ mainColumn=-1;mainColumnNeed=0;
+ if(tick<120)return;
+ for(int c=0;c<N;c++)if(mine(c)&&st[c]==0&&ready(c)>=24&&ed[c]<=10&&
+    (mainColumn<0||ready(c)>ready(mainColumn)))mainColumn=c;
+ if(mainColumn<0)return;
+ // A column below the enemy's assembly estimate still has military value.
+ // Keep most of its present strength available; otherwise repeated scouting
+ // splits can erase the only field force before it ever reaches that estimate.
+ mainColumnNeed=std::min(std::max(24,assemblyRequirement(mainColumn)),
+                         std::max(24,ready(mainColumn)*3/4));
+}
+
+bool scoutDepartureAllowed(const Order &x)const {
+ if(!x.half||x.s!=mainColumn)return true;
+ if(x.t<0||x.t>=N)return false;
+ int sent=moveArmy(x.s,true),left=ready(x.s)-sent;
+ int arriving=sent+(mine(x.t)?ready(x.t):-rememberedDefense(x.t));
+ return std::max(left,arriving)>=mainColumnNeed;
+}
 
 // Forecast a short, executable concentration by the opponent. The required
 // field army should answer what a nearby column can become, not just the
@@ -463,11 +488,15 @@ void intelligenceMap(){
 void taskRoutes(int source,int initial,bool recon=false,bool friendly=false){
  std::fill(routeCost,routeCost+N,1e20);std::fill(opParent,opParent+N,-1);
  std::fill(opSteps,opSteps+N,INF);std::fill(opForce,opForce+N,0);
- using Node=std::pair<double,int>;std::priority_queue<Node,std::vector<Node>,std::greater<Node>> heap;
- routeCost[source]=0;opSteps[source]=0;opForce[source]=initial;heap.push({0,source});
+ // Reuse the per-instance reserved storage instead of allocating and freeing
+ // a new priority queue for every candidate scout or transport route.
+ using Node=std::pair<double,int>;auto &heap=campaignHeap;heap.clear();
+ auto push=[&](Node n){heap.push_back(n);std::push_heap(heap.begin(),heap.end(),std::greater<Node>());};
+ routeCost[source]=0;opSteps[source]=0;opForce[source]=initial;push({0,source});
  int expanded=0;
  while(!heap.empty()&&expanded<N*2){
-  auto [cost,u]=heap.top();heap.pop();if(cost>routeCost[u]+1e-6)continue;expanded++;
+  std::pop_heap(heap.begin(),heap.end(),std::greater<Node>());auto [cost,u]=heap.back();heap.pop_back();
+  if(cost>routeCost[u]+1e-6)continue;expanded++;
   if(opSteps[u]>=40)continue;
   for(int k=0;k<4;k++){
    int v=nb[u][k];if(v<0||blocked(v)||v==source||(friendly&&!mine(v)))continue;
@@ -486,7 +515,7 @@ void taskRoutes(int source,int initial,bool recon=false,bool friendly=false){
    if(recon&&zoneETA[v]<=2&&mobileThreat>available+5)riskCost+=8.;
    double next=cost+1.+guard/(recon?5.:18.)+riskCost+(ter[v]==255?.20:0.);
    if(next+1e-6>=routeCost[v])continue;
-   routeCost[v]=next;opParent[v]=u;opHalf[v]=half;opSteps[v]=opSteps[u]+1;opForce[v]=std::max(1,available);heap.push({next,v});
+   routeCost[v]=next;opParent[v]=u;opHalf[v]=half;opSteps[v]=opSteps[u]+1;opForce[v]=std::max(1,available);push({next,v});
   }
  }
 }
@@ -518,6 +547,7 @@ void reconnaissancePrograms(){
   // Reconnaissance leases part of a column; the remainder keeps the
   // front occupied and remains available to answer a counterattack.
   if(usefulCityHalf(source)||ready(source)>=40)half=true;
+  if(source==mainColumn&&ready(source)-moveArmy(source,true)<mainColumnNeed)half=false;
   int initial=moveArmy(source,half);if(initial<12)continue;
   if(++roots>5)break;
   taskRoutes(source,initial,true);
