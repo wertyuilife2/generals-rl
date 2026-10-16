@@ -2423,6 +2423,52 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86": {
+      "source_directory": "heristic/gpt-6-razor/experiments/f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8eaaaab3ddf3c8ccfc66ca6ffcd6237a45b4c06200335f61204bc5864572b997/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2908000,
+        "invalid_actions": 1
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2908000,
+      "invalid_actions": 1,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "568981b061254ce23a12241af0377bc3b68c982a4fa33a96d9e6ed389667d336": {
+      "source_directory": "heristic/gpt-6-razor/experiments/568981b061254ce23a12241af0377bc3b68c982a4fa33a96d9e6ed389667d336",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e30138e9943c3e5fbeac445de0e2a558c462e6f90fa9778f81e00e72a0882193/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1871000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1871000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -7152,6 +7198,64 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-feasible-return-cover",
+      "version": "f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8eaaaab3ddf3c8ccfc66ca6ffcd6237a45b4c06200335f61204bc5864572b997/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.675,
+          "games": 160,
+          "invalid_actions": 1,
+          "mean_rank": 1.325,
+          "pair_score": 0.675,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 82374,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2908000,
+        "timeouts": 0,
+        "total_ns": 60306996000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-ownership-neutral-information",
+      "version": "568981b061254ce23a12241af0377bc3b68c982a4fa33a96d9e6ed389667d336",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e30138e9943c3e5fbeac445de0e2a558c462e6f90fa9778f81e00e72a0882193/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.68125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.31875,
+          "pair_score": 0.68125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81509,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1871000,
+        "timeouts": 0,
+        "total_ns": 58786150000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -8481,6 +8585,101 @@
             }
           }
         ]
+      },
+      "queuet_detailed_followup": {
+        "scope": "Three user-confirmed human QueueT losses, actual own legal observations and submitted actions. Separate alternative-policy probes do not execute their actions and cannot establish alternate wins.",
+        "records": "outputs/analysis/razor-v8-cover-20261017/queuet-military-transitions.json",
+        "reviewed_decision_frames": 128,
+        "factual_findings": [
+          {
+            "game": 3,
+            "replay": "https://bot.generals.io/replays/QFrr-v5QB",
+            "finding": "The opponent saw our general by tick150. Our repeated departures left no field stack comparable to the second incoming 65-troop column at180; home then had17."
+          },
+          {
+            "game": 4,
+            "replay": "https://bot.generals.io/replays/F4frURNEH",
+            "finding": "At225 home23 faced a visible35-troop column four steps away. After the raid, withdrawals resumed; the final wave reached home with67 at291 versus our37."
+          },
+          {
+            "game": 5,
+            "replay": "https://bot.generals.io/replays/insxRHOto",
+            "finding": "The actual raid fell from53 at156 to17 at168 while taking enemy two-troop tiles. At158 the adjacent northern square189 was already known empty, but our column turned south to229. A60-troop enemy was visible at194 at169, adjacent to our14 at193; instead of attacking that raider, it moved to214 then213 and followed the low-garrison approach. This is observed movement, not a claim to know the opponent intent or hidden assembly."
+          }
+        ],
+        "retained_source_probe": "outputs/analysis/razor-v8-online-20261017/retained-queuet-raid-route.json",
+        "retained_source_finding": "Current retained R repeats the historical first raid choices at156-162 when probed on the legal history. Persistent home exposure memory does not solve this offensive planning flaw.",
+        "trials": [
+          {
+            "version": "91111d1b1fc77738410d8e65273623ed95b08ffdbf38b47b1e50032014da6ad1",
+            "mechanism": "Pre-action loss of single-column return coverage and connected city relief.",
+            "status": "rejected_regression_draft",
+            "tests_passed": 13,
+            "tests_total": 14,
+            "test_log": "outputs/analysis/razor-v8-cover-20261017/tests-cover.log",
+            "diagnostic": "outputs/analysis/razor-v8-cover-20261017/coverage-counterattack-diagnostic.json",
+            "finding": "Protected an infeasible city needing558 troops and discouraged releasing its33 troops to a field army. Reintroduced the known delayed-counterattack transfer."
+          },
+          {
+            "version": "f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86",
+            "mechanism": "Coverage cost only if the existing disjoint collection schedule can actually fund city defence.",
+            "status": "rejected_as_active_candidate",
+            "targeted_tests": "outputs/analysis/razor-v8-cover-20261017/tests-feasible-cover-targeted.log",
+            "archived_tests": "outputs/analysis/razor-v8-cover-20261017/tests-archived-cover.log",
+            "report": "outputs/arena/native_1000/runs/8eaaaab3ddf3c8ccfc66ca6ffcd6237a45b4c06200335f61204bc5864572b997/report.json",
+            "paired": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+              "new_version": "f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86",
+              "control_wins": 119,
+              "new_wins": 108,
+              "changed_to_win": 7,
+              "changed_to_loss": 18,
+              "two_sided_exact_mcnemar_p": 0.043285250663757324,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8eaaaab3ddf3c8ccfc66ca6ffcd6237a45b4c06200335f61204bc5864572b997/report.json"
+            },
+            "invalid_actions": 1,
+            "invalid_sequence": 68,
+            "probe": "outputs/analysis/razor-v8-online-20261017/feasible-cover-human-and-city.json"
+          },
+          {
+            "version": "568981b061254ce23a12241af0377bc3b68c982a4fa33a96d9e6ed389667d336",
+            "mechanism": "Remove ownership-dependent extra reward for new vision; retain the existing general-location information value and normal territory value.",
+            "status": "rejected_as_active_candidate",
+            "tests_passed": 15,
+            "tests_total": 15,
+            "test_log": "outputs/analysis/razor-v8-cover-20261017/tests-neutral-information.log",
+            "archived_test_log": "outputs/analysis/razor-v8-cover-20261017/tests-archived-information.log",
+            "report": "outputs/arena/native_1000/runs/e30138e9943c3e5fbeac445de0e2a558c462e6f90fa9778f81e00e72a0882193/report.json",
+            "paired": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+              "new_version": "568981b061254ce23a12241af0377bc3b68c982a4fa33a96d9e6ed389667d336",
+              "control_wins": 119,
+              "new_wins": 109,
+              "changed_to_win": 10,
+              "changed_to_loss": 20,
+              "two_sided_exact_mcnemar_p": 0.09873714670538902,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e30138e9943c3e5fbeac445de0e2a558c462e6f90fa9778f81e00e72a0882193/report.json"
+            },
+            "probe": "outputs/analysis/razor-v8-online-20261017/ownership-neutral-queuet-route.json",
+            "finding": "At158 the probe explores210 then190 rather than turning south into229; at156 it instead proposes withdrawing the field column toward a neutral-city purchase. The single decision improvement did not produce a stronger candidate."
+          }
+        ],
+        "decision": "Restore the exact prior R implementation and active regression suite. Preserve all trial sources, reports, failures and dedicated trial regressions. Do not spend a formal submission on these changes.",
+        "limitations": [
+          "160-game schedule is reused development data, not a fresh holdout; game-level paired statistics do not account for map rotation correlation.",
+          "No new human games were played in this follow-up. Probes cannot prove that a recorded loss would be won.",
+          "Return coverage is an estimate; it does not solve all path interception or simultaneous asset obligations.",
+          "The retained candidate still has63.25% in its latest400-game v7 validation, below80%."
+        ],
+        "next_research_hypothesis": "An offensive operation needs an explicit information or military objective, an affordable route and a persistent assignment of its field column. Adding independent defence penalties or removing an attack reward alone lets another unrelated generator consume that same army. This remains a hypothesis requiring implementation and complete matches."
       }
     },
     "paired_reconnaissance_comparison": {
@@ -8593,10 +8792,9 @@
     "validation": {
       "tests": 14,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log",
-      "elapsed_seconds": 54.786
+      "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log"
     },
-    "note": "Persistent exposed-general knowledge trial. The parent online source timed out and remains disqualified. A clean new-source test does not establish that the earlier timeout cause has been fixed. These results do not meet the research objective or justify spending the remaining formal evaluation."
+    "note": "Exact prior R source retained after two human-review-driven trials lost ground on the matched160-game v7 schedule. R still repeats the observed low-information raid decisions and is not claimed to be human-level. Latest400-game v7 validation remains253/400; no formal submission."
   },
   "failed_regression_experiments": [
     {
@@ -8665,6 +8863,12 @@
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json"
       ]
+    },
+    {
+      "version": "91111d1b1fc77738410d8e65273623ed95b08ffdbf38b47b1e50032014da6ad1",
+      "source_directory": "heristic/gpt-6-razor/experiments/91111d1b1fc77738410d8e65273623ed95b08ffdbf38b47b1e50032014da6ad1",
+      "reason": "Return-coverage draft; standalone operations tests pass but full suite fails delayed-counterattack regression, 13/14. No Arena matches yet.",
+      "test_log": "outputs/analysis/razor-v8-cover-20261017/tests-cover.log"
     }
   ],
   "online_experiments": [
