@@ -2469,6 +2469,98 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "43d411a5cbb09012361e9a7c7a72ea6ff4c33b3fd0492f23b2cbc6699da3a98b": {
+      "source_directory": "heristic/gpt-6-razor/experiments/43d411a5cbb09012361e9a7c7a72ea6ff4c33b3fd0492f23b2cbc6699da3a98b",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cce9beb14210aa5c3af3b5b35a359acab6665293f35d5ae788bd2c99f2ae33e8/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 3610000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3610000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "c348e64f58be13e1fc31f4bd410476c5d64b7727accef4b853f5941379293b0a": {
+      "source_directory": "heristic/gpt-6-razor/experiments/c348e64f58be13e1fc31f4bd410476c5d64b7727accef4b853f5941379293b0a",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cfb5d7f6753b23ec1914045be3405342acf9c80e57c964991a446272d7f28ad/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 5464000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 5464000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "58d2ab5a3e045d40329a8fa3d79afd8526bf53c26ebaf854ec0373c74782b8c1": {
+      "source_directory": "heristic/gpt-6-razor/experiments/58d2ab5a3e045d40329a8fa3d79afd8526bf53c26ebaf854ec0373c74782b8c1",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c956b8ed20fc1af1fe400ebd77f18904184e05ab000495ea5bb17e8174a3c7f6/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2008000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2008000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "95f9311f025b8b1e2fc51daf16d8990bea2fe962caeb5ddaa3f87a77b9856a93": {
+      "source_directory": "heristic/gpt-6-razor/experiments/95f9311f025b8b1e2fc51daf16d8990bea2fe962caeb5ddaa3f87a77b9856a93",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/823aa5a6d3a8912010bec0b4b0e098a9835b92c708ce9e6ba63328e5e08f10d9/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 4335000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 4335000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -7256,6 +7348,122 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-persistent-field-command",
+      "version": "43d411a5cbb09012361e9a7c7a72ea6ff4c33b3fd0492f23b2cbc6699da3a98b",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cce9beb14210aa5c3af3b5b35a359acab6665293f35d5ae788bd2c99f2ae33e8/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5125,
+          "pair_score": 0.4875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 87529,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3610000,
+        "timeouts": 0,
+        "total_ns": 62672793000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-command-resource-claims",
+      "version": "c348e64f58be13e1fc31f4bd410476c5d64b7727accef4b853f5941379293b0a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cfb5d7f6753b23ec1914045be3405342acf9c80e57c964991a446272d7f28ad/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.4,
+          "pair_score": 0.6,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 84887,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 5464000,
+        "timeouts": 0,
+        "total_ns": 62950143000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-complete-defense-program",
+      "version": "58d2ab5a3e045d40329a8fa3d79afd8526bf53c26ebaf854ec0373c74782b8c1",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c956b8ed20fc1af1fe400ebd77f18904184e05ab000495ea5bb17e8174a3c7f6/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.69375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.30625,
+          "pair_score": 0.69375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83775,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2008000,
+        "timeouts": 0,
+        "total_ns": 63518801000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-common-king-feasibility",
+      "version": "95f9311f025b8b1e2fc51daf16d8990bea2fe962caeb5ddaa3f87a77b9856a93",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/823aa5a6d3a8912010bec0b4b0e098a9835b92c708ce9e6ba63328e5e08f10d9/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.375,
+          "pair_score": 0.625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 96810,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 4335000,
+        "timeouts": 0,
+        "total_ns": 73233939000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -8680,6 +8888,926 @@
           "The retained candidate still has63.25% in its latest400-game v7 validation, below80%."
         ],
         "next_research_hypothesis": "An offensive operation needs an explicit information or military objective, an affordable route and a persistent assignment of its field column. Adding independent defence penalties or removing an attack reward alone lets another unrelated generator consume that same army. This remains a hypothesis requiring implementation and complete matches."
+      },
+      "command_objectives_followup": {
+        "scope": "Observed own human-game streams, actual Arena actions and explicitly labelled alternative-decision probes. No new online games or formal publication in this follow-up.",
+        "human_sortie": {
+          "scope": "Actual own online observation stream. Visibility gained is descriptive; adjacent options use only known map and unseen-cell flags, never hidden contents.",
+          "choices_at_158": [
+            {
+              "cell": "189[9,9]=N0",
+              "newly_observable_cells": [
+                169,
+                170
+              ],
+              "walkable": true
+            },
+            {
+              "cell": "210[10,10]=N0",
+              "newly_observable_cells": [
+                191,
+                211,
+                231
+              ],
+              "walkable": true
+            },
+            {
+              "cell": "229[11,9]=E2",
+              "newly_observable_cells": [
+                249,
+                250
+              ],
+              "walkable": true
+            },
+            {
+              "cell": "208[10,8]=O1",
+              "newly_observable_cells": [],
+              "walkable": true
+            }
+          ],
+          "rows": [
+            {
+              "t": 156,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG11",
+              "own_total_army": 183,
+              "enemy_total_army": [
+                176
+              ],
+              "army": [
+                176,
+                183
+              ],
+              "land": [
+                68,
+                54
+              ],
+              "cities": 0,
+              "ours": [
+                "207[10,7]=O53",
+                "326[16,6]=OG11"
+              ],
+              "enemy": [
+                "208[10,8]=E2 d=12",
+                "227[11,7]=E2 d=12"
+              ],
+              "action": [
+                "207[10,7]=O53 -> 208[10,8]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 0,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 157,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG11",
+              "own_total_army": 181,
+              "enemy_total_army": [
+                174
+              ],
+              "army": [
+                174,
+                181
+              ],
+              "land": [
+                67,
+                55
+              ],
+              "cities": 0,
+              "ours": [
+                "208[10,8]=O50",
+                "326[16,6]=OG11"
+              ],
+              "enemy": [
+                "209[10,9]=E2 d=13",
+                "227[11,7]=E2 d=12"
+              ],
+              "action": [
+                "208[10,8]=O50 -> 209[10,9]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 158,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG12",
+              "own_total_army": 180,
+              "enemy_total_army": [
+                174
+              ],
+              "army": [
+                174,
+                180
+              ],
+              "land": [
+                66,
+                56
+              ],
+              "cities": 0,
+              "ours": [
+                "209[10,9]=O47",
+                "326[16,6]=OG12"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "209[10,9]=O47 -> 229[11,9]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 159,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG12",
+              "own_total_army": 178,
+              "enemy_total_army": [
+                172
+              ],
+              "army": [
+                172,
+                178
+              ],
+              "land": [
+                65,
+                57
+              ],
+              "cities": 0,
+              "ours": [
+                "229[11,9]=O44",
+                "326[16,6]=OG12"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "229[11,9]=O44 -> 249[12,9]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 2,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 160,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG13",
+              "own_total_army": 177,
+              "enemy_total_army": [
+                172
+              ],
+              "army": [
+                172,
+                177
+              ],
+              "land": [
+                64,
+                58
+              ],
+              "cities": 0,
+              "ours": [
+                "249[12,9]=O41",
+                "326[16,6]=OG13"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "249[12,9]=O41 -> 269[13,9]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 2,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 161,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG13",
+              "own_total_army": 175,
+              "enemy_total_army": [
+                170
+              ],
+              "army": [
+                170,
+                175
+              ],
+              "land": [
+                63,
+                59
+              ],
+              "cities": 0,
+              "ours": [
+                "269[13,9]=O38",
+                "326[16,6]=OG13"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "269[13,9]=O38 -> 270[13,10]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 2,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 162,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG14",
+              "own_total_army": 174,
+              "enemy_total_army": [
+                170
+              ],
+              "army": [
+                170,
+                174
+              ],
+              "land": [
+                62,
+                60
+              ],
+              "cities": 0,
+              "ours": [
+                "270[13,10]=O35",
+                "326[16,6]=OG14"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "270[13,10]=O35 -> 271[13,11]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 163,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG14",
+              "own_total_army": 172,
+              "enemy_total_army": [
+                168
+              ],
+              "army": [
+                168,
+                172
+              ],
+              "land": [
+                61,
+                61
+              ],
+              "cities": 0,
+              "ours": [
+                "271[13,11]=O32",
+                "326[16,6]=OG14"
+              ],
+              "enemy": [
+                "227[11,7]=E2 d=12",
+                "228[11,8]=E2 d=13"
+              ],
+              "action": [
+                "271[13,11]=O32 -> 251[12,11]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 164,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG15",
+              "own_total_army": 171,
+              "enemy_total_army": [
+                168
+              ],
+              "army": [
+                168,
+                171
+              ],
+              "land": [
+                60,
+                62
+              ],
+              "cities": 0,
+              "ours": [
+                "251[12,11]=O29",
+                "326[16,6]=OG15"
+              ],
+              "enemy": [
+                "232[11,12]=E3 d=17",
+                "227[11,7]=E2 d=12"
+              ],
+              "action": [
+                "251[12,11]=O29 -> 252[12,12]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 2,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 165,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG15",
+              "own_total_army": 169,
+              "enemy_total_army": [
+                166
+              ],
+              "army": [
+                166,
+                169
+              ],
+              "land": [
+                59,
+                63
+              ],
+              "cities": 0,
+              "ours": [
+                "252[12,12]=O26",
+                "326[16,6]=OG15"
+              ],
+              "enemy": [
+                "232[11,12]=E3 d=17",
+                "227[11,7]=E2 d=12"
+              ],
+              "action": [
+                "252[12,12]=O26 -> 253[12,13]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 166,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG16",
+              "own_total_army": 168,
+              "enemy_total_army": [
+                166
+              ],
+              "army": [
+                166,
+                168
+              ],
+              "land": [
+                58,
+                64
+              ],
+              "cities": 0,
+              "ours": [
+                "253[12,13]=O23",
+                "326[16,6]=OG16"
+              ],
+              "enemy": [
+                "232[11,12]=E3 d=17",
+                "227[11,7]=E2 d=12"
+              ],
+              "action": [
+                "253[12,13]=O23 -> 233[11,13]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 167,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG16",
+              "own_total_army": 166,
+              "enemy_total_army": [
+                164
+              ],
+              "army": [
+                164,
+                166
+              ],
+              "land": [
+                57,
+                65
+              ],
+              "cities": 0,
+              "ours": [
+                "233[11,13]=O20",
+                "326[16,6]=OG16"
+              ],
+              "enemy": [
+                "232[11,12]=E3 d=17",
+                "213[10,13]=E2 d=19"
+              ],
+              "action": [
+                "233[11,13]=O20 -> 213[10,13]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 168,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG17",
+              "own_total_army": 165,
+              "enemy_total_army": [
+                164
+              ],
+              "army": [
+                164,
+                165
+              ],
+              "land": [
+                56,
+                66
+              ],
+              "cities": 0,
+              "ours": [
+                "213[10,13]=O17",
+                "326[16,6]=OG17"
+              ],
+              "enemy": [
+                "194[9,14]=E3 d=19",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "213[10,13]=O17 -> 193[9,13]=E2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 169,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG17",
+              "own_total_army": 163,
+              "enemy_total_army": [
+                162
+              ],
+              "army": [
+                162,
+                163
+              ],
+              "land": [
+                55,
+                67
+              ],
+              "cities": 0,
+              "ours": [
+                "326[16,6]=OG17",
+                "193[9,13]=O14"
+              ],
+              "enemy": [
+                "194[9,14]=E60 d=19",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "326[16,6]=OG17 -> 325[16,5]=O2 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 170,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG2",
+              "own_total_army": 164,
+              "enemy_total_army": [
+                164
+              ],
+              "army": [
+                164,
+                164
+              ],
+              "land": [
+                55,
+                67
+              ],
+              "cities": 0,
+              "ours": [
+                "325[16,5]=O18",
+                "193[9,13]=O14"
+              ],
+              "enemy": [
+                "214[10,14]=E61 d=20",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "325[16,5]=O18 -> 324[16,4]=O2 FULL"
+              ],
+              "new_visible_since_previous_update": 0,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 171,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG2",
+              "own_total_army": 163,
+              "enemy_total_army": [
+                163
+              ],
+              "army": [
+                163,
+                163
+              ],
+              "land": [
+                56,
+                66
+              ],
+              "cities": 0,
+              "ours": [
+                "324[16,4]=O19",
+                "193[9,13]=O14"
+              ],
+              "enemy": [
+                "213[10,13]=E59 d=19",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "324[16,4]=O19 -> 304[15,4]=O2 FULL"
+              ],
+              "new_visible_since_previous_update": 0,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 172,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG3",
+              "own_total_army": 163,
+              "enemy_total_army": [
+                164
+              ],
+              "army": [
+                164,
+                163
+              ],
+              "land": [
+                57,
+                65
+              ],
+              "cities": 0,
+              "ours": [
+                "304[15,4]=O20",
+                "193[9,13]=O14"
+              ],
+              "enemy": [
+                "233[11,13]=E57 d=18",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "193[9,13]=O14 -> 194[9,14]=E1 FULL"
+              ],
+              "new_visible_since_previous_update": 0,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 173,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG3",
+              "own_total_army": 162,
+              "enemy_total_army": [
+                163
+              ],
+              "army": [
+                163,
+                162
+              ],
+              "land": [
+                58,
+                64
+              ],
+              "cities": 0,
+              "ours": [
+                "304[15,4]=O20",
+                "193[9,13]=O14"
+              ],
+              "enemy": [
+                "253[12,13]=E55 d=19",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "193[9,13]=O14 -> 194[9,14]=E1 FULL"
+              ],
+              "new_visible_since_previous_update": 0,
+              "known_enemy_generals": []
+            },
+            {
+              "t": 174,
+              "player": 1,
+              "shape": [
+                18,
+                20
+              ],
+              "home": "326[16,6]=OG4",
+              "own_total_army": 161,
+              "enemy_total_army": [
+                163
+              ],
+              "army": [
+                163,
+                161
+              ],
+              "land": [
+                58,
+                64
+              ],
+              "cities": 0,
+              "ours": [
+                "304[15,4]=O20",
+                "194[9,14]=O12"
+              ],
+              "enemy": [
+                "252[12,12]=E53 d=18",
+                "232[11,12]=E3 d=17"
+              ],
+              "action": [
+                "194[9,14]=O12 -> 174[8,14]=E1 FULL"
+              ],
+              "new_visible_since_previous_update": 3,
+              "known_enemy_generals": []
+            }
+          ],
+          "all_three_games_enemy_general_unseen_until_loss": {
+            "3": 186,
+            "4": 291,
+            "5": 245
+          }
+        },
+        "rejected_command_dispatch": {
+          "label": "goal-persistent-field-command",
+          "version": "43d411a5cbb09012361e9a7c7a72ea6ff4c33b3fd0492f23b2cbc6699da3a98b",
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cce9beb14210aa5c3af3b5b35a359acab6665293f35d5ae788bd2c99f2ae33e8/report.json",
+          "ok": true,
+          "completed_games": 160,
+          "metrics": {
+            "2": {
+              "game_win_rate": 0.4875,
+              "games": 160,
+              "invalid_actions": 0,
+              "mean_rank": 1.5125,
+              "pair_score": 0.4875,
+              "scored_games": 160,
+              "tick_limit_games": 0
+            }
+          },
+          "timing": {
+            "calls": 87529,
+            "errors": 0,
+            "limit_ns": 10000000,
+            "max_ns": 3610000,
+            "timeouts": 0,
+            "total_ns": 62672793000
+          },
+          "violations": 0,
+          "hard_limit_qualified": true
+        },
+        "rejected_command_dispatch_paired": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "new_version": "43d411a5cbb09012361e9a7c7a72ea6ff4c33b3fd0492f23b2cbc6699da3a98b",
+          "control_wins": 119,
+          "new_wins": 78,
+          "changed_to_win": 14,
+          "changed_to_loss": 55,
+          "two_sided_exact_mcnemar_p": 6.921916920059638e-07,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cce9beb14210aa5c3af3b5b35a359acab6665293f35d5ae788bd2c99f2ae33e8/report.json"
+        },
+        "rejected_resource_claims": {
+          "label": "goal-command-resource-claims",
+          "version": "c348e64f58be13e1fc31f4bd410476c5d64b7727accef4b853f5941379293b0a",
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cfb5d7f6753b23ec1914045be3405342acf9c80e57c964991a446272d7f28ad/report.json",
+          "ok": true,
+          "completed_games": 160,
+          "metrics": {
+            "2": {
+              "game_win_rate": 0.6,
+              "games": 160,
+              "invalid_actions": 0,
+              "mean_rank": 1.4,
+              "pair_score": 0.6,
+              "scored_games": 160,
+              "tick_limit_games": 0
+            }
+          },
+          "timing": {
+            "calls": 84887,
+            "errors": 0,
+            "limit_ns": 10000000,
+            "max_ns": 5464000,
+            "timeouts": 0,
+            "total_ns": 62950143000
+          },
+          "violations": 0,
+          "hard_limit_qualified": true
+        },
+        "rejected_resource_claims_paired": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "new_version": "c348e64f58be13e1fc31f4bd410476c5d64b7727accef4b853f5941379293b0a",
+          "control_wins": 119,
+          "new_wins": 96,
+          "changed_to_win": 12,
+          "changed_to_loss": 35,
+          "two_sided_exact_mcnemar_p": 0.0010885382064742544,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cfb5d7f6753b23ec1914045be3405342acf9c80e57c964991a446272d7f28ad/report.json"
+        },
+        "complete_defense_trial": {
+          "label": "goal-complete-defense-program",
+          "version": "58d2ab5a3e045d40329a8fa3d79afd8526bf53c26ebaf854ec0373c74782b8c1",
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c956b8ed20fc1af1fe400ebd77f18904184e05ab000495ea5bb17e8174a3c7f6/report.json",
+          "ok": true,
+          "completed_games": 160,
+          "metrics": {
+            "2": {
+              "game_win_rate": 0.69375,
+              "games": 160,
+              "invalid_actions": 0,
+              "mean_rank": 1.30625,
+              "pair_score": 0.69375,
+              "scored_games": 160,
+              "tick_limit_games": 0
+            }
+          },
+          "timing": {
+            "calls": 83775,
+            "errors": 0,
+            "limit_ns": 10000000,
+            "max_ns": 2008000,
+            "timeouts": 0,
+            "total_ns": 63518801000
+          },
+          "violations": 0,
+          "hard_limit_qualified": true
+        },
+        "complete_defense_paired": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "new_version": "58d2ab5a3e045d40329a8fa3d79afd8526bf53c26ebaf854ec0373c74782b8c1",
+          "control_wins": 119,
+          "new_wins": 111,
+          "changed_to_win": 2,
+          "changed_to_loss": 10,
+          "two_sided_exact_mcnemar_p": 0.03857421875,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c956b8ed20fc1af1fe400ebd77f18904184e05ab000495ea5bb17e8174a3c7f6/report.json"
+        },
+        "common_terminal_trial": {
+          "label": "goal-common-king-feasibility",
+          "version": "95f9311f025b8b1e2fc51daf16d8990bea2fe962caeb5ddaa3f87a77b9856a93",
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/823aa5a6d3a8912010bec0b4b0e098a9835b92c708ce9e6ba63328e5e08f10d9/report.json",
+          "ok": true,
+          "completed_games": 160,
+          "metrics": {
+            "2": {
+              "game_win_rate": 0.625,
+              "games": 160,
+              "invalid_actions": 0,
+              "mean_rank": 1.375,
+              "pair_score": 0.625,
+              "scored_games": 160,
+              "tick_limit_games": 0
+            }
+          },
+          "timing": {
+            "calls": 96810,
+            "errors": 0,
+            "limit_ns": 10000000,
+            "max_ns": 4335000,
+            "timeouts": 0,
+            "total_ns": 73233939000
+          },
+          "violations": 0,
+          "hard_limit_qualified": true
+        },
+        "common_terminal_paired": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "new_version": "95f9311f025b8b1e2fc51daf16d8990bea2fe962caeb5ddaa3f87a77b9856a93",
+          "control_wins": 119,
+          "new_wins": 100,
+          "changed_to_win": 9,
+          "changed_to_loss": 28,
+          "two_sided_exact_mcnemar_p": 0.0025632079923525453,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/823aa5a6d3a8912010bec0b4b0e098a9835b92c708ce9e6ba63328e5e08f10d9/report.json"
+        },
+        "actual_behavior_diagnostics": {
+          "retained-operations": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/retained-operations.json",
+          "command-operations": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/command-operations.json",
+          "claims-operations": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/claims-operations.json"
+        },
+        "first_exact_bug": {
+          "path": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/command-reversal-diagnostic.json",
+          "sequence": 3,
+          "description": "Identical replay decisions through tick250: a column crosses the six-step home-insurance boundary, alternating recall and forced reconnaissance. It also hijacks an existing city-investment programme."
+        },
+        "second_exact_bug": {
+          "path": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/claims-large-army-diagnostic.json",
+          "sequence": 26,
+          "description": "Identical decisions through tick805: a 1263-troop army repeatedly alternates an unsupported general-capture programme with one-order defence. An off-route enemy city can exhaust its capture margin by striking the owned approach."
+        },
+        "alternative_probes": [
+          "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/completed-defense-diagnostic.json",
+          "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/feasible-elimination-diagnostic.json",
+          "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/route-interception-diagnostic.json",
+          "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-objectives-20261017/common-king-program-diagnostic.json"
+        ],
+        "interpretation": [
+          "QueueT is the user-confirmed human. His three recorded wins ended at ticks186,291,245 without our side ever observing his general. Other online names do not establish human identity.",
+          "In QueueT game5 the thirteen advances from tick156 through168 did reveal35 previously unseen cells in the following observations. The column fell from53 to14 troops. The issue is reconnaissance cost and usable terminal force, not literally zero exploration.",
+          "The resource-claim trial improved on the first forced dispatcher but remained96/160 versus the retained control119/160. Its first eighty actual games still had547 large immediate reversals without collection/new vision; that descriptive label is not proof every reversal was bad.",
+          "The complete-defence programme passed its regression and finished111/160, with two flipped wins and ten flipped losses versus the control. This regression fix alone does not establish a strength gain.",
+          "Strict king-relief pricing alone failed the historical probe because owned-path-only reinforcement misses attrition on the approach. Applying interception to only the direct-campaign generators also failed: the occupation generator offered the same unfunded target.",
+          "The common terminal check simulates every remaining order, subtracts actual approach casualties once, and tests a visible off-route interception as an alternative to home reinforcement. It does not constitute exhaustive opponent search or proof of human-level play.",
+          "All alternative probes use the original subsequent observations; their actions were not executed and their choices cannot be counted as alternate wins. Paired game-level p-values also ignore correlations within rotated maps."
+        ],
+        "working_version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+        "common_terminal_decision": "Rejected for strength:100/160 versus retained119/160 on matched initial states, nine flipped wins and twenty-eight flipped losses. Working policy restored byte-for-byte to the retained parent.",
+        "archive_validation": {
+          "passed": true,
+          "python_history_tests": 4,
+          "standalone_cpp_binaries": 4,
+          "log": "outputs/analysis/razor-v8-command-objectives-20261017/tests-archived-trials.log"
+        },
+        "next_questions": [
+          "Measure which rejected general approaches could force a valuable defender response or concede a productive city. A complete direct capture is not the only useful outcome; replacing its false elimination prize with zero may suppress valid pressure. This is an untested explanation for the regression, not an established cause.",
+          "QueueT spent a first wave to obtain our general location and then delivered another concentrated wave. The failed forced-dispatch experiments retained an arbitrary fraction of the starting force, which is not equivalent to planning a useful reconnaissance mission. Compare the posterior target information reached and the next deployable force, not raw newly seen cells or a fixed survival threshold."
+        ]
       }
     },
     "paired_reconnaissance_comparison": {
@@ -8786,7 +9914,7 @@
   "working_candidate": {
     "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
     "source_directory": "heristic/gpt-6-razor/v8",
-    "status": "experimental_not_promoted",
+    "status": "retained_parent_after_rejected_objective_trials",
     "formal_publication": null,
     "hard_limit_qualified": true,
     "validation": {
@@ -8794,7 +9922,7 @@
       "passed": true,
       "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log"
     },
-    "note": "Exact prior R source retained after two human-review-driven trials lost ground on the matched160-game v7 schedule. R still repeats the observed low-information raid decisions and is not claimed to be human-level. Latest400-game v7 validation remains253/400; no formal submission."
+    "note": "Exact retained parent restored. New source snapshots and all trial outcomes are preserved. No formal v8 publication; latest400-game validation remains253/400 and the human-level/80% objective is unmet."
   },
   "failed_regression_experiments": [
     {
@@ -8869,6 +9997,43 @@
       "source_directory": "heristic/gpt-6-razor/experiments/91111d1b1fc77738410d8e65273623ed95b08ffdbf38b47b1e50032014da6ad1",
       "reason": "Return-coverage draft; standalone operations tests pass but full suite fails delayed-counterattack regression, 13/14. No Arena matches yet.",
       "test_log": "outputs/analysis/razor-v8-cover-20261017/tests-cover.log"
+    },
+    {
+      "version": "d721ca772f68d324839c61c4d2c757a7a4128266e171d8d129e7abc6947b608a",
+      "source_directory": "heristic/gpt-6-razor/experiments/d721ca772f68d324839c61c4d2c757a7a4128266e171d8d129e7abc6947b608a",
+      "reason": "Persistent command first draft; standalone existing operation tests and legal-history probe pass, no Arena matches. Follow-up adds a concrete return-for-refill route when nearby collection is unavailable.",
+      "probe": "outputs/analysis/razor-v8-online-20261017/persistent-command-queuet-route.json"
+    },
+    {
+      "version": "a8ae8dd4d0e0a95766783b769b6379c8965596cef2e75ee0631d46828d1784c2",
+      "source_directory": "heristic/gpt-6-razor/experiments/a8ae8dd4d0e0a95766783b769b6379c8965596cef2e75ee0631d46828d1784c2",
+      "reason": "Command home-role and half-branch tracking correction. All16 regressions pass; no Arena matches yet. Next revision also respects pre-existing investment and military claims, identified in the exact same reversal diagnostic.",
+      "test_log": "outputs/analysis/razor-v8-command-objectives-20261017/tests-command-roles-full.log"
+    },
+    {
+      "version": "56f6b60ffb1e5c4ce834877ed20688e2f4803eb59aef22deed2388cd2f06b2af",
+      "source_directory": "heristic/gpt-6-razor/experiments/56f6b60ffb1e5c4ce834877ed20688e2f4803eb59aef22deed2388cd2f06b2af",
+      "reason": "Existing operation-claim correction passed the standalone operations assertions. No Arena matches. The subsequent one-line correction makes an equivalent chosen action follow the same intended half-army branch.",
+      "test_log": "outputs/analysis/razor-v8-command-objectives-20261017/tests-command-claims-operations.log"
+    },
+    {
+      "version": "1429b55b394a28195eb0f840c5e50741f0d36615a2c348f75ac6ea4d4c2396ed",
+      "source_directory": "heristic/gpt-6-razor/experiments/1429b55b394a28195eb0f840c5e50741f0d36615a2c348f75ac6ea4d4c2396ed",
+      "reason": "Elimination feasibility draft passed fourteen regression tests. No Arena games; code review then bounded parent-chain relief subtraction at the actual route root to avoid following stale parent links.",
+      "test_log": "outputs/analysis/razor-v8-command-objectives-20261017/tests-feasible-elimination.log"
+    },
+    {
+      "version": "9414f244081b30b464b78cdc841ec55099ea520518c09426bbad9ddb70908a97",
+      "source_directory": "heristic/gpt-6-razor/experiments/9414f244081b30b464b78cdc841ec55099ea520518c09426bbad9ddb70908a97",
+      "reason": "Root-bounded elimination-feasibility draft passed targeted tests. No Arena games. Historical probe still reproduced the 1263-army loop: owned-path-only king relief omitted an off-route city that could intercept the advancing column through our thin corridor.",
+      "probe": "outputs/analysis/razor-v8-command-objectives-20261017/feasible-elimination-diagnostic.json"
+    },
+    {
+      "version": "4c40e24e4270f323e414f75eda60355f68837d410ab44b0fc3d551bcc6b1f015",
+      "source_directory": "heristic/gpt-6-razor/experiments/4c40e24e4270f323e414f75eda60355f68837d410ab44b0fc3d551bcc6b1f015",
+      "reason": "Per-generator off-route interception draft passed fourteen tests. No Arena games. Historical probe rejected direct-campaign prizes but the occupation generator proposed the same unsupported king goal. Replaced with a common complete-program terminal check.",
+      "probe": "outputs/analysis/razor-v8-command-objectives-20261017/route-interception-diagnostic.json",
+      "test_log": "outputs/analysis/razor-v8-command-objectives-20261017/tests-route-interception.log"
     }
   ],
   "online_experiments": [
