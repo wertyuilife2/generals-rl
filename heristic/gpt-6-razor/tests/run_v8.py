@@ -19,8 +19,10 @@ def main():
     parser.add_argument('--games', type=int, default=60)
     parser.add_argument('--seed', type=int, default=261016802)
     parser.add_argument('--size', default='auto')
+    parser.add_argument('--candidate', type=Path, default=ROOT / 'v8',
+                        help='Own source snapshot to test; defaults to the working candidate.')
     args = parser.parse_args()
-    source = ROOT / 'v8'
+    source = args.candidate
     params = json.loads((source / 'params.json').read_text())
     version, _, files = source_identity(source / 'policy.cpp', params)
     archive = ROOT / 'experiments' / version
@@ -41,6 +43,8 @@ def main():
     command += ['--player', str(archive / 'policy.cpp'), '--params', str(archive / 'params.json'),
                 '--games', str(args.games), '--seed', str(args.seed), '--size', args.size]
     result = output / (args.label + '-result.json')
+    if result.exists() or (output / (args.label + '.log')).exists():
+        raise SystemExit('Experiment label already exists; retain its evidence and choose a new label.')
     with result.open('w') as out, (output / (args.label + '.log')).open('w') as err:
         completed = subprocess.run(command, cwd=PROJECT, stdout=out, stderr=err)
     if completed.returncode:
@@ -51,7 +55,10 @@ def main():
     summary = dict(label=args.label, version=version, report=report['report'],
                    ok=report['ok'], completed_games=report['completed_games'],
                    metrics=player['by_players'], timing=player['timing'],
-                   violations=player['candidate_violations'])
+                   violations=player['candidate_violations'],
+                   hard_limit_qualified=(player['timing']['timeouts'] == 0
+                       and player['timing']['errors'] == 0
+                       and player['timing']['max_ns'] <= 10_000_000))
     index = ROOT / 'experiments/index-v8.json'
     with (output / 'index.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

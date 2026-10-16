@@ -160,7 +160,7 @@ void coordinatedAssaultPrograms(){
      std::abs(cellX[c]-cellX[goal])+std::abs(cellY[c]-cellY[goal])<=2)assaultCells[assaultCount++]=c;
   AssaultState initial;
   for(int j=0;j<assaultCount;j++){
-   int c=assaultCells[j];initial.owner[j]=own[c];initial.army[j]=own[c]>=0?ready(c):rememberedDefense(c);
+   int c=assaultCells[j];initial.owner[j]=own[c];initial.army[j]=mine(c)?ready(c):rememberedDefense(c);
    if(c==g)assaultHome=j;
    for(int k=0;k<4;k++){
     assaultNeighbors[j][k]=-1;
@@ -192,9 +192,10 @@ void coordinatedAssaultPrograms(){
 
 double campaignCost[MAXN];
 bool campaignClosed[MAXN];
+std::vector<std::pair<double,int>> campaignHeap;
 
 void campaignSearch(int source,int initial,int limit){
- if(tick<150||ed[source]>=INF){search(source,initial,limit);return;}
+ if(tick<150&&o->total_cities[p]==0&&ed[source]>=INF){search(source,initial,limit);return;}
  std::fill(dist,dist+N,INF);std::fill(force,force+N,-INF);
  std::fill(campaignCost,campaignCost+N,1e30);
  std::fill(campaignClosed,campaignClosed+N,false);
@@ -202,30 +203,45 @@ void campaignSearch(int source,int initial,int limit){
  double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
  double lossUnit=income*2.5+2;
  using Entry=std::pair<double,int>;
- std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> heap;
+ auto &heap=campaignHeap;heap.clear();
+ auto push=[&](Entry entry){heap.push_back(entry);std::push_heap(heap.begin(),heap.end(),std::greater<Entry>());};
  dist[source]=0;force[source]=initial;pathLoss[source]=0;first[source]=-1;parent[source]=-1;pathExposure[source]=0;
- campaignCost[source]=0;heap.push({0,source});
+ campaignCost[source]=0;push({0,source});
  while(!heap.empty()){
-  auto [cost,u]=heap.top();heap.pop();if(campaignClosed[u]||cost>campaignCost[u]+1e-8)continue;
+  std::pop_heap(heap.begin(),heap.end(),std::greater<Entry>());auto [cost,u]=heap.back();heap.pop_back();
+  if(campaignClosed[u]||cost>campaignCost[u]+1e-8)continue;
   campaignClosed[u]=true;if(dist[u]>=limit)continue;
   for(int k=0;k<4;k++){
    int v=nb[u][k];if(v<0||blocked(v)||campaignClosed[v])continue;
-   int f=force[u]-int(u!=source)+routeDelta[v];if(f<1)continue;
+   int d=dist[u]+1,sent=force[u],locked=0;bool half=false;
+   if(u!=source){
+    int available=force[u]+grows(u,actionTurn(d));half=reserve[u]>1;
+    sent=half?available/2:available-1;
+    if(available-sent<reserve[u])continue;
+    locked=std::max(0,available-sent-(mine(u)?army(u):1));
+   }
    int guard=mine(v)?0:rememberedDefense(v);
+   int period=(st[v]>0&&st[v]<3)?2:50;
+   int growth=std::max(0,actionTurn(d)/period-actionTurn(1)/period);
+   if(own[v]>=0&&!mine(v))guard+=growth;
+   int f=sent+(mine(v)?ready(v)+growth:-guard-int(ter[v]==255));if(f<1)continue;
    // Fighting another army removes troops from both sides; buying a neutral
    // city removes only ours. Keep actual force propagation unchanged and
    // distinguish these opportunity costs only when ranking approach routes.
    double price=1.;
    if(own[v]>=0&&own[v]!=p)
     price=std::clamp(.5+double(o->total_army[own[v]]-o->total_army[p])/(o->total_army[p]+30.),.15,1.1);
-   int spent=pathLoss[u]+int(u!=source)+int(std::lround(guard*price))+int(ter[v]==255);
+   if(aliveCount>2)price=1.-(1.-price)/(aliveCount-1);
+   int spent=pathLoss[u]+int(u!=source)+int(std::lround(guard*price))+
+     int(ter[v]==255)+int(locked*.3);
    double exposure=std::max(pathExposure[u],landingExposure(u,v,f,parent,dist));
    double next=dist[u]+1+spent/lossUnit+exposure;
    if(next>campaignCost[v]+1e-8||(std::abs(next-campaignCost[v])<=1e-8&&f<=force[v]))continue;
    campaignCost[v]=next;dist[v]=dist[u]+1;force[v]=f;pathLoss[v]=spent;
    first[v]=u==source?k:first[u];parent[v]=u;pathExposure[v]=exposure;
+   pathHalf[v]=half;
    if(!mine(v))searchTargets[v>>6]|=std::uint64_t(1)<<(v&63);
-   heap.push({next,v});
+   push({next,v});
   }
  }
 }
@@ -329,5 +345,64 @@ void convergingAssaultPrograms(){
    double value=eliminationValue(enemy)/(2.+.5*orders);
    offer(oneStep({value,action.s,action.t,direction(action.s,action.t),action.half},21));
   }
+ }
+}
+
+int collectionTroops[MAXN];
+int collectionArrival(const Program &q,int root){
+ int cells[41],count=1;cells[0]=root;
+ for(int j=0;j<q.count;j++){
+  int c=q.orders[j].s;bool found=false;for(int k=0;k<count;k++)if(cells[k]==c)found=true;
+  if(!found)cells[count++]=c;
+ }
+ for(int j=0;j<count;j++)collectionTroops[cells[j]]=ready(cells[j]);
+ for(int j=0;j<q.count;j++){
+  if(j)for(int k=0;k<count;k++)collectionTroops[cells[k]]+=grows(cells[k],actionTurn(j+1));
+  auto x=q.orders[j];int sent=x.half?collectionTroops[x.s]/2:collectionTroops[x.s]-1;
+  if(sent<1||collectionTroops[x.s]-sent<reserve[x.s])return -INF;
+  collectionTroops[x.s]-=sent;collectionTroops[x.t]+=sent;
+ }
+ return collectionTroops[root]+grows(root,actionTurn(q.count+1));
+}
+
+// Productive cities turn income into a column without harvesting dozens of
+// separate land tiles. Purchase plans start at the actual entrance, include
+// every collection order, and forecast growth during that concrete schedule.
+void productionInvestmentPrograms(){
+ if(tick<85||baselineDanger>0)return;
+ int cities[6],count=0;double priorities[6];
+ for(int c=0;c<N;c++)if(st[c]==1&&own[c]<0&&!blocked(c)&&zoneETA[c]>5){
+  int best=0;for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&mine(v))best=std::max(best,ready(v));}
+  if(!best)continue;
+  double value=best/(rememberedDefense(c)+1.)+1./(gd[c]+1.);
+  int j=count;if(j==6){j=5;if(value<=priorities[j])continue;}else count++;
+  while(j>0&&value>priorities[j-1]){if(j<6){cities[j]=cities[j-1];priorities[j]=priorities[j-1];}j--;}
+  cities[j]=c;priorities[j]=value;
+ }
+ double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
+ for(int ci=0;ci<count;ci++){
+  int city=cities[ci],root=-1,best=0;
+  for(int k=0;k<4;k++){
+   int c=nb[city][k];if(c<0||!mine(c))continue;
+   int available=ready(c);for(int j=0;j<4;j++){int v=nb[c][j];if(v>=0&&mine(v))available+=std::max(0,ready(v)-1);}
+   if(available>best){best=available;root=c;}
+  }
+  if(root<0)continue;
+  scheduleTree(root,20);Program bestPlan;
+  for(int k=1;k<=20;k++)if(schedule[root][k]>0){
+   Program q;q.root=root;q.goal=city;q.kind=22;q.born=tick;extractSchedule(root,k,q);
+   if(!q.count)continue;
+   int assembled=collectionArrival(q,root);if(assembled<1)continue;
+   bool half=reserve[root]>1;int mobile=half?assembled/2:assembled-1;
+   if(assembled-mobile<reserve[root])continue;
+   int remaining=mobile-rememberedDefense(city);if(remaining<6)continue;
+   if(moveArmy(root,half)>rememberedDefense(city)+5)continue;
+   double continuation=capitalHorizon/(2.+std::max<int64_t>(0,o->total_cities[p]));
+   q.value=(cityUtility(city,remaining,q.count+1)+continuation)/
+     (q.count+1.8+rememberedDefense(city)/(income*2.5+2));
+   q.orders[q.count++]={root,city,half};
+   if(q.value>bestPlan.value&&permitted(q.orders[0]))bestPlan=q;
+  }
+  offer(bestPlan);
  }
 }

@@ -4,8 +4,13 @@ int assetHeldSince[MAXN]{},assetLostAt[MAXN]{},assetFlips[MAXN]{};
 int assetHeldTotal[MAXN]{},assetCaptures[MAXN]{},assetLastOwner[MAXN]{};
 bool assetHistoryReady=false;
 int assetGuard[MAXN]{},assetETA[MAXN]{},zoneThreat[MAXN]{},zoneETA[MAXN]{};
+int assetRelief[MAXN][13]{};
+int priorCityArmy[MAXN]{},priorCityTick[MAXN]{},priorCityOwner[MAXN]{};
+bool priorCityThreat[MAXN]{};
+double cityDefenseHits[8]{},cityDefenseCases[8]{};
 double intel[MAXN]{},intelGain[MAXN]{},routeCost[MAXN];
 int opParent[MAXN],opSteps[MAXN],opForce[MAXN];
+bool opHalf[MAXN];
 bool conversionMode=false;
 int conversionSince=-1000;
 
@@ -36,6 +41,25 @@ void assetHistory(){
   assetLastOwner[c]=now;
  }
  assetHistoryReady=true;
+}
+
+void observeCityResponses(){
+ for(int c=0;c<N;c++)if(st[c]==1&&o->visible[c]&&own[c]>=0&&own[c]!=p){
+  int enemy=own[c];
+  if(priorCityTick[c]==tick-1&&priorCityOwner[c]==enemy&&priorCityThreat[c]){
+   cityDefenseCases[enemy]+=1.;
+   if(army(c)-priorCityArmy[c]-grows(c,tick)>=4)cityDefenseHits[enemy]+=1.;
+   if(cityDefenseCases[enemy]>40){cityDefenseCases[enemy]*=.8;cityDefenseHits[enemy]*=.8;}
+  }
+  int attacking=0,donor=0;
+  for(int k=0;k<4;k++){
+   int v=nb[c][k];if(v<0||!o->visible[v])continue;
+   if(mine(v))attacking=std::max(attacking,moveArmy(v));
+   else if(own[v]==enemy)donor=std::max(donor,moveArmy(v));
+  }
+  priorCityThreat[c]=attacking>ready(c)&&donor>=5;
+  priorCityArmy[c]=army(c);priorCityOwner[c]=enemy;priorCityTick[c]=tick;
+ }
 }
 
 void pressureMap(){
@@ -104,6 +128,11 @@ void pressureMap(){
 }
 
 double assetUtility(int c,int remaining,int arrival)const {
+ // Repeated quick losses are evidence that a nominal capture does not buy
+ // the promised income. Until the counterattack can be met, price this as
+ // transit through ordinary land rather than another productive conquest.
+ if(assetFlips[c]>=2&&tick-assetLostAt[c]<40&&remaining<zoneThreat[c]+8)
+  return own[c]>=0&&own[c]!=p?3.9:1.8;
  int local=0;
  for(int k=0;k<enemyCount[c];k++)local=std::max(local,moveArmy(enemyNeighbors[c][k]));
  double holding=80.;
@@ -116,10 +145,57 @@ double assetUtility(int c,int remaining,int arrival)const {
  int exits=0;for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&!blocked(v)&&st[v]!=1)exits++;}
  double value=(5.+holding*.29+exits*.55)/(1+.012*arrival);
 
- if(own[c]>=0&&own[c]!=p)value+=holding*.29/(1+.012*arrival);
+ if(own[c]>=0&&own[c]!=p)value+=holding*.29/(1+.012*arrival)/std::max(1,aliveCount-1);
  if(remaining<4)value*=.70;
  if(assetFlips[c]>0&&remaining<pressure+20)value-=std::min(10.,1.5*assetFlips[c]);
+ if(own[c]>=0&&own[c]!=p){
+  int enemy=own[c];double response=(2.+cityDefenseHits[enemy])/(8.+cityDefenseCases[enemy]);
+  int extra=assetRelief[c][std::clamp(arrival,0,12)];
+  value*=std::clamp(double(std::max(1,remaining))/(4.+response*extra),.15,1.);
+ }
  return value;
+}
+
+// Price the actual orders a visible defender has before occupation. Separate
+// donors share their common transport edges and are never counted twice.
+void buildCityRelief(){
+ std::memset(assetRelief,0,N*sizeof(assetRelief[0]));
+ int roots[12],count=0;double scores[12];
+ for(int c=0;c<N;c++)if(st[c]==1&&o->visible[c]&&own[c]>=0&&own[c]!=p){
+  int nearby=0;for(int k=0;k<4;k++){int u=nb[c][k];if(u>=0&&mine(u))nearby=std::max(nearby,ready(u));}
+  double value=nearby/(rememberedDefense(c)+10.)+1./(rememberedDefense(c)+1.);
+  int j=count;if(j==12){j=11;if(value<=scores[j])continue;}else count++;
+  while(j>0&&value>scores[j-1]){if(j<12){roots[j]=roots[j-1];scores[j]=scores[j-1];}j--;}
+  roots[j]=c;scores[j]=value;
+ }
+ for(int ri=0;ri<count;ri++){
+  int root=roots[ri],enemy=own[root];
+  std::fill(scheduleParent,scheduleParent+N,-2);
+  int nodes=1;scheduleOrder[0]=root;scheduleParent[root]=-1;dist[root]=0;
+  for(int j=0;j<nodes;j++){
+   int u=scheduleOrder[j];if(dist[u]>=8)continue;
+   for(int k=0;k<4;k++){
+    int v=nb[u][k];if(v<0||blocked(v)||own[v]!=enemy||scheduleParent[v]!=-2||nodes>=64)continue;
+    scheduleParent[v]=u;dist[v]=dist[u]+1;scheduleOrder[nodes++]=v;
+   }
+  }
+  for(int j=nodes-1;j>=0;j--){
+   int u=scheduleOrder[j];schedule[u][0]=std::max(1,rememberedDefense(u));
+   if(u!=root&&st[u]==2)schedule[u][0]=schedule[u][0]/2+1;
+   for(int b=1;b<=12;b++)schedule[u][b]=-INF;
+   for(int k=0;k<4;k++){
+    int v=nb[u][k];if(v<0||scheduleParent[v]!=u)continue;
+    for(int b=12;b>=1;b--)for(int use=0;use<b;use++)
+     if(schedule[u][b-use-1]>0&&schedule[v][use]>1)
+      schedule[u][b]=std::max(schedule[u][b],schedule[u][b-use-1]+schedule[v][use]-1);
+   }
+   for(int b=1;b<=12;b++)schedule[u][b]=std::max(schedule[u][b],schedule[u][b-1]);
+  }
+  for(int d=1;d<=12;d++){
+   int budget=std::max(0,d-int(enemy>p));
+   assetRelief[root][d]=std::max(0,schedule[root][budget]-rememberedDefense(root));
+  }
+ }
 }
 
 void intelligenceMap(){
@@ -169,15 +245,22 @@ void taskRoutes(int source,int initial,bool recon=false,bool friendly=false){
   if(opSteps[u]>=40)continue;
   for(int k=0;k<4;k++){
    int v=nb[u][k];if(v<0||blocked(v)||v==source||(friendly&&!mine(v)))continue;
-   int guard=mine(v)?0:rememberedDefense(v),available=opForce[u]-1;
-   if(mine(v))available+=std::max(0,army(v)-reserve[v]);else available-=guard;
+   int guard=mine(v)?0:rememberedDefense(v),available=opForce[u];bool half=false;
+   int step=opSteps[u]+1,period=st[v]>0&&st[v]<3?2:50;
+   int growth=std::max(0,actionTurn(step)/period-actionTurn(1)/period);
+   if(u!=source){
+    int prepared=opForce[u]+grows(u,actionTurn(step));half=reserve[u]>1;
+    available=half?prepared/2:prepared-1;if(prepared-available<reserve[u])continue;
+   }
+   if(mine(v))available+=ready(v)+growth;
+   else available-=guard+(own[v]>=0?growth:0);
    if(available<2&&!friendly)continue;
    int mobileThreat=zoneThreat[v];
    double riskCost=std::max(0,mobileThreat-available)* (recon?.14:.04);
    if(recon&&zoneETA[v]<=2&&mobileThreat>available+5)riskCost+=8.;
    double next=cost+1.+guard/(recon?5.:18.)+riskCost+(ter[v]==255?.20:0.);
    if(next+1e-6>=routeCost[v])continue;
-   routeCost[v]=next;opParent[v]=u;opSteps[v]=opSteps[u]+1;opForce[v]=std::max(1,available);heap.push({next,v});
+   routeCost[v]=next;opParent[v]=u;opHalf[v]=half;opSteps[v]=opSteps[u]+1;opForce[v]=std::max(1,available);heap.push({next,v});
   }
  }
 }
@@ -227,7 +310,7 @@ void reconnaissancePrograms(){
   if(goal<0)continue;
   Program q;q.root=source;q.goal=goal;q.born=tick;q.kind=10;q.value=best;
   int path[40],n=0;for(int c=goal;c!=source&&c>=0&&n<40;c=opParent[c])path[n++]=c;
-  int u=source;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1&&half};u=path[j];}
+  int u=source;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1?half:opHalf[path[j]]};u=path[j];}
   offer(q);
  }
 }
@@ -279,7 +362,7 @@ void mobilizationPrograms(){
   std::fill(opSteps,opSteps+N,INF);std::fill(opForce,opForce+N,INF);std::fill(opParent,opParent+N,-1);
   int head=0,tail=1;queue[0]=root;opSteps[root]=0;opForce[root]=0;
   while(head<tail){int u=queue[head++];if(opSteps[u]>=24)continue;
-   for(int j=0;j<4;j++){int v=nb[u][j];if(v<0||blocked(v)||v==root||opSteps[v]<opSteps[u]+1)continue;
+   for(int j=0;j<4;j++){int v=nb[u][j];if(v<0||blocked(v)||v==root||opSteps[v]<opSteps[u]+1||(mine(v)&&reserve[v]>1))continue;
     if(opSteps[v]==INF){opSteps[v]=opSteps[u]+1;queue[tail++]=v;}
     int loss=opForce[u]+1+(mine(v)?0:rememberedDefense(v));
     if(loss<opForce[v]){opForce[v]=loss;opParent[v]=u;}

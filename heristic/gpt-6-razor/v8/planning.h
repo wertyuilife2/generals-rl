@@ -97,7 +97,7 @@ double programScore(const Program &q)const {
  if(q.kind!=17&&q.kind!=20&&q.kind!=21&&!legalOrder(x,q.kind==3))return -1e30;
  if(q.kind==20&&!legalOrder(x,true))return -1e30;
  if(q.kind==14)return extractionSafe(q)?q.value+(q.born<tick?40.:0):-1e30;
- if(q.kind==10&&zoneETA[x.t]<=2&&zoneThreat[x.t]>moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t))+5)return -1e30;
+ if((q.kind==10||q.kind==24)&&zoneETA[x.t]<=2&&zoneThreat[x.t]>moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t))+5)return -1e30;
  double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
  if(after>baselineDanger+1&&after>60&&q.kind!=3)return -1e30;
  double transferRisk=(q.kind==2||q.kind==6)?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
@@ -360,6 +360,7 @@ double kingConfidence(int target,int remaining,int depth)const {
 
 void campaignPrograms(double income){
  for(int s:sources){
+  if(!planningTimeLeft())break;
   bool requiredHalf=false;if(!canDepart(s,requiredHalf))continue;
   int modes=(!requiredHalf&&usefulCityHalf(s))?2:1;
   for(int mode=0;mode<modes;mode++){
@@ -383,7 +384,7 @@ void campaignPrograms(double income){
    if(target<0)continue;
    Program q;q.value=highest;q.goal=target;q.root=s;q.born=tick;q.kind=1;
    int path[33],n=0;for(int v=target;v!=s&&v>=0&&n<33;v=parent[v])path[n++]=v;
-   int u=s;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1?half:false};u=path[j];}
+   int u=s;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1?half:pathHalf[path[j]]};u=path[j];}
    offer(q);
   }
  }
@@ -398,6 +399,7 @@ void logisticsPrograms(double income){
  for(int c:sources)if(ed[c]<=6&&ready(c)>=3){addRoot(c);if(rootCount>=4)break;}
  for(int c:sources){addRoot(c);if(rootCount>=6)break;}
  for(int ri=0;ri<rootCount;ri++){
+  if(!planningTimeLeft())break;
   int root=roots[ri],budget=10;
   scheduleTree(root,budget);
   int gathered[13];for(int k=0;k<=budget;k++)gathered[k]=schedule[root][k];
@@ -407,7 +409,7 @@ void logisticsPrograms(double income){
   int h=0,z=1;queue[0]=root;dist[root]=0;pathLoss[root]=0;parent[root]=-1;
   while(h<z){int u=queue[h++];if(dist[u]>=14)continue;
    for(int k=0;k<4;k++){
-    int v=nb[u][k];if(v<0||v==root||blocked(v))continue;
+    int v=nb[u][k];if(v<0||v==root||blocked(v)||(mine(v)&&reserve[v]>1))continue;
     int d=dist[u]+1;if(dist[v]<d)continue;
     int loss=pathLoss[u]+1+(mine(v)?0:rememberedDefense(v)+int(ter[v]==255));
     if(dist[v]==INF){dist[v]=d;queue[z++]=v;}
@@ -509,6 +511,7 @@ void interceptionPrograms(){
 void deploymentPrograms(){
  if(tick<100)return;
  for(int s:sources){
+  if(!planningTimeLeft())break;
   bool half=false;if(!canDepart(s,half))continue;
   // Deployment transports a reserve; it does not by itself justify giving
   // away a productive city. Tactical capture programs can still use full force.
@@ -516,6 +519,10 @@ void deploymentPrograms(){
   int initial=moveArmy(s,half);if(initial<18)continue;
   campaignSearch(s,initial,32);double best=-1e30;int goal=-1;
   for(int v=0;v<N;v++)if(own[v]>=0&&own[v]!=p&&o->alive[own[v]]&&dist[v]<INF&&first[v]>=0&&dist[v]>=2){
+   // Transport is a means of reaching a durable objective. Ordinary enemy
+   // tiles are already priced by campaigns; paying another large reward for
+   // proximity to them repeatedly displaces an army that can attack now.
+   if(st[v]!=1&&st[v]!=2)continue;
    if(force[v]<10||force[v]<initial/3)continue;
    int d=dist[v],enemy=own[v];
    double mobile=std::max<int64_t>(20,o->total_army[enemy]-o->total_land[enemy]);
@@ -535,7 +542,7 @@ void deploymentPrograms(){
   if(goal<0)continue;
   Program q;q.value=best;q.goal=goal;q.root=s;q.kind=8;q.born=tick;
   int path[33],n=0;for(int c=goal;c!=s&&c>=0&&n<33;c=parent[c])path[n++]=c;
-  int u=s;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1&&half};u=path[j];}
+  int u=s;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1?half:pathHalf[path[j]]};u=path[j];}
   offer(q);
  }
 }
