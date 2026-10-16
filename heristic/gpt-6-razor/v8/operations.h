@@ -400,10 +400,6 @@ void assetProtectionPrograms(){
   if(++considered>6)break;
   int budget=std::min(6,zoneETA[c]-1);scheduleTree(c,budget);
   for(int k=1;k<=budget;k++)if(schedule[c][k]>=need){
-   // Start at the latest safe collection time. A city one transfer away
-   // from safety does not need to immobilize a field army while the enemy
-   // is still six moves away. Re-evaluate every observation as it approaches.
-   if(k<zoneETA[c]-1)break;
    Program q;q.kind=12;q.goal=c;q.root=c;q.born=tick;
    q.value=4.+8./(k+1.);extractSchedule(c,k,q);
    if(q.count&&permitted(q.orders[0]))offer(q);
