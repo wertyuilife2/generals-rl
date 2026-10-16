@@ -185,6 +185,83 @@ double assetUtility(int c,int remaining,int arrival)const {
  return value;
 }
 
+// A neutral-city purchase consumes our army without removing an opponent's
+// army. Price the resulting position, including the field column which can
+// return to the city, rather than counting the purchase itself as success.
+// Public mobile army supplies a cautious prior when the front is visible;
+// it is not assigned to a hidden square or treated as an observed attacker.
+double capitalSecurity(const Program &q)const {
+ if(q.goal>=0&&st[q.goal]==2&&own[q.goal]>=0&&own[q.goal]!=p)return 1.;
+ bool purchase=false;
+ for(int j=q.cursor;j<q.count;j++){
+  int c=q.orders[j].t;
+  if(c>=0&&st[c]==1&&own[c]<0&&ed[c]<=6){purchase=true;break;}
+ }
+ if(!purchase)return 1.;
+ int index[MAXN],cells[81],owners[81],troops[81],count=0,assets[40],assetCount=0;
+ std::fill(index,index+N,-1);
+ for(int j=q.cursor;j<q.count;j++)for(int c:{q.orders[j].s,q.orders[j].t}){
+  if(c<0||c>=N||blocked(c))return .25;
+  if(index[c]>=0)continue;
+  int i=count++;index[c]=i;cells[i]=c;owners[i]=own[c];
+  troops[i]=mine(c)?ready(c):rememberedDefense(c);
+ }
+ for(int j=q.cursor;j<q.count;j++){
+  int step=j-q.cursor+1;
+  if(step>1)for(int i=0;i<count;i++)if(owners[i]>=0)troops[i]+=grows(cells[i],actionTurn(step));
+  auto x=q.orders[j];int s=index[x.s],t=index[x.t];
+  if(owners[s]!=p)return .25;
+  int sent=x.half?troops[s]/2:troops[s]-1;
+  if(sent<1||troops[s]-sent<reserve[x.s])return .25;
+  troops[s]-=sent;
+  if(owners[t]==p)troops[t]+=sent;
+  else{
+   if(sent<=troops[t])return .25;
+   if(st[x.t]==1&&owners[t]<0&&ed[x.t]<=6)assets[assetCount++]=x.t;
+   troops[t]=sent-troops[t];owners[t]=p;
+  }
+ }
+ auto ownerAt=[&](int c){return index[c]<0?own[c]:owners[index[c]];};
+ auto forceAt=[&](int c){return index[c]<0?ready(c):troops[index[c]];};
+ int distance[MAXN],work[MAXN];double security=1.;
+ for(int ai=0;ai<assetCount;ai++){
+  int city=assets[ai];bool front[8]{};int visibleColumn=0;
+  std::fill(distance,distance+N,INF);distance[city]=0;int head=0,tail=1;work[0]=city;
+  while(head<tail){int c=work[head++],d=distance[c];
+   if(own[c]>=0&&own[c]!=p&&o->alive[own[c]]&&tick-seen[c]<=8){
+    front[own[c]]=true;if(o->visible[c])visibleColumn=std::max(visibleColumn,army(c));
+   }
+   if(d>=6)continue;
+   for(int k=0;k<4;k++){int v=nb[c][k];if(v<0||blocked(v)||distance[v]<INF)continue;
+    distance[v]=d+1;work[tail++]=v;}
+  }
+  double need=visibleColumn;
+  for(int e=0;e<o->players;e++)if(front[e])
+   need=std::max(need,std::max<int64_t>(0,o->total_army[e]-o->total_land[e])*
+                      std::max(.35,observedColumnFraction[e]));
+  if(need<16)continue;
+  // The best single returning column is a feasible support option. Do not
+  // add several donors whose individual distances conceal multiple orders.
+  int support=0,horizon=std::clamp(ed[city],2,6);
+  std::fill(distance,distance+N,INF);distance[city]=0;head=0;tail=1;work[0]=city;
+  while(head<tail){int c=work[head++],d=distance[c];
+   if(c!=city&&ownerAt(c)==p){
+    int n=forceAt(c),sent=reserve[c]>1?n/2:n-1;
+    if(n-sent>=reserve[c])support=std::max(support,sent-d+1);
+   }
+   if(d>=horizon)continue;
+   for(int k=0;k<4;k++){int v=nb[c][k];if(v<0||ownerAt(v)!=p||distance[v]<INF)continue;
+    // A protected intermediate city cannot promise an unrestricted full
+    // transfer of this column on its way back to the new asset.
+    if(c!=city&&reserve[c]>1)continue;
+    distance[v]=d+1;work[tail++]=v;}
+  }
+  int held=ownerAt(city)==p?forceAt(city):0;
+  security=std::min(security,.15+.85*std::min(1.,(held+support)/(need+4.)));
+ }
+ return security;
+}
+
 // Price the actual orders a visible defender has before occupation. Separate
 // donors share their common transport edges and are never counted twice.
 void buildCityRelief(){

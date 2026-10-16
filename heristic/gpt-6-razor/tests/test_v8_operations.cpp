@@ -13,6 +13,101 @@ struct Board {
 
 int main(){
  {
+  Board b;b.owner[59]=0;b.army[59]=80;b.owner[61]=1;b.army[61]=100;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  assert(p->landingCanBeDenied({59,60,false}));
+  b.owner[60]=0;b.army[60]=100;b.refresh(*p);
+  assert(!p->landingCanBeDenied({59,60,false}));
+  // Earlier-seat reinforcement can deny the capture before we even land.
+  b.obs.player=1;b.owner[0]=b.owner[59]=1;b.owner[60]=b.owner[61]=0;b.army[60]=1;
+  auto later=std::make_unique<Policy>(1,1,"{}");b.refresh(*later);
+  assert(later->landingCanBeDenied({59,60,false}));
+  // Hitting the source first can leave too few troops to buy a city, even
+  // though that enemy is not strong enough to capture the source itself.
+  b.owner[61]=-1;b.army[61]=0;b.owner[58]=0;b.army[58]=50;
+  b.owner[60]=-2;b.structure[60]=1;b.army[60]=40;b.refresh(*later);
+  assert(later->landingCanBeDenied({59,60,false}));
+ }
+ {
+  Board b;b.owner[59]=0;b.army[59]=80;b.owner[60]=-2;b.army[60]=30;b.structure[60]=1;
+  b.owner[65]=1;b.army[65]=100;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->observeColumns();
+  Policy::Program q;q.root=59;q.goal=60;q.kind=22;q.count=1;q.orders[0]={59,60,false};
+  // The attacking column cannot count twice as the new garrison and its
+  // returning support. A real, independent nearby donor changes the result.
+  assert(p->capitalSecurity(q)<.8);
+  b.owner[49]=0;b.army[49]=80;b.refresh(*p);
+  assert(p->capitalSecurity(q)>.99);
+  // Spending that support on another city removes it from the final ledger.
+  b.owner[48]=-2;b.structure[48]=1;b.army[48]=70;b.refresh(*p);
+  q.count=2;q.orders[0]={49,48,false};q.orders[1]={59,60,false};
+  assert(p->capitalSecurity(q)<.8);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);
+  for(int c=0;c<11;c++){b.terrain[c]=0;b.owner[c]=0;b.army[c]=1;}
+  for(int c=21;c<=120;c+=11){b.terrain[c]=0;b.owner[c]=0;b.army[c]=1;}
+  b.army[0]=10;b.terrain[11]=0;b.owner[11]=0;b.army[11]=100;
+  b.owner[120]=1;b.army[120]=140;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  assert(p->gd[120]==20&&p->mobilizationETA[120]>12&&p->mobilizationETA[120]<=24);
+  assert(p->mobilizationThreat[120]>b.army[0]);
+  assert(p->reserve[0]<=b.army[0]);
+  // A one-order reinforcement has plenty of slack. It should be available
+  // as preparation, not immobilize home as a tactical emergency.
+  assert(p->defend().source<0);
+  // If assembling the required army is already impossible within that
+  // deadline, begin usable reinforcement instead of waiting for radius 12.
+  b.army[11]=40;b.refresh(*p);assert(p->defend().source==11);
+  // Distant attack forecasts still pay the actual compulsory city guard.
+  b.owner[10]=-2;b.structure[10]=1;b.army[10]=160;
+  auto blocked=std::make_unique<Policy>(0,1,"{}");b.refresh(*blocked);
+  assert(blocked->threat[120]==0&&blocked->mobilizationThreat[120]==0);
+ }
+ {
+  Board b;b.owner[60]=b.owner[61]=b.owner[90]=1;
+  b.structure[60]=2;b.structure[61]=1;b.army[60]=b.army[61]=100;b.army[90]=10;b.total[1]=250;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  b.obs.tick++;b.visible[60]=b.visible[61]=0;b.owner[60]=b.owner[61]=-3;b.army[60]=b.army[61]=-1;
+  b.army[90]=210;b.refresh(*p);
+  // The visible 210 troops cannot also remain in two remembered 100-troop
+  // garrisons when the opponent's entire public army is only 250.
+  assert(p->rememberedDefense(60)+p->rememberedDefense(61)<=40);
+  assert(p->rememberedDefense(90)==210);
+  // Do not rewrite the observation history to make the estimate fit.
+  assert(p->a[60]==100&&p->a[61]==100);
+  // A newer sighting should not be diluted by a much older large garrison.
+  b.obs.tick++;b.visible[60]=1;b.owner[60]=1;b.army[60]=20;b.total[1]=260;b.refresh(*p);
+  b.obs.tick++;b.visible[60]=0;b.owner[60]=-3;b.army[60]=-1;b.total[1]=250;b.refresh(*p);
+  assert(p->rememberedDefense(60)>=20);
+  assert(p->rememberedDefense(60)+p->rememberedDefense(61)<=40);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=b.army[56]=40;
+  b.owner[57]=1;b.army[57]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->scheduleTree(55,1);
+  assert(p->schedule[55][1]>=79);
+  // A real adjacent attacking column can remove the donor before a long
+  // collection finishes; relaxing the ownership shortcut must retain that.
+  b.army[57]=100;b.refresh(*p);p->scheduleTree(55,1);
+  assert(p->schedule[55][1]<0);
+ }
+ {
+  Board b;b.owner[12]=1;b.army[12]=30;b.total[1]=180;b.land[1]=50;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  // A reserve constraint alone cannot replace the troops consumed by a
+  // successful defense. Rebuild it before there is another lethal attack.
+  b.obs.tick+=20;b.owner[12]=0;b.army[12]=1;b.army[0]=2;
+  b.owner[13]=1;b.army[13]=1;
+  b.owner[1]=b.owner[2]=0;b.army[1]=25;b.army[2]=20;
+  b.refresh(*p);p->readinessProgram();
+  assert(p->proposalCount>0&&p->proposals[0].kind==6);
+  b.army[0]=100;b.refresh(*p);p->proposalCount=0;p->readinessProgram();
+  assert(p->proposalCount==0);
+ }
+ {
   Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
   for(int c=55;c<66;c++)b.terrain[c]=0;
   b.land[0]=30;b.owner[55]=b.owner[56]=b.owner[57]=0;

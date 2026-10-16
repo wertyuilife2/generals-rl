@@ -164,6 +164,7 @@ void localBattlePrograms(){
  for(int i=1;i<count&&!tacticalAborted;i++){
   Order action{tacticalCells[ours[i].s],tacticalCells[ours[i].t],ours[i].half};
   if(!legalOrder(action,true))continue;
+  if(landingCanBeDenied(action))continue;
   if(std::abs(cellX[action.s]-cellX[focus])+std::abs(cellY[action.s]-cellY[focus])>2||
      std::abs(cellX[action.t]-cellX[focus])+std::abs(cellY[action.t]-cellY[focus])>2)continue;
   if(dangerAfter(&action)>baselineDanger+1)continue;

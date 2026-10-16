@@ -43,6 +43,42 @@ bool legalOrder(const Order &x,bool allowAttrition=false)const {
  }
  return true;
 }
+
+// Test every visible one-order interception of this landing, including a
+// reinforcement before our move and a source hit which reduces what we can
+// send. Bounded local search may omit such a quiet reply from its shortlist;
+// an ordinary route cannot claim occupation or information in that case.
+bool landingCanBeDenied(const Order &x)const {
+ int source=ready(x.s),sent=moveArmy(x.s,x.half);
+ int targetOwner=own[x.t],target=mine(x.t)?ready(x.t):rememberedDefense(x.t);
+ // An explicitly proposed attrition attack already does not claim capture.
+ if(targetOwner!=p&&sent<=target)return false;
+ auto succeeds=[&](int troops,int owner,int guard){
+  int moving=x.half?troops/2:troops-1;
+  return moving>0&&(owner==p||moving>guard);
+ };
+ for(int k=0;k<enemyCount[x.t];k++){
+  int e=enemyNeighbors[x.t][k],owner=own[e],moving=moveArmy(e);
+  if(!o->visible[e]||moving<=0)continue;
+  if(owner<p){
+   int beforeOwner=targetOwner,before=target;
+   if(beforeOwner==owner)before+=moving;
+   else if(moving>before){before=moving-before;beforeOwner=owner;}
+   else before-=moving;
+   if(!succeeds(source,beforeOwner,before))return true;
+  }else{
+   int landed=sent+(targetOwner==p?target:-target);
+   if(moving>landed)return true;
+  }
+ }
+ for(int k=0;k<enemyCount[x.s];k++){
+  int e=enemyNeighbors[x.s][k];if(!o->visible[e]||own[e]>=p)continue;
+  int remaining=source-moveArmy(e);
+  int guard=e==x.t?ready(e)-moveArmy(e):target;
+  if(!succeeds(remaining,targetOwner,guard))return true;
+ }
+ return false;
+}
 // Marginal concentration only: transporting an already large stack into a
 // one-troop root creates no new field army. Shared branches are counted once.
 // Recently split troops retain a common identity while moving. Reuniting
@@ -96,6 +132,7 @@ double programScore(const Program &q)const {
  const Order &x=q.orders[q.cursor];
  if(q.kind!=17&&q.kind!=20&&q.kind!=21&&!legalOrder(x,q.kind==3))return -1e30;
  if(q.kind==20&&!legalOrder(x,true))return -1e30;
+ if(q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=17&&q.kind!=21&&landingCanBeDenied(x))return -1e30;
  if(q.kind==14)return extractionSafe(q)?q.value+(q.born<tick?40.:0):-1e30;
  if((q.kind==10||q.kind==24)&&zoneETA[x.t]<=2&&zoneThreat[x.t]>moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t))+5)return -1e30;
  double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
@@ -104,7 +141,7 @@ double programScore(const Program &q)const {
  double continuedRisk=(q.born<tick&&(q.kind==1||q.kind==8))?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
  double commitment=0;
  if(q.born<tick&&q.kind==11&&baselineDanger<2&&permitted(x))commitment=1.;
- return q.value+commitment-after-transferRisk-continuedRisk;
+ return q.value*capitalSecurity(q)+commitment-after-transferRisk-continuedRisk;
 }
 void offer(Program q){
  if(q.cursor>=q.count)return;
@@ -181,8 +218,11 @@ void scheduleTree(int root,int budget){
     continue;
    }
    if(v==g&&v!=root&&reserve[g]>1)continue;
-   // Exposed branches are not promised to a long assembly operation.
-   if(v!=root&&enemyCount[v]&&ed[root]>ed[v])continue;
+   // A hostile one-troop trail cannot overrun this donor. Only withhold
+   // exposed branches when an observed nearby force can actually take them;
+   // otherwise a returning army becomes unavailable solely due to ownership.
+   if(v!=root&&enemyCount[v]&&ed[root]>ed[v]&&
+      zoneETA[v]<=2&&zoneThreat[v]>=ready(v))continue;
    scheduleParent[v]=u;dist[v]=dist[u]+1;scheduleOrder[scheduleCount++]=v;
   }
  }
@@ -464,12 +504,17 @@ void logisticsPrograms(double income){
  }
 }
 
+int readinessTarget()const {
+ int visible=ed[g]<=8&&homeIncoming[8]>=8?int(homeIncoming[8]*1.35)+6:0;
+ return std::min(int(o->total_army[p]*.45),std::max(reserve[g],visible));
+}
+
 void readinessProgram(){
- if(ed[g]>8||homeIncoming[8]<8||baselineDanger>0)return;
- int target=std::min(int(o->total_army[p]*.45),int(homeIncoming[8]*1.35)+6);
+ if(tick<70||baselineDanger>0)return;
+ int target=readinessTarget();
  int deficit=target-ready(g);if(deficit<4)return;
- scheduleTree(g,8);Program best;
- for(int k=1;k<=8;k++){
+ scheduleTree(g,12);Program best;
+ for(int k=1;k<=12;k++){
   int gain=schedule[g][k]-ready(g);if(gain<4)continue;
   double score=5.0+.70*std::min(gain,deficit)/(k+1.);
   if(score<=best.value)continue;

@@ -103,7 +103,7 @@ std::int64_t decideV8(const ArenaObservation *obs){
  // opportunity justifies interruption. Skipped online ticks invalidate it.
  bool received=o->previous?(o->previous->valid&&o->previous->action==missionAction):
     (missionReceiptCell>=0&&mine(missionReceiptCell)&&army(missionReceiptCell)>=missionReceiptForce);
- bool stillNeeded=(mission.kind!=3||baselineDanger>0||raidNeed>army(g))&&(mission.kind!=6||army(g)<std::min(int(o->total_army[p]*.45),int(homeIncoming[8]*1.35)+6));
+ bool stillNeeded=(mission.kind!=3||baselineDanger>0||raidNeed>army(g))&&(mission.kind!=6||ready(g)<readinessTarget());
  if((mission.kind==3||mission.kind==6)&&missionTick==tick-1&&mission.cursor<mission.count&&tick-mission.born<=32&&received&&stillNeeded&&
     legalOrder(mission.orders[mission.cursor],mission.kind==3)){
   Program continued=mission;continued.value*=1.09;offer(continued);

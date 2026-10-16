@@ -46,6 +46,59 @@
       "invalid_actions": 0,
       "hard_limit_qualified": false
     },
+    "13688ebf325fa0c6d3141e40f899545c0104842f393db807becd064b5dd4fd5e": {
+      "source_directory": "heristic/gpt-6-razor/experiments/13688ebf325fa0c6d3141e40f899545c0104842f393db807becd064b5dd4fd5e",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3b26bf0880e436aa227dd23fa7179c0f0595c91aa3f6780d5488ffe9d8b043b7/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 5365000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "15f592e273c80ef2b263fe14dc2cd7d0824e15f1c6ead51849c85d2089bf35c8": {
+      "source_directory": "heristic/gpt-6-razor/experiments/15f592e273c80ef2b263fe14dc2cd7d0824e15f1c6ead51849c85d2089bf35c8",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cef46429548de8ba45622f13ea44e2f11d79e318eddfdcb49d55ebdaa7788de/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2ebd644fc08037db9618d66759f87aee0616d22de062bf7c4539c71e27471f7/report.json"
+      ],
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2914000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "1649edf64e51de8f37b5c2357395a224526125c64fa60ef68dbbf8d8e74db0f0": {
+      "source_directory": "heristic/gpt-6-razor/experiments/1649edf64e51de8f37b5c2357395a224526125c64fa60ef68dbbf8d8e74db0f0",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/87fc9b64e79155d341ac63ab5e716a1343ca26d81a80e03ecd84c37ffb44b335/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2836000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "18cda1f0a46e8fbbe96a7dd47b291de0fa01be05cb193bc6fba7036e22bfb08e": {
+      "source_directory": "heristic/gpt-6-razor/experiments/18cda1f0a46e8fbbe96a7dd47b291de0fa01be05cb193bc6fba7036e22bfb08e",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5762b8ac208138f523b9750d9662c459770de7bfc1e4593dcf530019f2f7dc68/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1850000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "19113053431cc5968ed9971afafc8874b3837b21d4b19279ccc7a4fc811a83d8": {
       "source_directory": "heristic/gpt-6-razor/experiments/19113053431cc5968ed9971afafc8874b3837b21d4b19279ccc7a4fc811a83d8",
       "source_identity_verified": true,
@@ -289,6 +342,24 @@
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
+    "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57": {
+      "source_directory": "heristic/gpt-6-razor/experiments/44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2e5859b6579eef0790214076e0147bff05c23221418e6d49f25b6d3175487aab/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a422b297708940894f983ec81b5f865f5276734a3e5b4166c7c3929fe7dac0ae/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee726da95937586b9e694038ece836de1a8354c63e6ef1095b43ffc1bd00e99f/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/fe9e3a1e5a216a1b4e4e7bc3ffcd22f499a22fef44798a7db3cbb335fc067738/report.json"
+      ],
+      "completed_games": 856,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 8125000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "4a918159f6f1050467f6b39ea136548f2155867b50119fca6b0973a5a5b03931": {
       "source_directory": "heristic/gpt-6-razor/experiments/4a918159f6f1050467f6b39ea136548f2155867b50119fca6b0973a5a5b03931",
       "source_identity_verified": true,
@@ -495,6 +566,20 @@
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
+    "766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27": {
+      "source_directory": "heristic/gpt-6-razor/experiments/766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/00af2a46cdbca105e937c2c75499a8540a234e5047b940ae5b1b6de281af3bd0/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e23b7210745d30f13e7bea063f5f2aed893f8cc952724a39559e253a0dbf760c/report.json"
+      ],
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 4582000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a": {
       "source_directory": "heristic/gpt-6-razor/experiments/831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a",
       "source_identity_verified": true,
@@ -548,6 +633,19 @@
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
+    "911d8691a011bab39525c0b7fff8de9b6a800329c3216f25a71183790f956def": {
+      "source_directory": "heristic/gpt-6-razor/experiments/911d8691a011bab39525c0b7fff8de9b6a800329c3216f25a71183790f956def",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/df5b8b55164ae0302d3431ae6c3b8d2669624d0d1789b2c6f1d892ce4ba19e09/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 5558000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "95da7b8946758d3f4eda0a73536cc6f7e34b2fe3613f4cfd862a39c127824b94": {
       "source_directory": "heristic/gpt-6-razor/experiments/95da7b8946758d3f4eda0a73536cc6f7e34b2fe3613f4cfd862a39c127824b94",
       "source_identity_verified": true,
@@ -584,6 +682,33 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 1004000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85": {
+      "source_directory": "heristic/gpt-6-razor/experiments/a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7170d45ebd3808a6786eecc40253a132359caf67a996edec41e80d2eb6d36f59/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d7d02178302eb458816d7006d3df7653be2b19608ca245d3f06dcf00ae828e85/report.json"
+      ],
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 5397000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "a3f6c136e5528fd0f01f23b75037b6fde6b019a53cfca86254b533d4b2090b88": {
+      "source_directory": "heristic/gpt-6-razor/experiments/a3f6c136e5528fd0f01f23b75037b6fde6b019a53cfca86254b533d4b2090b88",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d357a2e772e65f16f570f0b819c6722c8098fa47ced9c1bc88c13a97be824db7/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1874000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -650,6 +775,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 2045000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "ab96b8cbf45601850b0fb25b327ff033fac10ff4445f4585bb7ec39a62305435": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ab96b8cbf45601850b0fb25b327ff033fac10ff4445f4585bb7ec39a62305435",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8267703b723e4aa4d5a16e578b8ac469094722e3a98adfbb83f1c9f9eb2d31db/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3975000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -899,6 +1037,20 @@
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
+    "e24e6c7b74e52342f7e16707866bc30df11ec9e9eaade81170f84b85ca3c2495": {
+      "source_directory": "heristic/gpt-6-razor/experiments/e24e6c7b74e52342f7e16707866bc30df11ec9e9eaade81170f84b85ca3c2495",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3933c2fcb64b32fa96be12bfe1b4a3821480fc7af04190ec3289c4b103de3ae0/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f7e29bf99385e336758f5151d5ba390a81ea8d8c2535da4b32122c99730d3766/report.json"
+      ],
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2789000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "e8fa9a3fb3c4d035477a0ddbb54f93d9b1705624701be5c959a1d113df0cee6e": {
       "source_directory": "heristic/gpt-6-razor/experiments/e8fa9a3fb3c4d035477a0ddbb54f93d9b1705624701be5c959a1d113df0cee6e",
       "source_identity_verified": true,
@@ -924,6 +1076,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 2789000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "ea34c931430a3a0f9f06c79fe77517f9694b381bbbc26e5ee4d007c4e706afae": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ea34c931430a3a0f9f06c79fe77517f9694b381bbbc26e5ee4d007c4e706afae",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f178d6e9d2c339d23300c7a0ec70a6ddc510b2a1badbc9e05a9fda255c08814c/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3005000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -976,6 +1141,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 2408000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "f749d36c14ad0ac17e46487977161948fb751d04ae230e3a7c392aae4f05e9a9": {
+      "source_directory": "heristic/gpt-6-razor/experiments/f749d36c14ad0ac17e46487977161948fb751d04ae230e3a7c392aae4f05e9a9",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/efef3561f6f8d727d82b5ff2552e5a3a06a09c04df144756273b166c5b8e67eb/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 4743000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -4058,6 +4236,622 @@
       },
       "violations": 0,
       "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-exposed-home-recovery",
+      "version": "13688ebf325fa0c6d3141e40f899545c0104842f393db807becd064b5dd4fd5e",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3b26bf0880e436aa227dd23fa7179c0f0595c91aa3f6780d5488ffe9d8b043b7/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3375,
+          "pair_score": 0.6625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 86814,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 5365000,
+        "timeouts": 0,
+        "total_ns": 61021312000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-home-recovery-only",
+      "version": "18cda1f0a46e8fbbe96a7dd47b291de0fa01be05cb193bc6fba7036e22bfb08e",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5762b8ac208138f523b9750d9662c459770de7bfc1e4593dcf530019f2f7dc68/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.725,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.275,
+          "pair_score": 0.725,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83346,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1850000,
+        "timeouts": 0,
+        "total_ns": 58990207000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-home-return-paths",
+      "version": "15f592e273c80ef2b263fe14dc2cd7d0824e15f1c6ead51849c85d2089bf35c8",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2ebd644fc08037db9618d66759f87aee0616d22de062bf7c4539c71e27471f7/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.725,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.275,
+          "pair_score": 0.725,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80875,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1915000,
+        "timeouts": 0,
+        "total_ns": 58440054000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-home-return-independent",
+      "version": "15f592e273c80ef2b263fe14dc2cd7d0824e15f1c6ead51849c85d2089bf35c8",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cef46429548de8ba45622f13ea44e2f11d79e318eddfdcb49d55ebdaa7788de/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6675,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.3325,
+          "pair_score": 0.6675,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 214962,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2914000,
+        "timeouts": 0,
+        "total_ns": 163316706000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-forward-staging",
+      "version": "ab96b8cbf45601850b0fb25b327ff033fac10ff4445f4585bb7ec39a62305435",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8267703b723e4aa4d5a16e578b8ac469094722e3a98adfbb83f1c9f9eb2d31db/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.69375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.30625,
+          "pair_score": 0.69375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79523,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3975000,
+        "timeouts": 0,
+        "total_ns": 57704924000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-hidden-army-budget",
+      "version": "f749d36c14ad0ac17e46487977161948fb751d04ae230e3a7c392aae4f05e9a9",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/efef3561f6f8d727d82b5ff2552e5a3a06a09c04df144756273b166c5b8e67eb/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.725,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.275,
+          "pair_score": 0.725,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 82745,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 4743000,
+        "timeouts": 0,
+        "total_ns": 59904830000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-fresh-army-budget",
+      "version": "e24e6c7b74e52342f7e16707866bc30df11ec9e9eaade81170f84b85ca3c2495",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3933c2fcb64b32fa96be12bfe1b4a3821480fc7af04190ec3289c4b103de3ae0/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79016,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1865000,
+        "timeouts": 0,
+        "total_ns": 56835112000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-budget-staging",
+      "version": "911d8691a011bab39525c0b7fff8de9b6a800329c3216f25a71183790f956def",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/df5b8b55164ae0302d3431ae6c3b8d2669624d0d1789b2c6f1d892ce4ba19e09/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.69375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.30625,
+          "pair_score": 0.69375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79023,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 5558000,
+        "timeouts": 0,
+        "total_ns": 56810109000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-fresh-budget-independent",
+      "version": "e24e6c7b74e52342f7e16707866bc30df11ec9e9eaade81170f84b85ca3c2495",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f7e29bf99385e336758f5151d5ba390a81ea8d8c2535da4b32122c99730d3766/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.635,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.365,
+          "pair_score": 0.635,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 212964,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2789000,
+        "timeouts": 0,
+        "total_ns": 156656165000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-home-lead-time",
+      "version": "a3f6c136e5528fd0f01f23b75037b6fde6b019a53cfca86254b533d4b2090b88",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d357a2e772e65f16f570f0b819c6722c8098fa47ced9c1bc88c13a97be824db7/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3875,
+          "pair_score": 0.6125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 86999,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1874000,
+        "timeouts": 0,
+        "total_ns": 66139376000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-capital-security-wide-defense",
+      "version": "ea34c931430a3a0f9f06c79fe77517f9694b381bbbc26e5ee4d007c4e706afae",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f178d6e9d2c339d23300c7a0ec70a6ddc510b2a1badbc9e05a9fda255c08814c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.73125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.26875,
+          "pair_score": 0.73125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80923,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3005000,
+        "timeouts": 0,
+        "total_ns": 58235456000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-capital-deadlines",
+      "version": "766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e23b7210745d30f13e7bea063f5f2aed893f8cc952724a39559e253a0dbf760c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.73125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.26875,
+          "pair_score": 0.73125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 78140,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 4582000,
+        "timeouts": 0,
+        "total_ns": 55609408000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-capital-deadlines-paired",
+      "version": "766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/00af2a46cdbca105e937c2c75499a8540a234e5047b940ae5b1b6de281af3bd0/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.7225,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.2775,
+          "pair_score": 0.7225,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 205586,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2349000,
+        "timeouts": 0,
+        "total_ns": 150606396000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80578,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 8122000,
+        "timeouts": 0,
+        "total_ns": 57591927000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception-large8",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2e5859b6579eef0790214076e0147bff05c23221418e6d49f25b6d3175487aab/report.json",
+      "ok": true,
+      "completed_games": 16,
+      "metrics": {
+        "8": {
+          "game_win_rate": 0.1875,
+          "games": 16,
+          "invalid_actions": 0,
+          "mean_rank": 4.25,
+          "pair_score": 0.5357142857142857,
+          "scored_games": 16,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 11690,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2317000,
+        "timeouts": 0,
+        "total_ns": 16329809000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception-paired",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.7025,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.2975,
+          "pair_score": 0.7025,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 209969,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 8125000,
+        "timeouts": 0,
+        "total_ns": 153751173000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception-ffa4-validation",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/fe9e3a1e5a216a1b4e4e7bc3ffcd22f499a22fef44798a7db3cbb335fc067738/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.375,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.2875,
+          "pair_score": 0.5708333333333333,
+          "scored_games": 80,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 44140,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2126000,
+        "timeouts": 0,
+        "total_ns": 41082600000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception-aggressive",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee726da95937586b9e694038ece836de1a8354c63e6ef1095b43ffc1bd00e99f/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.99,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.01,
+          "pair_score": 0.99,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 39879,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3888000,
+        "timeouts": 0,
+        "total_ns": 28983475000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-interception-kestrel",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a422b297708940894f983ec81b5f865f5276734a3e5b4166c7c3929fe7dac0ae/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.87,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.13,
+          "pair_score": 0.87,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 45336,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3631000,
+        "timeouts": 0,
+        "total_ns": 33286617000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-assembly",
+      "version": "1649edf64e51de8f37b5c2357395a224526125c64fa60ef68dbbf8d8e74db0f0",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/87fc9b64e79155d341ac63ab5e716a1343ca26d81a80e03ecd84c37ffb44b335/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3375,
+          "pair_score": 0.6625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81608,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2836000,
+        "timeouts": 0,
+        "total_ns": 59366938000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-sortie-warning",
+      "version": "a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7170d45ebd3808a6786eecc40253a132359caf67a996edec41e80d2eb6d36f59/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.70625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.29375,
+          "pair_score": 0.70625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81190,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1858000,
+        "timeouts": 0,
+        "total_ns": 58658221000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-sortie-warning-paired",
+      "version": "a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d7d02178302eb458816d7006d3df7653be2b19608ca245d3f06dcf00ae828e85/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.695,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.305,
+          "pair_score": 0.695,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 210443,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 5397000,
+        "timeouts": 0,
+        "total_ns": 154932092000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -4073,7 +4867,7 @@
   ],
   "limitations": [
     "Free Arena runs only; no formal rating or main-site evaluation for v8.",
-    "Results do not establish the 80% duel target or human-level strength; no v8 human games have been played.",
+    "The 80% duel target and human-level strength remain unverified; no v8 human games or formal Arena evaluation have been started.",
     "Exact source snapshots preserve tested bytes, including harmless blank lines at EOF."
   ],
   "previous_checkpoint": {
@@ -4112,17 +4906,17 @@
     "human_level_verified": false,
     "target_met": false,
     "latest_holdout": {
-      "version": "3863631bdf04c578c4d49f3afa24bb808f0cf32828e36361405fd3fead2c56cf",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
       "games": 400,
-      "wins": 252,
-      "win_rate": 0.63,
-      "seed": 261017202,
+      "wins": 281,
+      "win_rate": 0.7025,
+      "seed": 261017212,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 1895000,
+      "max_ns": 8125000,
       "hard_limit_qualified": true,
-      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/43d1dfeb0adaa20543c78134cb476311c2b86fdb624110f3d42240fc34224523/report.json",
-      "note": "Frozen half-sortie candidate on a new independent seed; no human-level claim."
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+      "note": "Outside the repeated development seed. Recorded-player probes are not human matches."
     },
     "disqualified_holdout": {
       "version": "42443fddbe4280729c7a287dedd3d64df90add94114d8010af885d62a46e251c",
@@ -4137,7 +4931,50 @@
       "fixture": "heristic/gpt-6-razor/tests/human_failure_cases.json.gz",
       "cases": 11,
       "scope": "Eight main-site v7 losses and three earlier QueueT losses, using only the recorded player observations. Isolated v8 probes are not matches or human-strength evidence.",
-      "probe_results": "outputs/analysis/razor-human-review-20261016/isolated-probes.json"
+      "probe_results": "outputs/analysis/razor-human-review-20261016/isolated-probes.json",
+      "full_history_probes": [
+        "outputs/analysis/razor-human-review-20261016/fresh-budget-human.json",
+        "outputs/analysis/razor-human-review-20261016/capital-deadlines-human.json"
+      ],
+      "probe_scope": "Only recorded own legal observations enter the controllers. New decisions are not executed; subsequent frames remain historical. No alternate win result is asserted. Debug values are copied before observation expiry, and the underlying source identity was verified.",
+      "additional_regression_cases": [
+        "home rebuilding after a raid",
+        "longer mobilization deadline before a visible main-site column arrives",
+        "front-column preservation before the previously unseen counterattack",
+        "visible one-order interception of alternative routes"
+      ],
+      "findings": [
+        {
+          "case": "larger_total_without_deliverable_defense",
+          "observed": "At 1312 the enemy city held 490 after merging a 377-troop column; home was sixteen steps away. At the loss our total was still 1003 versus 746, but home had only 189 versus the adjacent 345.",
+          "implication": "Count force deliverable along actual routes before the arrival deadline; total army is not available defense.",
+          "addressed": "Longer mobilization deadlines, without a permanent long-range static garrison."
+        },
+        {
+          "case": "field_army_lost_in_reversal",
+          "observed": "At 810 enemy 33 was beside city 228 with 147; at 811 that city had 179, and at 812 the 179-troop column sortied. Our historical 85-troop landing could be intercepted in one order.",
+          "implication": "A productive city is a reinforcement and sortie point. Evaluate active visible replies, including a source hit and destination reinforcement.",
+          "addressed": "Common visible one-order interception check. Exact Arena seat order applies locally; recorded online outcomes are not assumed to have the same ordering."
+        },
+        {
+          "case": "front_city_purchase_before_counterattack",
+          "observed": "At 372 a 75-troop column bought a 47-troop neutral city. The 87-troop attacker first became visible at 373. Both local cities were subsequently lost.",
+          "implication": "A purchase must leave an affordable occupation and supporting column; the unseen later attacker cannot be inserted into the earlier observation.",
+          "addressed": "Post-program city security using one conserved troop ledger and a public-army prior, not hidden positions."
+        },
+        {
+          "case": "unsupported_city_occupation",
+          "observed": "City 151 was captured at 271, lost at 283, captured at 292 and lost at 302. Enemy city 183 remained its production and assembly base.",
+          "implication": "A capture is not a durable occupation. Reinforcement, a field defender and future sorties need a continuing shared action schedule.",
+          "addressed": "Partially addressed. Persistent occupation and a complete campaign controller remain unresolved."
+        },
+        {
+          "case": "queuet_two_wave_reconnaissance",
+          "observed": "The first raid exposed the home neighbourhood at 150. We withdrew repeatedly afterward. A second 62-troop column appeared at 178 against a 13-troop home.",
+          "implication": "The opponent retains knowledge of the exposed general after its scout leaves. A fresh raid is not a fresh information state.",
+          "addressed": "Post-raid rebuilding is improved; permanent exposure-aware strategy remains unresolved. Scouting intent is inferred from the observed sequence."
+        }
+      ]
     },
     "paired_reconnaissance_comparison": {
       "games": 400,
@@ -4164,19 +5001,92 @@
         "outputs/analysis/razor-v8-goal-20261016/complete-recon-discovery.json",
         "outputs/analysis/razor-v8-goal-20261016/adaptive-formation-discovery.json"
       ]
+    },
+    "paired_capital_comparison": {
+      "games": 400,
+      "seed": 261017212,
+      "matched_initial_states": true,
+      "control_version": "e24e6c7b74e52342f7e16707866bc30df11ec9e9eaade81170f84b85ca3c2495",
+      "new_version": "766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27",
+      "control_wins": 254,
+      "new_wins": 289,
+      "changed_to_win": 79,
+      "changed_to_loss": 44,
+      "two_sided_exact_mcnemar_p": 0.0020450395818434725,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f7e29bf99385e336758f5151d5ba390a81ea8d8c2535da4b32122c99730d3766/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/00af2a46cdbca105e937c2c75499a8540a234e5047b940ae5b1b6de281af3bd0/report.json",
+      "note": "The per-game McNemar number is unadjusted for map rotation clustering; the direct observed change is 254 to 289 wins on the same 400 scheduled games. The 80% target is not met."
+    },
+    "paired_interception_comparison": {
+      "games": 400,
+      "seed": 261017212,
+      "matched_initial_states": true,
+      "control_version": "766b7a17b64587848432779469d3791ba3842da2019453a177d147bd2b5b5e27",
+      "new_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "control_wins": 289,
+      "new_wins": 281,
+      "changed_to_win": 56,
+      "changed_to_loss": 64,
+      "two_sided_exact_mcnemar_p": 0.5229909838899945,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/00af2a46cdbca105e937c2c75499a8540a234e5047b940ae5b1b6de281af3bd0/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+      "note": "The per-game McNemar number is unadjusted for map rotation clustering. The direct observed change is 289 to 281 wins on the same 400 scheduled games; fixing recorded tactical interceptions did not establish a duel-strength improvement."
+    },
+    "city_assembly_trial": {
+      "games": 160,
+      "seed": 261017101,
+      "matched_initial_states": true,
+      "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "new_version": "1649edf64e51de8f37b5c2357395a224526125c64fa60ef68dbbf8d8e74db0f0",
+      "control_wins": 115,
+      "new_wins": 106,
+      "changed_to_win": 5,
+      "changed_to_loss": 14,
+      "two_sided_exact_mcnemar_p": 0.063568115234375,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/87fc9b64e79155d341ac63ab5e716a1343ca26d81a80e03ecd84c37ffb44b335/report.json",
+      "note": "Rejected as a combined change after a 115-to-106 win regression on the repeated development seed. Adding cities indiscriminately as assembly candidates is not evidence of learning effective human staging."
+    },
+    "city_sortie_development_trial": {
+      "games": 160,
+      "seed": 261017101,
+      "matched_initial_states": true,
+      "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "new_version": "a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85",
+      "control_wins": 115,
+      "new_wins": 113,
+      "changed_to_win": 0,
+      "changed_to_loss": 2,
+      "two_sided_exact_mcnemar_p": 0.5,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7170d45ebd3808a6786eecc40253a132359caf67a996edec41e80d2eb6d36f59/report.json"
+    },
+    "city_sortie_paired_trial": {
+      "games": 400,
+      "seed": 261017212,
+      "matched_initial_states": true,
+      "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "new_version": "a2770882c3a83554e4746f7150824c96afccd0e309213473946dde56808dca85",
+      "control_wins": 281,
+      "new_wins": 278,
+      "changed_to_win": 3,
+      "changed_to_loss": 6,
+      "two_sided_exact_mcnemar_p": 0.5078125,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d7d02178302eb458816d7006d3df7653be2b19608ca245d3f06dcf00ae828e85/report.json",
+      "note": "Not retained: 281 to 278 wins on the same 400 scheduled games, three changed to wins and six to losses; this does not establish a benefit. Both rejected variants remain archived."
     }
   },
   "working_candidate": {
-    "version": "3863631bdf04c578c4d49f3afa24bb808f0cf32828e36361405fd3fead2c56cf",
+    "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
     "source_directory": "heristic/gpt-6-razor/v8",
     "status": "experimental_not_promoted",
     "formal_publication": null,
     "hard_limit_qualified": true,
     "validation": {
-      "tests": 9,
+      "tests": 14,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-goal-20261016/tests-half-recon.log",
-      "note": "Includes complete reconnaissance feasibility, shared donor accounting, newly observed counterattack rejection, half-sortie selection, suspended operations, and retained tactical regressions."
+      "log": "outputs/analysis/razor-v8-goal-20261016/tests-visible-interception.log"
     }
   },
   "failed_regression_experiments": [
