@@ -2402,27 +2402,28 @@
       "source_directory": "heristic/gpt-6-razor/experiments/5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
       "source_identity_verified": true,
       "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3e06b13fb2a874e04023a2c182d87db3aec556cefb145187f60def4545448608/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d648e1097a317f9b2b2c249c9109bece9f2f09dd9dfd098f522df877e462d98f/report.json"
       ],
       "native_summary": {
-        "completed_games": 656,
-        "timeouts": 0,
+        "completed_games": 1056,
+        "timeouts": 1,
         "errors": 0,
-        "max_ns": 5777000,
+        "max_ns": 11049000,
         "invalid_actions": 0
       },
-      "completed_games": 656,
-      "timeouts": 0,
+      "completed_games": 1056,
+      "timeouts": 1,
       "errors": 0,
-      "max_ns": 5777000,
+      "max_ns": 11049000,
       "invalid_actions": 0,
       "online_reports": [],
       "online_completed_games": 0,
       "online_attempted_games": 0,
-      "hard_limit_qualified": true
+      "hard_limit_qualified": false
     },
     "f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86": {
       "source_directory": "heristic/gpt-6-razor/experiments/f040ab3164974ab24873a231d64ecc13db62bc9ec8f5575106215359b4782f86",
@@ -2556,6 +2557,99 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 4335000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5": {
+      "source_directory": "heristic/gpt-6-razor/experiments/11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1ec048380f7f72bc5332ac6de1c3667abe275043c6f2497cd1a5ea515193bdc8/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 560,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2031000,
+        "invalid_actions": 0
+      },
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2031000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96": {
+      "source_directory": "heristic/gpt-6-razor/experiments/b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/645d5f410569b0cd4ec91fad453634e8d3cb83fccd776db6935383e2f7b2e94c/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1859000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1859000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "b81c7366fd4394d8accbeb80488bba6f14bd72a6113d6e9ee481954868231632": {
+      "source_directory": "heristic/gpt-6-razor/experiments/b81c7366fd4394d8accbeb80488bba6f14bd72a6113d6e9ee481954868231632",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ab419b584e8161e5abf17e76336045aa41e58a1f2b8be56195135628a9b5e107/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1869000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1869000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "013be09d25c7d87c15bff2d722b97a61eb17cd691063fb87db1db4ee0a23a6f0": {
+      "source_directory": "heristic/gpt-6-razor/experiments/013be09d25c7d87c15bff2d722b97a61eb17cd691063fb87db1db4ee0a23a6f0",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee24ce93c02f2d652edd5a44c9e09c446a572532c5cf1cc3ba83fae4d68edd63/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1870000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1870000,
       "invalid_actions": 0,
       "online_reports": [],
       "online_completed_games": 0,
@@ -7173,7 +7267,7 @@
       },
       "violations": 0,
       "hard_limit_qualified": true,
-      "source_hard_limit_qualified": true
+      "source_hard_limit_qualified": false
     },
     {
       "label": "goal-persistent-home-exposure-fresh",
@@ -7202,7 +7296,7 @@
       },
       "violations": 0,
       "hard_limit_qualified": true,
-      "source_hard_limit_qualified": true
+      "source_hard_limit_qualified": false
     },
     {
       "label": "goal-repeated-transfer-fresh-control",
@@ -7260,7 +7354,7 @@
       },
       "violations": 0,
       "hard_limit_qualified": true,
-      "source_hard_limit_qualified": true
+      "source_hard_limit_qualified": false
     },
     {
       "label": "goal-persistent-home-exposure-eight",
@@ -7289,7 +7383,7 @@
       },
       "violations": 0,
       "hard_limit_qualified": true,
-      "source_hard_limit_qualified": true
+      "source_hard_limit_qualified": false
     },
     {
       "label": "goal-feasible-return-cover",
@@ -7464,6 +7558,180 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-land-tenure",
+      "version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81468,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2031000,
+        "timeouts": 0,
+        "total_ns": 60795620000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-land-tenure-fresh",
+      "version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1ec048380f7f72bc5332ac6de1c3667abe275043c6f2497cd1a5ea515193bdc8/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6625,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.3375,
+          "pair_score": 0.6625,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 208555,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1966000,
+        "timeouts": 0,
+        "total_ns": 160440371000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-land-tenure-fresh-parent-control",
+      "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3e06b13fb2a874e04023a2c182d87db3aec556cefb145187f60def4545448608/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.695,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.305,
+          "pair_score": 0.695,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 208239,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 11049000,
+        "timeouts": 1,
+        "total_ns": 160302271000
+      },
+      "violations": 0,
+      "hard_limit_qualified": false,
+      "source_hard_limit_qualified": false
+    },
+    {
+      "label": "goal-frontline-refill",
+      "version": "b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/645d5f410569b0cd4ec91fad453634e8d3cb83fccd776db6935383e2f7b2e94c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.375,
+          "pair_score": 0.625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 82594,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1859000,
+        "timeouts": 0,
+        "total_ns": 62509717000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-harvest-deadline",
+      "version": "b81c7366fd4394d8accbeb80488bba6f14bd72a6113d6e9ee481954868231632",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ab419b584e8161e5abf17e76336045aa41e58a1f2b8be56195135628a9b5e107/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.69375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.30625,
+          "pair_score": 0.69375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 84040,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1869000,
+        "timeouts": 0,
+        "total_ns": 65495518000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-unified-column-capital",
+      "version": "013be09d25c7d87c15bff2d722b97a61eb17cd691063fb87db1db4ee0a23a6f0",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee24ce93c02f2d652edd5a44c9e09c446a572532c5cf1cc3ba83fae4d68edd63/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.65,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.35,
+          "pair_score": 0.65,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83670,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1870000,
+        "timeouts": 0,
+        "total_ns": 63504080000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -7518,19 +7786,19 @@
     "human_level_verified": false,
     "target_met": false,
     "latest_holdout": {
-      "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+      "version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
       "games": 400,
-      "wins": 253,
-      "win_rate": 0.6325,
-      "seed": 261017701,
+      "wins": 265,
+      "win_rate": 0.6625,
+      "seed": 261017801,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 2154000,
+      "max_ns": 1966000,
       "hard_limit_qualified": true,
-      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
-      "note": "Fresh 400-game v7 schedule: 253 wins. Independent repeated-transfer candidate scores 251 on the same schedule. The candidates change different mechanisms, so this is not an isolated estimate of exposure memory. Neither reaches 80%; no human-level result is established.",
       "source_hard_limit_qualified": true,
-      "same_schedule_comparison": "outputs/analysis/razor-v8-online-20261017/exposure-vs-transfer-fresh-paired.json"
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1ec048380f7f72bc5332ac6de1c3667abe275043c6f2497cd1a5ea515193bdc8/report.json",
+      "same_schedule_comparison": "outputs/analysis/razor-v8-land-tenure-20261017/land-tenure-fresh-paired.json",
+      "note": "Fresh land-tenure schedule: 265/400, below the 80% target. Matched parent scored 278/400 but incurred one 11.049 ms timeout; that source is disqualified. Neither frozen human observations nor these native games verify human-level strength."
     },
     "disqualified_holdout": {
       "version": "42443fddbe4280729c7a287dedd3d64df90add94114d8010af885d62a46e251c",
@@ -9808,6 +10076,160 @@
           "Measure which rejected general approaches could force a valuable defender response or concede a productive city. A complete direct capture is not the only useful outcome; replacing its false elimination prize with zero may suppress valid pressure. This is an untested explanation for the regression, not an established cause.",
           "QueueT spent a first wave to obtain our general location and then delivered another concentrated wave. The failed forced-dispatch experiments retained an arbitrary fraction of the starting force, which is not equivalent to planning a useful reconnaissance mission. Compare the posterior target information reached and the next deployable force, not raw newly seen cells or a fixed survival threshold."
         ]
+      },
+      "land_tenure_and_supply_followup": {
+        "scope": "Only recorded legal own observations. QueueT is the user-confirmed human. Other identities are not inferred. No alternate game or win is claimed from probes.",
+        "evidence": "outputs/analysis/razor-v8-land-tenure-20261017/human-income-cycles.json",
+        "findings": [
+          "QueueT game 5: own 53 troop column at 156 fell to 14 by 169 during thirteen advances that revealed 35 cells. Enemy general remained unseen; this is costly, strategically incomplete exploration, not zero exploration.",
+          "The visible enemy column at 194 with 60 troops at 169 bypassed the own 14 troop remnant, first through 214 then 213, and mostly traversed the recently captured one-troop trail. Own home troops were simultaneously withdrawn to a second undersized forward column.",
+          "QueueT game 4: enemy land leads were 20, 24, 21 at ticks 150, 200, 250. Army deficits stepped from 14 to 34 to 58 to 79 and stayed constant between these pulses. Late recapture did not recover production already missed.",
+          "QueueT game 3: own territory led 65 to 55 at 124 but trailed 57 to 74 at 150. Home first exposed at 150; repeated withdrawals at 152, 157 and 170 preceded the decisive 62 troop wave at 178.",
+          "In game 5 enemy public army fell from 120 to 76 across 120-122 without a corresponding own loss, followed by faster relative growth. This is consistent with a hidden neutral-city investment, but no enemy-owned city was ever visible; its location and action are unconfirmed."
+        ],
+        "land_trial": {
+          "version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+          "development_summary": "outputs/analysis/razor-v8-land-tenure-20261017/land-tenure-summary.json",
+          "fresh_summary": "outputs/analysis/razor-v8-land-tenure-20261017/land-tenure-fresh-summary.json",
+          "paired": "outputs/analysis/razor-v8-land-tenure-20261017/land-tenure-fresh-paired.json",
+          "promoted": false
+        },
+        "new_failure": {
+          "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3e06b13fb2a874e04023a2c182d87db3aec556cefb145187f60def4545448608/report.json",
+          "tick": 340,
+          "elapsed_ns": 11049000,
+          "requalified": false,
+          "sequence": 343,
+          "game_id": "541f35a9ee488a1c1f6b2484c1acf45e64efff89338f2534de1f26d0379744b1",
+          "cause": "Unresolved; no external-load or timer excuse is asserted."
+        },
+        "frontline_refill_trial": {
+          "version": "b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96",
+          "status": "evaluated_not_promoted",
+          "validation": "Thirteen inherited tests passed; the new fixture initially omitted visible enemy contact, so mainColumn was never assigned. Corrected fixture passes the remaining C++ test; policy source was unchanged.",
+          "logs": [
+            "outputs/analysis/razor-v8-land-tenure-20261017/tests-refill.log",
+            "outputs/analysis/razor-v8-land-tenure-20261017/tests-refill-operations-corrected.log"
+          ],
+          "summary": {
+            "label": "goal-frontline-refill",
+            "version": "b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/645d5f410569b0cd4ec91fad453634e8d3cb83fccd776db6935383e2f7b2e94c/report.json",
+            "ok": true,
+            "completed_games": 160,
+            "metrics": {
+              "2": {
+                "game_win_rate": 0.625,
+                "games": 160,
+                "invalid_actions": 0,
+                "mean_rank": 1.375,
+                "pair_score": 0.625,
+                "scored_games": 160,
+                "tick_limit_games": 0
+              }
+            },
+            "timing": {
+              "calls": 82594,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 1859000,
+              "timeouts": 0,
+              "total_ns": 62509717000
+            },
+            "violations": 0,
+            "hard_limit_qualified": true
+          },
+          "passed_regression_tests": 14,
+          "paired": "outputs/analysis/razor-v8-land-tenure-20261017/refill-paired.json",
+          "probe": "outputs/analysis/razor-v8-land-tenure-20261017/refill-queuet.json",
+          "probe_comparator": "outputs/analysis/razor-v8-land-tenure-20261017/land-queuet.json",
+          "finding": "Frozen QueueT game 5 at ticks 156 and 158 diverts the main column into an eleven/thirteen-order neutral-city investment. This stops the recorded raid but is not proof of improvement. Actual 160-game matched results are 100 wins versus parent 119."
+        },
+        "design_hypotheses": [
+          "Price net front-column depletion by executable replacement routes, without charging ordinary owned transport as a casualty.",
+          "Price short-lived occupation against the next territory-production deadline, rather than treating post-pulse recapture as recovery of the missed income."
+        ],
+        "limitations": "Neither a plausible explanation of a human loss nor a passing frozen-history test demonstrates a counterfactual win. The new descendant does not establish the cause of its parent timeout.",
+        "contact_comparison": "outputs/analysis/razor-v8-land-tenure-20261017/contact-comparison.json",
+        "additional_findings": [
+          "In QueueT games 3 and 4, the first visible enemy column of at least twenty troops arrived at ticks 133 and 134. At tick 150 the largest own ordinary-tile stacks were only four and six troops. This differs from the 192 first-contact-column tick in the first HermesTestA game, but maps/opponents are confounded.",
+          "The retained implementation hard-rejects an undersized scout split while an ordinary full-column raid can consume the same army over its remaining route. The unified-column trial replaces that label-specific gate with shared terminal-column valuation; it is an experiment, not a proven tactical fix."
+        ],
+        "harvest_deadline_trial": {
+          "status": "evaluated_not_promoted",
+          "summary": {
+            "label": "goal-harvest-deadline",
+            "version": "b81c7366fd4394d8accbeb80488bba6f14bd72a6113d6e9ee481954868231632",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ab419b584e8161e5abf17e76336045aa41e58a1f2b8be56195135628a9b5e107/report.json",
+            "ok": true,
+            "completed_games": 160,
+            "metrics": {
+              "2": {
+                "game_win_rate": 0.69375,
+                "games": 160,
+                "invalid_actions": 0,
+                "mean_rank": 1.30625,
+                "pair_score": 0.69375,
+                "scored_games": 160,
+                "tick_limit_games": 0
+              }
+            },
+            "timing": {
+              "calls": 84040,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 1869000,
+              "timeouts": 0,
+              "total_ns": 65495518000
+            },
+            "violations": 0,
+            "hard_limit_qualified": true
+          },
+          "passed_regression_tests": 14,
+          "paired": "outputs/analysis/razor-v8-land-tenure-20261017/harvest-paired.json",
+          "test_log": "outputs/analysis/razor-v8-land-tenure-20261017/tests-harvest.log"
+        },
+        "unified_column_trial": {
+          "status": "evaluated_not_promoted",
+          "summary": {
+            "label": "goal-unified-column-capital",
+            "version": "013be09d25c7d87c15bff2d722b97a61eb17cd691063fb87db1db4ee0a23a6f0",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee24ce93c02f2d652edd5a44c9e09c446a572532c5cf1cc3ba83fae4d68edd63/report.json",
+            "ok": true,
+            "completed_games": 160,
+            "metrics": {
+              "2": {
+                "game_win_rate": 0.65,
+                "games": 160,
+                "invalid_actions": 0,
+                "mean_rank": 1.35,
+                "pair_score": 0.65,
+                "scored_games": 160,
+                "tick_limit_games": 0
+              }
+            },
+            "timing": {
+              "calls": 83670,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 1870000,
+              "timeouts": 0,
+              "total_ns": 63504080000
+            },
+            "violations": 0,
+            "hard_limit_qualified": true
+          },
+          "passed_regression_tests": 14,
+          "paired": "outputs/analysis/razor-v8-land-tenure-20261017/column-paired.json",
+          "test_log": "outputs/analysis/razor-v8-land-tenure-20261017/tests-column.log",
+          "probe": "outputs/analysis/razor-v8-land-tenure-20261017/column-queuet.json",
+          "finding": "The frozen QueueT game 5 still selects full ordinary-land attacks at ticks 156, 158, 160 and 165. Its shared terminal cost passes the synthetic invariant tests but does not remedy this recorded behavior. The native matched sample falls from 115 to 104 wins.",
+          "inferred_limitation": "The retained generator chooses one- or two-order land programs, and mainColumnNeed is capped at three quarters of the currently surviving force. Replanning can therefore lower the preservation standard after each loss. The trace and code support this mechanism; no alternate winning play is established."
+        },
+        "selection": "No tested change is promoted to a formal release. Working source is the land-tenure experiment, retained as an explicit experimental checkpoint after the former parent incurred a timing disqualification. Retention is not a claim of superiority.",
+        "archive_tests": "outputs/analysis/razor-v8-land-tenure-20261017/tests-archived-economic-trials.log",
+        "next_design_question": "Represent a sortie as a persistent military and information investment anchored at real assembly, accounting for cumulative depletion, the next land-income deadline, protected production and a feasible regrouping route. Assess when to finish or abandon that investment without resetting its loss budget every one-step capture. Earlier forced-role drafts regressed and must not be reintroduced merely by changing thresholds."
       }
     },
     "paired_reconnaissance_comparison": {
@@ -9909,20 +10331,37 @@
       "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
       "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d7d02178302eb458816d7006d3df7653be2b19608ca245d3f06dcf00ae828e85/report.json",
       "note": "Not retained: 281 to 278 wins on the same 400 scheduled games, three changed to wins and six to losses; this does not establish a benefit. Both rejected variants remain archived."
-    }
+    },
+    "holdout_history": [
+      {
+        "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+        "games": 400,
+        "wins": 253,
+        "win_rate": 0.6325,
+        "seed": 261017701,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2154000,
+        "hard_limit_qualified": true,
+        "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
+        "note": "Fresh 400-game v7 schedule: 253 wins. Independent repeated-transfer candidate scores 251 on the same schedule. The candidates change different mechanisms, so this is not an isolated estimate of exposure memory. Neither reaches 80%; no human-level result is established.",
+        "source_hard_limit_qualified": false,
+        "same_schedule_comparison": "outputs/analysis/razor-v8-online-20261017/exposure-vs-transfer-fresh-paired.json"
+      }
+    ]
   },
   "working_candidate": {
-    "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+    "version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
     "source_directory": "heristic/gpt-6-razor/v8",
-    "status": "retained_parent_after_rejected_objective_trials",
+    "status": "experimental_not_promoted",
     "formal_publication": null,
     "hard_limit_qualified": true,
     "validation": {
       "tests": 14,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-online-20261017/tests-exposed-home-full.log"
+      "log": "outputs/analysis/razor-v8-land-tenure-20261017/tests-land-tenure.log"
     },
-    "note": "Exact retained parent restored. New source snapshots and all trial outcomes are preserved. No formal v8 publication; latest400-game validation remains253/400 and the human-level/80% objective is unmet."
+    "note": "No tested change is promoted to a formal release. Working source is the land-tenure experiment, retained as an explicit experimental checkpoint after the former parent incurred a timing disqualification. Retention is not a claim of superiority."
   },
   "failed_regression_experiments": [
     {
@@ -9986,6 +10425,7 @@
       "reason": "Independent persistent exposed-general knowledge trial prompted by QueueT two-wave observations. Nearby deployable troops along an owned route credit defense; remote armies do not. Not compiled or tested yet.",
       "subsequently_evaluated": true,
       "subsequent_reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3e06b13fb2a874e04023a2c182d87db3aec556cefb145187f60def4545448608/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/73d7f0756b172f32313471f5b954c8930ba86f6991e93abf1de45c854cf3a0d6/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/961319ed938984e721cd36f643e8de300fcb2fe799ea657db433182cc6b37689/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bd39bebdc2edda92a91bb3a1b885130f60e5a6689dfae8c9639dfecc8249977a/report.json",
@@ -10099,6 +10539,14 @@
       "timeouts": 1,
       "errors": 0,
       "max_ns": 10387000
+    },
+    {
+      "version": "5e3dcf80e65c9b420533b028109b28156b8aa872ba5edb09bc61499bfa7e308d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3e06b13fb2a874e04023a2c182d87db3aec556cefb145187f60def4545448608/report.json",
+      "scope": "native_arena",
+      "timeouts": 1,
+      "errors": 0,
+      "max_ns": 11049000
     }
   ]
 }

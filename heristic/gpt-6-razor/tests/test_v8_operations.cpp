@@ -13,6 +13,26 @@ struct Board {
 
 int main(){
  {
+  Board b;b.owner[60]=0;b.army[60]=10;b.owner[62]=1;b.army[62]=100;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  b.obs.tick+=6;b.owner[60]=1;b.army[60]=2;b.refresh(*p);
+  double shortHold=p->plainUtility(60,10,1);
+  assert(shortHold<3.9*.75);
+  assert(p->plainUtility(60,150,1)>3.8);
+  for(int k=0;k<3;k++){
+   b.obs.tick++;b.owner[60]=0;b.army[60]=10;b.refresh(*p);
+   b.obs.tick+=6;b.owner[60]=1;b.army[60]=2;b.refresh(*p);
+  }
+  assert(p->plainUtility(60,10,1)<shortHold*.6);
+  // A remote disappearance of the enemy does not instantly turn a recent
+  // short-lived capture into a proven permanent source of income.
+  b.owner[62]=-1;b.army[62]=0;b.refresh(*p);
+  assert(p->plainUtility(60,10,1)<shortHold*.6);
+  b.obs.tick+=160;b.refresh(*p);assert(p->plainUtility(60,10,1)>3.8);
+  // New neutral territory keeps its original economic value.
+  assert(p->plainUtility(59,10,1)==1.8);
+ }
+ {
   // A cleared scout does not erase the opponent's knowledge of our general.
   // Remote troop totals are not a deployable home reserve.
   Board b;b.army[0]=40;b.owner[90]=0;b.army[90]=90;

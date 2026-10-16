@@ -3,6 +3,8 @@
 int assetHeldSince[MAXN]{},assetLostAt[MAXN]{},assetFlips[MAXN]{};
 int assetHeldTotal[MAXN]{},assetCaptures[MAXN]{},assetLastOwner[MAXN]{};
 bool assetHistoryReady=false;
+int plainHeldSince[MAXN]{},plainLostAt[MAXN]{};
+float plainHolding[MAXN]{};
 int assetGuard[MAXN]{},assetETA[MAXN]{},zoneThreat[MAXN]{},zoneETA[MAXN]{};
 int assetRelief[MAXN][13]{};
 struct CityReplyOrder {short s=-1,t=-1;bool half=false;};
@@ -127,6 +129,14 @@ void strategicMode(){
 void assetHistory(){
  for(int c=0;c<N;c++){
   int now=mine(c)?p:own[c];
+  if(st[c]==0){
+   if(now==p&&(!assetHistoryReady||assetLastOwner[c]!=p))plainHeldSince[c]=tick;
+   if(assetHistoryReady&&assetLastOwner[c]==p&&now!=p){
+    int held=std::clamp(tick-plainHeldSince[c],1,80);
+    double previous=plainHolding[c]>0?plainHolding[c]:80.;
+    plainHolding[c]=float((previous+held)*.5);plainLostAt[c]=tick;
+   }
+  }
   if(!assetHistoryReady){assetLastOwner[c]=now;if(now==p&&st[c]==1)assetHeldSince[c]=tick;}
   else if(st[c]==1){
    if(now==p&&assetLastOwner[c]!=p){assetHeldSince[c]=tick;assetCaptures[c]++;}
@@ -139,6 +149,21 @@ void assetHistory(){
   assetLastOwner[c]=now;
  }
  assetHistoryReady=true;
+}
+
+// Ordinary land pays income only while it is held. A repeatedly recovered
+// trail is not equivalent to a new durable province. Learn from this seat's
+// observed ownership changes; information, connectivity and combat rewards
+// are assessed separately and remain available on a contested route.
+double plainUtility(int c,int remaining,int arrival)const {
+ double value=own[c]>=0&&own[c]!=p?3.9:1.8;
+ if(plainHolding[c]<=0)return value;
+ double age=std::clamp((tick+arrival-plainLostAt[c])/160.,0.,1.);
+ double holding=plainHolding[c]+(80.-plainHolding[c])*age;
+ // A genuinely stronger arriving column can change the holding outcome.
+ // Absence of a currently visible threat alone does not erase the history.
+ if(zoneThreat[c]>=12&&remaining>=zoneThreat[c]+8)holding=80.;
+ return value*holding/80.;
 }
 
 void observeCityResponses(){

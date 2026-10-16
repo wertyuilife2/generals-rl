@@ -169,7 +169,7 @@ void informationPrograms(){
    double information=0,land=0;int spent=0;
    for(int j=n-1;j>=0;j--){
     int u=path[j];if(!mine(u)){
-     land+=own[u]>=0?3.9:1.8;spent+=rememberedDefense(u)+1;
+     land+=plainUtility(u,opForce[u],n-j);spent+=rememberedDefense(u)+1;
     }
     for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
      int x=cellX[u]+dx,y=cellY[u]+dy;if(x<0||x>=W||y<0||y>=H)continue;

@@ -39,7 +39,7 @@ double expeditionValue(const Program &q){
    // This operation seeks information around the hostile column. It cannot
    // promise to pass through a square that the observed column controls.
    if(zoneETA[x.t]<=2&&zoneThreat[x.t]>remaining+3)return -1e30;
-   land+=owner[b]>=0?3.9:1.8;spent+=troops[b];
+   land+=plainUtility(x.t,remaining,step);spent+=troops[b];
    owner[b]=p;troops[b]=remaining;
   }
   spent+=1;remaining=troops[b];
