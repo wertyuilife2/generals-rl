@@ -418,7 +418,7 @@ void campaignPrograms(double income){
     if(king&&force[v]<d/2+2)continue;
     if(king&&d==1&&moving<=captureDefense(v))continue;
     double reward=king?eliminationValue(own[v]):city?cityUtility(v,force[v],d):
-      1.8+(enemy?2.1:0)+unknown[v]*.22+(enemy&&moving>=20&&force[v]>=8?unknown[v]*.35:0);
+      plainUtility(v,force[v],d)+unknown[v]*.22+(enemy&&moving>=20&&force[v]>=8?unknown[v]*.35:0);
     if(!king&&tick>=100&&force[v]>=4)reward+=informationGain[v]*std::min(1.,force[v]/12.);
     if(!king)reward+=networkBonus[v];
     double score=reward/(d+.8+pathLoss[v]/(income*2.5+2));

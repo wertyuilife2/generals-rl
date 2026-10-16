@@ -829,7 +829,7 @@ struct Policy {
       }else if(city){
        reward=cityUtility(v,next.force,depth);
       }else{
-       reward=1.8+(enemy?2.1:0)+(gd[v]<8?.3:0);
+       reward=plainUtility(v,next.force,depth)+(gd[v]<8?.3:0);
        unsigned freshMask=unknownMask[v];
        for(int j=1;j<depth&&freshMask;j++){
         int c=r.path[j],dx=cellX[c]-cellX[v],dy=cellY[c]-cellY[v];
