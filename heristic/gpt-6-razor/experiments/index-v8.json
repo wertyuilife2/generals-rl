@@ -1,0 +1,1770 @@
+{
+  "series": "gpt-6-razor-v8",
+  "status": "experimental_not_promoted",
+  "final_version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+  "final_source_directory": "heristic/gpt-6-razor/v8",
+  "formal_evaluations_started": 0,
+  "publication": null,
+  "online_games_started": 0,
+  "started_at_utc": "2026-10-16T10:49:37Z",
+  "validation": {
+    "command": ".venv/bin/python -m unittest discover -s heristic/gpt-6-razor/tests -p test_v8.py",
+    "tests": 9,
+    "passed": true,
+    "log": "outputs/analysis/razor-v8-20261016/regressions-final.log"
+  },
+  "final_summary": {
+    "source_directory": "heristic/gpt-6-razor/experiments/68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+    "source_identity_verified": true,
+    "reports": [
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/92d071cf4497c8154a40745aaadb374328ffc054598c198dfa7130b77ae26d04/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d6345cc1fa5360a35aad12411cc042fdba2d890dcef2441807939f7a4ca564c7/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c41cb60b7cb3457d7eb99cc89681d9f7a02f4b363bc0bb00a104be136a9e356a/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/27adc3bf52357639b1b8a12696b1d92788c0306d653966a4d183894813aa20d5/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/95eb20914832c4a83ba2df2fff7c2633709d675bc75c17588f8eec0a70bf192c/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/706294a912659609a582ccbd7e5880cf1b61885b7c55483c51f80ed60ec0209f/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/4813e8c5e419949795f7310b5db4a9571ea7576a761b00bb5d9035b4ec19fb92/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c863452415350cf3e86d97ef0ac12ddcd4ccd4e3ceb27af178cae0fcf1b264e1/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/eeeaa9043e76da6d345c29cc41bbb1e5dc47ce95e65f2e39f0e61214f5259603/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/79ee17151d6e158c7b3bbb2e5fe07ecb631884536d623eedbf3d4cd82eabb33d/report.json",
+      "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0038fe9964a8c93e36ef5962a2a7ae2016cca2c5f51a69b82c361703acb4e163/report.json"
+    ],
+    "completed_games": 1111,
+    "timeouts": 0,
+    "errors": 0,
+    "max_ns": 2138000
+  },
+  "versions": {
+    "3eceabe00acbe6d04982507e901991b587c400344ca0e4e87d30b7b4ad775c04": {
+      "source_directory": "heristic/gpt-6-razor/experiments/3eceabe00acbe6d04982507e901991b587c400344ca0e4e87d30b7b4ad775c04",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bbb4df69ef2aaae792c0b0f24a9147f789e1bb9e9078dfb7d72127cf5a9bed60/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1916000
+    },
+    "3f1faf8e030272f3003108aabe19a69dff67648621a8960836c0ad4c9c1f6723": {
+      "source_directory": "heristic/gpt-6-razor/experiments/3f1faf8e030272f3003108aabe19a69dff67648621a8960836c0ad4c9c1f6723",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d69ef70828e263478dc1796e47fbba86f7119a3a1383e408ff7d3f908b2e750d/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/688b12ba777d5ab5604fef93cb4d99dd1d0dbd3575f27685648031fb304beb58/report.json"
+      ],
+      "completed_games": 80,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 420000
+    },
+    "4c81b75f0320717242f5624df89f6c9c20db5717b5f396c56d8d3dc0b5c4d3a0": {
+      "source_directory": "heristic/gpt-6-razor/experiments/4c81b75f0320717242f5624df89f6c9c20db5717b5f396c56d8d3dc0b5c4d3a0",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/09e6cda2a02454d7297d7d86384c2296270c1e52f13ad65b69e4fbf40bb21492/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3306000
+    },
+    "548f4faeb65df158b8a8ea23edc49d10b659509da8527a7c06bec399c8f5af65": {
+      "source_directory": "heristic/gpt-6-razor/experiments/548f4faeb65df158b8a8ea23edc49d10b659509da8527a7c06bec399c8f5af65",
+      "source_identity_verified": true,
+      "reports": [],
+      "completed_games": 0,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 0,
+      "status": "compilation_failed",
+      "failure_log": "outputs/analysis/razor-v8-20261016/commitment-pruning-fix.log"
+    },
+    "58e93377b26e4cbc0a1091897a610cd891ad81beaf229ee45c709195c38346bf": {
+      "source_directory": "heristic/gpt-6-razor/experiments/58e93377b26e4cbc0a1091897a610cd891ad81beaf229ee45c709195c38346bf",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/39e8be3222110c930ccbf502bd484831b019b9e75e63c835113cb77ddbb897c0/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2448000
+    },
+    "619503c46bbe574f50ec05ec2cc76758f72ccc03ae13b4f6bd3708c4ccdf830f": {
+      "source_directory": "heristic/gpt-6-razor/experiments/619503c46bbe574f50ec05ec2cc76758f72ccc03ae13b4f6bd3708c4ccdf830f",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a1df24a867d73970011b09ac0fd2715679d3495591bad27f45dadcb63c5e8f04/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 636000
+    },
+    "62c82a660dd2eb6999b0b71e7a257a694ee615a073b99a8fc5d1880fb29226ca": {
+      "source_directory": "heristic/gpt-6-razor/experiments/62c82a660dd2eb6999b0b71e7a257a694ee615a073b99a8fc5d1880fb29226ca",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0e5110a4596e5eee0f4ac9fe74769f0b6c34c8eebd66e733958cd47bd34134ec/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2187000
+    },
+    "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633": {
+      "source_directory": "heristic/gpt-6-razor/experiments/68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/92d071cf4497c8154a40745aaadb374328ffc054598c198dfa7130b77ae26d04/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d6345cc1fa5360a35aad12411cc042fdba2d890dcef2441807939f7a4ca564c7/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c41cb60b7cb3457d7eb99cc89681d9f7a02f4b363bc0bb00a104be136a9e356a/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/27adc3bf52357639b1b8a12696b1d92788c0306d653966a4d183894813aa20d5/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/95eb20914832c4a83ba2df2fff7c2633709d675bc75c17588f8eec0a70bf192c/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/706294a912659609a582ccbd7e5880cf1b61885b7c55483c51f80ed60ec0209f/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/4813e8c5e419949795f7310b5db4a9571ea7576a761b00bb5d9035b4ec19fb92/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c863452415350cf3e86d97ef0ac12ddcd4ccd4e3ceb27af178cae0fcf1b264e1/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/eeeaa9043e76da6d345c29cc41bbb1e5dc47ce95e65f2e39f0e61214f5259603/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/79ee17151d6e158c7b3bbb2e5fe07ecb631884536d623eedbf3d4cd82eabb33d/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0038fe9964a8c93e36ef5962a2a7ae2016cca2c5f51a69b82c361703acb4e163/report.json"
+      ],
+      "completed_games": 1111,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2138000
+    },
+    "831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a": {
+      "source_directory": "heristic/gpt-6-razor/experiments/831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/6d48dfefdc586890e39d4938af88a426e93978013973a756969154bf42773134/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/835682974cd4f2e11fa6b2b956c678912add8a62ea92610efdc2209e9d1ec13a/report.json"
+      ],
+      "completed_games": 208,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2357000
+    },
+    "85cd6cbf033faea04e34a3fc7cb7078931791d68b5345c3bf06c275e6aab170b": {
+      "source_directory": "heristic/gpt-6-razor/experiments/85cd6cbf033faea04e34a3fc7cb7078931791d68b5345c3bf06c275e6aab170b",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/65e50e0ea02b261d9499ff447169a1e2ebd460e7ff9d756f84afb1b6f91c96ee/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 893000
+    },
+    "9041c2bef3141f9132aef1d6835c6542c6ff61c6e6ef13b53acb164e93351724": {
+      "source_directory": "heristic/gpt-6-razor/experiments/9041c2bef3141f9132aef1d6835c6542c6ff61c6e6ef13b53acb164e93351724",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/32fdf44f1e7e65bfb93984c96f4d89114f54be9ec77f83c08a96115acf61cecf/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 6309000
+    },
+    "95da7b8946758d3f4eda0a73536cc6f7e34b2fe3613f4cfd862a39c127824b94": {
+      "source_directory": "heristic/gpt-6-razor/experiments/95da7b8946758d3f4eda0a73536cc6f7e34b2fe3613f4cfd862a39c127824b94",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c8300755e579481639445a07d5a6b0fa6c7abb9fe5f3f37bbc3d588269facf8d/report.json"
+      ],
+      "completed_games": 120,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1970000
+    },
+    "9ca4baec03b120e43f577ca2ee8139779da1ef2c546d7f1d5a4d5b149435a71d": {
+      "source_directory": "heristic/gpt-6-razor/experiments/9ca4baec03b120e43f577ca2ee8139779da1ef2c546d7f1d5a4d5b149435a71d",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/28ba475164dcdb62d47a6b31a2866ce4e8830de552ad92e9597efe909cafab95/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1004000
+    },
+    "a407a63b8e9f24b7853db8ab68b06a8645ac3b3b5d5db3ae126c832e6a3caf7f": {
+      "source_directory": "heristic/gpt-6-razor/experiments/a407a63b8e9f24b7853db8ab68b06a8645ac3b3b5d5db3ae126c832e6a3caf7f",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e94d6f949505b1ebb98039e0bafe09ac697ab441483eb00b00d4dd514b65da2d/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e0aebefab5785051ae07f000e7e70b64e91338aeec6af72cfbeee757e8e0ae3f/report.json"
+      ],
+      "completed_games": 220,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2134000
+    },
+    "a48200e945597861c719227d1dc1ffce9e1ecb204586d2d1c05ce15a2cb4b194": {
+      "source_directory": "heristic/gpt-6-razor/experiments/a48200e945597861c719227d1dc1ffce9e1ecb204586d2d1c05ce15a2cb4b194",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/743ebeb1f7290842691cee5e93e6f4d66d984d98596a4363aa58336458b3bbbc/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2009000
+    },
+    "a7a92c4b22aef00d2ca30aaed71c4aeea77574a8d4523c18816a40d3b3073b1d": {
+      "source_directory": "heristic/gpt-6-razor/experiments/a7a92c4b22aef00d2ca30aaed71c4aeea77574a8d4523c18816a40d3b3073b1d",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ae942601331de8cd03b30a5425b5df54048921ce8e7e8feed62200c0937b9bf2/report.json"
+      ],
+      "completed_games": 100,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 572000
+    },
+    "adb64a4d030274ff740745664131fde95b7bca50488ca3e9e18148668a040923": {
+      "source_directory": "heristic/gpt-6-razor/experiments/adb64a4d030274ff740745664131fde95b7bca50488ca3e9e18148668a040923",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7d809213aceaab3f2fc13f96a590088fb59b616b002574a76dc7d8f6459706de/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3a92ec15be91612579e9c988a14ea5cb221ef508403c75753c96352359a95d11/report.json"
+      ],
+      "completed_games": 260,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2739000
+    },
+    "bbfe83596ab69d729eda908c623bafa8d8ab2881e07fb7229bb66b6fbb089305": {
+      "source_directory": "heristic/gpt-6-razor/experiments/bbfe83596ab69d729eda908c623bafa8d8ab2881e07fb7229bb66b6fbb089305",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1e47e003adcdc6135ef645aa52575fd9b6ac3a2a6b683bdda94bb090ee33464b/report.json"
+      ],
+      "completed_games": 60,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 670000
+    },
+    "c027c23fc1a0c385b59fb883779ce5378869ec643058544e8537d47a471ad463": {
+      "source_directory": "heristic/gpt-6-razor/experiments/c027c23fc1a0c385b59fb883779ce5378869ec643058544e8537d47a471ad463",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/27f1056c180a729c5982a200f208edcee9a003a6d698b6339b79a27e2bdc692d/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9af590eeb1fd3fd1ebc6ccce144a1e40d046ff1413c79318197f939fe40d8d5d/report.json"
+      ],
+      "completed_games": 220,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3169000
+    },
+    "c16dbca9276c4970e50794a5cf79b40d3ab1306984c97311d9ecc41beca64484": {
+      "source_directory": "heristic/gpt-6-razor/experiments/c16dbca9276c4970e50794a5cf79b40d3ab1306984c97311d9ecc41beca64484",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/50a99ec11ef5f51ed2ff0160215db7d8fe518db88770696472b5d9da813b4893/report.json"
+      ],
+      "completed_games": 120,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1095000
+    },
+    "ccac19c12a3a440d9c5dffc7ddde39b80238a945e498567e59db1d1afd074d64": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ccac19c12a3a440d9c5dffc7ddde39b80238a945e498567e59db1d1afd074d64",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b5c601f4de272e23603e5e51b67d8b6511e364233d83b48e0a888ef45bba7986/report.json"
+      ],
+      "completed_games": 120,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2185000
+    },
+    "d03e64de6c8705988f2c20628e94af513e8e725c990671b544d8f1b4454fa90f": {
+      "source_directory": "heristic/gpt-6-razor/experiments/d03e64de6c8705988f2c20628e94af513e8e725c990671b544d8f1b4454fa90f",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d6000fb7c625010bd3a39baa0fc4f4709d5f8ccf5fe31de8ed032c1271a9842c/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/afd6512d732fd69e79fd718662bf512fd29967895e13260f960c602d6d2a8d1a/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1a4859bf0fa6273c2512dc0f5e68b2766a080a83d53a2401cf1118f20a6cebd4/report.json"
+      ],
+      "completed_games": 440,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2526000
+    },
+    "d710f72628d33af80dd061176b3983b0e77d0055ea843eea8ad578484f43bb7a": {
+      "source_directory": "heristic/gpt-6-razor/experiments/d710f72628d33af80dd061176b3983b0e77d0055ea843eea8ad578484f43bb7a",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/95b1897e364c41fa753616c821188553c1b5cf80497d42015e8ea8025207d1ef/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c932a94e601b0ca462ac57cffda1a3560d71e1c85c752b2d6f473e2163f1a5f/report.json"
+      ],
+      "completed_games": 192,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2965000
+    },
+    "d85ed123f9a3fb95098c29a665c8f051727d924aa4727840007aaaf8c4776c2a": {
+      "source_directory": "heristic/gpt-6-razor/experiments/d85ed123f9a3fb95098c29a665c8f051727d924aa4727840007aaaf8c4776c2a",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e8753e5deceb9d4f25959935131b5d02ccb0eb69e7b19e70b6eb625e05969788/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2023000
+    },
+    "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3": {
+      "source_directory": "heristic/gpt-6-razor/experiments/da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/36a0ded92f0a198ec58f30def6ab70afc605de88767d2c4649291f455966123c/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/4ef1e0b0b5d52cd0623320cf66d8de6c4c5d53bd131994c7a293fe62c67a760c/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/21bfd7082a61af6c1f8b143066a61ecefec5eb91245c8e36eae6053ad5437a1c/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/58c9e79de953acd80dc44fac7ac226cc6de83f1cd5ec42756b674b4c2a62f7fc/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/24f928b8b97def452f9a43ae6bc229b8511c0a31b5852b464e15e0ea7c16776a/report.json"
+      ],
+      "completed_games": 960,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3756000
+    },
+    "ea454efc628c4a9ccff982fe1b73bc9b377c2057ed6b2669451ff8184180a14c": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ea454efc628c4a9ccff982fe1b73bc9b377c2057ed6b2669451ff8184180a14c",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9afd6b65b6ba8461d1d4395cbdda536604850997615805880591169d43d6b31a/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 6337000
+    },
+    "f58f44ddbf77133e64dc6f92fb51d01f93f8434bad7f2819c7855b73dbfb609c": {
+      "source_directory": "heristic/gpt-6-razor/experiments/f58f44ddbf77133e64dc6f92fb51d01f93f8434bad7f2819c7855b73dbfb609c",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ad8ce42513579a437a3810c38225b0c2a45b386c7ef84c9651454229497952e3/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1373000
+    },
+    "fdf6aab3e144f3aa89b7bb72ee9ec668df93eb9a4f5ca7db1aac96413c89ef5b": {
+      "source_directory": "heristic/gpt-6-razor/experiments/fdf6aab3e144f3aa89b7bb72ee9ec668df93eb9a4f5ca7db1aac96413c89ef5b",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/573182bdd5d890c06d9519b4d47f6195489c3c8f85f9fea8c1a74abb6478b9e3/report.json"
+      ],
+      "completed_games": 120,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1121000
+    },
+    "fe4669787cda471564ce5063172663044770f8322d419bef2dbbfe2cbe3ff3cc": {
+      "source_directory": "heristic/gpt-6-razor/experiments/fe4669787cda471564ce5063172663044770f8322d419bef2dbbfe2cbe3ff3cc",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cc045629731574ad0a98bf8a0c103e5f5fe5d3e0034edd8bea9de046a12cef4b/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2509000
+    }
+  },
+  "experiments": [
+    {
+      "label": "advantage-conversion",
+      "version": "4c81b75f0320717242f5624df89f6c9c20db5717b5f396c56d8d3dc0b5c4d3a0",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/09e6cda2a02454d7297d7d86384c2296270c1e52f13ad65b69e4fbf40bb21492/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.45,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.55,
+          "pair_score": 0.45,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 93644,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3306000,
+        "timeouts": 0,
+        "total_ns": 20133935000
+      },
+      "violations": 0
+    },
+    {
+      "label": "asset-budget",
+      "version": "831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/6d48dfefdc586890e39d4938af88a426e93978013973a756969154bf42773134/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.6,
+          "pair_score": 0.4,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 89168,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1946000,
+        "timeouts": 0,
+        "total_ns": 26083364000
+      },
+      "violations": 0
+    },
+    {
+      "label": "asset-only",
+      "version": "85cd6cbf033faea04e34a3fc7cb7078931791d68b5345c3bf06c275e6aab170b",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/65e50e0ea02b261d9499ff447169a1e2ebd460e7ff9d756f84afb1b6f91c96ee/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.48,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.52,
+          "pair_score": 0.48,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 59228,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 893000,
+        "timeouts": 0,
+        "total_ns": 11118058000
+      },
+      "violations": 0
+    },
+    {
+      "label": "attrition-defense",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/92d071cf4497c8154a40745aaadb374328ffc054598c198dfa7130b77ae26d04/report.json",
+      "ok": true,
+      "completed_games": 200,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.465,
+          "games": 200,
+          "invalid_actions": 0,
+          "mean_rank": 1.535,
+          "pair_score": 0.465,
+          "scored_games": 200,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 123893,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1412000,
+        "timeouts": 0,
+        "total_ns": 31170951000
+      },
+      "violations": 0
+    },
+    {
+      "label": "budget-ffa8",
+      "version": "831d9813ea6a91d61e42f5efeec23999c235f1da6c622c714bc4fa7d60cd566a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/835682974cd4f2e11fa6b2b956c678912add8a62ea92610efdc2209e9d1ec13a/report.json",
+      "ok": true,
+      "completed_games": 48,
+      "metrics": {
+        "8": {
+          "game_win_rate": 0.125,
+          "games": 48,
+          "invalid_actions": 0,
+          "mean_rank": 4.03125,
+          "pair_score": 0.5669642857142857,
+          "scored_games": 48,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 32246,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2357000,
+        "timeouts": 0,
+        "total_ns": 15926879000
+      },
+      "violations": 0
+    },
+    {
+      "label": "commitment-pruning-fixed",
+      "version": "95da7b8946758d3f4eda0a73536cc6f7e34b2fe3613f4cfd862a39c127824b94",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c8300755e579481639445a07d5a6b0fa6c7abb9fe5f3f37bbc3d588269facf8d/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.45,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.5458333333333334,
+          "pair_score": 0.45416666666666666,
+          "scored_games": 120,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 66782,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1970000,
+        "timeouts": 0,
+        "total_ns": 19650866000
+      },
+      "violations": 0
+    },
+    {
+      "label": "committed-mobilization",
+      "version": "9ca4baec03b120e43f577ca2ee8139779da1ef2c546d7f1d5a4d5b149435a71d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/28ba475164dcdb62d47a6b31a2866ce4e8830de552ad92e9597efe909cafab95/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.5,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.5,
+          "pair_score": 0.5,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 57333,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1004000,
+        "timeouts": 0,
+        "total_ns": 10955787000
+      },
+      "violations": 0
+    },
+    {
+      "label": "coordinated-defender",
+      "version": "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/36a0ded92f0a198ec58f30def6ab70afc605de88767d2c4649291f455966123c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.5,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5,
+          "pair_score": 0.5,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 88629,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1875000,
+        "timeouts": 0,
+        "total_ns": 21039662000
+      },
+      "violations": 0
+    },
+    {
+      "label": "deep-mobilization",
+      "version": "c16dbca9276c4970e50794a5cf79b40d3ab1306984c97311d9ecc41beca64484",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/50a99ec11ef5f51ed2ff0160215db7d8fe518db88770696472b5d9da813b4893/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.425,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.575,
+          "pair_score": 0.425,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 69576,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1095000,
+        "timeouts": 0,
+        "total_ns": 20848956000
+      },
+      "violations": 0
+    },
+    {
+      "label": "defender-holdout-ffa",
+      "version": "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/4ef1e0b0b5d52cd0623320cf66d8de6c4c5d53bd131994c7a293fe62c67a760c/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.3,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 2.308333333333333,
+          "pair_score": 0.5638888888888889,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 76877,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2243000,
+        "timeouts": 0,
+        "total_ns": 22464115000
+      },
+      "violations": 0
+    },
+    {
+      "label": "economical-defense",
+      "version": "fdf6aab3e144f3aa89b7bb72ee9ec668df93eb9a4f5ca7db1aac96413c89ef5b",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/573182bdd5d890c06d9519b4d47f6195489c3c8f85f9fea8c1a74abb6478b9e3/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.475,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.525,
+          "pair_score": 0.475,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 68439,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1121000,
+        "timeouts": 0,
+        "total_ns": 20256952000
+      },
+      "violations": 0
+    },
+    {
+      "label": "economy-before-mobilization",
+      "version": "d85ed123f9a3fb95098c29a665c8f051727d924aa4727840007aaaf8c4776c2a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e8753e5deceb9d4f25959935131b5d02ccb0eb69e7b19e70b6eb625e05969788/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5875,
+          "pair_score": 0.4125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 89489,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2023000,
+        "timeouts": 0,
+        "total_ns": 23428897000
+      },
+      "violations": 0
+    },
+    {
+      "label": "extraction-ffa4",
+      "version": "d03e64de6c8705988f2c20628e94af513e8e725c990671b544d8f1b4454fa90f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d6000fb7c625010bd3a39baa0fc4f4709d5f8ccf5fe31de8ed032c1271a9842c/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.35,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 2.2916666666666665,
+          "pair_score": 0.5694444444444444,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 77391,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2296000,
+        "timeouts": 0,
+        "total_ns": 22340307000
+      },
+      "violations": 0
+    },
+    {
+      "label": "extraction-kestrel",
+      "version": "d03e64de6c8705988f2c20628e94af513e8e725c990671b544d8f1b4454fa90f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/afd6512d732fd69e79fd718662bf512fd29967895e13260f960c602d6d2a8d1a/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.8375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.159375,
+          "pair_score": 0.840625,
+          "scored_games": 160,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 103901,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2526000,
+        "timeouts": 0,
+        "total_ns": 35085155000
+      },
+      "violations": 0
+    },
+    {
+      "label": "field-ffa4",
+      "version": "adb64a4d030274ff740745664131fde95b7bca50488ca3e9e18148668a040923",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7d809213aceaab3f2fc13f96a590088fb59b616b002574a76dc7d8f6459706de/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.35,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 2.32,
+          "pair_score": 0.56,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 63291,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2739000,
+        "timeouts": 0,
+        "total_ns": 21705166000
+      },
+      "violations": 0
+    },
+    {
+      "label": "field-pressure",
+      "version": "adb64a4d030274ff740745664131fde95b7bca50488ca3e9e18148668a040923",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/3a92ec15be91612579e9c988a14ea5cb221ef508403c75753c96352359a95d11/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.39375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.60625,
+          "pair_score": 0.39375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 92318,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1540000,
+        "timeouts": 0,
+        "total_ns": 28313277000
+      },
+      "violations": 0
+    },
+    {
+      "label": "field-rally",
+      "version": "d710f72628d33af80dd061176b3983b0e77d0055ea843eea8ad578484f43bb7a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/95b1897e364c41fa753616c821188553c1b5cf80497d42015e8ea8025207d1ef/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.40625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.59375,
+          "pair_score": 0.40625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 91774,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 888000,
+        "timeouts": 0,
+        "total_ns": 25754301000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-3p",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d6345cc1fa5360a35aad12411cc042fdba2d890dcef2441807939f7a4ca564c7/report.json",
+      "ok": true,
+      "completed_games": 18,
+      "metrics": {
+        "3": {
+          "game_win_rate": 0.4444444444444444,
+          "games": 18,
+          "invalid_actions": 0,
+          "mean_rank": 1.8333333333333333,
+          "pair_score": 0.5833333333333334,
+          "scored_games": 18,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 10650,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1959000,
+        "timeouts": 0,
+        "total_ns": 2848249000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-4p",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c41cb60b7cb3457d7eb99cc89681d9f7a02f4b363bc0bb00a104be136a9e356a/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.425,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.075,
+          "pair_score": 0.6416666666666667,
+          "scored_games": 80,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 47781,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1222000,
+        "timeouts": 0,
+        "total_ns": 14479989000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-5p",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/27adc3bf52357639b1b8a12696b1d92788c0306d653966a4d183894813aa20d5/report.json",
+      "ok": true,
+      "completed_games": 25,
+      "metrics": {
+        "5": {
+          "game_win_rate": 0.36,
+          "games": 25,
+          "invalid_actions": 0,
+          "mean_rank": 2.48,
+          "pair_score": 0.63,
+          "scored_games": 25,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 14866,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1211000,
+        "timeouts": 0,
+        "total_ns": 5122152000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-6p",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/95eb20914832c4a83ba2df2fff7c2633709d675bc75c17588f8eec0a70bf192c/report.json",
+      "ok": true,
+      "completed_games": 24,
+      "metrics": {
+        "6": {
+          "game_win_rate": 0.4166666666666667,
+          "games": 24,
+          "invalid_actions": 0,
+          "mean_rank": 2.5,
+          "pair_score": 0.7000000000000001,
+          "scored_games": 24,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 15786,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1649000,
+        "timeouts": 0,
+        "total_ns": 5317324000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-7p",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/706294a912659609a582ccbd7e5880cf1b61885b7c55483c51f80ed60ec0209f/report.json",
+      "ok": true,
+      "completed_games": 28,
+      "metrics": {
+        "7": {
+          "game_win_rate": 0.21428571428571427,
+          "games": 28,
+          "invalid_actions": 0,
+          "mean_rank": 3.75,
+          "pair_score": 0.5416666666666666,
+          "scored_games": 28,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 20220,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1461000,
+        "timeouts": 0,
+        "total_ns": 7601163000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-aggressive",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/4813e8c5e419949795f7310b5db4a9571ea7576a761b00bb5d9035b4ec19fb92/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.9833333333333333,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.0166666666666666,
+          "pair_score": 0.9833333333333333,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 67457,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2071000,
+        "timeouts": 0,
+        "total_ns": 17694392000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-ffa8",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c863452415350cf3e86d97ef0ac12ddcd4ccd4e3ceb27af178cae0fcf1b264e1/report.json",
+      "ok": true,
+      "completed_games": 64,
+      "metrics": {
+        "8": {
+          "game_win_rate": 0.203125,
+          "games": 64,
+          "invalid_actions": 0,
+          "mean_rank": 3.4375,
+          "pair_score": 0.6517857142857143,
+          "scored_games": 64,
+          "tick_limit_games": 4
+        }
+      },
+      "timing": {
+        "calls": 61505,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2138000,
+        "timeouts": 0,
+        "total_ns": 27733504000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-kestrel",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/eeeaa9043e76da6d345c29cc41bbb1e5dc47ce95e65f2e39f0e61214f5259603/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.8,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.2,
+          "pair_score": 0.8,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 67223,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 841000,
+        "timeouts": 0,
+        "total_ns": 16761124000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-large-map",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/79ee17151d6e158c7b3bbb2e5fe07ecb631884536d623eedbf3d4cd82eabb33d/report.json",
+      "ok": true,
+      "completed_games": 32,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.40625,
+          "games": 32,
+          "invalid_actions": 0,
+          "mean_rank": 1.578125,
+          "pair_score": 0.421875,
+          "scored_games": 32,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 37732,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1783000,
+        "timeouts": 0,
+        "total_ns": 20134254000
+      },
+      "violations": 0
+    },
+    {
+      "label": "final-v7-matched",
+      "version": "68c43a2f31e8f2c36cccc7064bb971da397f1c573408063617ab767e6ad5d633",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0038fe9964a8c93e36ef5962a2a7ae2016cca2c5f51a69b82c361703acb4e163/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4775,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.5225,
+          "pair_score": 0.4775,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 233259,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1895000,
+        "timeouts": 0,
+        "total_ns": 56487331000
+      },
+      "violations": 0
+    },
+    {
+      "label": "force-kestrel",
+      "version": "a407a63b8e9f24b7853db8ab68b06a8645ac3b3b5d5db3ae126c832e6a3caf7f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e94d6f949505b1ebb98039e0bafe09ac697ab441483eb00b00d4dd514b65da2d/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.93,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.07,
+          "pair_score": 0.93,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 56583,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 965000,
+        "timeouts": 0,
+        "total_ns": 16325246000
+      },
+      "violations": 0
+    },
+    {
+      "label": "garrison-extraction",
+      "version": "d03e64de6c8705988f2c20628e94af513e8e725c990671b544d8f1b4454fa90f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1a4859bf0fa6273c2512dc0f5e68b2766a080a83d53a2401cf1118f20a6cebd4/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5625,
+          "pair_score": 0.4375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 92453,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1633000,
+        "timeouts": 0,
+        "total_ns": 18949275000
+      },
+      "violations": 0
+    },
+    {
+      "label": "holdout-aggressive",
+      "version": "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/21bfd7082a61af6c1f8b143066a61ecefec5eb91245c8e36eae6053ad5437a1c/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.9833333333333333,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.0166666666666666,
+          "pair_score": 0.9833333333333333,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 64047,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 955000,
+        "timeouts": 0,
+        "total_ns": 16490124000
+      },
+      "violations": 0
+    },
+    {
+      "label": "holdout-kestrel",
+      "version": "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/58c9e79de953acd80dc44fac7ac226cc6de83f1cd5ec42756b674b4c2a62f7fc/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.85,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.15,
+          "pair_score": 0.85,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 84147,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2412000,
+        "timeouts": 0,
+        "total_ns": 21064715000
+      },
+      "violations": 0
+    },
+    {
+      "label": "holdout-v7",
+      "version": "da98d0103de915e671c8c89bf838b40aae3d1e9c4e3a017960f027374af4a7b3",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/24f928b8b97def452f9a43ae6bc229b8511c0a31b5852b464e15e0ea7c16776a/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4925,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.5075,
+          "pair_score": 0.4925,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 237187,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3756000,
+        "timeouts": 0,
+        "total_ns": 57708224000
+      },
+      "violations": 0
+    },
+    {
+      "label": "integrated-assault",
+      "version": "62c82a660dd2eb6999b0b71e7a257a694ee615a073b99a8fc5d1880fb29226ca",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0e5110a4596e5eee0f4ac9fe74769f0b6c34c8eebd66e733958cd47bd34134ec/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.475,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.525,
+          "pair_score": 0.475,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 88380,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2187000,
+        "timeouts": 0,
+        "total_ns": 20320118000
+      },
+      "violations": 0
+    },
+    {
+      "label": "integrated-assault-target",
+      "version": "f58f44ddbf77133e64dc6f92fb51d01f93f8434bad7f2819c7855b73dbfb609c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ad8ce42513579a437a3810c38225b0c2a45b386c7ef84c9651454229497952e3/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.475,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.525,
+          "pair_score": 0.475,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 88381,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1373000,
+        "timeouts": 0,
+        "total_ns": 20487475000
+      },
+      "violations": 0
+    },
+    {
+      "label": "mobile-force-objective",
+      "version": "a407a63b8e9f24b7853db8ab68b06a8645ac3b3b5d5db3ae126c832e6a3caf7f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e0aebefab5785051ae07f000e7e70b64e91338aeec6af72cfbeee757e8e0ae3f/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4666666666666667,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.5333333333333334,
+          "pair_score": 0.4666666666666667,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 68788,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2134000,
+        "timeouts": 0,
+        "total_ns": 20594387000
+      },
+      "violations": 0
+    },
+    {
+      "label": "mobilization-only",
+      "version": "3eceabe00acbe6d04982507e901991b587c400344ca0e4e87d30b7b4ad775c04",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bbb4df69ef2aaae792c0b0f24a9147f789e1bb9e9078dfb7d72127cf5a9bed60/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.5,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.5,
+          "pair_score": 0.5,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 56954,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1916000,
+        "timeouts": 0,
+        "total_ns": 11391104000
+      },
+      "violations": 0
+    },
+    {
+      "label": "persistent-aggressive",
+      "version": "c027c23fc1a0c385b59fb883779ce5378869ec643058544e8537d47a471ad463",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/27f1056c180a729c5982a200f208edcee9a003a6d698b6339b79a27e2bdc692d/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.98,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.02,
+          "pair_score": 0.98,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 51886,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3169000,
+        "timeouts": 0,
+        "total_ns": 13361663000
+      },
+      "violations": 0
+    },
+    {
+      "label": "persistent-operations",
+      "version": "c027c23fc1a0c385b59fb883779ce5378869ec643058544e8537d47a471ad463",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9af590eeb1fd3fd1ebc6ccce144a1e40d046ff1413c79318197f939fe40d8d5d/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4083333333333333,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.5916666666666666,
+          "pair_score": 0.4083333333333333,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 69379,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1038000,
+        "timeouts": 0,
+        "total_ns": 20050132000
+      },
+      "violations": 0
+    },
+    {
+      "label": "prototype-aggressive",
+      "version": "3f1faf8e030272f3003108aabe19a69dff67648621a8960836c0ad4c9c1f6723",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d69ef70828e263478dc1796e47fbba86f7119a3a1383e408ff7d3f908b2e750d/report.json",
+      "ok": true,
+      "completed_games": 20,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.8,
+          "games": 20,
+          "invalid_actions": 0,
+          "mean_rank": 1.2,
+          "pair_score": 0.8,
+          "scored_games": 20,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 9224,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 347000,
+        "timeouts": 0,
+        "total_ns": 553852000
+      },
+      "violations": 0
+    },
+    {
+      "label": "prototype-v7",
+      "version": "3f1faf8e030272f3003108aabe19a69dff67648621a8960836c0ad4c9c1f6723",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/688b12ba777d5ab5604fef93cb4d99dd1d0dbd3575f27685648031fb304beb58/report.json",
+      "ok": true,
+      "completed_games": 60,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.1,
+          "games": 60,
+          "invalid_actions": 0,
+          "mean_rank": 1.9,
+          "pair_score": 0.1,
+          "scored_games": 60,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 30404,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 420000,
+        "timeouts": 0,
+        "total_ns": 2004817000
+      },
+      "violations": 0
+    },
+    {
+      "label": "prototype2-archive",
+      "version": "bbfe83596ab69d729eda908c623bafa8d8ab2881e07fb7229bb66b6fbb089305",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1e47e003adcdc6135ef645aa52575fd9b6ac3a2a6b683bdda94bb090ee33464b/report.json",
+      "ok": true,
+      "completed_games": 60,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.11666666666666667,
+          "games": 60,
+          "invalid_actions": 0,
+          "mean_rank": 1.8833333333333333,
+          "pair_score": 0.11666666666666667,
+          "scored_games": 60,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 34677,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 670000,
+        "timeouts": 0,
+        "total_ns": 5529676000
+      },
+      "violations": 0
+    },
+    {
+      "label": "prototype2-v7",
+      "version": "bbfe83596ab69d729eda908c623bafa8d8ab2881e07fb7229bb66b6fbb089305",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1e47e003adcdc6135ef645aa52575fd9b6ac3a2a6b683bdda94bb090ee33464b/report.json",
+      "ok": true,
+      "completed_games": 60,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.11666666666666667,
+          "games": 60,
+          "invalid_actions": 0,
+          "mean_rank": 1.8833333333333333,
+          "pair_score": 0.11666666666666667,
+          "scored_games": 60,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 34677,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 670000,
+        "timeouts": 0,
+        "total_ns": 5529676000
+      },
+      "violations": 0
+    },
+    {
+      "label": "rally-large-map",
+      "version": "d710f72628d33af80dd061176b3983b0e77d0055ea843eea8ad578484f43bb7a",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c932a94e601b0ca462ac57cffda1a3560d71e1c85c752b2d6f473e2163f1a5f/report.json",
+      "ok": true,
+      "completed_games": 32,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.46875,
+          "games": 32,
+          "invalid_actions": 0,
+          "mean_rank": 1.53125,
+          "pair_score": 0.46875,
+          "scored_games": 32,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 30526,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2965000,
+        "timeouts": 0,
+        "total_ns": 23970349000
+      },
+      "violations": 0
+    },
+    {
+      "label": "reconnaissance-reserve",
+      "version": "ea454efc628c4a9ccff982fe1b73bc9b377c2057ed6b2669451ff8184180a14c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9afd6b65b6ba8461d1d4395cbdda536604850997615805880591169d43d6b31a/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5875,
+          "pair_score": 0.4125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 90133,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 6337000,
+        "timeouts": 0,
+        "total_ns": 26662996000
+      },
+      "violations": 0
+    },
+    {
+      "label": "remaining-action-value",
+      "version": "a48200e945597861c719227d1dc1ffce9e1ecb204586d2d1c05ce15a2cb4b194",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/743ebeb1f7290842691cee5e93e6f4d66d984d98596a4363aa58336458b3bbbc/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.44375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.55625,
+          "pair_score": 0.44375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 92305,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2009000,
+        "timeouts": 0,
+        "total_ns": 26576274000
+      },
+      "violations": 0
+    },
+    {
+      "label": "retained-city-routes",
+      "version": "9041c2bef3141f9132aef1d6835c6542c6ff61c6e6ef13b53acb164e93351724",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/32fdf44f1e7e65bfb93984c96f4d89114f54be9ec77f83c08a96115acf61cecf/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.425,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.575,
+          "pair_score": 0.425,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 90562,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 6309000,
+        "timeouts": 0,
+        "total_ns": 26521270000
+      },
+      "violations": 0
+    },
+    {
+      "label": "scored-operations",
+      "version": "58e93377b26e4cbc0a1091897a610cd891ad81beaf229ee45c709195c38346bf",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/39e8be3222110c930ccbf502bd484831b019b9e75e63c835113cb77ddbb897c0/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.33,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.67,
+          "pair_score": 0.33,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 57430,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2448000,
+        "timeouts": 0,
+        "total_ns": 13210656000
+      },
+      "violations": 0
+    },
+    {
+      "label": "scout-burst",
+      "version": "a7a92c4b22aef00d2ca30aaed71c4aeea77574a8d4523c18816a40d3b3073b1d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ae942601331de8cd03b30a5425b5df54048921ce8e7e8feed62200c0937b9bf2/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.31,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.69,
+          "pair_score": 0.31,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 55748,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 572000,
+        "timeouts": 0,
+        "total_ns": 11088799000
+      },
+      "violations": 0
+    },
+    {
+      "label": "scout-only",
+      "version": "619503c46bbe574f50ec05ec2cc76758f72ccc03ae13b4f6bd3708c4ccdf830f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a1df24a867d73970011b09ac0fd2715679d3495591bad27f45dadcb63c5e8f04/report.json",
+      "ok": true,
+      "completed_games": 100,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.34,
+          "games": 100,
+          "invalid_actions": 0,
+          "mean_rank": 1.66,
+          "pair_score": 0.34,
+          "scored_games": 100,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 59953,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 636000,
+        "timeouts": 0,
+        "total_ns": 12015531000
+      },
+      "violations": 0
+    },
+    {
+      "label": "spatial-intelligence",
+      "version": "fe4669787cda471564ce5063172663044770f8322d419bef2dbbfe2cbe3ff3cc",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/cc045629731574ad0a98bf8a0c103e5f5fe5d3e0034edd8bea9de046a12cef4b/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.4125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.5875,
+          "pair_score": 0.4125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 90624,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2509000,
+        "timeouts": 0,
+        "total_ns": 24046281000
+      },
+      "violations": 0
+    },
+    {
+      "label": "unified-budget",
+      "version": "ccac19c12a3a440d9c5dffc7ddde39b80238a945e498567e59db1d1afd074d64",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b5c601f4de272e23603e5e51b67d8b6511e364233d83b48e0a888ef45bba7986/report.json",
+      "ok": true,
+      "completed_games": 120,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.49166666666666664,
+          "games": 120,
+          "invalid_actions": 0,
+          "mean_rank": 1.5083333333333333,
+          "pair_score": 0.49166666666666664,
+          "scored_games": 120,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 66814,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2185000,
+        "timeouts": 0,
+        "total_ns": 16110048000
+      },
+      "violations": 0
+    }
+  ],
+  "controls": [
+    {
+      "label": "v7-kestrel-control",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e73e29265bf05e8d026dda81f2c9721214a4d56e2b727583ebb7efba2ebdbbf4/report.json"
+    }
+  ],
+  "limitations": [
+    "Free Arena runs only; no formal rating or main-site evaluation for v8.",
+    "Results do not demonstrate superiority over v7, expert humans, or learning algorithms.",
+    "Exact source snapshots preserve tested bytes, including harmless blank lines at EOF."
+  ]
+}
