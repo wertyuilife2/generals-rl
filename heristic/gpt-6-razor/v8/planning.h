@@ -133,6 +133,7 @@ double programScore(const Program &q)const {
  if(q.kind!=17&&q.kind!=20&&q.kind!=21&&!legalOrder(x,q.kind==3))return -1e30;
  if(q.kind==20&&!legalOrder(x,true))return -1e30;
  if(q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=17&&q.kind!=21&&landingCanBeDenied(x))return -1e30;
+ if((q.kind==1||q.kind==2||q.kind==8||q.kind==23)&&!cityReplyHolds(q))return -1e30;
  if(q.kind==14)return extractionSafe(q)?q.value+(q.born<tick?40.:0):-1e30;
  if((q.kind==10||q.kind==24)&&zoneETA[x.t]<=2&&zoneThreat[x.t]>moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t))+5)return -1e30;
  double after=((q.kind==4&&aliveCount<=2)||q.kind==9)?0:dangerAfter(&x);
@@ -141,7 +142,10 @@ double programScore(const Program &q)const {
  double continuedRisk=(q.born<tick&&(q.kind==1||q.kind==8))?risk(x.s,x.t,moveArmy(x.s,x.half)):0;
  double commitment=0;
  if(q.born<tick&&q.kind==11&&baselineDanger<2&&permitted(x))commitment=1.;
- return q.value*capitalSecurity(q)+commitment-after-transferRisk-continuedRisk;
+ double security=capitalSecurity(q);
+ bool purchaseObjective=q.goal>=0&&st[q.goal]==1;
+ if(security<=0&&purchaseObjective&&q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=17&&q.kind!=21)return -1e30;
+ return q.value*std::max(.15,security)+commitment-after-transferRisk-continuedRisk;
 }
 void offer(Program q){
  if(q.cursor>=q.count)return;

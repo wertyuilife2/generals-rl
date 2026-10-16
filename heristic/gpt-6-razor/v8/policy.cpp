@@ -88,6 +88,7 @@ struct Policy {
   std::fill(ter,ter+MAXN,255);std::fill(st,st+MAXN,255);std::fill(own,own+MAXN,-3);
   std::fill(a,a+MAXN,0);std::fill(seen,seen+MAXN,-10000);std::fill(lastOwn,lastOwn+MAXN,-3);
   std::fill(enemyGeneral,enemyGeneral+8,-1);
+  std::fill(cityReplyIndex,cityReplyIndex+MAXN,-1);
   sources.reserve(MAXN);keep.reserve(MAXN);border.reserve(MAXN);
   campaignHeap.reserve(MAXN*4+4);
  }

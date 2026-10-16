@@ -204,7 +204,10 @@ void frontFormationPrograms(){
   if(need>.7*std::max<int64_t>(0,o->total_army[p]-o->total_land[p]))continue;
   bfs(enemy,opSteps,false,true);
   int roots[3],rootCount=0,deadlines[3];double scores[3];
-  for(int c=0;c<N;c++)if(mine(c)&&c!=g&&opSteps[c]>=3&&opSteps[c]<=8){
+  // A one-order merge is still possible with an attacker one or two steps
+  // away. Validate that joint round below instead of excluding the root
+  // merely because its unreinforced garrison currently loses the fight.
+  for(int c=0;c<N;c++)if(mine(c)&&c!=g&&opSteps[c]>=1&&opSteps[c]<=8){
    int potential=ready(c);
    for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&mine(v)){
     bool half=false;if(canDepart(v,half))potential+=moveArmy(v,half);
@@ -213,7 +216,7 @@ void frontFormationPrograms(){
    double score=std::min(need,potential)/(2.+.3*opSteps[c]);
    int j=rootCount;if(j==3){j=2;if(score<=scores[j])continue;}else rootCount++;
    while(j>0&&score>scores[j-1]){if(j<3){roots[j]=roots[j-1];scores[j]=scores[j-1];deadlines[j]=deadlines[j-1];}j--;}
-   roots[j]=c;scores[j]=score;deadlines[j]=std::min(6,opSteps[c]-1);
+   roots[j]=c;scores[j]=score;deadlines[j]=std::clamp(opSteps[c]-1,1,6);
   }
   for(int ri=0;ri<rootCount;ri++){
    int root=roots[ri],budget=deadlines[ri];scheduleTree(root,budget);Program best;

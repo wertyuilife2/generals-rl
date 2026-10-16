@@ -155,6 +155,22 @@
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
+    "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff": {
+      "source_directory": "heristic/gpt-6-razor/experiments/1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9914258f9330d7e77e092b7812780284347b3e12d2c274db207ba9d392f4cf25/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9b387b6e82f34321b10ee8957d7181b97b71846256da5a998b3fa0ffae7039e8/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/aef4a8d9d48742cb93e5600e730336d877e9b35191e53906bb18b5138a80790d/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f6f9f971663d22f995fe273992899498b10ce181003ab03cf1b370edf4bf06da/report.json"
+      ],
+      "completed_games": 656,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3989000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
     "245b56346374648eb2bb6c0423b057e7f4540004a6849c1af3f507dc2f2e488d": {
       "source_directory": "heristic/gpt-6-razor/experiments/245b56346374648eb2bb6c0423b057e7f4540004a6849c1af3f507dc2f2e488d",
       "source_identity_verified": true,
@@ -205,6 +221,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 8976000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "34c795a10dd535265d81723f02f7654b90b037222eef6b8a7fc8622f61316644": {
+      "source_directory": "heristic/gpt-6-razor/experiments/34c795a10dd535265d81723f02f7654b90b037222eef6b8a7fc8622f61316644",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7d277d5659de8f349f54999f8aa7fc98af3fa506c739c37933bf57785bfd92c7/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 3769000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -349,11 +378,13 @@
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2e5859b6579eef0790214076e0147bff05c23221418e6d49f25b6d3175487aab/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a422b297708940894f983ec81b5f865f5276734a3e5b4166c7c3929fe7dac0ae/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a8ebb7425bd1aa6bfbbcc1f152869229bd274b27b947aedc5213a8c242184e02/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bc0f9192bacf234a363428b51630e6cced7c51d59a77cf040ff22546bb7c5404/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ee726da95937586b9e694038ece836de1a8354c63e6ef1095b43ffc1bd00e99f/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/fe9e3a1e5a216a1b4e4e7bc3ffcd22f499a22fef44798a7db3cbb335fc067738/report.json"
       ],
-      "completed_games": 856,
+      "completed_games": 1336,
       "timeouts": 0,
       "errors": 0,
       "max_ns": 8125000,
@@ -396,6 +427,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 1607000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "548627e2e03b8494458f49ec7f563129a2a2676ef3e7babe9e2e5838255e872c": {
+      "source_directory": "heristic/gpt-6-razor/experiments/548627e2e03b8494458f49ec7f563129a2a2676ef3e7babe9e2e5838255e872c",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d10008e17ee0b53a3dfb616fd095810b0b2e29e48fd4659d5eb5aa00f5f2598b/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1859000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -682,6 +726,20 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 1004000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae": {
+      "source_directory": "heristic/gpt-6-razor/experiments/9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/53faeb6dd0fdf0c94b3a7f94f85acaf3c00abf5dbac1be8adc88c876cebb175f/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/843ebd9140386dda232527dd252b1daae5384d06d93f2021390cbfcb90eff00a/report.json"
+      ],
+      "completed_games": 560,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2309000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -1034,6 +1092,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 3756000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "e10efb3c0540c3711d09c9937aa4ad91384699434ec753f2f082d470a3bd1cd9": {
+      "source_directory": "heristic/gpt-6-razor/experiments/e10efb3c0540c3711d09c9937aa4ad91384699434ec753f2f082d470a3bd1cd9",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/6e1800434c1a25e52e54d2857b8999e5e2a9f1b47720ffbe0ad0f9a7222ca7dc/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1826000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -4852,6 +4923,314 @@
       },
       "violations": 0,
       "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-relief",
+      "version": "548627e2e03b8494458f49ec7f563129a2a2676ef3e7babe9e2e5838255e872c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d10008e17ee0b53a3dfb616fd095810b0b2e29e48fd4659d5eb5aa00f5f2598b/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3875,
+          "pair_score": 0.6125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 84028,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1859000,
+        "timeouts": 0,
+        "total_ns": 60757737000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-reply-ledger",
+      "version": "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/843ebd9140386dda232527dd252b1daae5384d06d93f2021390cbfcb90eff00a/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.68125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.31875,
+          "pair_score": 0.68125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79322,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1832000,
+        "timeouts": 0,
+        "total_ns": 56680475000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-command-control",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a8ebb7425bd1aa6bfbbcc1f152869229bd274b27b947aedc5213a8c242184e02/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.655,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.34375,
+          "pair_score": 0.65625,
+          "scored_games": 400,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 213749,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2568000,
+        "timeouts": 0,
+        "total_ns": 158076345000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-reply-ledger-validation",
+      "version": "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/53faeb6dd0fdf0c94b3a7f94f85acaf3c00abf5dbac1be8adc88c876cebb175f/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6575,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.3425,
+          "pair_score": 0.6575,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 209424,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2309000,
+        "timeouts": 0,
+        "total_ns": 153646735000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-opponent-assembly-ledger",
+      "version": "34c795a10dd535265d81723f02f7654b90b037222eef6b8a7fc8622f61316644",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7d277d5659de8f349f54999f8aa7fc98af3fa506c739c37933bf57785bfd92c7/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.68125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.31875,
+          "pair_score": 0.68125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79271,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3769000,
+        "timeouts": 0,
+        "total_ns": 56275798000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-close-formation",
+      "version": "e10efb3c0540c3711d09c9937aa4ad91384699434ec753f2f082d470a3bd1cd9",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/6e1800434c1a25e52e54d2857b8999e5e2a9f1b47720ffbe0ad0f9a7222ca7dc/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.675,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.325,
+          "pair_score": 0.675,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 79638,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1826000,
+        "timeouts": 0,
+        "total_ns": 54881031000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-funded-city",
+      "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9b387b6e82f34321b10ee8957d7181b97b71846256da5a998b3fa0ffae7039e8/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.675,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.325,
+          "pair_score": 0.675,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 82413,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3989000,
+        "timeouts": 0,
+        "total_ns": 58859662000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-funded-city-validation",
+      "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/aef4a8d9d48742cb93e5600e730336d877e9b35191e53906bb18b5138a80790d/report.json",
+      "ok": true,
+      "completed_games": 400,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6575,
+          "games": 400,
+          "invalid_actions": 0,
+          "mean_rank": 1.3425,
+          "pair_score": 0.6575,
+          "scored_games": 400,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 204640,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3709000,
+        "timeouts": 0,
+        "total_ns": 150798837000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-funded-city-large8",
+      "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/9914258f9330d7e77e092b7812780284347b3e12d2c274db207ba9d392f4cf25/report.json",
+      "ok": true,
+      "completed_games": 16,
+      "metrics": {
+        "8": {
+          "game_win_rate": 0.1875,
+          "games": 16,
+          "invalid_actions": 0,
+          "mean_rank": 4.25,
+          "pair_score": 0.5357142857142857,
+          "scored_games": 16,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 13799,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3228000,
+        "timeouts": 0,
+        "total_ns": 19931657000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-funded-city-ffa4",
+      "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f6f9f971663d22f995fe273992899498b10ce181003ab03cf1b370edf4bf06da/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.475,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.025,
+          "pair_score": 0.6583333333333333,
+          "scored_games": 80,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 51244,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2095000,
+        "timeouts": 0,
+        "total_ns": 52389795000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-command-control-ffa4",
+      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bc0f9192bacf234a363428b51630e6cced7c51d59a77cf040ff22546bb7c5404/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.4375,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.1,
+          "pair_score": 0.6333333333333333,
+          "scored_games": 80,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 51373,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2042000,
+        "timeouts": 0,
+        "total_ns": 52733955000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -4906,17 +5285,17 @@
     "human_level_verified": false,
     "target_met": false,
     "latest_holdout": {
-      "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+      "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
       "games": 400,
-      "wins": 281,
-      "win_rate": 0.7025,
-      "seed": 261017212,
+      "wins": 263,
+      "win_rate": 0.6575,
+      "seed": 261017301,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 8125000,
+      "max_ns": 3709000,
       "hard_limit_qualified": true,
-      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b0bdaee3e99033c8b3fb579e86690ed1f52d852f6a6d4615dd404b90ba7be367/report.json",
-      "note": "Outside the repeated development seed. Recorded-player probes are not human matches."
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/aef4a8d9d48742cb93e5600e730336d877e9b35191e53906bb18b5138a80790d/report.json",
+      "note": "Separate from the repeated 160-game development seed, but this 400-game validation seed was also used for the frozen control and intermediate city-reply variant. Not a new human match or a formal evaluation."
     },
     "disqualified_holdout": {
       "version": "42443fddbe4280729c7a287dedd3d64df90add94114d8010af885d62a46e251c",
@@ -4974,7 +5353,778 @@
           "implication": "The opponent retains knowledge of the exposed general after its scout leaves. A fresh raid is not a fresh information state.",
           "addressed": "Post-raid rebuilding is improved; permanent exposure-aware strategy remains unresolved. Scouting intent is inferred from the observed sequence."
         }
-      ]
+      ],
+      "command_and_occupation_followup": {
+        "working_version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+        "status": "Provisional behavior corrections; no demonstrated strength gain or human-level result.",
+        "paired_validation": {
+          "games": 400,
+          "seed": 261017301,
+          "matched_initial_states": true,
+          "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+          "new_version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+          "control_wins": 262,
+          "new_wins": 263,
+          "changed_to_win": 42,
+          "changed_to_loss": 41,
+          "two_sided_exact_mcnemar_p": 1.0,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a8ebb7425bd1aa6bfbbcc1f152869229bd274b27b947aedc5213a8c242184e02/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/aef4a8d9d48742cb93e5600e730336d877e9b35191e53906bb18b5138a80790d/report.json",
+          "interpretation": "42 gains and 41 losses; the per-game test ignores map-rotation clustering and provides no evidence of a strength gain."
+        },
+        "paired_ffa": {
+          "games": 80,
+          "seed": 261017304,
+          "matched_initial_states": true,
+          "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+          "new_version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+          "control_wins": 35,
+          "new_wins": 38,
+          "changed_to_win": 8,
+          "changed_to_loss": 5,
+          "two_sided_exact_mcnemar_p": 0.5810546875,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/bc0f9192bacf234a363428b51630e6cced7c51d59a77cf040ff22546bb7c5404/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f6f9f971663d22f995fe273992899498b10ce181003ab03cf1b370edf4bf06da/report.json",
+          "interpretation": "Same four-player pool and eighty scheduled games: 35 to 38 wins, mean rank 2.100 to 2.025. A small observed change, not sufficient evidence of general superiority or human-level strength."
+        },
+        "previous_city_reply_validation": {
+          "games": 400,
+          "seed": 261017301,
+          "matched_initial_states": true,
+          "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+          "new_version": "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+          "control_wins": 262,
+          "new_wins": 263,
+          "changed_to_win": 36,
+          "changed_to_loss": 35,
+          "two_sided_exact_mcnemar_p": 1.0,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a8ebb7425bd1aa6bfbbcc1f152869229bd274b27b947aedc5213a8c242184e02/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/53faeb6dd0fdf0c94b3a7f94f85acaf3c00abf5dbac1be8adc88c876cebb175f/report.json"
+        },
+        "rejected_city_relief": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+          "new_version": "548627e2e03b8494458f49ec7f563129a2a2676ef3e7babe9e2e5838255e872c",
+          "control_wins": 115,
+          "new_wins": 98,
+          "changed_to_win": 6,
+          "changed_to_loss": 23,
+          "two_sided_exact_mcnemar_p": 0.002315700054168701,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/5282df066f949faf6ef765e892f705a849de6d308f2774085fefbd011b93e8af/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d10008e17ee0b53a3dfb616fd095810b0b2e29e48fd4659d5eb5aa00f5f2598b/report.json"
+        },
+        "opponent_assembly_development": {
+          "games": 160,
+          "seed": 261017101,
+          "matched_initial_states": true,
+          "control_version": "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+          "new_version": "34c795a10dd535265d81723f02f7654b90b037222eef6b8a7fc8622f61316644",
+          "control_wins": 109,
+          "new_wins": 109,
+          "changed_to_win": 1,
+          "changed_to_loss": 1,
+          "two_sided_exact_mcnemar_p": 1.0,
+          "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/843ebd9140386dda232527dd252b1daae5384d06d93f2021390cbfcb90eff00a/report.json",
+          "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7d277d5659de8f349f54999f8aa7fc98af3fa506c739c37933bf57785bfd92c7/report.json"
+        },
+        "frozen_previous_control": {
+          "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+          "games": 400,
+          "wins": 262,
+          "seed": 261017301,
+          "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a8ebb7425bd1aa6bfbbcc1f152869229bd274b27b947aedc5213a8c242184e02/report.json"
+        },
+        "source_variants": [
+          {
+            "version": "548627e2e03b8494458f49ec7f563129a2a2676ef3e7babe9e2e5838255e872c",
+            "change": "Explicit city-relief scheduling",
+            "decision": "Rejected after 98/160 versus the frozen control 115/160; six flipped wins and twenty-three flipped losses."
+          },
+          {
+            "version": "9ee59bbd979b7d8296c3d7070fa33af32a367b0dab520ebd35895fd35ef4a9ae",
+            "change": "Joint city-occupation and observed enemy-reinforcement ledger",
+            "decision": "263/400 versus control 262/400, not a demonstrated win-rate improvement. Among the first eighty same-seed games, large immediate reversals without collection or new vision fell from 476 to 326; that descriptive category can still include useful tactical dodges."
+          },
+          {
+            "version": "34c795a10dd535265d81723f02f7654b90b037222eef6b8a7fc8622f61316644",
+            "change": "Six-order opponent concentration forecast",
+            "decision": "109/160, unchanged total relative to its direct predecessor: one changed win and one changed loss."
+          },
+          {
+            "version": "e10efb3c0540c3711d09c9937aa4ad91384699434ec753f2f082d470a3bd1cd9",
+            "change": "Allow feasible one- and two-step front formations",
+            "decision": "108/160 and one human regression failure; not retained unchanged."
+          },
+          {
+            "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
+            "change": "Reject unfunded neutral-city investment independently of alternative proposal availability",
+            "decision": "Fourteen regressions passed; 108/160 development and 263/400 validation. The same validation games changed forty-two losses to wins and forty-one wins to losses versus the previous working control; not a strength breakthrough."
+          }
+        ],
+        "human_full_history_probe": {
+          "path": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/funded-city-human.json",
+          "scope": "Recorded own legal observation streams. Alternative actions are NOT executed; later frames remain historical. This is no evidence of alternate wins. Diagnostics copy values inside arena_act before observation expiry. Instrumented-source timing is separate from the unchanged candidate Arena timing.",
+          "games": 8,
+          "selected_frames": 40,
+          "timing_scope": "Instrumented diagnostic only; excluded from the unmodified candidate Arena timing."
+        },
+        "action_economy": {
+          "scope": "Historical own legal observations and submitted actions only. Attempts are not guaranteed executed orders; short ownership duration is descriptive, not proof that the move was bad. New-vision updates are not attributed causally to a particular action.",
+          "games": [
+            {
+              "game": 1,
+              "moves_after_150": 708,
+              "friendly_transfers": 442,
+              "attacks": 266,
+              "recent_enemy_land_recapture_attempts": 71,
+              "large_column_recent_recapture_attempts": 40,
+              "non_city_tiles_lost": 163,
+              "non_city_tiles_lost_within_20_ticks": 85,
+              "post_contact_orders": 708,
+              "post_contact_updates_with_new_vision": 73,
+              "first_visible_enemy_in_home_vision": 524,
+              "examples": [
+                {
+                  "tick": 286,
+                  "source": 182,
+                  "target": 163,
+                  "source_army": 64,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 297,
+                  "source": 204,
+                  "target": 185,
+                  "source_army": 3,
+                  "ticks_since_loss": 12,
+                  "newly_seen": 3
+                },
+                {
+                  "tick": 348,
+                  "source": 216,
+                  "target": 197,
+                  "source_army": 3,
+                  "ticks_since_loss": 2,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 349,
+                  "source": 217,
+                  "target": 198,
+                  "source_army": 4,
+                  "ticks_since_loss": 2,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 363,
+                  "source": 258,
+                  "target": 239,
+                  "source_army": 110,
+                  "ticks_since_loss": 1,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 364,
+                  "source": 239,
+                  "target": 238,
+                  "source_army": 108,
+                  "ticks_since_loss": 3,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 365,
+                  "source": 238,
+                  "target": 237,
+                  "source_army": 106,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 366,
+                  "source": 237,
+                  "target": 218,
+                  "source_army": 104,
+                  "ticks_since_loss": 7,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 2,
+              "moves_after_150": 759,
+              "friendly_transfers": 481,
+              "attacks": 278,
+              "recent_enemy_land_recapture_attempts": 113,
+              "large_column_recent_recapture_attempts": 46,
+              "non_city_tiles_lost": 238,
+              "non_city_tiles_lost_within_20_ticks": 106,
+              "post_contact_orders": 786,
+              "post_contact_updates_with_new_vision": 36,
+              "first_visible_enemy_in_home_vision": 639,
+              "examples": [
+                {
+                  "tick": 220,
+                  "source": 168,
+                  "target": 169,
+                  "source_army": 16,
+                  "ticks_since_loss": 18,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 227,
+                  "source": 223,
+                  "target": 205,
+                  "source_army": 3,
+                  "ticks_since_loss": 23,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 241,
+                  "source": 183,
+                  "target": 165,
+                  "source_army": 25,
+                  "ticks_since_loss": 0,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 242,
+                  "source": 165,
+                  "target": 166,
+                  "source_army": 22,
+                  "ticks_since_loss": 2,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 243,
+                  "source": 166,
+                  "target": 167,
+                  "source_army": 20,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 244,
+                  "source": 167,
+                  "target": 168,
+                  "source_army": 18,
+                  "ticks_since_loss": 6,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 245,
+                  "source": 168,
+                  "target": 169,
+                  "source_army": 16,
+                  "ticks_since_loss": 8,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 248,
+                  "source": 188,
+                  "target": 170,
+                  "source_army": 10,
+                  "ticks_since_loss": 22,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 3,
+              "moves_after_150": 1259,
+              "friendly_transfers": 826,
+              "attacks": 433,
+              "recent_enemy_land_recapture_attempts": 165,
+              "large_column_recent_recapture_attempts": 58,
+              "non_city_tiles_lost": 376,
+              "non_city_tiles_lost_within_20_ticks": 82,
+              "post_contact_orders": 1992,
+              "post_contact_updates_with_new_vision": 72,
+              "first_visible_enemy_in_home_vision": 1022,
+              "examples": [
+                {
+                  "tick": 265,
+                  "source": 70,
+                  "target": 91,
+                  "source_army": 7,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 266,
+                  "source": 91,
+                  "target": 92,
+                  "source_army": 5,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 267,
+                  "source": 92,
+                  "target": 113,
+                  "source_army": 3,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 277,
+                  "source": 91,
+                  "target": 112,
+                  "source_army": 7,
+                  "ticks_since_loss": 17,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 278,
+                  "source": 112,
+                  "target": 111,
+                  "source_army": 5,
+                  "ticks_since_loss": 13,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 279,
+                  "source": 112,
+                  "target": 111,
+                  "source_army": 5,
+                  "ticks_since_loss": 14,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 280,
+                  "source": 111,
+                  "target": 90,
+                  "source_army": 3,
+                  "ticks_since_loss": 14,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 285,
+                  "source": 155,
+                  "target": 154,
+                  "source_army": 13,
+                  "ticks_since_loss": 27,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 4,
+              "moves_after_150": 179,
+              "friendly_transfers": 99,
+              "attacks": 80,
+              "recent_enemy_land_recapture_attempts": 14,
+              "large_column_recent_recapture_attempts": 3,
+              "non_city_tiles_lost": 32,
+              "non_city_tiles_lost_within_20_ticks": 20,
+              "post_contact_orders": 179,
+              "post_contact_updates_with_new_vision": 38,
+              "first_visible_enemy_in_home_vision": 128,
+              "examples": [
+                {
+                  "tick": 226,
+                  "source": 183,
+                  "target": 182,
+                  "source_army": 7,
+                  "ticks_since_loss": 2,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 230,
+                  "source": 104,
+                  "target": 105,
+                  "source_army": 29,
+                  "ticks_since_loss": 1,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 231,
+                  "source": 105,
+                  "target": 124,
+                  "source_army": 27,
+                  "ticks_since_loss": 3,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 232,
+                  "source": 124,
+                  "target": 125,
+                  "source_army": 25,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 233,
+                  "source": 125,
+                  "target": 144,
+                  "source_army": 23,
+                  "ticks_since_loss": 7,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 234,
+                  "source": 144,
+                  "target": 163,
+                  "source_army": 21,
+                  "ticks_since_loss": 9,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 236,
+                  "source": 182,
+                  "target": 183,
+                  "source_army": 19,
+                  "ticks_since_loss": 1,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 263,
+                  "source": 199,
+                  "target": 218,
+                  "source_army": 8,
+                  "ticks_since_loss": 15,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 6,
+              "moves_after_150": 985,
+              "friendly_transfers": 545,
+              "attacks": 440,
+              "recent_enemy_land_recapture_attempts": 156,
+              "large_column_recent_recapture_attempts": 49,
+              "non_city_tiles_lost": 308,
+              "non_city_tiles_lost_within_20_ticks": 125,
+              "post_contact_orders": 1016,
+              "post_contact_updates_with_new_vision": 59,
+              "first_visible_enemy_in_home_vision": 893,
+              "examples": [
+                {
+                  "tick": 204,
+                  "source": 168,
+                  "target": 148,
+                  "source_army": 8,
+                  "ticks_since_loss": 7,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 205,
+                  "source": 148,
+                  "target": 149,
+                  "source_army": 5,
+                  "ticks_since_loss": 9,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 207,
+                  "source": 105,
+                  "target": 106,
+                  "source_army": 3,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 210,
+                  "source": 186,
+                  "target": 166,
+                  "source_army": 8,
+                  "ticks_since_loss": 10,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 211,
+                  "source": 186,
+                  "target": 166,
+                  "source_army": 8,
+                  "ticks_since_loss": 11,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 212,
+                  "source": 166,
+                  "target": 146,
+                  "source_army": 6,
+                  "ticks_since_loss": 13,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 213,
+                  "source": 146,
+                  "target": 147,
+                  "source_army": 4,
+                  "ticks_since_loss": 15,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 240,
+                  "source": 186,
+                  "target": 166,
+                  "source_army": 11,
+                  "ticks_since_loss": 1,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 7,
+              "moves_after_150": 350,
+              "friendly_transfers": 240,
+              "attacks": 110,
+              "recent_enemy_land_recapture_attempts": 39,
+              "large_column_recent_recapture_attempts": 14,
+              "non_city_tiles_lost": 60,
+              "non_city_tiles_lost_within_20_ticks": 35,
+              "post_contact_orders": 350,
+              "post_contact_updates_with_new_vision": 24,
+              "first_visible_enemy_in_home_vision": 448,
+              "examples": [
+                {
+                  "tick": 159,
+                  "source": 136,
+                  "target": 137,
+                  "source_army": 3,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 163,
+                  "source": 180,
+                  "target": 158,
+                  "source_army": 3,
+                  "ticks_since_loss": 1,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 172,
+                  "source": 203,
+                  "target": 181,
+                  "source_army": 3,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 188,
+                  "source": 204,
+                  "target": 182,
+                  "source_army": 6,
+                  "ticks_since_loss": 19,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 212,
+                  "source": 157,
+                  "target": 158,
+                  "source_army": 29,
+                  "ticks_since_loss": 2,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 213,
+                  "source": 158,
+                  "target": 136,
+                  "source_army": 27,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 214,
+                  "source": 158,
+                  "target": 136,
+                  "source_army": 27,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 215,
+                  "source": 136,
+                  "target": 137,
+                  "source_army": 25,
+                  "ticks_since_loss": 7,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 8,
+              "moves_after_150": 743,
+              "friendly_transfers": 420,
+              "attacks": 323,
+              "recent_enemy_land_recapture_attempts": 130,
+              "large_column_recent_recapture_attempts": 61,
+              "non_city_tiles_lost": 193,
+              "non_city_tiles_lost_within_20_ticks": 95,
+              "post_contact_orders": 743,
+              "post_contact_updates_with_new_vision": 54,
+              "first_visible_enemy_in_home_vision": 608,
+              "examples": [
+                {
+                  "tick": 163,
+                  "source": 294,
+                  "target": 272,
+                  "source_army": 43,
+                  "ticks_since_loss": 26,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 165,
+                  "source": 250,
+                  "target": 249,
+                  "source_army": 37,
+                  "ticks_since_loss": 25,
+                  "newly_seen": 1
+                },
+                {
+                  "tick": 213,
+                  "source": 249,
+                  "target": 250,
+                  "source_army": 45,
+                  "ticks_since_loss": 18,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 214,
+                  "source": 250,
+                  "target": 251,
+                  "source_army": 42,
+                  "ticks_since_loss": 20,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 215,
+                  "source": 250,
+                  "target": 251,
+                  "source_army": 42,
+                  "ticks_since_loss": 21,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 216,
+                  "source": 251,
+                  "target": 229,
+                  "source_army": 39,
+                  "ticks_since_loss": 26,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 239,
+                  "source": 273,
+                  "target": 251,
+                  "source_army": 17,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 240,
+                  "source": 273,
+                  "target": 251,
+                  "source_army": 17,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                }
+              ]
+            },
+            {
+              "game": 9,
+              "moves_after_150": 1191,
+              "friendly_transfers": 668,
+              "attacks": 523,
+              "recent_enemy_land_recapture_attempts": 223,
+              "large_column_recent_recapture_attempts": 112,
+              "non_city_tiles_lost": 365,
+              "non_city_tiles_lost_within_20_ticks": 124,
+              "post_contact_orders": 1191,
+              "post_contact_updates_with_new_vision": 50,
+              "first_visible_enemy_in_home_vision": 1341,
+              "examples": [
+                {
+                  "tick": 157,
+                  "source": 117,
+                  "target": 95,
+                  "source_army": 3,
+                  "ticks_since_loss": 4,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 182,
+                  "source": 183,
+                  "target": 184,
+                  "source_army": 9,
+                  "ticks_since_loss": 3,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 183,
+                  "source": 184,
+                  "target": 162,
+                  "source_army": 7,
+                  "ticks_since_loss": 5,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 184,
+                  "source": 184,
+                  "target": 162,
+                  "source_army": 7,
+                  "ticks_since_loss": 6,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 185,
+                  "source": 162,
+                  "target": 163,
+                  "source_army": 5,
+                  "ticks_since_loss": 8,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 186,
+                  "source": 163,
+                  "target": 164,
+                  "source_army": 3,
+                  "ticks_since_loss": 10,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 208,
+                  "source": 184,
+                  "target": 206,
+                  "source_army": 17,
+                  "ticks_since_loss": 28,
+                  "newly_seen": 0
+                },
+                {
+                  "tick": 209,
+                  "source": 206,
+                  "target": 207,
+                  "source_army": 14,
+                  "ticks_since_loss": 28,
+                  "newly_seen": 0
+                }
+              ]
+            }
+          ],
+          "counting_note": "Losses and recaptures count events/attempts, not distinct squares. Submitted online instructions can be repeated or unexecuted; no causal win claim is made from these counts."
+        },
+        "profiling": {
+          "control": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/retained-planning.json",
+          "city_relief": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/city-relief-planning.json",
+          "scope": "First twelve games, not a representative all-map timing guarantee. All fourteen optional stages were entered in the control sample; that sample does not support blanket attribution of stagnation to the planning clock."
+        },
+        "behavior_comparison": {
+          "control": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/control-operations.json",
+          "city_reply": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/city-reply-operations.json",
+          "scope": "First eighty matched-seed historical games, descriptive rather than causal."
+        },
+        "remaining_findings": [
+          "In the continuous historical probe, the candidate still leaves some newly captured cities. In game 6, the 48-troop enemy first becomes visible at tick 340, after the tick-338 exit. Merely keeping the 33-troop garrison would not defeat it. A supported occupation, withdrawal and reassembly plan remains unresolved.",
+          "In game 9 after tick 150, 223 of 523 submitted attacks on non-owned squares aimed at ordinary land lost within the previous 30 ticks. 112 used a source with at least 30 troops. These are attempts, not confirmed executed actions, and recapture is not automatically a mistake. The current fixed ordinary-land reward should be audited against actual holding time and transport/vision value.",
+          "The candidate preserves the front army before the previously unseen counterattack and starts earlier reinforcement against the recorded distant column, in continuous historical probes. Later frames are the original game, so neither result proves a saved game.",
+          "Human sequences show reusable field columns returning through productive cities, source/landing interceptions, and repeat raids after reconnaissance. Independent task prizes do not yet guarantee a shared campaign schedule that retains a mobile defender, explores a different route, and delivers reinforcement on time."
+        ]
+      }
     },
     "paired_reconnaissance_comparison": {
       "games": 400,
@@ -5078,15 +6228,15 @@
     }
   },
   "working_candidate": {
-    "version": "44d490690c7d80c65296d90b885fa75dc8f8273b5ab70eeb6caee9577336ae57",
+    "version": "1f89e047cf9363b92fecfdb7d8ac47ba7f4b38daf85b5ed3226731e00c4308ff",
     "source_directory": "heristic/gpt-6-razor/v8",
-    "status": "experimental_not_promoted",
+    "status": "experimental_behavior_fixes_not_strength_promoted",
     "formal_publication": null,
     "hard_limit_qualified": true,
     "validation": {
       "tests": 14,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-goal-20261016/tests-visible-interception.log"
+      "log": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/tests-funded-city.log"
     }
   },
   "failed_regression_experiments": [
@@ -5099,6 +6249,11 @@
       "log": "outputs/analysis/razor-v8-goal-20261016/tests-city-mobile-defense.log",
       "version": "0d9b23e9adc884122af777809deb5e518ef62d7beb5a4a38e433a6f0c426655c",
       "failure": "A rear transport displaced the available city half sortie; also incurred a recorded decision timeout."
+    },
+    {
+      "version": "e10efb3c0540c3711d09c9937aa4ad91384699434ec753f2f082d470a3bd1cd9",
+      "log": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-command-20261017/tests-close-formation.log",
+      "failure": "One of fourteen tests failed: the recorded unsupported neutral-city purchase was selected again. The later funded-city variant passed all fourteen. This failed run remains preserved; a separate instrumented probe chose a safe move, so timing-dependent proposal coverage is a hypothesis, not an established sole cause."
     }
   ]
 }
