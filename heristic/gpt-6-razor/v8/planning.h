@@ -85,7 +85,7 @@ bool landingCanBeDenied(const Order &x)const {
 // that identity is transport, not newly assembled fighting strength.
 int flowId[MAXN]{},flowAt[MAXN]{},flowSerial=0;
 int flowS=-1,flowT=-1,flowTick=-1,flowFamily=0,flowBorn=0,flowTargetArmy=0,flowExpected=0;
-bool flowHalf=false;
+bool flowVoluntarySplit=false;
 std::int64_t flowAction=0;
 int currentFlow(int c)const {return flowId[c]&&tick-flowAt[c]<=32?flowId[c]:0;}
 bool sameFlow(int a,int b)const {int f=currentFlow(a);return f&&f==currentFlow(b);}
@@ -97,12 +97,17 @@ void updateFlows(){
  int moved=o->previous?int(o->previous->moved):flowExpected-flowTargetArmy;
  if(moved<=0)return;
  int family=flowFamily,born=flowBorn;
- if(flowHalf&&!family){family=++flowSerial;born=tick;}
- if(flowHalf&&mine(flowS)){flowId[flowS]=family;flowAt[flowS]=born;}
+ if(flowVoluntarySplit&&!family){family=++flowSerial;born=tick;}
+ if(flowVoluntarySplit&&mine(flowS)){flowId[flowS]=family;flowAt[flowS]=born;}
  if(moved>=flowTargetArmy){flowId[flowT]=family;flowAt[flowT]=born;}
 }
 void recordFlow(const Order &x,std::int64_t action){
- flowS=x.s;flowT=x.t;flowTick=tick;flowHalf=x.half;flowAction=action;
+ flowS=x.s;flowT=x.t;flowTick=tick;flowAction=action;
+ // A compulsory half departure releases troops from a reserved garrison;
+ // its second half-transfer can create a larger usable field column. It is
+ // not a discretionary split of an already movable army. Existing lineage
+ // is still inherited, so entering a city cannot erase a recent split.
+ flowVoluntarySplit=x.half&&reserve[x.s]<=1;
  flowFamily=currentFlow(x.s);flowBorn=flowAt[x.s];
  flowTargetArmy=mine(x.t)?ready(x.t):0;
  flowExpected=moveArmy(x.s,x.half)+(mine(x.t)?army(x.t):-rememberedDefense(x.t));
@@ -111,7 +116,9 @@ int assemblyCredit(const Program &collection,int root,int finalForce,int need)co
  int cells[41],families[41],mass[41]{},count=0;
  cells[0]=root;for(int j=0;j<collection.count;j++)cells[j+1]=collection.orders[j].s;
  for(int j=0;j<=collection.count;j++){
-  int c=cells[j],family=currentFlow(c);if(!family)family=-c-1;
+  int c=cells[j];bool duplicate=false;for(int k=0;k<j;k++)if(cells[k]==c)duplicate=true;
+  if(duplicate)continue;
+  int family=currentFlow(c);if(!family)family=-c-1;
   int slot=0;while(slot<count&&families[slot]!=family)slot++;
   if(slot==count)families[count++]=family;
   mass[slot]+=std::max(0,ready(c)-1);
@@ -205,8 +212,9 @@ double cityUtility(int c,int remaining,int arrival)const {
 }
 
 // Compute the exact set of edges used by a bounded friendly collection tree.
-// Each child subtree is disjoint, each selected edge costs one order, and the
-// reconstruction merges children before moving their parent toward the root.
+// Each child subtree is disjoint. A reserved donor may use up to four half
+// transfers over the same edge, each paying one order and retaining its actual
+// reserve. Reconstruction completes the child before sending its troops.
 void scheduleTree(int root,int budget){
  std::fill(scheduleParent,scheduleParent+N,-2);
  for(int c=0;c<N;c++)if(mine(c)){
@@ -237,25 +245,42 @@ void scheduleTree(int root,int budget){
   for(int k=0;k<4;k++){
    for(int b=0;b<=budget;b++)schedulePick[u][k][b]=-1;
    int child=nb[u][k];if(child<0||scheduleParent[child]!=u)continue;
+   if(reserve[child]<=1){
+    for(int b=budget;b>=1;b--)for(int use=0;use<b;use++){
+     if(schedule[u][b-use-1]<0||schedule[child][use]<=1)continue;
+     int value=schedule[u][b-use-1]+schedule[child][use]-1;
+     if(value>schedule[u][b]){schedule[u][b]=value;schedulePick[u][k][b]=use*4;}
+    }
+    continue;
+   }
    for(int b=budget;b>=1;b--)for(int use=0;use<b;use++){
-    if(schedule[u][b-use-1]<0||schedule[child][use]<=1)continue;
-    int available=schedule[child][use]-1;
-    if(reserve[child]>1)available=(schedule[child][use]+1)/2>=reserve[child]?schedule[child][use]/2:0;
-    if(available<=0)continue;
-    int value=schedule[u][b-use-1]+available;
-    if(value>schedule[u][b]){schedule[u][b]=value;schedulePick[u][k][b]=use;}
+    int assembled=schedule[child][use];if(assembled<=1)continue;
+    int remaining=assembled,maxMoves=std::min(4,b-use);
+    for(int moves=1;moves<=maxMoves;moves++){
+     remaining=(remaining+1)/2;
+     if(remaining<reserve[child])break;
+     int base=schedule[u][b-use-moves];
+     if(base<0||assembled<=remaining)continue;
+     int value=base+assembled-remaining;
+     // Own-tree choices pack the child budget and transfer count. The
+     // separate adversarial city-relief extractor retains its own format.
+     if(value>schedule[u][b]){schedule[u][b]=value;schedulePick[u][k][b]=use*4+moves-1;}
+    }
    }
   }
  }
 }
 void extractSchedule(int u,int budget,Program &q){
- int use[4];
- for(int k=3;k>=0;k--){use[k]=schedulePick[u][k][budget];if(use[k]>=0)budget-=use[k]+1;}
+ int use[4],moves[4]{};
+ for(int k=3;k>=0;k--){
+  int pick=schedulePick[u][k][budget];use[k]=pick<0?-1:pick/4;
+  if(pick>=0){moves[k]=pick%4+1;budget-=use[k]+moves[k];}
+ }
  // Every selected child is finished before its edge to the parent is used.
  // This preserves a feasible prefix if an emergency interrupts the program.
  for(int k=0;k<4;k++)if(use[k]>=0){
   int child=nb[u][k];extractSchedule(child,use[k],q);
-  if(q.count<40)q.orders[q.count++]={child,u,reserve[child]>1};
+  for(int j=0;j<moves[k]&&q.count<40;j++)q.orders[q.count++]={child,u,reserve[child]>1};
  }
 }
 

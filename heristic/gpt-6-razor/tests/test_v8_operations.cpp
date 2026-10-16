@@ -13,6 +13,25 @@ struct Board {
 
 int main(){
  {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.structure[55]=1;b.army[55]=100;b.army[56]=1;
+  b.owner[65]=1;b.army[65]=100;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->reserve[55]=20;
+  p->scheduleTree(56,3);
+  assert(p->schedule[56][1]==51&&p->schedule[56][2]==76&&p->schedule[56][3]<0);
+  Policy::Program q;q.kind=11;q.root=q.goal=56;q.born=300;p->extractSchedule(56,2,q);
+  assert(q.count==2&&q.orders[0].s==55&&q.orders[1].s==55&&q.orders[0].half&&q.orders[1].half);
+  assert(p->collectionArrival(q,56)==76);
+  assert(p->collectionTroops[55]>=20);
+  // Repeated edges do not introduce a second copy of the same donor.
+  assert(p->mobileAssemblyCredit(q,56,76,100)==25);
+  auto action=arena_move(55,1,true);p->recordFlow(q.orders[0],action);
+  b.obs.tick=301;b.army[55]=50;b.army[56]=51;b.refresh(*p);p->reserve[55]=20;
+  assert(!p->sameFlow(55,56));
+  q.cursor=1;assert(p->remainingAssemblyValue(q)>0);
+ }
+ {
   // Human replay pattern: the strongest available field column is below
   // the enemy's predicted concentration. That is no reason to split it into
   // two still weaker scouts; merging the departing half with another stack

@@ -3,7 +3,7 @@
   "status": "active_research_not_promoted",
   "formal_evaluations_started": 0,
   "publication": null,
-  "online_games_started": 0,
+  "online_games_started": 2,
   "started_at_utc": "2026-10-16T10:49:37Z",
   "versions": {
     "06cda639767ec31fd633c2afe40f169ea7f930577491c796ef1be385448d3c92": {
@@ -5694,8 +5694,8 @@
     }
   ],
   "limitations": [
-    "Free Arena runs only; no formal rating or main-site evaluation for v8.",
-    "The 80% duel target and human-level strength remain unverified; no v8 human games or formal Arena evaluation have been started.",
+    "No formal v8 publication. Retained immutable e7d36 has an ongoing main-site batch; main-site opponents are not independently verified as humans.",
+    "The 80% duel target and human-level strength remain unverified. New repeated-transfer, funded-purchase and city-relief drafts have not yet been validated.",
     "Exact source snapshots preserve tested bytes, including harmless blank lines at EOF."
   ],
   "previous_checkpoint": {
@@ -6806,6 +6806,47 @@
           "selected_frames": 40,
           "finding": "At game 2 tick 270 the candidate chooses a full-column reconnaissance departure instead of the previous half split. At tick 271 and 292, the historical newly captured city still launches its small garrison. The full campaign and occupation problem remains unresolved; no alternate game was played."
         }
+      },
+      "current_online_followup": {
+        "report": "outputs/online/razor-v8-main-probe-20261016T2050Z/report.json",
+        "source_version": "e7d36ac6ce0f05f96ac9b55e9295b3664e74abb92fbb6a9c1013c9d604985ba3",
+        "observations": [
+          {
+            "game": 1,
+            "replay": "https://generals.io/replays/mzVOpWfRC",
+            "outcome": "won",
+            "enemy_general_first_seen": 591,
+            "finish_tick": 725,
+            "note": "The first known-general assault was intercepted at 623/624; later reassembly won. The unseen reinforcement origin is unknown."
+          },
+          {
+            "game": 2,
+            "status": "ongoing",
+            "ticks": [
+              333,
+              334,
+              335,
+              336,
+              350,
+              352,
+              362,
+              363
+            ],
+            "note": "A 146-troop column bought adjacent neutral cities costing 45 and 47, then launched small columns away. An 80-troop enemy first visible at 352 approached and captured both cities at 362/363. The existing city reinforcement generator is not connected to the current controller. Purchase funding and city relief are being tested separately."
+          }
+        ],
+        "verified_human_followup": {
+          "record_root": "outputs/online/razor-100-20261014T125242Z/batch-02",
+          "opponent": "QueueT",
+          "identity_basis": "Identified as a human expert by the user.",
+          "games": [
+            3,
+            4,
+            5
+          ],
+          "scope": "Rechecked recorded own legal streams; these games used an older Razor source, not the current v8.",
+          "observations": "At game 3 tick 176 total armies were 145 versus 172; at 180 a 65-troop enemy column was five steps from home while our largest stack was home 17. In game 5 our early 53-troop raid was consumed across low-value enemy land; the opponent counter-column followed the approach back to our home and later reused it."
+        }
       }
     },
     "paired_reconnaissance_comparison": {
@@ -6910,15 +6951,14 @@
     }
   },
   "working_candidate": {
-    "version": "e7d36ac6ce0f05f96ac9b55e9295b3664e74abb92fbb6a9c1013c9d604985ba3",
+    "version": "ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
     "source_directory": "heristic/gpt-6-razor/v8",
-    "status": "experimental_human_failure_fix_not_strength_promoted",
+    "status": "unvalidated_repeated_protected_transfer_trial",
     "formal_publication": null,
-    "hard_limit_qualified": true,
+    "hard_limit_qualified": false,
     "validation": {
-      "tests": 14,
-      "passed": true,
-      "log": "/Users/bzy/project/generals-rl/outputs/analysis/razor-v8-retention-20261017/tests-existing-column.log"
+      "passed": false,
+      "note": "Draft archived. Validation has not started while the retained immutable policy is playing its online batch."
     }
   },
   "failed_regression_experiments": [
@@ -6943,6 +6983,53 @@
       "version": "6a966b6f192e253d8867ec0ab2f29d0440d084f8c87e2ce924b70400027138b5",
       "source_directory": "heristic/gpt-6-razor/experiments/6a966b6f192e253d8867ec0ab2f29d0440d084f8c87e2ce924b70400027138b5",
       "reason": "Composition draft archived before addressing the predecessor timing violation; no games or strength claim."
+    },
+    {
+      "version": "a1ebf65c25af8619bb1663c0d988c0f23a68548721705925fa39f4a2d100bb3a",
+      "source_directory": "heristic/gpt-6-razor/experiments/a1ebf65c25af8619bb1663c0d988c0f23a68548721705925fa39f4a2d100bb3a",
+      "reason": "Untested deployable-city-role draft. Live v8 observations reveal compulsory half departures from lightly reserved cities, so a complete repeated-transfer schedule is investigated separately. No strength or timing claim."
+    },
+    {
+      "version": "ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
+      "source_directory": "heristic/gpt-6-razor/experiments/ff2606c1b5169f2b83f25060a4f729b5073cb76dd8c4c7b67a467f3d35bc0825",
+      "reason": "Repeated protected-donor transfers and conserved assembly credit; awaiting serial validation after the active online match batch."
+    },
+    {
+      "version": "1fc96f7a90e6b278f8aec8e19800611bfb0bac209e3651777329148b12fcec28",
+      "source_directory": "heristic/gpt-6-razor/experiments/1fc96f7a90e6b278f8aec8e19800611bfb0bac209e3651777329148b12fcec28",
+      "reason": "Independent funded-neutral-occupation trial from retained source e7d36: reject underfunded purchases including intermediate cities, without changing repeated-donor scheduling. Not compiled or run yet."
+    },
+    {
+      "version": "07c409ecf6c6bd4fbec112c1d006e1c3836279f9885d946cd1f2a23819076cfd",
+      "source_directory": "heristic/gpt-6-razor/experiments/07c409ecf6c6bd4fbec112c1d006e1c3836279f9885d946cd1f2a23819076cfd",
+      "reason": "Independent trial connecting the existing deadline-aware city reinforcement generator to the controller. No changes to purchase gating or repeated protected-donor extraction. Awaiting serial validation after online batch."
+    }
+  ],
+  "online_experiments": [
+    {
+      "source_version": "e7d36ac6ce0f05f96ac9b55e9295b3664e74abb92fbb6a9c1013c9d604985ba3",
+      "report": "outputs/online/razor-v8-main-probe-20261016T2050Z/report.json",
+      "site": "main",
+      "requested_games": 3,
+      "completed_games": 1,
+      "wins": 1,
+      "losses": 0,
+      "failures": 0,
+      "status": "running",
+      "active_game": {
+        "attempt": 2,
+        "seed": 261017602,
+        "started_at": "2026-10-16T20:57:39.709143+00:00",
+        "record": "/Users/bzy/project/generals-rl/outputs/online/razor-v8-main-probe-20261016T2050Z/game-002.jsonl"
+      },
+      "identity_note": "Public opponent usernames do not establish whether a main-site opponent is human or AI.",
+      "timing": {
+        "calls": 725,
+        "max_ns": 3719000,
+        "timeouts": 0,
+        "errors": 0
+      },
+      "scope": "Timing aggregate currently covers completed games only; active-game timing is pending. All outcomes and failures will be retained."
     }
   ]
 }

@@ -575,7 +575,9 @@ int mobileAssemblyCredit(const Program &q,int root,int finalForce,int need)const
  int cells[41],families[41],mass[41]{},count=0;
  cells[0]=root;for(int j=0;j<q.count;j++)cells[j+1]=q.orders[j].s;
  for(int j=0;j<=q.count;j++){
-  int c=cells[j],family=currentFlow(c);bool split=family!=0;if(!family)family=-c-1;
+  int c=cells[j];bool duplicate=false;for(int k=0;k<j;k++)if(cells[k]==c)duplicate=true;
+  if(duplicate)continue;
+  int family=currentFlow(c);bool split=family!=0;if(!family)family=-c-1;
   int slot=0;while(slot<count&&families[slot]!=family)slot++;
   if(slot==count)families[count++]=family;
   bool half=false;
