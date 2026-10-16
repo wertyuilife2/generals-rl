@@ -130,6 +130,7 @@ Program oneStep(const Candidate &c,int kind=0)const {
 double programScore(const Program &q)const {
  if(q.cursor>=q.count)return -1e30;
  const Order &x=q.orders[q.cursor];
+ if((q.kind==10||q.kind==16||q.kind==24)&&!scoutDepartureAllowed(x))return -1e30;
  if(q.kind!=17&&q.kind!=20&&q.kind!=21&&!legalOrder(x,q.kind==3))return -1e30;
  if(q.kind==20&&!legalOrder(x,true))return -1e30;
  if(q.kind!=3&&q.kind!=4&&q.kind!=9&&q.kind!=17&&q.kind!=21&&landingCanBeDenied(x))return -1e30;

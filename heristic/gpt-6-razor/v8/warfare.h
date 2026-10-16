@@ -117,7 +117,7 @@ void expeditionPrograms(){
      // available when the route actually requires its additional troops.
      if(q.value>best.value+1e-9||
         (mode&&q.value>=best.value-1e-9&&q.value>-1e29)){
-      if(permitted(q.orders[0]))best=q;
+      if(permitted(q.orders[0])&&scoutDepartureAllowed(q.orders[0]))best=q;
      }
     }
    }
