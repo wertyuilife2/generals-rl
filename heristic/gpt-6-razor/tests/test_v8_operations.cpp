@@ -1,0 +1,118 @@
+#include "../v8/policy.cpp"
+#include <cassert>
+#include <memory>
+
+struct Board {
+ static constexpr int S=121;
+ std::uint8_t terrain[S]{},structure[S]{},visible[S],alive[2]={1,1};
+ std::int16_t owner[S];std::int64_t army[S]{},total[2]={400,200},land[2]={20,10},cities[2]={1,-1};
+ ArenaObservation obs{11,11,2,0,300,0,terrain,structure,owner,army,visible,alive,total,land,cities,nullptr};
+ Board(){std::fill(visible,visible+S,1);std::fill(owner,owner+S,-1);owner[0]=0;army[0]=100;structure[0]=2;}
+ void refresh(Policy &p){p.update(&obs);p.assetHistory();p.pressureMap();p.buildKingRelief();p.buildAttacks();p.baselineDanger=p.dangerAfter(nullptr,p.homeIncoming);}
+};
+
+int main(){
+ {
+  Board b;b.owner[1]=b.owner[11]=1;b.army[1]=80;b.army[11]=70;
+  b.owner[22]=b.owner[23]=0;b.army[22]=b.army[23]=30;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  assert(p->homeIncoming[1]<b.army[0]);
+  assert(p->homeIncoming[2]>b.army[0]);
+  assert(p->baselineDanger>0);
+ }
+ {
+  Board b;b.owner[120]=b.owner[119]=b.owner[109]=1;b.structure[120]=2;
+  b.army[120]=10;b.army[119]=40;b.army[109]=50;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  // Two independent donors can reach the king in two orders. Assuming only
+  // the single largest donor understates the defense of a distant attack.
+  assert(p->kingRelief[1][3]>=88);
+  assert(p->kingRelief[1][1]==0); // The defender acts after this seat.
+ }
+ {
+  Board b;b.army[0]=200;b.owner[5]=1;b.army[5]=140;
+  b.owner[11]=b.owner[12]=0;b.army[11]=b.army[12]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  bool half=false;assert(!p->canDepart(0,half));
+  Policy::Program q;q.kind=14;q.root=0;q.goal=12;q.count=3;q.born=300;
+  q.orders[0]={0,11,true};q.orders[1]={11,12,true};q.orders[2]={11,0,false};
+  assert(p->extractionSafe(q));
+  // The same sequence must be rejected when the attack can arrive before
+  // the planned return, regardless of its final garrison being sufficient.
+  b.owner[2]=1;b.army[2]=140;b.owner[5]=-1;b.army[5]=0;b.refresh(*p);
+  assert(!p->extractionSafe(q));
+ }
+ {
+  Board b;b.owner[59]=0;b.army[59]=200;b.owner[60]=1;b.army[60]=100;
+  auto p=std::make_unique<Policy>(0,1,"{}");auto action=p->act(&b.obs);
+  assert(action==arena_move(59,1,false));
+  // The same exchange becomes unsound when a second visible army can take
+  // the surviving column immediately; do not count the first kill alone.
+  b.owner[61]=1;b.army[61]=200;
+  auto q=std::make_unique<Policy>(0,1,"{}");action=q->act(&b.obs);
+  assert(action!=arena_move(59,1,false));
+ }
+ {
+  Board b;b.owner[58]=b.owner[59]=b.owner[60]=0;b.army[58]=20;b.army[59]=1;b.army[60]=10;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  Policy::Program q;q.kind=11;q.born=300;q.root=q.goal=60;q.value=4;q.count=2;q.cursor=1;
+  q.orders[0]={58,59,false};q.orders[1]={59,60,false};
+  auto action=arena_move(58,1,false);p->rememberOperation(q,q.orders[0],action);
+  // Online updates may skip a tick and omit native move receipts. The
+  // operation is acknowledged from its own source and destination changes.
+  b.obs.tick=302;b.army[58]=1;b.army[59]=20;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  assert(p->activeOperation.kind==11&&!p->operationPending&&p->proposalCount==1);
+  // An emergency elsewhere does not discard the suspended collection tree.
+  b.obs.tick=303;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  assert(p->proposalCount==1&&p->proposals[0].orders[1].s==59);
+  // Losing the remaining donor makes the plan infeasible, so it is cancelled.
+  b.obs.tick=304;b.owner[59]=1;b.army[59]=80;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  assert(p->activeOperation.kind==0);
+ }
+ {
+  Board b;b.owner[59]=b.owner[60]=0;b.army[59]=25;b.army[60]=25;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  Policy::Program ongoing;ongoing.kind=11;ongoing.born=299;ongoing.value=4;
+  ongoing.count=1;ongoing.orders[0]={59,60,false};
+  Policy::Program fresh=ongoing;fresh.born=300;fresh.value=4.5;
+  p->offer(ongoing);p->offer(fresh);
+  // Deduplication and final selection must use the same commitment utility.
+  // Otherwise the identical first action silently erases the longer plan.
+  assert(p->proposalCount==1&&p->proposals[0].born==299);
+ }
+ {
+  Board b;b.owner[60]=b.owner[59]=0;b.structure[60]=1;b.army[60]=100;b.army[59]=1;
+  b.owner[62]=1;b.army[62]=45;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  // A two-step observed counterattack must affect departure, even though no
+  // enemy is adjacent to the city yet. Half departure can retain production.
+  assert(!p->permitted({60,59,false}));
+  assert(p->permitted({60,59,true}));
+  p->scheduleTree(59,1);Policy::Program q;p->extractSchedule(59,1,q);
+  assert(q.count==1&&q.orders[0].s==60&&q.orders[0].half);
+  assert(p->schedule[59][1]==51);
+ }
+ {
+  Board b;b.structure[60]=1;b.owner[60]=1;b.army[60]=4;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  double original=p->assetUtility(60,10,1);
+  for(int cycle=0;cycle<3;cycle++){
+   b.obs.tick+=2;b.owner[60]=0;b.army[60]=10;b.refresh(*p);
+   b.obs.tick+=2;b.owner[60]=1;b.army[60]=4;b.refresh(*p);
+  }
+  assert(p->assetUtility(60,10,1)<original*.6);
+  // A new force capable of retaining the asset restores the investment.
+  assert(p->assetUtility(60,80,1)>original*.9);
+ }
+ {
+  Board b;b.owner[56]=0;b.army[56]=35;b.owner[60]=1;b.army[60]=180;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  p->taskRoutes(56,34,true);
+  assert(p->opSteps[64]<INF);
+  // The information route deliberately detours around a visible main army.
+  int steps=0;for(int c=64;c!=56;c=p->opParent[c]){
+   assert(c>=0&&c!=60&&++steps<40);
+  }
+  assert(steps>8);
+ }
+}
