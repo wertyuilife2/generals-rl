@@ -119,16 +119,13 @@ int scoutingDistance[MAXN];
 unsigned char scoutingRevealed[MAXN];
 void informationPrograms(){
  if(tick<180||o->total_land[p]<45||baselineDanger>1||expeditionCredit<3)return;
- int strongest=0;bool unknownKing=false;double prize=0,totalInformation=0;
+ bool unknownKing=false;double totalInformation=0;
  for(int e=0;e<o->players;e++)if(e!=p&&o->alive[e]){
-  strongest=std::max(strongest,int(o->total_army[e]));
-  if(enemyGeneral[e]<0){unknownKing=true;prize=std::max(prize,eliminationValue(e));}
+  if(enemyGeneral[e]<0)unknownKing=true;
  }
  if(!unknownKing)return;
- for(int c=0;c<N;c++)totalInformation+=intel[c];
+ for(int c=0;c<N;c++)totalInformation+=kingInformation[c];
  if(totalInformation<2)return;
- double superiority=double(o->total_army[p]+20)/(strongest+20.);
- double conversion=std::clamp(.25+.35*(superiority-1.),.12,.65);
  int head=0,tail=0;
  for(int c=0;c<N;c++){
   scoutingDistance[c]=INF;
@@ -174,10 +171,10 @@ void informationPrograms(){
     }
     for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
      int x=cellX[u]+dx,y=cellY[u]+dy;if(x<0||x>=W||y<0||y>=H)continue;
-     int c=y*W+x;if(!scoutingRevealed[c]){scoutingRevealed[c]=1;information+=intel[c];}
+     int c=y*W+x;if(!scoutingRevealed[c]){scoutingRevealed[c]=1;information+=kingInformation[c];}
     }
    }
-   double intelValue=prize*conversion*information/totalInformation;
+   double intelValue=informationPrice*information;
    double value=(land+intelValue)/(n+1.+.08*spent+.01*mobile);
    Program q;q.kind=24;q.root=source;q.goal=goal;q.born=tick;q.value=value;
    int u=source;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1?half:opHalf[path[j]]};u=path[j];}

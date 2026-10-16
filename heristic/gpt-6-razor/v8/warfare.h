@@ -1,7 +1,7 @@
-// Plan reconnaissance as one executable investment: collect disjoint donors,
-// then carry the resulting column through a safe approach to unseen ground.
-// Route estimates deliberately do not collect those donors a second time.
-int expeditionLoss[MAXN],expeditionDepth[MAXN],expeditionParent[MAXN];
+// Price reconnaissance as a complete, executable investment. The collection
+// and route share one troop ledger; a donor cannot be collected twice. Every
+// order costs one turn, and only newly revealed general-location mass pays.
+int expeditionDepth[MAXN],expeditionParent[MAXN],expeditionIndex[MAXN];
 double expeditionCost[MAXN];
 unsigned char expeditionVision[MAXN];
 double expeditionCredit=0;
@@ -12,83 +12,114 @@ void updateExpeditionCredit(){
  expeditionCreditTick=tick;
 }
 
+double expeditionValue(const Program &q){
+ if(q.cursor>=q.count)return -1e30;
+ int cells[81],owner[81],troops[81],count=0;
+ std::fill(expeditionIndex,expeditionIndex+N,-1);
+ std::fill(expeditionVision,expeditionVision+N,0);
+ for(int j=q.cursor;j<q.count;j++)for(int c:{q.orders[j].s,q.orders[j].t}){
+  if(c<0||c>=N||blocked(c))return -1e30;
+  if(expeditionIndex[c]>=0)continue;
+  int i=count++;expeditionIndex[c]=i;cells[i]=c;owner[i]=own[c];
+  troops[i]=mine(c)?ready(c):rememberedDefense(c);
+ }
+ double information=0,land=0,spent=0;int remaining=0;
+ for(int j=q.cursor;j<q.count;j++){
+  int step=j-q.cursor+1;
+  if(step>1)for(int i=0;i<count;i++)if(owner[i]>=0)troops[i]+=grows(cells[i],actionTurn(step));
+  auto x=q.orders[j];int a=expeditionIndex[x.s],b=expeditionIndex[x.t];
+  if(owner[a]!=p||direction(x.s,x.t)<0)return -1e30;
+  int sent=x.half?troops[a]/2:troops[a]-1;
+  if(sent<1||troops[a]-sent<reserve[x.s])return -1e30;
+  troops[a]-=sent;
+  if(owner[b]==p)troops[b]+=sent;
+  else{
+   if(sent<=troops[b])return -1e30;
+   remaining=sent-troops[b];
+   // This operation seeks information around the hostile column. It cannot
+   // promise to pass through a square that the observed column controls.
+   if(zoneETA[x.t]<=2&&zoneThreat[x.t]>remaining+3)return -1e30;
+   land+=owner[b]>=0?3.9:1.8;spent+=troops[b];
+   owner[b]=p;troops[b]=remaining;
+  }
+  spent+=1;remaining=troops[b];
+  for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
+   int xx=cellX[x.t]+dx,yy=cellY[x.t]+dy;if(xx<0||xx>=W||yy<0||yy>=H)continue;
+   int c=yy*W+xx;if(expeditionVision[c])continue;
+   expeditionVision[c]=1;information+=kingInformation[c]*std::min(1.,remaining/12.);
+  }
+ }
+ if(information<=0||remaining<4)return -1e30;
+ double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
+ return (land+informationPrice*information)/(q.count-q.cursor+1.+spent/(income*2.5+2.));
+}
+
 void expeditionPrograms(){
- if(tick<240||o->total_land[p]<65||baselineDanger>1||expeditionCredit<8)return;
- if(o->total_cities[p]<1&&o->total_land[p]<100)return;
- bool unknownKing=false;
- for(int e=0;e<o->players;e++)if(e!=p&&o->alive[e]&&enemyGeneral[e]<0)unknownKing=true;
- if(!unknownKing)return;
- int roots[8],count=0;double priorities[8];
+ if(tick<120||o->total_land[p]<25||baselineDanger>1||informationPrice<=0)return;
+ int roots[4],count=0;double priorities[4];
  for(int c=0;c<N;c++)if(mine(c)&&ready(c)>2){
   bool half=false;if(!canDepart(c,half))continue;
   int mobile=moveArmy(c,half);
   for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&mine(v)&&canDepart(v,half))mobile+=moveArmy(v,half)/2;}
-  double value=std::min(110,mobile)/(2.+.15*std::min(30,ed[c]));
+  double value=std::min(160,mobile)/(2.+.10*std::min(30,ed[c]));
   if(zoneETA[c]<=2&&zoneThreat[c]>=ready(c))continue;
-  int j=count;if(j==8){j=7;if(value<=priorities[j])continue;}else count++;
-  while(j>0&&value>priorities[j-1]){if(j<8){roots[j]=roots[j-1];priorities[j]=priorities[j-1];}j--;}
+  int j=count;if(j==4){j=3;if(value<=priorities[j])continue;}else count++;
+  while(j>0&&value>priorities[j-1]){if(j<4){roots[j]=roots[j-1];priorities[j]=priorities[j-1];}j--;}
   roots[j]=c;priorities[j]=value;
  }
+ double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
  for(int ri=0;ri<count;ri++){
+  if(!planningTimeLeft())break;
   int root=roots[ri];bool requiredHalf=false;canDepart(root,requiredHalf);
-  scheduleTree(root,10);
+  scheduleTree(root,12);
   std::fill(expeditionCost,expeditionCost+N,1e30);
   std::fill(expeditionParent,expeditionParent+N,-1);
-  std::fill(expeditionLoss,expeditionLoss+N,INF);
   std::fill(expeditionDepth,expeditionDepth+N,INF);
-  using Entry=std::pair<double,int>;
-  std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> heap;
-  expeditionCost[root]=0;expeditionDepth[root]=0;expeditionLoss[root]=0;heap.push({0,root});
+  using Entry=std::pair<double,int>;auto &heap=campaignHeap;heap.clear();
+  auto push=[&](Entry e){heap.push_back(e);std::push_heap(heap.begin(),heap.end(),std::greater<Entry>());};
+  expeditionCost[root]=0;expeditionDepth[root]=0;push({0,root});
   int expanded=0;
   while(!heap.empty()&&expanded<N*2){
-   auto [cost,u]=heap.top();heap.pop();if(cost>expeditionCost[u]+1e-8)continue;expanded++;
+   std::pop_heap(heap.begin(),heap.end(),std::greater<Entry>());auto [cost,u]=heap.back();heap.pop_back();
+   if(cost>expeditionCost[u]+1e-8)continue;expanded++;
    if(expeditionDepth[u]>=24)continue;
    for(int k=0;k<4;k++){
-    int v=nb[u][k];if(v<0||v==root||blocked(v))continue;
+    int v=nb[u][k];if(v<0||v==root||blocked(v)||(mine(v)&&reserve[v]>1))continue;
     int guard=mine(v)?0:rememberedDefense(v);
-    double exposure=zoneETA[v]<=2?std::max(0,zoneThreat[v]-35)*.12:0.;
-    double next=cost+1.+guard*.18+exposure;
+    double exposure=zoneETA[v]<=2?std::max(0,zoneThreat[v]-24)*.15:0.;
+    double next=cost+1.+guard/(income*2.5+2.)+exposure;
     if(next>=expeditionCost[v])continue;
-    expeditionCost[v]=next;expeditionParent[v]=u;expeditionDepth[v]=expeditionDepth[u]+1;
-    expeditionLoss[v]=expeditionLoss[u]+int(!mine(v))+guard;heap.push({next,v});
+    expeditionCost[v]=next;expeditionParent[v]=u;expeditionDepth[v]=expeditionDepth[u]+1;push({next,v});
    }
   }
-  int goals[10],goalCount=0;double goalPriority[10];
-  for(int c=0;c<N;c++)if(intelGain[c]>=2.5&&expeditionDepth[c]>0&&expeditionDepth[c]<=24){
-   double value=intelGain[c]/(2.+.25*expeditionCost[c]);
-   if(gd[c]<8)value*=.5;
-   int j=goalCount;if(j==10){j=9;if(value<=goalPriority[j])continue;}else goalCount++;
-   while(j>0&&value>goalPriority[j-1]){if(j<10){goals[j]=goals[j-1];goalPriority[j]=goalPriority[j-1];}j--;}
+  int goals[6],goalCount=0;double goalPriority[6];
+  for(int c=0;c<N;c++)if(informationGain[c]>0&&expeditionDepth[c]>0&&expeditionDepth[c]<=24){
+   double value=informationGain[c]/(1.+expeditionCost[c]);
+   int j=goalCount;if(j==6){j=5;if(value<=goalPriority[j])continue;}else goalCount++;
+   while(j>0&&value>goalPriority[j-1]){if(j<6){goals[j]=goals[j-1];goalPriority[j]=goalPriority[j-1];}j--;}
    goals[j]=c;goalPriority[j]=value;
   }
   Program best;
-  for(int gi=0;gi<goalCount;gi++){
-   int goal=goals[gi],path[25],n=0;
-   for(int u=goal;u!=root&&u>=0&&n<25;u=expeditionParent[u])path[n++]=u;
-   if(!n||n>24)continue;
-   std::fill(expeditionVision,expeditionVision+N,0);
-   double information=0;int threatOnPath=0;
-   for(int j=0;j<n;j++){
-    int u=path[j];if(zoneETA[u]<=2)threatOnPath=std::max(threatOnPath,zoneThreat[u]);
-    for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
-     int x=cellX[u]+dx,y=cellY[u]+dy;if(x<0||x>=W||y<0||y>=H)continue;
-     int c=y*W+x;if(!expeditionVision[c]){expeditionVision[c]=1;information+=intel[c];}
+  for(int k=0;k<=12;k++){
+   if(!planningTimeLeft())break;
+   if(schedule[root][k]<1)continue;
+   Program collection;if(k)extractSchedule(root,k,collection);
+   for(int gi=0;gi<goalCount;gi++){
+    int goal=goals[gi],path[25],n=0;
+    for(int u=goal;u!=root&&u>=0&&n<25;u=expeditionParent[u])path[n++]=u;
+    if(!n||n>24)continue;
+    for(int mode=int(requiredHalf);mode<=1;mode++){
+     Program q=collection;q.kind=16;q.root=root;q.goal=goal;q.born=tick;
+     int u=root;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1&&bool(mode)};u=path[j];}
+     q.value=expeditionValue(q);
+     // If a half sortie obtains the same information and territory, retain
+     // the other half for defense or a second operation. Full is still
+     // available when the route actually requires its additional troops.
+     if(q.value>best.value+1e-9||
+        (mode&&q.value>=best.value-1e-9&&q.value>-1e29)){
+      if(permitted(q.orders[0]))best=q;
+     }
     }
-   }
-   for(int k=0;k<=10;k++){
-    int assembled=schedule[root][k];if(assembled<1)continue;
-    bool half=requiredHalf||assembled>=90||(st[root]==1&&assembled>=35);
-    int moving=half?assembled/2:assembled-1;
-    if(assembled-moving<reserve[root]||moving<18||moving>100)continue;
-    int arrival=moving-expeditionLoss[goal];
-    if(arrival<std::max(8,threatOnPath+3))continue;
-    double value=(8.+std::min(32.,information)*1.1)/(3.+.40*(k+n)+.12*expeditionLoss[goal]);
-    value=std::min(10.,value);
-    if(value<=best.value)continue;
-    Program q;q.kind=16;q.root=root;q.goal=goal;q.born=tick;q.value=value;
-    if(k)extractSchedule(root,k,q);
-    int u=root;for(int j=n-1;j>=0;j--){q.orders[q.count++]={u,path[j],j==n-1&&half};u=path[j];}
-    if(q.count&&q.count<=expeditionCredit&&permitted(q.orders[0]))best=q;
    }
   }
   offer(best);

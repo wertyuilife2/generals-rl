@@ -15,6 +15,73 @@ int main(){
  {
   Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
   for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.land[0]=30;b.owner[55]=b.owner[56]=b.owner[57]=0;
+  b.army[55]=b.army[56]=17;b.army[57]=1;
+  b.owner[58]=-2;b.structure[58]=1;b.army[58]=25;
+  for(int c=59;c<66;c++){b.visible[c]=0;b.terrain[c]=255;b.structure[c]=255;b.owner[c]=-3;b.army[c]=-1;}
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->intelligenceMap();
+  Policy::Program q;q.kind=16;q.root=55;q.goal=59;q.count=5;
+  q.orders[0]={56,55,false};q.orders[1]={55,56,false};q.orders[2]={56,57,false};
+  q.orders[3]={57,58,false};q.orders[4]={58,59,false};
+  // The approach reuses a donor tile, but its army is only collected once.
+  // Both real donors are necessary to cross the known guard and reveal fog.
+  assert(p->expeditionValue(q)>0);
+  p->expeditionPrograms();assert(p->proposalCount>0);
+  b.army[56]=1;b.refresh(*p);p->intelligenceMap();assert(p->expeditionValue(q)<-1e29);
+  p->proposalCount=0;p->expeditionPrograms();assert(p->proposalCount==0);
+  b.army[56]=17;b.refresh(*p);p->intelligenceMap();
+  for(int c=59;c<66;c++)p->kingInformation[c]=0;
+  assert(p->expeditionValue(q)<-1e29);
+  // New information can invalidate the whole approach while its first
+  // collection order is still legal. Do not continue into a known ambush.
+  b.visible[60]=1;b.terrain[60]=0;b.structure[60]=0;b.owner[60]=1;b.army[60]=80;
+  b.refresh(*p);p->intelligenceMap();assert(p->expeditionValue(q)<-1e29);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;b.land[0]=30;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=80;b.army[56]=1;
+  for(int c=59;c<66;c++){b.visible[c]=0;b.terrain[c]=255;b.structure[c]=255;b.owner[c]=-3;b.army[c]=-1;}
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->intelligenceMap();
+  p->expeditionPrograms();assert(p->proposalCount>0);
+  // Both modes can reveal the entire corridor. Keep the unneeded half
+  // available rather than making an 80-troop scouting commitment.
+  for(int j=0;j<p->proposalCount;j++)assert(p->proposals[j].orders[0].half);
+ }
+ {
+  Board b;b.obs.tick=150;b.cities[0]=0;b.land[0]=30;
+  std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=b.army[56]=40;
+  b.owner[61]=1;b.army[61]=60;b.total[1]=110;b.land[1]=20;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->observeColumns();
+  p->mobilizationPrograms();assert(p->proposalCount>0);
+  // A previously observed concentrated opponent remains a reason to build
+  // a comparable field army after that column briefly leaves our vision.
+  assert(p->observedColumnFraction[1]>.6);
+  b.obs.tick++;b.visible[61]=0;b.owner[61]=-3;b.army[61]=-1;
+  b.refresh(*p);p->observeColumns();assert(p->assemblyRequirement(56)>=60);
+ }
+ {
+  Board b;std::fill(b.visible,b.visible+Board::S,0);
+  std::fill(b.terrain,b.terrain+Board::S,255);std::fill(b.structure,b.structure+Board::S,255);
+  std::fill(b.owner,b.owner+Board::S,-3);std::fill(b.army,b.army+Board::S,-1);
+  b.visible[0]=1;b.terrain[0]=0;b.structure[0]=2;b.owner[0]=0;b.army[0]=100;
+  b.terrain[120]=2;b.total[0]=b.total[1]=1000;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->intelligenceMap();
+  assert(p->informationPrice>0&&p->kingInformation[0]==0&&p->kingInformation[120]==0);
+  double opening=p->eliminationValue(1);
+  b.total[0]=b.total[1]=2000;b.refresh(*p);p->intelligenceMap();
+  assert(p->eliminationValue(1)>opening);
+  // Scouting a cell permanently removes it from the unknown-general mass.
+  b.visible[60]=1;b.terrain[60]=0;b.structure[60]=0;b.owner[60]=-1;b.army[60]=0;
+  b.obs.tick++;b.refresh(*p);p->intelligenceMap();assert(p->kingInformation[60]==0);
+  b.visible[60]=0;b.terrain[60]=255;b.structure[60]=255;b.owner[60]=-3;b.army[60]=-1;
+  b.obs.tick++;b.refresh(*p);p->intelligenceMap();assert(p->kingInformation[60]==0);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
   b.owner[58]=b.owner[59]=0;b.army[58]=80;b.army[59]=30;
   b.owner[60]=b.owner[61]=1;b.army[60]=4;b.army[61]=70;b.structure[60]=1;
   auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->sources={58,59};
@@ -190,13 +257,40 @@ int main(){
   // Online updates may skip a tick and omit native move receipts. The
   // operation is acknowledged from its own source and destination changes.
   b.obs.tick=302;b.army[58]=1;b.army[59]=20;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
-  assert(p->activeOperation.kind==11&&!p->operationPending&&p->proposalCount==1);
+  assert(p->proposalCount==1&&p->proposals[0].orders[1].s==59);
   // An emergency elsewhere does not discard the suspended collection tree.
   b.obs.tick=303;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
   assert(p->proposalCount==1&&p->proposals[0].orders[1].s==59);
   // Losing the remaining donor makes the plan infeasible, so it is cancelled.
   b.obs.tick=304;b.owner[59]=1;b.army[59]=80;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
-  assert(p->activeOperation.kind==0);
+  assert(p->proposalCount==0);
+ }
+ {
+  // A second independent operation must not erase an interrupted column.
+  Board b;b.owner[55]=b.owner[56]=b.owner[57]=0;b.army[55]=60;b.army[56]=b.army[57]=1;
+  b.owner[77]=b.owner[78]=b.owner[79]=0;b.army[77]=30;b.army[78]=b.army[79]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  Policy::Program first;first.kind=1;first.born=300;first.root=55;first.goal=58;
+  first.value=4;first.count=3;first.cursor=1;
+  first.orders[0]={55,56,false};first.orders[1]={56,57,false};first.orders[2]={57,58,false};
+  p->rememberOperation(first,first.orders[0],arena_move(55,1,false));
+  b.obs.tick=301;b.army[55]=1;b.army[56]=60;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  assert(p->proposalCount==1);
+  Policy::Program second;second.kind=2;second.born=301;second.root=77;second.goal=79;
+  second.value=4;second.count=2;second.cursor=1;second.orders[0]={77,78,false};second.orders[1]={78,79,false};
+  p->rememberOperation(second,second.orders[0],arena_move(77,1,false));
+  b.obs.tick=302;b.army[77]=1;b.army[78]=30;b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  bool a=false,z=false;for(int i=0;i<p->proposalCount;i++){
+   auto &q=p->proposals[i];a|=q.orders[q.cursor].s==56;z|=q.orders[q.cursor].s==78;
+  }
+  assert(a&&z);
+  // An actual emergency withdrawal consumes the first task's army. That
+  // task must be cancelled, while the independent supply task survives.
+  Policy::Program emergency;emergency.kind=3;emergency.count=1;
+  p->rememberOperation(emergency,{56,45,false},arena_move(56,0,false));
+  b.obs.tick=303;b.army[56]=1;b.owner[45]=0;b.army[45]=59;
+  b.refresh(*p);p->proposalCount=0;p->resumeOperation();
+  assert(p->proposalCount==1&&p->proposals[0].orders[p->proposals[0].cursor].s==78);
  }
  {
   Board b;b.owner[59]=b.owner[60]=0;b.army[59]=25;b.army[60]=25;
