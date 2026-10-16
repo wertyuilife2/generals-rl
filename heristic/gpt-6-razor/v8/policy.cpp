@@ -61,6 +61,7 @@ struct Policy {
  double threat[MAXN],pathExposure[MAXN];
  bool pathHalf[MAXN]{};
  int threatETA[MAXN], attackCost[MAXN], nextAttackCost[MAXN],attackGuard[MAXN];
+ int mobilizationThreat[MAXN],mobilizationETA[MAXN];
  int homeCells[MAXN],homeCount=0;
  std::uint64_t searchTargets[MAXN/64];
  int rememberedReserve=1, rememberedReserveTick=-1000;
@@ -75,7 +76,7 @@ struct Policy {
  Route beam[96],expanded[384];
  double cellRank[MAXN];
  int treeParent[MAXN],treeOrder[MAXN],treeCount=0;
- int gatherForce[MAXN][13],gatherSource[MAXN][13],gatherDir[MAXN][13];
+ int gatherForce[MAXN][25],gatherSource[MAXN][25],gatherDir[MAXN][25];
  const ArenaObservation *o=nullptr;
  Policy(int player,uint64_t seed,const char *params):p(player),rng(seed) {
   harvestValue=std::clamp(parameter(params,"\"harvest_value\"",0),0.0,4.0);
@@ -141,10 +142,12 @@ struct Policy {
   std::fill(out,out+N,INF);if(root<0)return;int h=0,z=0;queue[z++]=root;out[root]=0;
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||ter[v]==1||(!fogPass&&ter[v]==2)||out[v]!=INF||(friends&&!mine(v))||(noCities&&st[v]==1&&!mine(v)))continue;out[v]=out[u]+1;queue[z++]=v;}}
  }
- // Cache exactly the cells visited by the original twelve-layer defense DP.
+ // A visible column can be farther away than the time needed to move one
+ // donor, yet closer than the orders needed to assemble the whole defence.
+ // Keep the forecast as long as the executable collection budget.
  void cacheHomeGeometry(){
   homeCount=0;
-  for(int c=0;c<N;c++)if(gd[c]<=12)homeCells[homeCount++]=c;
+  for(int c=0;c<N;c++)if(gd[c]<=24)homeCells[homeCount++]=c;
  }
  void update(const ArenaObservation *obs){
   learnGrowth(obs);
@@ -200,6 +203,42 @@ struct Policy {
     }
    }
   }
+  // Separate sightings may contain the same soldiers after they move through
+  // fog. Preserve the raw observations, but keep the planning prior within
+  // the owner's public unseen-army budget. This is an estimate, not a claim
+  // about hidden positions; executed attacks still use the current view.
+  int64_t visibleArmy[8]{},hiddenEstimate[8]{},hiddenFloor[8]{};
+  for(int c=0;c<N;c++)if(own[c]>=0&&own[c]!=p){
+   int e=own[c];
+   if(o->visible[c])visibleArmy[e]+=army(c);
+   else{hiddenEstimate[e]+=defenseCache[c];hiddenFloor[e]+=defenseCache[c]>0;}
+  }
+  for(int e=0;e<o->players;e++)if(e!=p){
+   int64_t budget=std::max<int64_t>(0,o->total_army[e]-visibleArmy[e]);
+   if(hiddenEstimate[e]<=budget)continue;
+   int count=0;for(int c=0;c<N;c++)if(own[c]==e&&!o->visible[c])queue[count++]=c;
+   if(budget<hiddenFloor[e]){
+    for(int j=0;j<count;j++){int c=queue[j];defenseCache[c]=int(defenseCache[c]*budget/hiddenEstimate[e]);}
+    continue;
+   }
+   // A column seen one tick ago is better evidence than a long-unseen city
+   // garrison. Equal-age observations share the remaining budget; older
+   // memories cannot dilute a fresh threat merely by being numerous.
+   std::sort(queue,queue+count,[&](int x,int y){return seen[x]!=seen[y]?seen[x]>seen[y]:x<y;});
+   int64_t available=budget-hiddenFloor[e];
+   for(int begin=0;begin<count;){
+    int end=begin;int64_t mobile=0;
+    while(end<count&&seen[queue[end]]==seen[queue[begin]]){
+     int c=queue[end++];mobile+=std::max(0,defenseCache[c]-1);
+    }
+    int64_t used=std::min(available,mobile);
+    for(int j=begin;j<end;j++){
+     int c=queue[j],floor=defenseCache[c]>0;
+     defenseCache[c]=floor+(mobile?int((defenseCache[c]-floor)*used/mobile):0);
+    }
+    available-=used;begin=end;
+   }
+  }
   for(int e=0;e<o->players;e++){if(!o->alive[e])enemyGeneral[e]=-1;oldTotals[e]=int(o->total_army[e]);}
   if(mapChanged){bfs(g,gd,false,false,true);cacheHomeGeometry();}
   std::fill(ed,ed+N,INF);int h=0,z=0;
@@ -224,10 +263,12 @@ struct Policy {
   // The DP can only affect visible mobile enemies in the cached home area.
   // Retain the normal zeroed threat state when no such enemy exists.
   bool hasHomeThreat=false;
-  if(ed[g]<=12)for(int j=0;j<homeCount;j++){
+  if(ed[g]<=24)for(int j=0;j<homeCount;j++){
    int c=homeCells[j];
    if(o->visible[c]&&own[c]>=0&&own[c]!=p&&a[c]>1){hasHomeThreat=true;break;}
   }
+  std::fill(mobilizationThreat,mobilizationThreat+N,0);
+  std::fill(mobilizationETA,mobilizationETA+N,INF);
   if(hasHomeThreat){
   std::fill(attackCost,attackCost+N,INF);
   std::fill(nextAttackCost,nextAttackCost+N,INF);attackCost[g]=0;
@@ -238,7 +279,7 @@ struct Policy {
     else if(o->visible[c]&&own[c]==-2)attackGuard[c]=std::max(0,a[c]);
    }
   }
-  for(int d=1;d<=12;d++){
+  for(int d=1;d<=24;d++){
    for(int j=0;j<homeCount;j++){
     int u=homeCells[j];if(u==g)continue;
     int cost=INF;
@@ -260,7 +301,12 @@ struct Policy {
       }
      }
 
-     if(threatETA[u]==INF||required>threat[u]||(required==threat[u]&&d<threatETA[u])){threat[u]=required;threatETA[u]=d;}
+     if(d<=12){
+      if(threatETA[u]==INF||required>threat[u]||(required==threat[u]&&d<threatETA[u])){threat[u]=required;threatETA[u]=d;}
+     }else if(required>mobilizationThreat[u]||
+              (required==mobilizationThreat[u]&&d<mobilizationETA[u])){
+      mobilizationThreat[u]=required;mobilizationETA[u]=d;
+     }
     }
    }
    for(int j=0;j<homeCount;j++){int c=homeCells[j];attackCost[c]=nextAttackCost[c];}
@@ -543,16 +589,25 @@ struct Policy {
    urgent=coalitionSource;deficit=coalitionNeed-army(g)+1;
    urgency=(deficit+2.0)/(coalitionETA+1.0);
   }
+  // Long-range warnings are preparation deadlines, not permanent garrison
+  // requirements. An existing tactical emergency always takes precedence.
+  bool longWarning=false;
+  if(urgent<0)for(int e=0;e<N;e++)if(mobilizationETA[e]<INF){
+   int lack=mobilizationThreat[e]-army(g)+1;if(lack<=1)continue;
+   double q=(lack+2.)/(mobilizationETA[e]+1.);
+   if(q>urgency){urgency=q;urgent=e;deficit=lack;longWarning=true;}
+  }
   if(urgent<0)return best;
   bfs(g,fd,true);
-  int deadline=coalitionDanger?coalitionDeadline:threatETA[urgent]-(own[urgent]<p?1:0);
+  int deadline=coalitionDanger?coalitionDeadline:
+     (longWarning?mobilizationETA[urgent]:threatETA[urgent])-(own[urgent]<p?1:0);
   // Schedule a complete reinforcement tree before the attack deadline.
   // Greedy nearest-donor transfers repeatedly traverse emptied corridors;
   // their individual ETAs do not prove that all promised troops can arrive.
   // A disjoint tree accounts for every merge and move in the action budget.
   bool scheduled=false;
   if(deadline>0){
-   int budget=std::min(12,deadline);
+   int budget=std::min(24,deadline);
    gatherTree(g,budget);
    int rootGrowth=moveArmy(g)+1-army(g);
    for(int used=1;used<=budget;used++){
@@ -563,6 +618,10 @@ struct Policy {
     int dest=nb[source][direction],moving=moveArmy(source);
     double departure=risk(source,dest,moving);
     if(departure>=1000)continue;
+    // A distant threat is urgent only when the complete collection is
+    // running out of slack. The standing reserve/readiness task still
+    // prepares home while there is time for other operations.
+    if(longWarning&&deadline-used>4){scheduled=true;break;}
     best={24+deficit*2.0/(used+.5)+urgency*2-departure,source,g,direction,false};
     scheduled=true;break;
    }
