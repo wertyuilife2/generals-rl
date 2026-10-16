@@ -13,6 +13,54 @@ struct Board {
 
 int main(){
  {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=b.army[56]=40;
+  b.owner[58]=1;b.army[58]=60;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->frontFormationPrograms();
+  bool merge=false;for(int j=0;j<p->proposalCount;j++){
+   auto q=p->proposals[j];if(q.count==1&&q.orders[0].s==55&&q.orders[0].t==56)merge=true;
+  }
+  assert(merge);
+  b.owner[58]=-1;b.army[58]=0;b.owner[57]=1;b.army[57]=60;
+  b.refresh(*p);p->proposalCount=0;p->frontFormationPrograms();assert(p->proposalCount>0);
+  // The joined force must actually survive; proximity does not waive that.
+  b.army[57]=100;b.refresh(*p);p->proposalCount=0;p->frontFormationPrograms();assert(p->proposalCount==0);
+  // Rejoining a recent split is not the creation of another counter-column.
+  b.army[57]=60;b.refresh(*p);p->flowId[55]=p->flowId[56]=1;
+  p->flowAt[55]=p->flowAt[56]=p->tick;p->proposalCount=0;p->frontFormationPrograms();assert(p->proposalCount==0);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[56]=0;b.army[56]=50;
+  b.owner[60]=b.owner[61]=b.owner[62]=1;b.army[60]=75;b.army[61]=1;b.army[62]=80;b.structure[60]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->buildOpponentAssembly();
+  assert(p->opponentAssembly[60]==154&&p->assemblyRequirement(56)>150&&p->assemblyRequirement(56)<200);
+  // Proximity alone cannot transport an army across a mountain barrier.
+  b.terrain[61]=1;b.owner[61]=-1;b.army[61]=0;b.refresh(*p);p->buildOpponentAssembly();
+  assert(p->opponentAssembly[60]==75&&p->assemblyRequirement(56)<100);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[58]=0;b.army[58]=80;
+  b.owner[60]=b.owner[61]=b.owner[62]=1;b.army[60]=10;b.army[61]=1;b.army[62]=100;b.structure[60]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->buildCityRelief();
+  Policy::Program q;q.kind=23;q.root=58;q.goal=60;q.count=2;
+  q.orders[0]={58,59,false};q.orders[1]={59,60,false};
+  // The later seat can finish its two-order relief by recapturing the city
+  // in our arrival round, even though it cannot reinforce before our move.
+  assert(p->assetRelief[60][2]==0);assert(!p->cityReplyHolds(q));
+  b.army[58]=160;b.refresh(*p);p->buildCityRelief();assert(p->cityReplyHolds(q));
+  // An army killed on the approach is not available a second time as relief.
+  b.owner[58]=-1;b.army[58]=0;b.owner[63]=0;b.army[63]=150;
+  b.refresh(*p);p->buildCityRelief();q.root=63;q.count=3;
+  q.orders[0]={63,62,false};q.orders[1]={62,61,false};q.orders[2]={61,60,false};
+  assert(p->cityReplyHolds(q));
+ }
+
+ {
   Board b;b.owner[59]=0;b.army[59]=80;b.owner[61]=1;b.army[61]=100;
   auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
   assert(p->landingCanBeDenied({59,60,false}));
@@ -36,6 +84,12 @@ int main(){
   // The attacking column cannot count twice as the new garrison and its
   // returning support. A real, independent nearby donor changes the result.
   assert(p->capitalSecurity(q)<.8);
+  b.army[60]=50;b.refresh(*p);q.value=1000.;
+  // This purchase spends more army than all surviving local cover, and
+  // that cover cannot match the nearby counter-column. Its rejection must
+  // not depend on finding a higher-scoring optional alternative in time.
+  assert(p->capitalSecurity(q)==0.&&p->programScore(q)<-1e29);
+  b.army[60]=30;
   b.owner[49]=0;b.army[49]=80;b.refresh(*p);
   assert(p->capitalSecurity(q)>.99);
   // Spending that support on another city removes it from the final ledger.

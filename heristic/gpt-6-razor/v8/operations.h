@@ -5,6 +5,10 @@ int assetHeldTotal[MAXN]{},assetCaptures[MAXN]{},assetLastOwner[MAXN]{};
 bool assetHistoryReady=false;
 int assetGuard[MAXN]{},assetETA[MAXN]{},zoneThreat[MAXN]{},zoneETA[MAXN]{};
 int assetRelief[MAXN][13]{};
+struct CityReplyOrder {short s=-1,t=-1;bool half=false;};
+struct CityReply {int count=0;CityReplyOrder orders[12];};
+int cityReplyIndex[MAXN];
+CityReply cityReplies[12][13];
 int priorCityArmy[MAXN]{},priorCityTick[MAXN]{},priorCityOwner[MAXN]{};
 bool priorCityThreat[MAXN]{};
 double cityDefenseHits[8]{},cityDefenseCases[8]{};
@@ -16,6 +20,46 @@ bool conversionMode=false;
 int conversionSince=-1000;
 double observedColumnFraction[8]{};
 int columnObservationTick=-1;
+int opponentAssembly[MAXN]{};
+
+// Forecast a short, executable concentration by the opponent. The required
+// field army should answer what a nearby column can become, not just the
+// number currently displayed on its square. Shared transport edges and
+// donors are counted once, under a six-order collection budget.
+void buildOpponentAssembly(){
+ std::fill(opponentAssembly,opponentAssembly+N,0);
+ if(tick<120)return;
+ int starts[12],count=0;
+ for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&own[c]!=p&&st[c]!=2&&ready(c)>=12){
+  int j=count;if(j==12){j=11;if(ready(c)<=ready(starts[j]))continue;}else count++;
+  while(j>0&&ready(c)>ready(starts[j-1])){if(j<12)starts[j]=starts[j-1];j--;}
+  starts[j]=c;
+ }
+ for(int ri=0;ri<count;ri++){
+  int root=starts[ri],enemy=own[root];
+  std::fill(scheduleParent,scheduleParent+N,-2);
+  int nodes=1;scheduleOrder[0]=root;scheduleParent[root]=-1;dist[root]=0;
+  for(int j=0;j<nodes;j++){
+   int u=scheduleOrder[j];if(dist[u]>=6)continue;
+   for(int k=0;k<4;k++){int v=nb[u][k];
+    if(v<0||blocked(v)||own[v]!=enemy||scheduleParent[v]!=-2||nodes>=64)continue;
+    scheduleParent[v]=u;dist[v]=dist[u]+1;scheduleOrder[nodes++]=v;
+   }
+  }
+  for(int j=nodes-1;j>=0;j--){
+   int u=scheduleOrder[j];schedule[u][0]=std::max(1,rememberedDefense(u));
+   if(u!=root&&st[u]==2)schedule[u][0]=schedule[u][0]/2+1;
+   for(int b=1;b<=6;b++)schedule[u][b]=-INF;
+   for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||scheduleParent[v]!=u)continue;
+    for(int b=6;b>=1;b--)for(int use=0;use<b;use++)
+     if(schedule[u][b-use-1]>0&&schedule[v][use]>1)
+      schedule[u][b]=std::max(schedule[u][b],schedule[u][b-use-1]+schedule[v][use]-1);
+   }
+   for(int b=1;b<=6;b++)schedule[u][b]=std::max(schedule[u][b],schedule[u][b-1]);
+  }
+  opponentAssembly[root]=schedule[root][6];
+ }
+}
 
 void observeColumns(){
  int elapsed=columnObservationTick<0?0:std::max(0,tick-columnObservationTick);
@@ -34,7 +78,7 @@ int assemblyRequirement(int root)const {
  for(int c=0;c<N;c++)if(own[c]>=0&&own[c]!=p&&o->alive[own[c]]&&tick-seen[c]<=80){
   int distance=std::abs(cellX[c]-cellX[root])+std::abs(cellY[c]-cellY[root]);
   if(distance<=14)near[own[c]]=true;
-  if(o->visible[c]&&distance<=10)need=std::max(need,army(c)+12);
+  if(o->visible[c]&&distance<=10)need=std::max(need,std::max(army(c),opponentAssembly[c])+12);
  }
  for(int e=0;e<o->players;e++)if(near[e]){
   double mobile=std::max<int64_t>(0,o->total_army[e]-o->total_land[e]);
@@ -198,7 +242,7 @@ double capitalSecurity(const Program &q)const {
   if(c>=0&&st[c]==1&&own[c]<0&&ed[c]<=6){purchase=true;break;}
  }
  if(!purchase)return 1.;
- int index[MAXN],cells[81],owners[81],troops[81],count=0,assets[40],assetCount=0;
+ int index[MAXN],cells[81],owners[81],troops[81],count=0,assets[40],purchaseCost[40],assetCount=0;
  std::fill(index,index+N,-1);
  for(int j=q.cursor;j<q.count;j++)for(int c:{q.orders[j].s,q.orders[j].t}){
   if(c<0||c>=N||blocked(c))return .25;
@@ -217,7 +261,7 @@ double capitalSecurity(const Program &q)const {
   if(owners[t]==p)troops[t]+=sent;
   else{
    if(sent<=troops[t])return .25;
-   if(st[x.t]==1&&owners[t]<0&&ed[x.t]<=6)assets[assetCount++]=x.t;
+   if(st[x.t]==1&&owners[t]<0&&ed[x.t]<=6){assets[assetCount]=x.t;purchaseCost[assetCount++]=troops[t];}
    troops[t]=sent-troops[t];owners[t]=p;
   }
  }
@@ -257,6 +301,11 @@ double capitalSecurity(const Program &q)const {
     distance[v]=d+1;work[tail++]=v;}
   }
   int held=ownerAt(city)==p?forceAt(city):0;
+  // A purchase that consumes at least as much army as the whole remaining
+  // garrison and returnable support, while leaving that force below the
+  // estimated nearby counter-column, is not a funded occupation. Reject the
+  // investment even when no optional scouting candidate has been generated.
+  if(held+support<need&&purchaseCost[ai]>=held+support)return 0.;
   security=std::min(security,.15+.85*std::min(1.,(held+support)/(need+4.)));
  }
  return security;
@@ -266,6 +315,7 @@ double capitalSecurity(const Program &q)const {
 // donors share their common transport edges and are never counted twice.
 void buildCityRelief(){
  std::memset(assetRelief,0,N*sizeof(assetRelief[0]));
+ std::fill(cityReplyIndex,cityReplyIndex+N,-1);
  int roots[12],count=0;double scores[12];
  for(int c=0;c<N;c++)if(st[c]==1&&o->visible[c]&&own[c]>=0&&own[c]!=p){
   int nearby=0;for(int k=0;k<4;k++){int u=nb[c][k];if(u>=0&&mine(u))nearby=std::max(nearby,ready(u));}
@@ -276,6 +326,7 @@ void buildCityRelief(){
  }
  for(int ri=0;ri<count;ri++){
   int root=roots[ri],enemy=own[root];
+  cityReplyIndex[root]=ri;
   std::fill(scheduleParent,scheduleParent+N,-2);
   int nodes=1;scheduleOrder[0]=root;scheduleParent[root]=-1;dist[root]=0;
   for(int j=0;j<nodes;j++){
@@ -290,18 +341,74 @@ void buildCityRelief(){
    if(u!=root&&st[u]==2)schedule[u][0]=schedule[u][0]/2+1;
    for(int b=1;b<=12;b++)schedule[u][b]=-INF;
    for(int k=0;k<4;k++){
+    for(int b=0;b<=12;b++)schedulePick[u][k][b]=-1;
     int v=nb[u][k];if(v<0||scheduleParent[v]!=u)continue;
     for(int b=12;b>=1;b--)for(int use=0;use<b;use++)
-     if(schedule[u][b-use-1]>0&&schedule[v][use]>1)
-      schedule[u][b]=std::max(schedule[u][b],schedule[u][b-use-1]+schedule[v][use]-1);
+     if(schedule[u][b-use-1]>0&&schedule[v][use]>1){
+      int value=schedule[u][b-use-1]+schedule[v][use]-1;
+      if(value>schedule[u][b]){schedule[u][b]=value;schedulePick[u][k][b]=use;}
+     }
    }
-   for(int b=1;b<=12;b++)schedule[u][b]=std::max(schedule[u][b],schedule[u][b-1]);
+  }
+  int bestBudget[13]{};
+  for(int d=1;d<=12;d++)bestBudget[d]=schedule[root][d]>schedule[root][bestBudget[d-1]]?d:bestBudget[d-1];
+  for(int d=0;d<=12;d++){
+   auto &reply=cityReplies[ri][d];reply.count=0;
+   extractCityReply(root,bestBudget[d],reply);
   }
   for(int d=1;d<=12;d++){
    int budget=std::max(0,d-int(enemy>p));
-   assetRelief[root][d]=std::max(0,schedule[root][budget]-rememberedDefense(root));
+   assetRelief[root][d]=std::max(0,schedule[root][bestBudget[budget]]-rememberedDefense(root));
   }
  }
+}
+
+void extractCityReply(int u,int budget,CityReply &reply){
+ int use[4];
+ for(int k=3;k>=0;k--){use[k]=schedulePick[u][k][budget];if(use[k]>=0)budget-=use[k]+1;}
+ for(int k=0;k<4;k++)if(use[k]>=0){
+  int child=nb[u][k];extractCityReply(child,use[k],reply);
+  if(reply.count<12)reply.orders[reply.count++]={short(child),short(u),st[child]==2};
+ }
+}
+
+// Test a concrete observed/history-derived reinforcement response against
+// the whole remaining occupation program. Both players move on one ledger
+// in seat order: a donor killed en route cannot also reinforce the city, and
+// a later seat can recapture immediately after our apparent final capture.
+bool cityReplyHolds(const Program &q)const {
+ int goal=q.goal,steps=q.count-q.cursor;
+ if(goal<0||st[goal]!=1||own[goal]<0||own[goal]==p||steps<1)return true;
+ int ri=cityReplyIndex[goal];if(ri<0||ri>=12)return true;
+ const auto &reply=cityReplies[ri][std::min(12,steps)];
+ if(!reply.count)return true;
+ int index[MAXN],cells[105],owners[105],troops[105],count=0;
+ std::fill(index,index+N,-1);
+ auto add=[&](int c){if(index[c]>=0)return;int i=count++;index[c]=i;cells[i]=c;
+  owners[i]=own[c];troops[i]=mine(c)?ready(c):rememberedDefense(c);};
+ for(int j=q.cursor;j<q.count;j++){add(q.orders[j].s);add(q.orders[j].t);}
+ for(int j=0;j<reply.count;j++){add(reply.orders[j].s);add(reply.orders[j].t);}
+ int enemy=own[goal];bool eliminated=false;
+ auto move=[&](int source,int target,bool half,int player){
+  int s=index[source],t=index[target];if(owners[s]!=player)return false;
+  int sent=half?troops[s]/2:troops[s]-1;if(sent<1)return false;
+  troops[s]-=sent;
+  if(owners[t]==player)troops[t]+=sent;
+  else if(sent>troops[t]){
+   if(st[target]==2&&owners[t]==enemy&&player==p)eliminated=true;
+   troops[t]=sent-troops[t];owners[t]=player;
+  }else troops[t]-=sent;
+  return true;
+ };
+ for(int step=0;step<steps;step++){
+  if(step)for(int i=0;i<count;i++)if(owners[i]>=0)troops[i]+=grows(cells[i],actionTurn(step+1));
+  auto respond=[&](){if(step<reply.count){auto x=reply.orders[step];move(x.s,x.t,x.half,enemy);}};
+  if(enemy<p)respond();
+  auto x=q.orders[q.cursor+step];if(!move(x.s,x.t,x.half,p))return false;
+  if(eliminated)return true;
+  if(enemy>p)respond();
+ }
+ return index[goal]>=0&&owners[index[goal]]==p;
 }
 
 void intelligenceMap(){
