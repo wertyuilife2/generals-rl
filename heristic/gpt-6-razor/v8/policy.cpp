@@ -48,6 +48,7 @@ struct Policy {
  int homeDistance[MAXN],component[MAXN],componentArmy[MAXN],componentLand[MAXN];
  double networkBonus[MAXN];
  int lastHomeContact=-1000,raidNeed=0;
+ bool homeKnownTo[8]{};
  bool growthBeforeMove=true;
  int growthEvidence=0,receiptSource=-1,receiptTarget=-1,receiptTick=-1;
  int receiptArmy=0,receiptTargetArmy=0,receiptOwner=-1;
@@ -368,6 +369,34 @@ struct Policy {
               o->total_army[e]-o->total_land[e]+pulses*o->total_land[e])));
     if(field>=25&&largestField*2<field)
      raidNeed=std::max(raidNeed,int(raidValue*std::min(field*.40,double(o->total_army[p])*.30)));
+   }
+   reserve[g]=std::max(reserve[g],raidNeed);
+  }
+  // Visibility of our general is permanent knowledge for that opponent,
+  // even after the scouting army leaves. Keep an insurance requirement for
+  // another raid without inventing a hidden attacker at a particular cell.
+  bool exposed=false;
+  for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&own[c]!=p&&
+      std::abs(cellX[c]-cellX[g])<=1&&std::abs(cellY[c]-cellY[g])<=1)
+   homeKnownTo[own[c]]=true;
+  for(int e=0;e<o->players;e++){
+   if(!o->alive[e])homeKnownTo[e]=false;
+   exposed|=homeKnownTo[e];
+  }
+  if(exposed&&raidValue>0&&tick>=70){
+   // One real column can cover the general if it has a short owned return
+   // route. A distant raid or merely a geometrically close stack cannot.
+   bfs(g,fd,true);int returning=0;
+   for(int c=0;c<N;c++)if(c!=g&&mine(c)&&fd[c]<=6){
+    bool half=false;if(canDepart(c,half))
+     returning=std::max(returning,std::max(0,moveArmy(c,half)-fd[c]+1));
+   }
+   for(int e=0;e<o->players;e++)if(homeKnownTo[e]&&o->alive[e]){
+    int pulses=(tick+6)/50-tick/50;
+    int field=int(std::min<int64_t>(300,std::max<int64_t>(0,
+         o->total_army[e]-o->total_land[e]+pulses*o->total_land[e])));
+    int cover=int(raidValue*std::min(field*.40,double(o->total_army[p])*.30));
+    raidNeed=std::max(raidNeed,std::max(0,cover-returning));
    }
    reserve[g]=std::max(reserve[g],raidNeed);
   }
