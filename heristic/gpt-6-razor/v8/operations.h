@@ -9,10 +9,39 @@ int priorCityArmy[MAXN]{},priorCityTick[MAXN]{},priorCityOwner[MAXN]{};
 bool priorCityThreat[MAXN]{};
 double cityDefenseHits[8]{},cityDefenseCases[8]{};
 double intel[MAXN]{},intelGain[MAXN]{},routeCost[MAXN];
+double kingInformation[MAXN]{},informationGain[MAXN]{},informationPrice=0;
 int opParent[MAXN],opSteps[MAXN],opForce[MAXN];
 bool opHalf[MAXN];
 bool conversionMode=false;
 int conversionSince=-1000;
+double observedColumnFraction[8]{};
+int columnObservationTick=-1;
+
+void observeColumns(){
+ int elapsed=columnObservationTick<0?0:std::max(0,tick-columnObservationTick);
+ columnObservationTick=tick;
+ for(int e=0;e<o->players;e++)observedColumnFraction[e]=
+  std::max(.35,observedColumnFraction[e]-.0003*elapsed);
+ for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&own[c]!=p&&st[c]!=2&&army(c)>=16){
+  int e=own[c];double mobile=std::max<int64_t>(1,o->total_army[e]-o->total_land[e]);
+  double fraction=std::min(.95,std::max(0,army(c)-1)/mobile);
+  observedColumnFraction[e]=std::max(observedColumnFraction[e],fraction);
+ }
+}
+
+int assemblyRequirement(int root)const {
+ bool near[8]{};int need=24;
+ for(int c=0;c<N;c++)if(own[c]>=0&&own[c]!=p&&o->alive[own[c]]&&tick-seen[c]<=80){
+  int distance=std::abs(cellX[c]-cellX[root])+std::abs(cellY[c]-cellY[root]);
+  if(distance<=14)near[own[c]]=true;
+  if(o->visible[c]&&distance<=10)need=std::max(need,army(c)+12);
+ }
+ for(int e=0;e<o->players;e++)if(near[e]){
+  double mobile=std::max<int64_t>(0,o->total_army[e]-o->total_land[e]);
+  need=std::max(need,4+int(mobile*std::max(.35,observedColumnFraction[e])));
+ }
+ return std::min(need,int(std::max<int64_t>(0,o->total_army[p]-o->total_land[p])*.65));
+}
 
 void strategicMode(){
  int enemyArmy=0;bool unknownKing=false;
@@ -200,6 +229,8 @@ void buildCityRelief(){
 
 void intelligenceMap(){
  std::fill(intel,intel+N,0.);std::fill(intelGain,intelGain+N,0.);
+ std::fill(kingInformation,kingInformation+N,0.);std::fill(informationGain,informationGain+N,0.);
+ informationPrice=0;
  double ex[8]{},ey[8]{},weight[8]{},spread[8]{};
  for(int c=0;c<N;c++)if(own[c]>=0&&own[c]!=p&&o->alive[own[c]]){
   int e=own[c];double w=st[c]==1?3.:1.;ex[e]+=cellX[c]*w;ey[e]+=cellY[c]*w;weight[e]+=w;
@@ -223,12 +254,23 @@ void intelligenceMap(){
     intel[c]=std::max(intel[c],away*prior);
    }
   }
+  kingInformation[c]=intel[c];
   if(!o->visible[c]&&st[c]==1)intel[c]+=.3*std::min(1.,(tick-seen[c])/40.);
   if(!o->visible[c]&&ter[c]==2)intel[c]+=.18;
  }
+ double total=0,prize=0;int strongest=0;
+ for(int c=0;c<N;c++)total+=kingInformation[c];
+ for(int e=0;e<o->players;e++)if(e!=p&&o->alive[e]){
+  strongest=std::max(strongest,int(o->total_army[e]));
+  if(enemyGeneral[e]<0)prize=std::max(prize,eliminationValue(e));
+ }
+ double ratio=double(o->total_army[p]+20)/(strongest+20.);
+ if(total>0)informationPrice=prize*std::clamp(.25+.35*(ratio-1.),.12,.65)/total;
  for(int c=0;c<N;c++)if(!blocked(c)){
   for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
-   int x=cellX[c]+dx,y=cellY[c]+dy;if(x>=0&&x<W&&y>=0&&y<H)intelGain[c]+=intel[y*W+x];
+   int x=cellX[c]+dx,y=cellY[c]+dy;if(x>=0&&x<W&&y>=0&&y<H){
+    intelGain[c]+=intel[y*W+x];informationGain[c]+=informationPrice*kingInformation[y*W+x];
+   }
   }
  }
 }
@@ -332,7 +374,9 @@ int mobileAssemblyCredit(const Program &q,int root,int finalForce,int need)const
 
 void mobilizationPrograms(){
  bool knownTarget=false;for(int e=0;e<o->players;e++)if(e!=p&&o->alive[e]&&enemyGeneral[e]>=0)knownTarget=true;
- if((!conversionMode&&!knownTarget)||tick<260||o->total_cities[p]<2||baselineDanger>0)return;
+ // The first enemy column often arrives before either side has two cities.
+ // A nearby observed front, rather than an economic lead, warrants assembly.
+ if(tick<120||o->total_land[p]<25||baselineDanger>0)return;
  int roots[6],count=0;double priorities[6];
  for(int c=0;c<N;c++)if(mine(c)&&st[c]==0&&ed[c]<=10){
   if(zoneETA[c]<=4&&zoneThreat[c]>=ready(c)-2)continue;
@@ -348,12 +392,8 @@ void mobilizationPrograms(){
   roots[slot]=c;priorities[slot]=priority;
  }
  for(int ri=0;ri<count;ri++){
-  int root=roots[ri],need=24;
-  for(int e=0;e<o->players;e++)if(e!=p&&o->alive[e])
-   need=std::max(need,int((o->total_army[e]-o->total_land[e])*.35));
-  for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&own[c]!=p&&
-    std::abs(cellX[c]-cellX[root])+std::abs(cellY[c]-cellY[root])<=10)need=std::max(need,army(c)+12);
-  need=std::min(need,int((o->total_army[p]-o->total_land[p])*.65));
+  if(!planningTimeLeft())break;
+  int root=roots[ri],need=assemblyRequirement(root);
   if(ready(root)>=need&&!knownTarget)continue;
   int budget=tick<500?12:24;
   scheduleTree(root,budget);Program best;

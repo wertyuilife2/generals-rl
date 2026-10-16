@@ -375,12 +375,16 @@ struct Policy {
   }
  }
  double eliminationValue(int e)const {
-  if(o->players==2)return 120+std::min<int64_t>(300,o->total_army[e])*.20+
-                                   std::min<int64_t>(200,o->total_land[e])*.40;
   double soldiers=std::max<int64_t>(0,o->total_army[e]);
   double land=std::max<int64_t>(0,o->total_land[e]);
-  return 120+.20*std::sqrt(soldiers*std::min(300.,soldiers))+
-             .40*std::sqrt(land*std::min(200.,land));
+  // A terminal objective cannot retain an opening-sized price while the
+  // productive capital at stake grows by an order of magnitude. In FFA the
+  // victim's half-army and territory are transferable assets; in a duel the
+  // win also settles the value of our surviving army and territory.
+  double value=120.+.5*soldiers+.8*land;
+  if(aliveCount==2)value+=.5*std::max<int64_t>(0,o->total_army[p])+
+                         .8*std::max<int64_t>(0,o->total_land[p]);
+  return value;
  }
  int rememberedDefense(int i)const {return defenseCache[i];}
  bool canDepart(int s,bool &half)const{
@@ -746,6 +750,16 @@ struct Policy {
        int fresh=__builtin_popcount(freshMask);
        reward+=fresh*(tick<80?.32:.22);
        if(enemy&&moving>=20&&next.force>=8)reward+=fresh*.55;
+       if(tick>=100&&next.force>=4){
+        // Each unseen general candidate can be revealed only once along
+        // this route. Never pay again for overlapping vision or old terrain.
+        double information=0;unsigned mask=freshMask;
+        while(mask){int b=__builtin_ctz(mask);mask&=mask-1;
+         int cell=(cellY[v]+b/3-1)*W+cellX[v]+b%3-1;
+         information+=kingInformation[cell];
+        }
+        reward+=informationPrice*information*std::min(1.,next.force/12.);
+       }
        if(enemy&&guard>3)reward+=std::min(6.,guard*.06);
        if(ter[v]==255)reward*=.76;
       }

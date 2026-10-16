@@ -4,7 +4,7 @@
 struct Order { int s=-1,t=-1; bool half=false; };
 struct Program {
  double value=-1e30;
- int goal=-1,root=-1,kind=0,count=0,cursor=0,born=0;
+ int goal=-1,root=-1,kind=0,count=0,cursor=0,born=0,taskId=0;
  Order orders[40];
 };
 Program proposals[18],mission;
@@ -374,6 +374,7 @@ void campaignPrograms(double income){
     if(king&&d==1&&moving<=captureDefense(v))continue;
     double reward=king?eliminationValue(own[v]):city?cityUtility(v,force[v],d):
       1.8+(enemy?2.1:0)+unknown[v]*.22+(enemy&&moving>=20&&force[v]>=8?unknown[v]*.35:0);
+    if(!king&&tick>=100&&force[v]>=4)reward+=informationGain[v]*std::min(1.,force[v]/12.);
     if(!king)reward+=networkBonus[v];
     double score=reward/(d+.8+pathLoss[v]/(income*2.5+2));
     if(king){score+=6./(1+.07*d);score*=kingConfidence(v,force[v],d);}
