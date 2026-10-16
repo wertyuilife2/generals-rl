@@ -77,12 +77,27 @@
       "source_directory": "heristic/gpt-6-razor/experiments/1e1259dcf14e2018e6e3e41b8016c023595628e4833f317e4bb1adcfa244542f",
       "source_identity_verified": true,
       "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ae1846cd760c8a3e8279882870c250b00bbb6b7c8995adfbf5b527dd3d3baf41/report.json",
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/afd13ce25158e63da081c6b116736d66cd5987bbed77827da2018bb7f957fd85/report.json",
         "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/deb5529655e10a77f35fca9d364a958de2d57383860a9e605197932ed3adcab1/report.json"
+      ],
+      "completed_games": 320,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 6641000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "1e14cd403842b0abe4a8451dbeb96634c997f8b440c288f84c4cf453bf6e2d8b": {
+      "source_directory": "heristic/gpt-6-razor/experiments/1e14cd403842b0abe4a8451dbeb96634c997f8b440c288f84c4cf453bf6e2d8b",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/037085d1ad133b8968f9043ee0ed976cec9578a43a90cc83d224c6fe548fbe53/report.json"
       ],
       "completed_games": 160,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 4377000,
+      "max_ns": 3660000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -122,6 +137,19 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 1237000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": true
+    },
+    "37cade188e379883190c91e455cca47eb9bb8c60c81aa0812a03cfcc2d0bab60": {
+      "source_directory": "heristic/gpt-6-razor/experiments/37cade188e379883190c91e455cca47eb9bb8c60c81aa0812a03cfcc2d0bab60",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1f9a8d7fa853865d5f6b8005438f947fd851d9aab11638a8db4d66c73abfa202/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2194000,
       "invalid_actions": 0,
       "hard_limit_qualified": true
     },
@@ -175,6 +203,19 @@
       "timeouts": 1,
       "errors": 0,
       "max_ns": 15170000,
+      "invalid_actions": 0,
+      "hard_limit_qualified": false
+    },
+    "428cc27827884f28b95b670329b4ba5494aa791d2e939e59adfaa34b36202b35": {
+      "source_directory": "heristic/gpt-6-razor/experiments/428cc27827884f28b95b670329b4ba5494aa791d2e939e59adfaa34b36202b35",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d3b5486f0e77fff54b84541700d70d39ae40ed9196c737b68521a8948139707d/report.json"
+      ],
+      "completed_games": 160,
+      "timeouts": 2,
+      "errors": 0,
+      "max_ns": 14904000,
       "invalid_actions": 0,
       "hard_limit_qualified": false
     },
@@ -3498,6 +3539,146 @@
       },
       "violations": 0,
       "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-recapture-wide",
+      "version": "1e1259dcf14e2018e6e3e41b8016c023595628e4833f317e4bb1adcfa244542f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/afd13ce25158e63da081c6b116736d66cd5987bbed77827da2018bb7f957fd85/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.575,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 1.41875,
+          "pair_score": 0.58125,
+          "scored_games": 80,
+          "tick_limit_games": 1
+        }
+      },
+      "timing": {
+        "calls": 60873,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2855000,
+        "timeouts": 0,
+        "total_ns": 43741595000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-active-city-defense",
+      "version": "1e14cd403842b0abe4a8451dbeb96634c997f8b440c288f84c4cf453bf6e2d8b",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/037085d1ad133b8968f9043ee0ed976cec9578a43a90cc83d224c6fe548fbe53/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.50625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.49375,
+          "pair_score": 0.50625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 109617,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 3660000,
+        "timeouts": 0,
+        "total_ns": 61937540000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-timed-city-defense",
+      "version": "37cade188e379883190c91e455cca47eb9bb8c60c81aa0812a03cfcc2d0bab60",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1f9a8d7fa853865d5f6b8005438f947fd851d9aab11638a8db4d66c73abfa202/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.575,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.425,
+          "pair_score": 0.575,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 104905,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2194000,
+        "timeouts": 0,
+        "total_ns": 56397986000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-recapture-ffa4",
+      "version": "1e1259dcf14e2018e6e3e41b8016c023595628e4833f317e4bb1adcfa244542f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/ae1846cd760c8a3e8279882870c250b00bbb6b7c8995adfbf5b527dd3d3baf41/report.json",
+      "ok": true,
+      "completed_games": 80,
+      "metrics": {
+        "4": {
+          "game_win_rate": 0.3625,
+          "games": 80,
+          "invalid_actions": 0,
+          "mean_rank": 2.2875,
+          "pair_score": 0.5708333333333333,
+          "scored_games": 80,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 52223,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 6641000,
+        "timeouts": 0,
+        "total_ns": 34156890000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true
+    },
+    {
+      "label": "goal-operation-forecast",
+      "version": "428cc27827884f28b95b670329b4ba5494aa791d2e939e59adfaa34b36202b35",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/d3b5486f0e77fff54b84541700d70d39ae40ed9196c737b68521a8948139707d/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.49375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.50625,
+          "pair_score": 0.49375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 93283,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 14904000,
+        "timeouts": 2,
+        "total_ns": 59116404000
+      },
+      "violations": 0,
+      "hard_limit_qualified": false
     }
   ],
   "controls": [
@@ -3571,18 +3752,24 @@
       "timeouts": 1,
       "hard_limit_qualified": false,
       "note": "Recorded result is retained; the timeout disqualifies this implementation under the research constraints."
+    },
+    "human_review": {
+      "fixture": "heristic/gpt-6-razor/tests/human_failure_cases.json.gz",
+      "cases": 11,
+      "scope": "Eight main-site v7 losses and three earlier QueueT losses, using only the recorded player observations. Isolated v8 probes are not matches or human-strength evidence.",
+      "probe_results": "outputs/analysis/razor-human-review-20261016/isolated-probes.json"
     }
   },
   "working_candidate": {
-    "version": "1e1259dcf14e2018e6e3e41b8016c023595628e4833f317e4bb1adcfa244542f",
+    "version": "428cc27827884f28b95b670329b4ba5494aa791d2e939e59adfaa34b36202b35",
     "source_directory": "heristic/gpt-6-razor/v8",
     "status": "experimental_not_promoted",
     "formal_publication": null,
-    "hard_limit_qualified": true,
+    "hard_limit_qualified": false,
     "validation": {
       "tests": 9,
       "passed": true,
-      "log": "outputs/analysis/razor-v8-goal-20261016/tests-city-recapture.log"
+      "log": "outputs/analysis/razor-v8-goal-20261016/tests-operation-forecast.log"
     }
   },
   "failed_regression_experiments": [
