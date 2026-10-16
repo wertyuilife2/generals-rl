@@ -30,7 +30,8 @@ double remainingAssemblyValue(const Program &plan){
 
 void resumeOperation(){
  if(activeOperation.kind==0)return;
- if(activeOperation.kind==16&&expeditionCredit<1)return;
+ if(activeOperation.kind==23&&mine(activeOperation.goal)){activeOperation=Program();operationPending=false;return;}
+ if((activeOperation.kind==16||activeOperation.kind==24)&&expeditionCredit<1)return;
  if(operationPending){
   bool matching=o->previous&&o->previous->action==operationAction;
   bool received=matching&&o->previous->valid;
@@ -41,13 +42,18 @@ void resumeOperation(){
   else return;
  }
  if(activeOperation.cursor>=activeOperation.count){
-  if(activeOperation.kind==11&&mine(activeOperation.root)){rallyCell=activeOperation.root;rallyTick=tick;}
+  if((activeOperation.kind==11||activeOperation.kind==25)&&mine(activeOperation.root)){rallyCell=activeOperation.root;rallyTick=tick;}
   if(activeOperation.kind==14&&mine(activeOperation.goal)){rallyCell=activeOperation.goal;rallyTick=tick;}
   activeOperation=Program();return;
  }
  bool expired=tick-activeOperation.born>48||tick-operationProgress>10;
- bool explored=(activeOperation.kind==10||activeOperation.kind==16)&&intelGain[activeOperation.goal]<1.;
+ bool explored=(activeOperation.kind==10||activeOperation.kind==16||activeOperation.kind==24)&&intelGain[activeOperation.goal]<1.;
  auto &next=activeOperation.orders[activeOperation.cursor];
+ if(activeOperation.kind==23&&next.t==activeOperation.goal&&st[next.t]==1&&
+    assetFlips[next.t]>=2&&tick-assetLostAt[next.t]<40&&
+    moveArmy(next.s,next.half)-rememberedDefense(next.t)<zoneThreat[next.t]+8){
+  activeOperation=Program();return;
+ }
  if(expired||explored||!mine(next.s)||blocked(next.t)){activeOperation=Program();return;}
  if(activeOperation.kind==14?extractionSafe(activeOperation):permitted(next)){
   Program q=activeOperation;
@@ -57,7 +63,7 @@ void resumeOperation(){
 }
 
 void rememberOperation(const Program &chosen,const Order &action,std::int64_t encoded){
- if(chosen.kind!=10&&chosen.kind!=11&&chosen.kind!=12&&chosen.kind!=14&&chosen.kind!=15&&chosen.kind!=16&&chosen.kind!=19)return;
+ if(chosen.kind!=10&&chosen.kind!=11&&chosen.kind!=12&&chosen.kind!=14&&chosen.kind!=15&&chosen.kind!=16&&chosen.kind!=19&&chosen.kind!=22&&chosen.kind!=23&&chosen.kind!=24&&chosen.kind!=25)return;
  activeOperation=chosen;operationIssued=tick;operationSource=action.s;
  operationDestination=action.t;operationBefore=army(action.s);operationSent=moveArmy(action.s,action.half);
  operationAction=encoded;operationPending=true;
@@ -66,7 +72,8 @@ void rememberOperation(const Program &chosen,const Order &action,std::int64_t en
 
 std::int64_t decideV8(const ArenaObservation *obs){
  if(obs->width*obs->height>MAXN||obs->general_pos<0)return 0;
- update(obs);updateExpeditionCredit();assetHistory();strategicMode();pressureMap();intelligenceMap();supplyMap();buildKingRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
+ planningStart=std::chrono::steady_clock::now();
+ update(obs);updateExpeditionCredit();assetHistory();observeCityResponses();strategicMode();pressureMap();intelligenceMap();supplyMap();buildKingRelief();buildCityRelief();buildAttacks();baselineDanger=dangerAfter(nullptr,homeIncoming);proposalCount=0;
  resumeOperation();
  // Finish a concrete, validated program unless new information or a better
  // opportunity justifies interruption. Skipped online ticks invalidate it.
@@ -104,23 +111,27 @@ std::int64_t decideV8(const ArenaObservation *obs){
   for(int j=0;j<4;j++)keep.push_back(sources[border[j].second]);sources.swap(keep);
  }
  double income=.5*(std::max<int64_t>(0,o->total_cities[p])+1)+.02*o->total_land[p];
- campaignPrograms(income);
- routePlan(income); // Registers the full column program, including collections.
- if(tick>=48)logisticsPrograms(income);
+ if(planningTimeLeft())campaignPrograms(income);
+ if(planningTimeLeft())routePlan(income); // Full program, including collections.
+ if(tick>=48&&planningTimeLeft())logisticsPrograms(income);
  readinessProgram();
- deploymentPrograms();
+ if(planningTimeLeft())deploymentPrograms();
  homeCounterPrograms();
  interceptionPrograms();
  fieldEngagementPrograms();
- coordinatedAssaultPrograms();
- convergingAssaultPrograms();
+ if(planningTimeLeft())coordinatedAssaultPrograms();
+ if(planningTimeLeft())convergingAssaultPrograms();
  // Small-scout trials are archived; no routine scouting order is forced.
- reconnaissancePrograms();
+ if(planningTimeLeft())reconnaissancePrograms();
  // Expedition proposals remain archived for isolated research.
- mobilizationPrograms();
+ if(planningTimeLeft())mobilizationPrograms();
  extractionPrograms();
- unlockGarrisonPrograms();
- localBattlePrograms();
+ if(planningTimeLeft())unlockGarrisonPrograms();
+ if(planningTimeLeft())productionInvestmentPrograms();
+ if(planningTimeLeft())occupationPrograms();
+ if(planningTimeLeft())informationPrograms();
+ if(planningTimeLeft())frontFormationPrograms();
+ if(planningTimeLeft())localBattlePrograms();
 
  // A common post-action safety gate covers every mode and every player count.
  // Safe alternatives are preferred before comparing economic benefits.
@@ -131,7 +142,7 @@ std::int64_t decideV8(const ArenaObservation *obs){
  }
  if(best<0){mission=Program();missionTick=tick;return 0;}
  Program chosen=proposals[best];Order action=chosen.orders[chosen.cursor++];
- if(chosen.kind==16||chosen.kind==18)expeditionCredit-=1;
+ if(chosen.kind==16||chosen.kind==18||chosen.kind==24)expeditionCredit-=1;
  // Continuation preference is applied afresh, never compounded every turn.
  if(chosen.born<tick)chosen.value/=1.09;
  mission=chosen;missionTick=tick;oldTarget=chosen.goal;oldSource=action.t;lastTarget=action.t;

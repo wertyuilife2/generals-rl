@@ -5,11 +5,14 @@ struct TacticalOrder {int s=-1,t=-1;bool half=false;double rank=0;};
 int tacticalCells[41],tacticalNeighbors[41][4],tacticalCount=0,tacticalEnemy=-1;
 int tacticalHome=-1,tacticalKing=-1,tacticalWork=0;
 int tacticalFocus=-1;
+int tacticalProgress[2][41];
+double tacticalProjection[2][41];
 bool tacticalAborted=false;
 
 double tacticalTile(int i,int owner,int army)const {
  if(owner!=p&&owner!=tacticalEnemy)return 0;
  int c=tacticalCells[i];double value=army+.8+(st[c]==1?28.:0.);
+ value+=tacticalProjection[owner==p?0:1][i]*std::max(0,army-1);
  return owner==p?value:-value;
 }
 
@@ -51,7 +54,7 @@ int tacticalOrders(const TacticalPosition &s,int player,TacticalOrder *orders,in
       std::abs(cellY[tacticalCells[v]]-cellY[tacticalFocus])>3)continue;
    for(int half=0;half<2;half++){
     if(half&&s.army[u]<4)continue;
-    if(++tacticalWork>100000){tacticalAborted=true;return count;}
+    if(++tacticalWork>24000||((tacticalWork&255)==0&&!planningTimeLeft())){tacticalAborted=true;return count;}
     int sent=half?s.army[u]/2:s.army[u]-1,owner=s.owner[v],army=s.army[v];
     if(owner==player)army+=sent;
     else if(sent>army){army=sent-army;owner=player;}
@@ -103,7 +106,10 @@ void localBattlePrograms(){
  int focus=-1;double priority=-1;
  for(int c=0;c<N;c++)if(o->visible[c]&&own[c]>=0&&st[c]==1){
   int us=mine(c)?ready(c):0,them=mine(c)?0:ready(c);
-  for(int k=0;k<4;k++){int v=nb[c][k];if(v<0||!o->visible[v])continue;
+  for(int dy=-3;dy<=3;dy++)for(int dx=-3;dx<=3;dx++){
+   if(std::abs(dx)+std::abs(dy)>3)continue;
+   int x=cellX[c]+dx,y=cellY[c]+dy;if(x<0||x>=W||y<0||y>=H)continue;
+   int v=y*W+x;if(!o->visible[v])continue;
    if(mine(v))us=std::max(us,ready(v));else if(own[v]==tacticalEnemy)them=std::max(them,ready(v));
   }
   if(us<8||them<8)continue;
@@ -116,13 +122,29 @@ void localBattlePrograms(){
     std::abs(cellX[c]-cellX[focus])+std::abs(cellY[c]-cellY[focus])<=4)tacticalCells[tacticalCount++]=c;
  TacticalPosition initial;
  for(int i=0;i<tacticalCount;i++){
-  int c=tacticalCells[i];initial.owner[i]=own[c];initial.army[i]=own[c]>=0?ready(c):rememberedDefense(c);
+  int c=tacticalCells[i];initial.owner[i]=own[c];initial.army[i]=mine(c)?ready(c):rememberedDefense(c);
   if(c==g)tacticalHome=i;
   if(c==enemyGeneral[tacticalEnemy])tacticalKing=i;
   for(int k=0;k<4;k++){
    tacticalNeighbors[i][k]=-1;
    for(int j=0;j<tacticalCount;j++)if(tacticalCells[j]==nb[c][k])tacticalNeighbors[i][k]=j;
   }
+ }
+ for(int side=0;side<2;side++){
+  int targetOwner=side==0?tacticalEnemy:p,work[41],head=0,tail=0;
+  for(int i=0;i<tacticalCount;i++){
+   tacticalProgress[side][i]=INF;
+   if(initial.owner[i]==targetOwner&&(initial.army[i]>=8||st[tacticalCells[i]]>0)){
+    tacticalProgress[side][i]=0;work[tail++]=i;
+   }
+  }
+  while(head<tail){int u=work[head++];
+   for(int k=0;k<4;k++){int v=tacticalNeighbors[u][k];if(v<0||tacticalProgress[side][v]<INF)continue;
+    tacticalProgress[side][v]=tacticalProgress[side][u]+1;work[tail++]=v;
+   }
+  }
+  for(int i=0;i<tacticalCount;i++)tacticalProjection[side][i]=
+   tacticalProgress[side][i]<INF?.15/(1.+.25*tacticalProgress[side][i]):0.;
  }
  TacticalOrder ours[13],replies[6];int count=tacticalOrders(initial,p,ours,9),nr=tacticalOrders(initial,tacticalEnemy,replies,6);
  // Include the scheduler's strongest local proposals even when they are

@@ -8,10 +8,84 @@ struct Board {
  std::int16_t owner[S];std::int64_t army[S]{},total[2]={400,200},land[2]={20,10},cities[2]={1,-1};
  ArenaObservation obs{11,11,2,0,300,0,terrain,structure,owner,army,visible,alive,total,land,cities,nullptr};
  Board(){std::fill(visible,visible+S,1);std::fill(owner,owner+S,-1);owner[0]=0;army[0]=100;structure[0]=2;}
- void refresh(Policy &p){p.update(&obs);p.assetHistory();p.pressureMap();p.buildKingRelief();p.buildAttacks();p.baselineDanger=p.dangerAfter(nullptr,p.homeIncoming);}
+ void refresh(Policy &p){p.planningStart=std::chrono::steady_clock::now();p.update(&obs);p.assetHistory();p.pressureMap();p.buildKingRelief();p.buildAttacks();p.baselineDanger=p.dangerAfter(nullptr,p.homeIncoming);}
 };
 
 int main(){
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[58]=b.owner[59]=0;b.army[58]=80;b.army[59]=30;
+  b.owner[60]=b.owner[61]=1;b.army[60]=4;b.army[61]=70;b.structure[60]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->sources={58,59};
+  p->assetFlips[60]=4;p->assetLostAt[60]=300;p->occupationPrograms();
+  assert(p->proposalCount>0);
+  for(int j=0;j<p->proposalCount;j++){
+   auto &q=p->proposals[j];assert(q.count>=2&&p->mine(q.orders[0].t));
+  }
+  // A cheap recapture is not an occupation when the same visible army will
+  // immediately take it back. The plan must first fund the retained force.
+  b.army[58]=1;b.refresh(*p);p->proposalCount=0;p->occupationPrograms();
+  assert(p->proposalCount==0);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[55]=b.owner[56]=0;b.army[55]=b.army[56]=40;
+  b.owner[61]=1;b.army[61]=60;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->frontFormationPrograms();
+  assert(p->proposalCount>0);bool combined=false;
+  for(int j=0;j<p->proposalCount;j++){
+   auto &q=p->proposals[j];if(q.kind==25&&q.root==56&&q.count==1&&q.orders[0].s==55)combined=true;
+  }
+  assert(combined);
+  b.army[55]=1;b.army[56]=100;b.refresh(*p);p->proposalCount=0;p->frontFormationPrograms();
+  // Relocating an existing superior column must not earn the creation bonus.
+  assert(p->proposalCount==0);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[56]=b.owner[57]=0;b.army[56]=b.army[57]=50;
+  b.owner[59]=1;b.army[59]=70;b.structure[59]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);p->sources={56,57};
+  p->occupationPrograms();
+  assert(p->proposalCount>0);
+  bool feasible=false;
+  for(int j=0;j<p->proposalCount;j++){
+   auto &q=p->proposals[j];
+   if(q.kind==23&&q.goal==59&&q.count==3&&q.orders[0].s==56&&q.orders[0].t==57)feasible=true;
+  }
+  // Neither source can attack alone. The operation must first combine the
+  // two real armies, and must stop proposing an attack when they are too small.
+  assert(feasible);b.army[59]=200;b.refresh(*p);p->proposalCount=0;
+  p->occupationPrograms();assert(p->proposalCount==0);
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;
+  b.owner[57]=0;b.army[57]=100;b.structure[57]=1;
+  b.owner[59]=1;b.army[59]=60;
+  auto p=std::make_unique<Policy>(0,1,"{}");auto action=p->act(&b.obs);
+  // The sortie itself screens the city. A stationary half-garrison rule
+  // cannot express this safe advance down a one-cell corridor.
+  assert(p->reserve[57]>50);
+  assert(action==arena_move(57,1,false));
+ }
+ {
+  Board b;std::fill(b.terrain,b.terrain+Board::S,1);b.terrain[0]=0;
+  for(int c=55;c<66;c++)b.terrain[c]=0;b.terrain[46]=0;
+  b.owner[56]=b.owner[57]=0;b.army[56]=100;b.army[57]=50;b.structure[57]=1;
+  b.owner[46]=1;b.army[46]=40;
+  b.owner[59]=-2;b.army[59]=80;b.structure[59]=1;
+  auto p=std::make_unique<Policy>(0,1,"{}");b.refresh(*p);
+  assert(p->reserve[57]>1);
+  p->campaignSearch(56,99,8);
+  // Arrive with 149, grow to 150, then HALF sends exactly 75. Merely
+  // subtracting a 40-troop reserve wrongly predicts a 110-troop sortie.
+  assert(p->force[58]==75&&p->pathHalf[58]);
+  assert(p->dist[59]>=INF);
+ }
  {
   Board b;b.owner[60]=1;b.structure[60]=2;b.army[60]=130;
   b.owner[56]=b.owner[64]=0;b.army[56]=b.army[64]=80;

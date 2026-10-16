@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -30,14 +31,20 @@ struct Route {
  double gain=0,rank=0,loss=0,hazard=0,exposure=0;
  int cell=-1,source=-1,force=0,dir=-1,steps=0;
  bool half=false;
+ unsigned halfMask=0;
  short path[13]{};
 };
 struct Policy {
+ std::chrono::steady_clock::time_point planningStart=std::chrono::steady_clock::now();
+ bool planningTimeLeft()const {
+  return std::chrono::steady_clock::now()-planningStart<std::chrono::microseconds(1800);
+ }
  int p,W=0,H=0,N=0,g=-1,tick=0,oldTarget=-1,oldSource=-1,lastTarget=-1,aliveCount=0;
  uint64_t rng;
  double harvestValue=0;
  bool harvestContact=false,harvestIncome=false;
  double networkValue=1,raidValue=1;
+ double capitalHorizon=80;
  int homeDistance[MAXN],component[MAXN],componentArmy[MAXN],componentLand[MAXN];
  double networkBonus[MAXN];
  int lastHomeContact=-1000,raidNeed=0;
@@ -52,6 +59,7 @@ struct Policy {
  int nb[MAXN][4],gd[MAXN],fd[MAXN],ed[MAXN],unknown[MAXN],fogGain[MAXN],reserve[MAXN],targetDist[MAXN];
  int dist[MAXN],force[MAXN],pathLoss[MAXN],first[MAXN],parent[MAXN],queue[MAXN];
  double threat[MAXN],pathExposure[MAXN];
+ bool pathHalf[MAXN]{};
  int threatETA[MAXN], attackCost[MAXN], nextAttackCost[MAXN],attackGuard[MAXN];
  int homeCells[MAXN],homeCount=0;
  std::uint64_t searchTargets[MAXN/64];
@@ -75,10 +83,12 @@ struct Policy {
   harvestIncome=parameter(params,"\"harvest_income\"",0)>0;
   networkValue=std::clamp(parameter(params,"\"network_value\"",1),0.0,2.0);
   raidValue=std::clamp(parameter(params,"\"raid_value\"",1),0.0,2.0);
+  capitalHorizon=std::clamp(parameter(params,"\"capital_horizon\"",80),0.0,640.0);
   std::fill(ter,ter+MAXN,255);std::fill(st,st+MAXN,255);std::fill(own,own+MAXN,-3);
   std::fill(a,a+MAXN,0);std::fill(seen,seen+MAXN,-10000);std::fill(lastOwn,lastOwn+MAXN,-3);
   std::fill(enemyGeneral,enemyGeneral+8,-1);
   sources.reserve(MAXN);keep.reserve(MAXN);border.reserve(MAXN);
+  campaignHeap.reserve(MAXN*4+4);
  }
  uint64_t random(){rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;return rng;}
  // terrain=2 is an observation-only fog obstacle (mountain or city).
@@ -409,6 +419,7 @@ struct Policy {
  }
  // Fast bounded breadth-first campaigns, keeping the strongest shortest route.
  void search(int s,int initial,int depth){
+  std::fill(pathHalf,pathHalf+N,false);
   std::fill(dist,dist+N,INF);std::fill(force,force+N,-INF);
   std::fill(searchTargets,searchTargets+(N+63)/64,0);int h=0,z=0;
   queue[z++]=s;dist[s]=0;force[s]=initial;pathLoss[s]=0;first[s]=-1;parent[s]=-1;pathExposure[s]=0;
@@ -655,12 +666,15 @@ struct Policy {
   double discount[13];discount[0]=1;for(int d=1;d<=12;d++)discount[d]=discount[d-1]*.93;
   const double troopScale=income*2.5+2;
   for(int depth=1;depth<=(harvestActive?12:10)&&count;depth++){
+   if(!planningTimeLeft())break;
    int generated=0;
    std::fill(cellRank,cellRank+N,-1e30);
    for(int b=0;b<count;b++){
     const Route &r=beam[b];int u=r.cell;
-    int moving=(depth==1?moveArmy(r.source,r.half):r.force-1+
-       int((actionTurn(depth)%2==0&&st[u]>0&&st[u]<3)||(actionTurn(depth)%50==0&&st[u]==0)));
+    bool departingHalf=depth==1?r.half:reserve[u]>1;
+    int available=r.force+(depth>1?grows(u,actionTurn(depth)):0);
+    int moving=depth==1?moveArmy(r.source,r.half):(departingHalf?available/2:available-1);
+    if(available-moving<reserve[u])continue;
     if(moving<1)continue;
     for(int dir=0;dir<4;dir++){
      int v=nb[u][dir];if(v<0||blocked(v))continue;
@@ -672,6 +686,7 @@ struct Policy {
      if(!mine(v)&&moving<=guard+(ter[v]==255?1:0))continue;
      if(mine(v)&&v==g&&reserve[g]>1)continue;
      Route next=r;next.cell=v;next.steps=depth;next.path[depth]=v;
+     if(departingHalf)next.halfMask|=1u<<(depth-1);
      if(depth==1){
       next.dir=dir;next.hazard=risk(u,v,moving);
       if(next.hazard>=1000)continue;
@@ -692,14 +707,16 @@ struct Policy {
      }
      next.exposure=std::max(r.exposure,exposure);
      if(mine(v)){
-      next.force=moving+std::max(0,army(v)-reserve[v]+1);
+      next.force=moving+army(v);
       if(st[v]>0&&st[v]<3)next.force+=futureGrowth(depth);
       else if(st[v]==0)next.force+=futureGrowth(depth,50);
       if(harvestActive){
-       int collected=std::max(0,next.force-moving-1);
+       int deployable=reserve[v]>1?((next.force+1)/2>=reserve[v]?next.force/2:0):next.force-1;
+       int collected=std::max(0,deployable-moving);
        // Merging a one-troop donor into an existing large army must not
        // receive credit for assembling that whole army again.
-       int largestBefore=std::max(moving+1,next.force-moving);
+       int alone=reserve[v]>1?((ready(v)+1)/2>=reserve[v]?ready(v)/2:0):ready(v)-1;
+       int largestBefore=std::max(moving+1,alone+1);
        int useful=std::min({collected,moving,std::max(0,concentration-largestBefore)});
        for(int j=0;j<depth;j++)if(sameFlow(r.path[j],v)){useful=0;break;}
        double proximity=harvestContact?std::clamp((18.-ed[v])/8.,0.,1.):1.;
@@ -735,6 +752,7 @@ struct Policy {
       next.gain+=discount[depth-1]*(reward+(king?0:networkBonus[v]));
      }
      next.loss+=(depth>1);
+     if(depth>1)next.loss+=.3*std::max(0,available-moving-(mine(u)?army(u):1));
      next.rank=next.gain/(.8+.80*depth+next.loss/troopScale)-next.hazard-next.exposure;
      if(next.source==oldSource)next.rank*=1.025;
      if(next.cell==oldTarget)next.rank*=1.04;
@@ -742,7 +760,7 @@ struct Policy {
       best={next.rank,next.source,v,next.dir,next.half};
       bestProgram=Program();bestProgram.value=next.rank;bestProgram.goal=v;
       bestProgram.root=next.source;bestProgram.born=tick;bestProgram.kind=1;
-      for(int j=0;j<depth;j++)bestProgram.orders[bestProgram.count++]={next.path[j],next.path[j+1],j==0&&next.half};
+      for(int j=0;j<depth;j++)bestProgram.orders[bestProgram.count++]={next.path[j],next.path[j+1],bool(next.halfMask&(1u<<j))};
      }
      // A small terminal value preserves gathering routes in the beam without
      // awarding their speculative gain to an executable action.
@@ -803,6 +821,7 @@ struct Policy {
  #include "operations.h"
 #include "warfare.h"
 #include "tactics.h"
+#include "strategy.h"
 #include "controller.h"
  int64_t act(const ArenaObservation *obs){return decideV8(obs);}
 
