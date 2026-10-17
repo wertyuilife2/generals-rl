@@ -2655,6 +2655,75 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "50a98bd57639dea4a59f4fcb8b08269f0f51cadd903b4c98b597354413051a9f": {
+      "source_directory": "heristic/gpt-6-razor/experiments/50a98bd57639dea4a59f4fcb8b08269f0f51cadd903b4c98b597354413051a9f",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cf610be2bf4f116c13d771fff64ce5baf5c8d01377faeaa016f535322a99677/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1901000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1901000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "ebf5c78fa5371416e352d2de12f1dd3fba73a6507eb97bd1c442632f02d0395d": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ebf5c78fa5371416e352d2de12f1dd3fba73a6507eb97bd1c442632f02d0395d",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b70b70ddff0e1ee24b581bb821d9080e153d809447502ac5d5424e59ff91232f/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1878000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1878000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "2abb89839e98e062822025033e4262b5c0efa8ed32a38bbddf4c051a3eec1d1e": {
+      "source_directory": "heristic/gpt-6-razor/experiments/2abb89839e98e062822025033e4262b5c0efa8ed32a38bbddf4c051a3eec1d1e",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e10bb8df3927f5458ea10dd789c0a3c30bb13dc3a8b68d6aa2124ed46d69e8ee/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1934000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1934000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -7732,6 +7801,93 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-campaign-ledger",
+      "version": "50a98bd57639dea4a59f4fcb8b08269f0f51cadd903b4c98b597354413051a9f",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cf610be2bf4f116c13d771fff64ce5baf5c8d01377faeaa016f535322a99677/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3625,
+          "pair_score": 0.6375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 86762,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1901000,
+        "timeouts": 0,
+        "total_ns": 67242152000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-short-king-race",
+      "version": "ebf5c78fa5371416e352d2de12f1dd3fba73a6507eb97bd1c442632f02d0395d",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b70b70ddff0e1ee24b581bb821d9080e153d809447502ac5d5424e59ff91232f/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.725,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.275,
+          "pair_score": 0.725,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80993,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1878000,
+        "timeouts": 0,
+        "total_ns": 59495235000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-visible-reply-race",
+      "version": "2abb89839e98e062822025033e4262b5c0efa8ed32a38bbddf4c051a3eec1d1e",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e10bb8df3927f5458ea10dd789c0a3c30bb13dc3a8b68d6aa2124ed46d69e8ee/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.7125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.2875,
+          "pair_score": 0.7125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80752,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1934000,
+        "timeouts": 0,
+        "total_ns": 59552667000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -10230,6 +10386,156 @@
         "selection": "No tested change is promoted to a formal release. Working source is the land-tenure experiment, retained as an explicit experimental checkpoint after the former parent incurred a timing disqualification. Retention is not a claim of superiority.",
         "archive_tests": "outputs/analysis/razor-v8-land-tenure-20261017/tests-archived-economic-trials.log",
         "next_design_question": "Represent a sortie as a persistent military and information investment anchored at real assembly, accounting for cumulative depletion, the next land-income deadline, protected production and a feasible regrouping route. Assess when to finish or abandon that investment without resetting its loss budget every one-step capture. Earlier forced-role drafts regressed and must not be reintroduced merely by changing thresholds."
+      },
+      "campaign_replay_review_20261017": {
+        "scope": "Three user-confirmed QueueT losses and all eight v7 main-site losses, from actual own recorded observations. Other account names are not independently identified as human. No alternative-policy probe is an alternate match.",
+        "analyzer": "heristic/gpt-6-razor/tests/review_recorded_campaigns.py",
+        "recorded_main_games": "outputs/analysis/razor-human-campaigns-20261017/main-v7.json",
+        "recorded_bot_games": "outputs/analysis/razor-human-campaigns-20261017/batch02.json",
+        "sortie_income_ledger": "outputs/analysis/razor-human-campaigns-20261017/queuet-sortie-income.json",
+        "observations": [
+          "All eight v7 main-site losses ended without our observations ever revealing the opposing general. This is a complete count for this recorded ten-game batch, not a population estimate of human strength.",
+          "QueueT game 5: thirteen advances at ticks 156-168 reduced the moving column from 53 to 14. They revealed 35 previously unseen cells. Nine of the thirteen captured ordinary tiles were lost before the next global land-growth pulse; only four were ours at tick 200. Cells that later became fogged do not establish their subsequent enemy ownership.",
+          "Main-site game 8: city 228 was captured nine times and lost nine times. Our consecutive observed holding intervals were 12, 8, 6, 15, 1, 14, 22, 18 and 77 ticks. After eight captures a full departure order was submitted; one occupation ended in a one-tick recapture before a recorded departure. Submitted orders and actual transitions remain separately recorded.",
+          "Main-site game 8: our 101-troop column moved into an observed 162-troop enemy interception at tick 784. A later enemy 33-troop remnant merged into city 228 (147 to 179 at tick 811); the 179-troop sortie then intercepted our 85-troop landing. The visible sequence demonstrates field-army reuse and city resupply; hidden enemy routes are not reconstructed.",
+          "Main-site game 9: despite 1003 total army versus 746 at the final observation, home held only 189 against an adjacent 345. The distant 132-troop field column and 119-troop city were not usable immediate defense. This is deployment and shared action-budget failure, not proof that economic advantage is worthless."
+        ],
+        "current_source_probe": {
+          "source_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+          "result": "outputs/analysis/razor-human-review-20261016/land-current-review-20261017.json",
+          "timing": "outputs/analysis/razor-human-campaigns-20261017/current-probe-timing.json",
+          "calls": 4272,
+          "max_ns": 2030000,
+          "timeouts": 0,
+          "errors": 0,
+          "interpretation": "Historical observations were held fixed and generated decisions were not executed. The current source avoids both featured immediate interception moves and starts home reinforcement earlier in game 9; these are local behavior checks, not saved games. Full departures from already-captured city states still occur. A fresh match is required to assess the resulting campaign."
+        },
+        "design_requirements": [
+          "Judge a sortie by information reached, retained income and the next usable field force; raw newly seen cells or captures cannot be its only terminal reward.",
+          "Treat a city as an assembly and resupply position. Compare occupation, mobile coverage, reinforcement and deliberate evacuation on one action schedule.",
+          "Budget rear collection, scouting and front operations together. A force promised to defense cannot simultaneously fund another campaign.",
+          "Retain general-exposure knowledge after an enemy scout leaves. Separate certainty about observed threats from uncertainty about hidden force.",
+          "Reject local behavioral improvements as strength evidence until matched games on fresh samples and broader opponents support them."
+        ],
+        "campaign_trials": {
+          "ledger": {
+            "summary": {
+              "label": "goal-campaign-ledger",
+              "version": "50a98bd57639dea4a59f4fcb8b08269f0f51cadd903b4c98b597354413051a9f",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/2cf610be2bf4f116c13d771fff64ce5baf5c8d01377faeaa016f535322a99677/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.6375,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.3625,
+                  "pair_score": 0.6375,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 86762,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1901000,
+                "timeouts": 0,
+                "total_ns": 67242152000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regression_tests": 14,
+            "test_log": "outputs/analysis/razor-v8-campaign-ledger-20261017/tests-ledger.log",
+            "paired_result": "outputs/analysis/razor-v8-campaign-ledger-20261017/ledger-paired.json",
+            "status": "evaluated_not_promoted",
+            "interpretation": "Changed the historical depleted-column branch, but 102/160 wins versus parent 115. The preregistered fresh-400 gate failed, so the fresh followup was not run."
+          },
+          "race": {
+            "summary": {
+              "label": "goal-short-king-race",
+              "version": "ebf5c78fa5371416e352d2de12f1dd3fba73a6507eb97bd1c442632f02d0395d",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b70b70ddff0e1ee24b581bb821d9080e153d809447502ac5d5424e59ff91232f/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.725,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.275,
+                  "pair_score": 0.725,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 80993,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1878000,
+                "timeouts": 0,
+                "total_ns": 59495235000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regression_tests": 14,
+            "test_log": "outputs/analysis/razor-v8-campaign-ledger-20261017/tests-race.log",
+            "paired_result": "outputs/analysis/razor-v8-campaign-ledger-20261017/race-paired.json",
+            "status": "evaluated_not_promoted",
+            "interpretation": "116/160 versus parent 115, with three paired gains and two losses on an extensively reused schedule. No credible strength improvement. The initial visible reply bound omitted combined independent replies."
+          },
+          "race-bound": {
+            "summary": {
+              "label": "goal-visible-reply-race",
+              "version": "2abb89839e98e062822025033e4262b5c0efa8ed32a38bbddf4c051a3eec1d1e",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e10bb8df3927f5458ea10dd789c0a3c30bb13dc3a8b68d6aa2124ed46d69e8ee/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.7125,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.2875,
+                  "pair_score": 0.7125,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 80752,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1934000,
+                "timeouts": 0,
+                "total_ns": 59552667000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regression_tests": 14,
+            "test_log": "outputs/analysis/razor-v8-campaign-ledger-20261017/tests-race-bound.log",
+            "paired_result": "outputs/analysis/razor-v8-campaign-ledger-20261017/race-bound-paired.json",
+            "status": "evaluated_not_promoted",
+            "interpretation": "Sum of unique visible off-route reply armies replaces a maximum-single-reply bound. 114/160 versus parent 115. This is conservative for visible replies, not a hidden-information safety proof."
+          },
+          "archive_regressions": "outputs/analysis/razor-v8-campaign-ledger-20261017/tests-archived.log"
+        },
+        "decision": "No candidate is promoted, no official evaluation is spent, and the 80% duel and human-level objectives remain unmet.",
+        "recall_cycle_diagnosis": {
+          "report": "outputs/arena/native_1000/runs/2cf610be2bf4f116c13d771fff64ce5baf5c8d01377faeaa016f535322a99677/report.json",
+          "sequence": 112,
+          "diagnostic": "outputs/analysis/razor-v8-campaign-ledger-20261017/deadline-cycle-112.json",
+          "finding": "Instrumented historical replay matched all actions through the diagnostic endpoint. The same stationary long-range threat yields a 23-order deadline. One forward/backward move changes home-collection cost between 19 and 18; the slack test flips between 4 and 5. Thus the defense proposal cancels immediately after its first retreat step and offense sends the army forward again. This is a confirmed command arbitration cycle, not yet a generally validated fix."
+        },
+        "implementation_gap": {
+          "source": "heristic/gpt-6-razor/v8/controller.h",
+          "finding": "resumeOperation clears a kind-23 occupation task as soon as its goal is owned. Acquisition is a complete task; holding, resupply and the next sortie are subsequent separately ranked proposals. Existing local city reserves and recapture discounts do not constitute a continuing shared occupation schedule. This code observation motivates a redesign; it is not proof that retaining every captured city would improve results."
+        }
       }
     },
     "paired_reconnaissance_comparison": {
