@@ -1,0 +1,263 @@
+{
+  "scope": "Actual own legal observations and own candidate traces only. QueueT is the user-confirmed human; main-site account identities are not independently verified. Historical alternative actions are not executed and cannot establish alternative wins.",
+  "working_source_unchanged": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+  "formal_evaluations_started": 0,
+  "human_readiness_review": {
+    "tool": "heristic/gpt-6-razor/tests/review_campaign_readiness.py",
+    "audit": "outputs/analysis/razor-v8-regional-rollout-20261017/main9-readiness-audit.json",
+    "figure": "outputs/analysis/razor-v8-regional-rollout-20261017/jujo-concentration.png",
+    "findings": [
+      "Main9 at1315 own1065 versus opponent804 total troops, but the visible enemy column has481. Own leading field army132 is22 owned-path steps from home; the rear city106 is18 steps away.",
+      "The leading field army is7 owned-path steps from home at1280,17 at1300,22 at1310. By1320 it has no all-owned path to home. This is a measured reduction in support connectivity, not just a total-army deficit.",
+      "At1310 a static owned BFS-tree schedule gives123 home troops after12 orders and158 after16. This ignores growth and enemy replies and is not an optimal bound or proof that every defense loses.",
+      "Actual main9 at1341 still has132 remote troops and119 in the rear city while home189 faces visible enemy345 at an adjacent tile. Earlier stages, not just the final emergency, require analysis.",
+      "QueueT games3,4,5 all have zero owned cities throughout the recorded histories. The regional-city module does not activate there and cannot be credited with repairing those early-game defeats."
+    ]
+  },
+  "implementation_findings": [
+    "The first rollout restricted future own responses to the last moved army. Candidate root annotations therefore changed access to other existing troops. The common-response version evaluates the same top-four actual own armies for every candidate.",
+    "The first rollout stored a terminal-survival margin in a persistent legacy auction bid, creating values above100000. The common-response version stores zero and re-enters these tasks only into the regional comparison.",
+    "The short-program score assumes future cover actions that the live controller can discard after the initial program ends. The retained-prefix trial preserves the actual contiguous own command prefix used by the selected worst-response rollout; it never compresses a future action across WAIT.",
+    "All three are experimental bounded response models. Two greedy opponent modes, sixteen turns and currently visible troops do not represent optimal play or prove robust human defense."
+  ],
+  "native_trials": [
+    {
+      "trial_type": "joint_response",
+      "label": "goal-regional-joint-rollout",
+      "version": "edbb3c2fcb0343ea36051cb969867f32f5d8320b390eab99d4bcba3fc6c6f0de",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2061c26e7e63eb2c5351333093533a04c9ad7947e16623d3a01ac01924f8723/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.5125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.4875,
+          "pair_score": 0.5125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 95305,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2847000,
+        "timeouts": 0,
+        "total_ns": 84602904000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "wins": 82,
+      "regressions_passed": 14,
+      "regression_log": "outputs/analysis/razor-v8-regional-rollout-20261017/tests-pressure-full.log",
+      "development_gate_wins": 125,
+      "promoted": false
+    },
+    {
+      "trial_type": "common_response",
+      "label": "goal-regional-common-response",
+      "version": "afd364b53d4292fc9d119e44bf79b7636ed21ceb06be5bad893c9e62219c19f5",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1f4918ddb1594f626f198e1f519750ac9f3f801edf5ad6b2edce9b6e95bc9fdb/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.61875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.38125,
+          "pair_score": 0.61875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 93372,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 4414000,
+        "timeouts": 0,
+        "total_ns": 90085706000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "wins": 99,
+      "regressions_passed": 14,
+      "regression_log": "outputs/analysis/razor-v8-regional-rollout-20261017/tests-fair-full.log",
+      "development_gate_wins": 125,
+      "promoted": false
+    },
+    {
+      "trial_type": "retained_response_prefix",
+      "label": "goal-regional-realized-response",
+      "version": "750def5d29878b60b4f1e022c39424cea1832ae83869df1af305c56832ea7f4c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c94c8a81991faff936b743d84a36a8eb3858c37f98fa823f85065ef92dcfca84/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.64375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.35625,
+          "pair_score": 0.64375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 89551,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 4145000,
+        "timeouts": 0,
+        "total_ns": 80826760000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "wins": 103,
+      "regressions_passed": 14,
+      "regression_log": "outputs/analysis/razor-v8-regional-rollout-20261017/tests-realized-full.log",
+      "development_gate_wins": 125,
+      "promoted": false
+    }
+  ],
+  "paired_comparisons": [
+    {
+      "games": 160,
+      "seed": 261017101,
+      "matched_initial_states": true,
+      "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "new_version": "edbb3c2fcb0343ea36051cb969867f32f5d8320b390eab99d4bcba3fc6c6f0de",
+      "control_wins": 115,
+      "new_wins": 82,
+      "changed_to_win": 11,
+      "changed_to_loss": 44,
+      "two_sided_exact_mcnemar_p": 8.699371704778969e-06,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2061c26e7e63eb2c5351333093533a04c9ad7947e16623d3a01ac01924f8723/report.json"
+    },
+    {
+      "games": 160,
+      "seed": 261017101,
+      "matched_initial_states": true,
+      "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "new_version": "afd364b53d4292fc9d119e44bf79b7636ed21ceb06be5bad893c9e62219c19f5",
+      "control_wins": 115,
+      "new_wins": 99,
+      "changed_to_win": 15,
+      "changed_to_loss": 31,
+      "two_sided_exact_mcnemar_p": 0.02589608179323477,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/1f4918ddb1594f626f198e1f519750ac9f3f801edf5ad6b2edce9b6e95bc9fdb/report.json"
+    },
+    {
+      "games": 160,
+      "seed": 261017101,
+      "matched_initial_states": true,
+      "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "new_version": "750def5d29878b60b4f1e022c39424cea1832ae83869df1af305c56832ea7f4c",
+      "control_wins": 115,
+      "new_wins": 103,
+      "changed_to_win": 11,
+      "changed_to_loss": 23,
+      "two_sided_exact_mcnemar_p": 0.05761267291381955,
+      "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+      "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/c94c8a81991faff936b743d84a36a8eb3858c37f98fa823f85065ef92dcfca84/report.json"
+    }
+  ],
+  "paired_scope": "Matched game outcomes; repeated development maps and rotated seats are not independent fresh validation. McNemar p-values here are descriptive game-level values.",
+  "mechanics": {
+    "source": "heristic/gpt-6-razor/tests/test_v8_regional_rollout.cpp",
+    "log": "outputs/analysis/razor-v8-regional-rollout-20261017/tests-archived-mechanics.log",
+    "cases": [
+      "donor conservation",
+      "two columns and retargeting",
+      "blocked approach after withdrawal",
+      "terminal seat order",
+      "common future army pool independent of root metadata",
+      "no terminal margin in persistent auction bids",
+      "no compressed WAIT in retained prefixes"
+    ]
+  },
+  "native_actual_history_probes": [
+    {
+      "report": "outputs/analysis/razor-v8-regional-rollout-20261017/loss39.json",
+      "source": "edbb3c2fcb0343ea36051cb969867f32f5d8320b390eab99d4bcba3fc6c6f0de",
+      "sequence": 39,
+      "timing": {
+        "calls": 359,
+        "total_ns": 223217000,
+        "max_ns": 1329000,
+        "max_tick": 303,
+        "timeouts": 0,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "native_max_ns": 1329000,
+        "measurement": "single-thread C++ arena_act wall time; excludes Arena and IPC"
+      },
+      "max_action_mismatches": 0
+    },
+    {
+      "report": "outputs/analysis/razor-v8-regional-rollout-20261017/loss5.json",
+      "source": "edbb3c2fcb0343ea36051cb969867f32f5d8320b390eab99d4bcba3fc6c6f0de",
+      "sequence": 5,
+      "timing": {
+        "calls": 892,
+        "total_ns": 1072793000,
+        "max_ns": 2356000,
+        "max_tick": 412,
+        "timeouts": 0,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "native_max_ns": 2356000,
+        "measurement": "single-thread C++ arena_act wall time; excludes Arena and IPC"
+      },
+      "max_action_mismatches": 0
+    },
+    {
+      "report": "outputs/analysis/razor-v8-regional-rollout-20261017/fair-loss39.json",
+      "source": "afd364b53d4292fc9d119e44bf79b7636ed21ceb06be5bad893c9e62219c19f5",
+      "sequence": 39,
+      "timing": {
+        "calls": 819,
+        "total_ns": 714234000,
+        "max_ns": 1935000,
+        "max_tick": 511,
+        "timeouts": 0,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "native_max_ns": 1935000,
+        "measurement": "single-thread C++ arena_act wall time; excludes Arena and IPC"
+      },
+      "max_action_mismatches": 0
+    }
+  ],
+  "human_probes": [
+    {
+      "report": "outputs/analysis/razor-v8-regional-rollout-20261017/regional-human-probe.json",
+      "source": "edbb3c2fcb0343ea36051cb969867f32f5d8320b390eab99d4bcba3fc6c6f0de",
+      "calls": 3366,
+      "max_ns": 2590000,
+      "timeouts": 0,
+      "errors": 0
+    },
+    {
+      "report": "outputs/analysis/razor-v8-regional-rollout-20261017/fair-human-probe.json",
+      "source": "afd364b53d4292fc9d119e44bf79b7636ed21ceb06be5bad893c9e62219c19f5",
+      "calls": 3366,
+      "max_ns": 4416000,
+      "timeouts": 0,
+      "errors": 0
+    }
+  ],
+  "decision": "No regional trial passes the predeclared125/160 development gate or beats the retained115/160 comparator. No promotion, fresh holdout, online matches, or formal evaluation. Preserve every failed experiment.",
+  "next_design_constraints": [
+    "Measure troops deliverable along owned routes within an actual shared command schedule; total army and territory alone do not certify usable power.",
+    "Account for how a raid moves the main army away from productive assets and return routes before committing to it. Scouting needs a destination and force budget.",
+    "Separate no-city early play from city-region response. Preserve recognition of an exposed general and expected repeat raids.",
+    "Validate a common long-term objective and its execution. A high rollout value or a successful local intervention is insufficient if economy and initiative deteriorate in executed games."
+  ]
+}
