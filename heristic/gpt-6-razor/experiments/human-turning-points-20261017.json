@@ -1,0 +1,73 @@
+{
+  "scope": "Recorded legal views and submitted orders. Opponent human identity is not independently verified for main-site usernames. City changes with observation gaps are not exact capture times. Growth-frame changes can include investment; no hidden cities are read. No policy is run and no counterfactual outcome is claimed.",
+  "review_tool": "heristic/gpt-6-razor/tests/review_human_turning_points.py",
+  "raw_review": "outputs/analysis/razor-human-close-review-20261017/reproducible-review.json",
+  "figures": [
+    "outputs/analysis/razor-human-close-review-20261017/jujo-city-cycle.png",
+    "outputs/analysis/razor-human-close-review-20261017/queuet-interception.png"
+  ],
+  "facts": {
+    "v7_main_losses": 8,
+    "losses_without_visible_enemy_general": 8,
+    "jujo_game6_550_800": {
+      "start": 550,
+      "end": 800,
+      "own_minus_enemy_before": 227,
+      "own_minus_enemy_after": -59,
+      "changes_by_phase": {
+        "between_growth_boundaries": -48,
+        "ordinary_growth_boundary": -281,
+        "land_growth_boundary": 43
+      },
+      "histogram": {
+        "between_growth_boundaries:0": 124,
+        "ordinary_growth_boundary:-3": 6,
+        "ordinary_growth_boundary:-1": 3,
+        "between_growth_boundaries:-48": 1,
+        "ordinary_growth_boundary:-2": 55,
+        "ordinary_growth_boundary:-4": 24,
+        "land_growth_boundary:24": 1,
+        "ordinary_growth_boundary:0": 23,
+        "ordinary_growth_boundary:-6": 9,
+        "land_growth_boundary:8": 1,
+        "land_growth_boundary:13": 1,
+        "land_growth_boundary:5": 1,
+        "land_growth_boundary:-7": 1
+      },
+      "observed_neutral_city_captures": [
+        {
+          "tick": 569,
+          "city": 145,
+          "previous_visible_garrison": 48
+        }
+      ]
+    },
+    "counterexample_to_blanket_city_avoidance": "At400-442 own-minus-enemy army grows from229 to270 while cities90,194,254 are taken and lost. Recapture counts alone do not prove bad exchanges.",
+    "neutral_investment_risk": "City273 costs49 neutral troops at444 and is observed lost at463; city250 costs49 at489 and is observed lost at499. The first tenures have9 and5 subsequent ordinary growth boundaries with own prior ownership. Access and denial value are not valued by this count.",
+    "city_chain": "A visible enemy138 column at111 on690 moves via110,109,129,149,169,168,188,208,207, captures206 at700,267 at704,307 at706. Our home grows142 to151 over this interval. A later visible93 column at272 on713 captures250 at716,267 at720,307 at722, including a city we just retook at720.",
+    "queuet_game5": "Actual156-169 expedition shrinks53 to14; at169 QueueT60 bypasses it. Our second column gathers17 to22 during169-180. At185-186 we spend orders on the distant remnant while the enemy approaches the second column; at187 the22-column is gone and enemy15 occupies224. No hidden continuation is reconstructed."
+  },
+  "retained_probe": {
+    "source_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+    "report": "outputs/analysis/razor-human-close-review-20261017/retained-main-probe.json",
+    "calls": 3366,
+    "max_ns": 1891000,
+    "timeouts": 0,
+    "errors": 0,
+    "scope": "All actual own legal observations, ordered from start. Generated actions are not executed; later observations and actual outcomes remain historical. This is not a counterfactual game. Online frames have no artificial previous-action receipt. Debug state copied during arena_act.",
+    "findings": [
+      "At main6 tick404 retained v8 chooses a half-force reconnaissance departure90->91 rather than the historical full departure90->110. It has changed some old behavior.",
+      "At414 it still proposes full departure from city194, and at691-695 proposes collecting around287 for an attack on275 while the observed enemy column moves into the region. At700-705 it instead bids for distant city90. At719 it still selects327->307, the historical recapture preceding another loss at722. The later boards are historical, not outcomes of these alternative actions.",
+      "These decisions identify remaining regional coordination questions. Different choices at404 or415 are not evidence that any human match is now won."
+    ]
+  },
+  "next_design_requirements": [
+    "Compare regional production retained after a shared command schedule, not independent rewards for touching each city. A mobile field column may cover several cities only when it can actually respond in time.",
+    "Plan neutral purchases together with occupation and reinforcement. Account for the purchase cost separately from symmetric combat and temporary denial value.",
+    "Give reconnaissance an explicit destination into unresolved enemy territory, a force budget, and a continuation/return condition; do not equate short recapture routes with discovery.",
+    "Compare fresh opponent advance, production raids, and waiting/collection responses against the same candidate sequence. Home survival alone does not certify economic safety.",
+    "Evaluate changes with executed Arena and online matches; frozen human histories are diagnostic evidence only."
+  ],
+  "decision": "No strategy promoted and no formal evaluation started. Working source unchanged. Initial unfinished tempo source preserved separately; human regional-control review takes priority over another narrow home-response adjustment.",
+  "tempo_snapshot": "e770f2d2fd4a871df99a9a3f8c3f547360f149a4afc4c89e0f795b8e4b71e2cf"
+}

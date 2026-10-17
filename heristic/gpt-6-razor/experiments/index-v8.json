@@ -12406,6 +12406,14 @@
           "Historical alternative-policy actions are never substituted for the recorded subsequent observations and are not alternative wins."
         ],
         "decision": "No trial promoted; development advance gate121/160 not reached. No new400-game holdout, online match or formal evaluation. Working source remains byte-for-byte unchanged."
+      },
+      "human_turning_points_20261017": {
+        "evidence": "heristic/gpt-6-razor/experiments/human-turning-points-20261017.json",
+        "packed_evidence": "heristic/gpt-6-razor/experiments/human-turning-points-20261017.json.gz",
+        "working_unchanged": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+        "native_games": 0,
+        "formal_evaluations_started": 0,
+        "tempo_snapshot": "e770f2d2fd4a871df99a9a3f8c3f547360f149a4afc4c89e0f795b8e4b71e2cf"
       }
     },
     "paired_reconnaissance_comparison": {
@@ -12730,6 +12738,14 @@
       "source_directory": "heristic/gpt-6-razor/experiments/deeb91f6e1e9958309ca5fe13084fb2228411fd6d76f7cb87f185a6a8354f6e6",
       "test_log": "outputs/analysis/razor-v8-rescue-ledger-20261017/tests-margin-full.log",
       "reason": "Passed14 regressions. Before native or probe, corrected the subtraction of natural home growth from the prospective reinforcement credit. No native games."
+    },
+    {
+      "version": "e770f2d2fd4a871df99a9a3f8c3f547360f149a4afc4c89e0f795b8e4b71e2cf",
+      "source_directory": "heristic/gpt-6-razor/experiments/e770f2d2fd4a871df99a9a3f8c3f547360f149a4afc4c89e0f795b8e4b71e2cf",
+      "test_log": "outputs/analysis/razor-v8-tempo-20261017/tests-full.log",
+      "regressions_passed": 14,
+      "native_games": 0,
+      "reason": "Initial public-income/response-budget tempo draft. Preserved before corrections. No native game or human-history probe executed. Known unresolved issues: first fallback validates legalOrder rather than permitted; prefix/no-prefix growth horizons differ. Deferred while following the user request for deeper human-game review. No strength or timing qualification claimed."
     }
   ],
   "online_experiments": [
