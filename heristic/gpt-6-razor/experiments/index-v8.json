@@ -2939,6 +2939,75 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c": {
+      "source_directory": "heristic/gpt-6-razor/experiments/86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2f539bfd42c74fd90e388487ba7614f8ecfd356930289caa1f3d0e668e60bbc/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1877000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1877000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7": {
+      "source_directory": "heristic/gpt-6-razor/experiments/7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0b3884d58da5c385b97c69e0ad80135c155a3b033a34cf986d5150a8ecc55d65/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2008000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2008000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "1a21bf0d99430837616f68a07ed56759636ccc1ed78ac81ba4c2edccc2db3202": {
+      "source_directory": "heristic/gpt-6-razor/experiments/1a21bf0d99430837616f68a07ed56759636ccc1ed78ac81ba4c2edccc2db3202",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/985b86f309b439931bd1e36de09fef9a26e9b055ca9225e7be190f522d6bec42/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2129000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2129000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -8364,6 +8433,93 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-response-budget-hold",
+      "version": "86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2f539bfd42c74fd90e388487ba7614f8ecfd356930289caa1f3d0e668e60bbc/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81961,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1877000,
+        "timeouts": 0,
+        "total_ns": 57009543000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-response-budget-counter",
+      "version": "7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0b3884d58da5c385b97c69e0ad80135c155a3b033a34cf986d5150a8ecc55d65/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81997,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2008000,
+        "timeouts": 0,
+        "total_ns": 56612562000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-response-budget-legal-fallback",
+      "version": "1a21bf0d99430837616f68a07ed56759636ccc1ed78ac81ba4c2edccc2db3202",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/985b86f309b439931bd1e36de09fef9a26e9b055ca9225e7be190f522d6bec42/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.725,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.275,
+          "pair_score": 0.725,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81543,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2129000,
+        "timeouts": 0,
+        "total_ns": 56003114000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -11706,6 +11862,201 @@
           "A completed defense collection needs a continuing obligation; the province trial demonstrated immediate appropriation by an unrelated attack campaign.",
           "Evaluate equal army exchanges in their economic context. Losing22 also removes opposing troops; avoiding the loss is not by itself proof of strategic improvement. QueueT had recurring-production evidence and gained land before that exchange."
         ]
+      },
+      "response_budget_trials_20261017": {
+        "hypothesis": "Coordinate a strategic first order with a concrete subsequent home response, sharing all troops, command slots and turn order. Hold a viable position instead of automatically stepping backward at an unsafe advance. A general departure can also be answered by a concrete counter-capture.",
+        "scope": "Single dominant visible enemy, long-range duel threats, at most four shortest approaches. The later versions test both full and half initial launches. This is a bounded planning model, not an exhaustive opponent-policy or fog-state safety proof. All native runs were serial.",
+        "preregister": "outputs/analysis/razor-v8-response-budget-20261017/preregister.json",
+        "trials": {
+          "home_response": {
+            "result": {
+              "label": "goal-response-budget-hold",
+              "version": "86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2f539bfd42c74fd90e388487ba7614f8ecfd356930289caa1f3d0e668e60bbc/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.71875,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.28125,
+                  "pair_score": 0.71875,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81961,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1877000,
+                "timeouts": 0,
+                "total_ns": 57009543000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-response-budget-20261017/tests-hold.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c",
+              "control_wins": 115,
+              "new_wins": 115,
+              "changed_to_win": 4,
+              "changed_to_loss": 4,
+              "two_sided_exact_mcnemar_p": 1.0,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/f2f539bfd42c74fd90e388487ba7614f8ecfd356930289caa1f3d0e668e60bbc/report.json"
+            }
+          },
+          "counter_response": {
+            "result": {
+              "label": "goal-response-budget-counter",
+              "version": "7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0b3884d58da5c385b97c69e0ad80135c155a3b033a34cf986d5150a8ecc55d65/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.71875,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.28125,
+                  "pair_score": 0.71875,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81997,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 2008000,
+                "timeouts": 0,
+                "total_ns": 56612562000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-response-budget-20261017/tests-counter-full.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7",
+              "control_wins": 115,
+              "new_wins": 115,
+              "changed_to_win": 4,
+              "changed_to_loss": 4,
+              "two_sided_exact_mcnemar_p": 1.0,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0b3884d58da5c385b97c69e0ad80135c155a3b033a34cf986d5150a8ecc55d65/report.json"
+            }
+          },
+          "legal_fallback": {
+            "result": {
+              "label": "goal-response-budget-legal-fallback",
+              "version": "1a21bf0d99430837616f68a07ed56759636ccc1ed78ac81ba4c2edccc2db3202",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/985b86f309b439931bd1e36de09fef9a26e9b055ca9225e7be190f522d6bec42/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.725,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.275,
+                  "pair_score": 0.725,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81543,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 2129000,
+                "timeouts": 0,
+                "total_ns": 56003114000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-response-budget-20261017/tests-guard-full.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "1a21bf0d99430837616f68a07ed56759636ccc1ed78ac81ba4c2edccc2db3202",
+              "control_wins": 115,
+              "new_wins": 116,
+              "changed_to_win": 5,
+              "changed_to_loss": 4,
+              "two_sided_exact_mcnemar_p": 1.0,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/985b86f309b439931bd1e36de09fef9a26e9b055ca9225e7be190f522d6bec42/report.json"
+            }
+          }
+        },
+        "mechanics": {
+          "runner": "heristic/gpt-6-razor/tests/test_v8_response_budget_trial.py",
+          "passed": true,
+          "log": "outputs/analysis/razor-v8-response-budget-20261017/tests-all-archived.log"
+        },
+        "test_correction": {
+          "failed_log": "outputs/analysis/razor-v8-response-budget-20261017/tests-legal-mechanics.log",
+          "diagnostic": "outputs/analysis/razor-v8-response-budget-20261017/legal-debug.log",
+          "corrected_log": "outputs/analysis/razor-v8-response-budget-20261017/tests-legal-mechanics-fixed.log",
+          "explanation": "The first fixture incorrectly expected the optimal collection to spend one extra order sending a small guard home. Leaving that guard on the attack path already supplies the same blocking value, so the actual minimum was14 orders, not15. The corrected fallback-boundary test explicitly supplies a feasible nonminimal15-order queue and checks first-order legality; it does not claim the optimal tree chose that queue."
+        },
+        "old_cycle_probe": {
+          "report": "outputs/analysis/razor-v8-response-budget-20261017/deadline-hold.json",
+          "scope": "Alternative actions on an older trial observation stream, never executed. The qualified working parent already won the corresponding development map at494 ticks; this probe alone therefore cannot be counted as a new win.",
+          "finding": "At the alternating historical frames582,584,...,590 the response scheduler advances263->281 instead of recalling263->245. The actual old recording continues its old actions. At600 the new bounded model is inactive."
+        },
+        "exact_new_loss": {
+          "report": "outputs/analysis/razor-v8-response-budget-20261017/actual-loss2.json",
+          "source": "86a03b9ec91c5c82f2c26d344fded6d5b236f3889d3797c9c96788ee2f96411c",
+          "sequence": 2,
+          "calls": 638,
+          "action_mismatches": 0,
+          "finding": "At169-172 the long-range response model replaces the front44-troop column move224->243 with unrelated smaller transfers. The visible enemy general245 contains49-57 troops. A return-home-only response set misses counter-capture after that garrison departs. This establishes the selected decisions and the missing response option, not that it alone caused the eventual loss."
+        },
+        "counter_followup": {
+          "probe": "outputs/analysis/razor-v8-response-budget-20261017/counter-loss2.json",
+          "scope": "Unexecuted alternatives on the preceding losing history.",
+          "finding": "Full/half-launch counter analysis admits224->243 at169-172. In a separately executed full native game on that map, the counter version still loses at700 ticks, compared with638 for the home-only response trial and a532-tick win for the parent. No repaired-game claim."
+        },
+        "limits": [
+          "Other enemy columns, adaptive rerouting, later waves, city retention and field survival are not jointly optimized by this home-response model.",
+          "The fixed development schedule has been reused heavily. Paired game-level statistics ignore within-map seat-rotation correlation.",
+          "A completed rescue feasibility check does not establish productive offense, exploration or human-level play."
+        ],
+        "remaining": "The shared command constraint now has executable response and waiting semantics, but has not raised win rate. Future work must evaluate the value and continuing responsibilities of field armies, cities and exploration alongside home survival.",
+        "executed_counter_diagnostic": {
+          "report": "outputs/analysis/razor-v8-response-budget-20261017/counter-actual-loss2.json",
+          "source": "7e426fa94ce8ec8c0f84a3a61d01af9d141d9c37915f00e15a703bc694f948e7",
+          "calls": 211,
+          "action_mismatches": 0,
+          "finding": "At169 the accepted first order224->243 is supported by a conditional counter against general245. At170 and171 its accepted alternatives instead use home32 as the response target. At172 no large enemy remains visible, so the visible-column model is inactive. The field continues a sequence of land raids:44 troops at224 at169,35 at241 at173,23 at238 at180,12 at315 at195, and no field above5 by200. The opponent general was not captured. Loss of visibility does not prove the enemy garrison departed; no hidden move is inferred.",
+          "implication": "Preserving a one-step feasible response does not preserve a continuing operational objective, king vision, or a useful terminal field army. The exact later cause of the700-tick defeat is not established by this early sequence."
+        },
+        "decision": "No variant promoted. The preregistered121/160 development gate was not reached; no fresh400-game holdout, online game or formal evaluation started."
       }
     },
     "paired_reconnaissance_comparison": {
@@ -11869,6 +12220,11 @@
       "version": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
       "log": "outputs/analysis/razor-v8-province-20261017/king-path-old-case.log",
       "failure": "After its completed native trial, a newly written semantic regression exposed a king route pruned under the initial garrison but enabled by a proposed withdrawal. Old source gives +2.72222; fixed source rejects it. This assertion failure is preserved separately from native timing and protocol qualification."
+    },
+    {
+      "version": "e324794480e4223f0c9037a1b4911d63096f77fbf4119b3f84bdf7061e3b6bce",
+      "log": "outputs/analysis/razor-v8-response-budget-20261017/tests-old-mechanics.log",
+      "failure": "Expected old-source failure of the subsequently added hold-at-viable-boundary case. Exit-6 retained in old-mechanics-result.json. Not a native timing or protocol failure."
     }
   ],
   "unexecuted_snapshots": [
@@ -12007,6 +12363,18 @@
       "source_directory": "heristic/gpt-6-razor/experiments/1a60fb287b29f6b302db0a32e4627ae1752ec27056c063617b0ef7966482acd9",
       "reason": "Field-focus-only source. Full-history QueueT probes completed with no errors, but at185 both retreats from224 were absent from the root candidate set. No native trial or full regression suite.",
       "probe": "outputs/analysis/razor-v8-field-retreat-20261017/ordering.json"
+    },
+    {
+      "version": "e324794480e4223f0c9037a1b4911d63096f77fbf4119b3f84bdf7061e3b6bce",
+      "source_directory": "heristic/gpt-6-razor/experiments/e324794480e4223f0c9037a1b4911d63096f77fbf4119b3f84bdf7061e3b6bce",
+      "test_log": "outputs/analysis/razor-v8-response-budget-20261017/tests-full.log",
+      "reason": "Initial response scheduler. Fourteen standard regressions passed; later failed the new safe-hold assertion because it automatically recalled the defender instead of waiting at a viable position. No native games."
+    },
+    {
+      "version": "1d425946bda1a7de08da21f345e06c36c393d3c703aaabf4a52db418d875b22b",
+      "source_directory": "heristic/gpt-6-razor/experiments/1d425946bda1a7de08da21f345e06c36c393d3c703aaabf4a52db418d875b22b",
+      "test_log": "outputs/analysis/razor-v8-response-budget-20261017/tests-counter-prehalf.log",
+      "reason": "First conditional counter-capture draft. Existing response mechanics passed; no full regression suite or native games. Replaced by explicit full and half enemy launches before evaluation."
     }
   ],
   "online_experiments": [
