@@ -2847,6 +2847,98 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659": {
+      "source_directory": "heristic/gpt-6-razor/experiments/57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/80d2bacdaa3d4db7d3a01c0a7a81fda9f22134db69f3a904086181a468f9166c/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1890000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1890000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "ed3370d06be60a25bc96e8040dc57bd04f491915fc16a0a9c1086810f6c95194": {
+      "source_directory": "heristic/gpt-6-razor/experiments/ed3370d06be60a25bc96e8040dc57bd04f491915fc16a0a9c1086810f6c95194",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/55a4eb44d8c78ec879e03345f9d30c27bb01e77fb2b8df76f52b0ba7e9d3ec18/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1861000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1861000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "f77ab97dd53ef9427c1a154fb8c0576026a56fb8106e6739b56e21e4d0ad59a4": {
+      "source_directory": "heristic/gpt-6-razor/experiments/f77ab97dd53ef9427c1a154fb8c0576026a56fb8106e6739b56e21e4d0ad59a4",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b4fb72798a18c11bbf5699a7acbb592cacafb7c1d789a7663ba226670033b8c5/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1889000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1889000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c": {
+      "source_directory": "heristic/gpt-6-razor/experiments/bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c2ee12f1417f87663997de4a8b7ce0632920b046e4cde94c9acbc7462e46552/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1882000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1882000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -8156,6 +8248,122 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-province-funded",
+      "version": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/80d2bacdaa3d4db7d3a01c0a7a81fda9f22134db69f3a904086181a468f9166c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.66875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.33125,
+          "pair_score": 0.66875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83089,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1890000,
+        "timeouts": 0,
+        "total_ns": 63431791000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-half-supply",
+      "version": "ed3370d06be60a25bc96e8040dc57bd04f491915fc16a0a9c1086810f6c95194",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/55a4eb44d8c78ec879e03345f9d30c27bb01e77fb2b8df76f52b0ba7e9d3ec18/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.68125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.31875,
+          "pair_score": 0.68125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 86419,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1861000,
+        "timeouts": 0,
+        "total_ns": 63522902000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-province-king-paths",
+      "version": "f77ab97dd53ef9427c1a154fb8c0576026a56fb8106e6739b56e21e4d0ad59a4",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b4fb72798a18c11bbf5699a7acbb592cacafb7c1d789a7663ba226670033b8c5/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.68125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.31875,
+          "pair_score": 0.68125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83419,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1889000,
+        "timeouts": 0,
+        "total_ns": 64240361000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-field-retreat-coverage",
+      "version": "bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c2ee12f1417f87663997de4a8b7ce0632920b046e4cde94c9acbc7462e46552/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6625,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3375,
+          "pair_score": 0.6625,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 82810,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1882000,
+        "timeouts": 0,
+        "total_ns": 59077824000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -11279,6 +11487,225 @@
           "The next comparison must include controlled future gameplay. Historical action changes and unit-test passes cannot establish human-level play."
         ],
         "status": "Review complete; these findings are evidence for the continuing redesign. Human-level performance and80% againstv7 remain unverified."
+      },
+      "province_trials_20261017": {
+        "scope": "Serial Arena native trials. Historical policy probes use unchanged legal own observations, not executed alternate outcomes. The reused development schedule cannot establish human-level strength.",
+        "hypothesis": "Fund concrete forward collection by reducing simulated land and city losses against visible-column raids. Track every donor on one sparse troop ledger and preserve the home reserve.",
+        "trials": {
+          "funded": {
+            "result": {
+              "label": "goal-province-funded",
+              "version": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/80d2bacdaa3d4db7d3a01c0a7a81fda9f22134db69f3a904086181a468f9166c/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.66875,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.33125,
+                  "pair_score": 0.66875,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 83089,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1890000,
+                "timeouts": 0,
+                "total_ns": 63431791000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-province-20261017/tests-funded.log"
+            },
+            "paired_comparison": "outputs/analysis/razor-v8-province-20261017/native-paired.json",
+            "status": "evaluated_not_promoted"
+          },
+          "half_supply_only": {
+            "result": {
+              "label": "goal-half-supply",
+              "version": "ed3370d06be60a25bc96e8040dc57bd04f491915fc16a0a9c1086810f6c95194",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/55a4eb44d8c78ec879e03345f9d30c27bb01e77fb2b8df76f52b0ba7e9d3ec18/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.68125,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.31875,
+                  "pair_score": 0.68125,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 86419,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1861000,
+                "timeouts": 0,
+                "total_ns": 63522902000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-province-20261017/tests-half-full.log"
+            },
+            "paired_comparison": "outputs/analysis/razor-v8-province-20261017/half-paired.json",
+            "status": "evaluated_not_promoted"
+          },
+          "king_paths": {
+            "result": {
+              "label": "goal-province-king-paths",
+              "version": "f77ab97dd53ef9427c1a154fb8c0576026a56fb8106e6739b56e21e4d0ad59a4",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/b4fb72798a18c11bbf5699a7acbb592cacafb7c1d789a7663ba226670033b8c5/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.68125,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.31875,
+                  "pair_score": 0.68125,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 83419,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1889000,
+                "timeouts": 0,
+                "total_ns": 64240361000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-province-20261017/tests-kingpaths.log"
+            },
+            "paired_comparison": "outputs/analysis/razor-v8-province-20261017/paths-paired.json",
+            "status": "evaluated_not_promoted"
+          }
+        },
+        "preregister": "outputs/analysis/razor-v8-province-20261017/preregister.json",
+        "mechanics": {
+          "runner": "heristic/gpt-6-razor/tests/test_v8_province_trials.py",
+          "passed": true,
+          "log": "outputs/analysis/razor-v8-province-20261017/tests-archived.log"
+        },
+        "semantic_regression": {
+          "old": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+          "fixed": "f77ab97dd53ef9427c1a154fb8c0576026a56fb8106e6739b56e21e4d0ad59a4",
+          "source": "heristic/gpt-6-razor/tests/test_v8_province_king_path.cpp",
+          "report": "outputs/analysis/razor-v8-province-20261017/king-path-regression.json",
+          "finding": "An initially blocked ten-step attack becomes lethal after lending half of the home army. Sampled raid paths omitted it because they were generated before the loan. Retaining four direct king approaches lets the same troop ledger detect it. This bounded fix does not enumerate every adaptive enemy response."
+        },
+        "human_probes": [
+          "outputs/analysis/razor-v8-province-20261017/queuet-current.json",
+          "outputs/analysis/razor-v8-province-20261017/queuet-posts.json",
+          "outputs/analysis/razor-v8-province-20261017/queuet-funded.json"
+        ],
+        "decision": "No province or isolated half-supply variant promoted. Parent115/160; funded107/160; half-supply109/160; king-path fix109/160. None reaches the121-win gate. No fresh400-game holdout or formal evaluation.",
+        "actual_loss_trace": {
+          "report": "outputs/analysis/razor-v8-province-20261017/province-loss48.json",
+          "sequence": 48,
+          "source": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+          "calls": 301,
+          "action_mismatches": 0,
+          "observed": "At271 a one-order province task splits home92 into square210. At272 a separate king campaign begins; at274 it withdraws that same forward force210->211. The largest own field reaches152 at155, six return steps from home, at290; it moves away and is nine steps away by293. Home then recalls small donors; enemy waves merge next to home and capture it at301.",
+          "limitation": "This establishes the selected actions and missing persistent post responsibility. It does not prove that retaining the post wins, nor that the separate pruned-king-path regression caused this native defeat.",
+          "requirement": "A force allocated to a continuing defensive responsibility needs explicit reassessment or replacement before an unrelated campaign takes it. Completing assembly cannot itself end that responsibility."
+        }
+      },
+      "queuet_field_retreat_20261017": {
+        "scope": "QueueT is the user-confirmed human opponent. Actual observations and selected original orders are separated from unexecuted current-policy probes. A favorable local evaluation is not proof of a better game outcome.",
+        "record": "outputs/online/razor-100-20261014T125242Z/batch-02/game-005.jsonl",
+        "episode": "outputs/analysis/razor-v8-field-retreat-20261017/human-episode.json",
+        "fixture": "heristic/gpt-6-razor/tests/queuet_field_retreat_history.json.gz",
+        "observed": "At169 enemy60 at194 bypasses adjacent own14 at193, continuing via214,213,233 into our thin trail. Our freshly collected22 stands at225 at180-184, retreats to224 at185, then remains there while the submitted actions at185 and186 move the distant scout174->154->134. Enemy40 at205 at185 moves to204 with38 at186; at187 enemy15 occupies224 and our22 is gone. The main column had taken productive land before this interception. No claim is made about unobserved orders or private intent.",
+        "current_policy_gap": "On unchanged historical observations, working11da chooses home-readiness rather than moving224 at185. The original local tactical search only chooses owned-city foci, so this ordinary-field contact is absent. This is an action-level finding, not an alternate-game loss result.",
+        "search_coverage": {
+          "focus_only": "1a60fb287b29f6b302db0a32e4627ae1752ec27056c063617b0ef7966482acd9",
+          "focus_probe": "outputs/analysis/razor-v8-field-retreat-20261017/ordering.json",
+          "finding": "Merely enabling ordinary-field foci is insufficient: immediate-gain root pruning keeps224->204 and224->225 but omits both rearward224->244 and224->223 at185.",
+          "fixed_source": "bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c",
+          "coverage_probe": "outputs/analysis/razor-v8-field-retreat-20261017/coverage-ordering.json",
+          "finding_after": "Retaining all full moves of the principal field army on each side includes both escapes. The root evaluation at185 prefers escape224->223 (24.3294) over local WAIT (20.5305), with no search abortion. However, its offered score4.89945 still loses to home-readiness5.6. The actual generated action is therefore unchanged at this frame. Root values printed for skipped candidate slots in the debug trace may be stale; only evaluated matching actions are used here."
+        },
+        "trial": {
+          "result": {
+            "label": "goal-field-retreat-coverage",
+            "version": "bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c",
+            "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c2ee12f1417f87663997de4a8b7ce0632920b046e4cde94c9acbc7462e46552/report.json",
+            "ok": true,
+            "completed_games": 160,
+            "metrics": {
+              "2": {
+                "game_win_rate": 0.6625,
+                "games": 160,
+                "invalid_actions": 0,
+                "mean_rank": 1.3375,
+                "pair_score": 0.6625,
+                "scored_games": 160,
+                "tick_limit_games": 0
+              }
+            },
+            "timing": {
+              "calls": 82810,
+              "errors": 0,
+              "limit_ns": 10000000,
+              "max_ns": 1882000,
+              "timeouts": 0,
+              "total_ns": 59077824000
+            },
+            "violations": 0,
+            "hard_limit_qualified": true
+          },
+          "paired_comparison": {
+            "games": 160,
+            "seed": 261017101,
+            "matched_initial_states": true,
+            "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+            "new_version": "bc91301db23eda7ec099d8a8ac14bf1a4e5086684bd3fec4d310bd488cd7ef3c",
+            "control_wins": 115,
+            "new_wins": 106,
+            "changed_to_win": 8,
+            "changed_to_loss": 17,
+            "two_sided_exact_mcnemar_p": 0.10775214433670044,
+            "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+            "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/8c2ee12f1417f87663997de4a8b7ce0632920b046e4cde94c9acbc7462e46552/report.json"
+          },
+          "regressions": {
+            "passed": 14,
+            "log": "outputs/analysis/razor-v8-field-retreat-20261017/tests-full.log"
+          },
+          "mechanics": {
+            "passed": true,
+            "runner": "heristic/gpt-6-razor/tests/test_v8_field_retreat_trial.py",
+            "log": "outputs/analysis/razor-v8-field-retreat-20261017/tests-mechanics.log"
+          }
+        },
+        "decision": "Not promoted: the160-game development gate was not reached. No fresh400-game holdout, formal Arena evaluation, or new online game started.",
+        "remaining_design_requirements": [
+          "Compare an unrelated task with the cost of leaving other live forces idle, including the last legal response window and seat order. Local search alone does not coordinate command allocation.",
+          "Retaining all principal-army moves fixes one pruning omission but is still a bounded two-round search. Do not call it exhaustive or assume it handles every merge, split, retreat or rerouting.",
+          "A completed defense collection needs a continuing obligation; the province trial demonstrated immediate appropriation by an unrelated attack campaign.",
+          "Evaluate equal army exchanges in their economic context. Losing22 also removes opposing troops; avoiding the loss is not by itself proof of strategic improvement. QueueT had recurring-production evidence and gained land before that exchange."
+        ]
       }
     },
     "paired_reconnaissance_comparison": {
@@ -11432,6 +11859,16 @@
       "version": "e9f7749709ec9e353e91e8adbb3d59376382445f6ccbbb76defb1a0847203665",
       "log": "outputs/analysis/razor-v8-regional-defense-20261017/tests-full.log",
       "failure": "One of fourteen regressions failed: the safe city sortie action assertion. A separate instrumented replay selected the expected action. Cause unresolved; no native match and no timing-qualification claim. Source and the failed log are preserved."
+    },
+    {
+      "version": "5d1fb5b76fe722af8fec60cb6982e4b8f505390b8c38d31aadcf87b97b53d58c",
+      "log": "outputs/analysis/razor-v8-province-20261017/tests-mechanics.log",
+      "failure": "Narrow-corridor mechanics failure; fixed before native evaluation."
+    },
+    {
+      "version": "57d3cdc4620ccc5f45fcc6cce9c9352e25527ad394af5278ef8a7e81f6e2b659",
+      "log": "outputs/analysis/razor-v8-province-20261017/king-path-old-case.log",
+      "failure": "After its completed native trial, a newly written semantic regression exposed a king route pruned under the initial garrison but enabled by a proposed withdrawal. Old source gives +2.72222; fixed source rejects it. This assertion failure is preserved separately from native timing and protocol qualification."
     }
   ],
   "unexecuted_snapshots": [
@@ -11546,6 +11983,30 @@
       "source_directory": "heristic/gpt-6-razor/experiments/9b79df039f2ca70ee37e531d630a08281c3082f19a3a6f72508326b34a92df11",
       "test_log": "outputs/analysis/razor-v8-regional-defense-20261017/tests-funded.log",
       "reason": "Funded regional draft passed fourteen regressions; no native games. Subsequently credited the actual return edge of a newly captured post, before the native trial."
+    },
+    {
+      "version": "5d1fb5b76fe722af8fec60cb6982e4b8f505390b8c38d31aadcf87b97b53d58c",
+      "source_directory": "heristic/gpt-6-razor/experiments/5d1fb5b76fe722af8fec60cb6982e4b8f505390b8c38d31aadcf87b97b53d58c",
+      "test_log": "outputs/analysis/razor-v8-province-20261017/tests-mechanics.log",
+      "reason": "Initial prototype rejected a narrow corridor because fewer than four hypotheses survived. Mechanics assertion failed; no native games."
+    },
+    {
+      "version": "a72cbca975eeacb2ebdf41498323b9fa84f55dae99def3aea9b6b36b08680b22",
+      "source_directory": "heristic/gpt-6-razor/experiments/a72cbca975eeacb2ebdf41498323b9fa84f55dae99def3aea9b6b36b08680b22",
+      "test_log": "outputs/analysis/razor-v8-province-20261017/tests-full.log",
+      "reason": "Narrow-corridor fix. Fourteen regressions passed. Historical QueueT probe remained reactive and could claim an enormous king-saving bonus. No native games."
+    },
+    {
+      "version": "7666f3cd1b6c4b43877263c5d61d4ab7848eaf0c8eb4eafdd98201a7e646b645",
+      "source_directory": "heristic/gpt-6-razor/experiments/7666f3cd1b6c4b43877263c5d61d4ab7848eaf0c8eb4eafdd98201a7e646b645",
+      "test_log": "outputs/analysis/razor-v8-province-20261017/tests-mechanics-posts.log",
+      "reason": "Stratified roots and disabled the partial model under existing lethal king routes. Mechanics passed, no full regression suite and no native games. No province action selected in the three QueueT histories."
+    },
+    {
+      "version": "1a60fb287b29f6b302db0a32e4627ae1752ec27056c063617b0ef7966482acd9",
+      "source_directory": "heristic/gpt-6-razor/experiments/1a60fb287b29f6b302db0a32e4627ae1752ec27056c063617b0ef7966482acd9",
+      "reason": "Field-focus-only source. Full-history QueueT probes completed with no errors, but at185 both retreats from224 were absent from the root candidate set. No native trial or full regression suite.",
+      "probe": "outputs/analysis/razor-v8-field-retreat-20261017/ordering.json"
     }
   ],
   "online_experiments": [
