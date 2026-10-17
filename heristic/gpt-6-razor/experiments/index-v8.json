@@ -3008,6 +3008,75 @@
       "online_completed_games": 0,
       "online_attempted_games": 0,
       "hard_limit_qualified": true
+    },
+    "c8d78c77f2634a9a535770acdc8cc04c3a69844d26f987bb7e1b07205c5948e7": {
+      "source_directory": "heristic/gpt-6-razor/experiments/c8d78c77f2634a9a535770acdc8cc04c3a69844d26f987bb7e1b07205c5948e7",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/17c3a60d99e1e7183c440318446f2643a5b957213e5f097995537f33310ec98a/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1870000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1870000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "93681ee2e38cb08106082a77d967c39a53a64e6e9851aa7c9dca150471522de8": {
+      "source_directory": "heristic/gpt-6-razor/experiments/93681ee2e38cb08106082a77d967c39a53a64e6e9851aa7c9dca150471522de8",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/49939cec66dfe6be0790fd7b87e251b50baca883588cbdd391ed5c088a4de343/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1861000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1861000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "8eefe0dd592a9215cb8972eed710bb3ece574fb9adff88cd7d7fde19defaa66e": {
+      "source_directory": "heristic/gpt-6-razor/experiments/8eefe0dd592a9215cb8972eed710bb3ece574fb9adff88cd7d7fde19defaa66e",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7615a9eef8f33d20f70bd42da8ccc74e5f8ffdaf32438d147d104d1b70232e4c/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 2106000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 2106000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
     }
   },
   "experiments": [
@@ -8520,6 +8589,93 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-current-route-suffix-value",
+      "version": "c8d78c77f2634a9a535770acdc8cc04c3a69844d26f987bb7e1b07205c5948e7",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/17c3a60d99e1e7183c440318446f2643a5b957213e5f097995537f33310ec98a/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.6875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.3125,
+          "pair_score": 0.6875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81839,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1870000,
+        "timeouts": 0,
+        "total_ns": 57075340000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-complete-short-rescue-ledger",
+      "version": "93681ee2e38cb08106082a77d967c39a53a64e6e9851aa7c9dca150471522de8",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/49939cec66dfe6be0790fd7b87e251b50baca883588cbdd391ed5c088a4de343/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.73125,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.26875,
+          "pair_score": 0.73125,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81349,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1861000,
+        "timeouts": 0,
+        "total_ns": 55867571000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-complete-short-rescue-readiness",
+      "version": "8eefe0dd592a9215cb8972eed710bb3ece574fb9adff88cd7d7fde19defaa66e",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7615a9eef8f33d20f70bd42da8ccc74e5f8ffdaf32438d147d104d1b70232e4c/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.74375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.25625,
+          "pair_score": 0.74375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 81443,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 2106000,
+        "timeouts": 0,
+        "total_ns": 60877895000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -12057,6 +12213,199 @@
           "implication": "Preserving a one-step feasible response does not preserve a continuing operational objective, king vision, or a useful terminal field army. The exact later cause of the700-tick defeat is not established by this early sequence."
         },
         "decision": "No variant promoted. The preregistered121/160 development gate was not reached; no fresh400-game holdout, online game or formal evaluation started."
+      },
+      "route_reward_rescue_trials_20261017": {
+        "scope": "Own legal historical observations, native Arena games and immutable source tests. All native games and policy probes ran serially. No baseline source, hidden opponent policy or external decision runtime was used.",
+        "trials": {
+          "remaining_route": {
+            "result": {
+              "label": "goal-current-route-suffix-value",
+              "version": "c8d78c77f2634a9a535770acdc8cc04c3a69844d26f987bb7e1b07205c5948e7",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/17c3a60d99e1e7183c440318446f2643a5b957213e5f097995537f33310ec98a/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.6875,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.3125,
+                  "pair_score": 0.6875,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81839,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1870000,
+                "timeouts": 0,
+                "total_ns": 57075340000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-route-value-20261017/tests-full.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "c8d78c77f2634a9a535770acdc8cc04c3a69844d26f987bb7e1b07205c5948e7",
+              "control_wins": 115,
+              "new_wins": 110,
+              "changed_to_win": 27,
+              "changed_to_loss": 32,
+              "two_sided_exact_mcnemar_p": 0.6029232012571503,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/17c3a60d99e1e7183c440318446f2643a5b957213e5f097995537f33310ec98a/report.json"
+            }
+          },
+          "first_feasible_rescue": {
+            "result": {
+              "label": "goal-complete-short-rescue-ledger",
+              "version": "93681ee2e38cb08106082a77d967c39a53a64e6e9851aa7c9dca150471522de8",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/49939cec66dfe6be0790fd7b87e251b50baca883588cbdd391ed5c088a4de343/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.73125,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.26875,
+                  "pair_score": 0.73125,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81349,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1861000,
+                "timeouts": 0,
+                "total_ns": 55867571000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-rescue-ledger-20261017/tests-full.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "93681ee2e38cb08106082a77d967c39a53a64e6e9851aa7c9dca150471522de8",
+              "control_wins": 115,
+              "new_wins": 117,
+              "changed_to_win": 4,
+              "changed_to_loss": 2,
+              "two_sided_exact_mcnemar_p": 0.6875,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/49939cec66dfe6be0790fd7b87e251b50baca883588cbdd391ed5c088a4de343/report.json"
+            }
+          },
+          "readiness_rescue": {
+            "result": {
+              "label": "goal-complete-short-rescue-readiness",
+              "version": "8eefe0dd592a9215cb8972eed710bb3ece574fb9adff88cd7d7fde19defaa66e",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7615a9eef8f33d20f70bd42da8ccc74e5f8ffdaf32438d147d104d1b70232e4c/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.74375,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.25625,
+                  "pair_score": 0.74375,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 81443,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 2106000,
+                "timeouts": 0,
+                "total_ns": 60877895000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "regressions": {
+              "passed": 14,
+              "log": "outputs/analysis/razor-v8-rescue-ledger-20261017/tests-margin-fixed-full.log"
+            },
+            "paired_comparison": {
+              "games": 160,
+              "seed": 261017101,
+              "matched_initial_states": true,
+              "control_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+              "new_version": "8eefe0dd592a9215cb8972eed710bb3ece574fb9adff88cd7d7fde19defaa66e",
+              "control_wins": 115,
+              "new_wins": 119,
+              "changed_to_win": 8,
+              "changed_to_loss": 4,
+              "two_sided_exact_mcnemar_p": 0.3876953125,
+              "control_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/a2a2b94ddcfac6a1a97cc01779f7cafaa8ef1a80d1cfe01ee7aa2da35dd868ff/report.json",
+              "new_report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/7615a9eef8f33d20f70bd42da8ccc74e5f8ffdaf32438d147d104d1b70232e4c/report.json"
+            }
+          }
+        },
+        "route_repricing": {
+          "hypothesis": "A resumed beam route must be repriced using only its unexecuted suffix and current observation. The route extension evaluator is shared with fresh beam search.",
+          "mechanics": "Completed capture rewards are absent; the suffix equals a fresh route in the same state; a new later blocker invalidates it; current reserves are checked; already owned cells do not keep paying capture rewards.",
+          "human_probe": "outputs/analysis/razor-v8-route-value-20261017/queuet-current.json",
+          "finding": "On QueueT game5 historical observations156-168, only the tick168 generated action changes. The other thirteen-step depletion pattern largely persists. The static-route correction is not a complete explanation or solution for field-army depletion.",
+          "actual_loss": "outputs/analysis/razor-v8-route-value-20261017/early-loss91.json",
+          "actual_loss_finding": "146 guarded calls and zero recorded-action mismatches. At143 an enemy36 army is visible three steps from home30. The old scheduler seeks only2 reinforcement troops while the full route model includes visible intermediate enemy donors. The game ends at146. This identifies inconsistent response demand; it does not establish a feasible rescue at143 or prove repricing alone caused the loss."
+        },
+        "shared_rescue": {
+          "hypothesis": "Compare entire short reinforcement sequences against the existing attack routes on a shared ledger, in seat order; include two orders of sequential adjacent attacks. The opponent can consume the same donor that the rescue wants to move.",
+          "human_probe": "outputs/analysis/razor-v8-rescue-ledger-20261017/queuet-current.json",
+          "human_finding": "QueueT game4 tick189: own home55 has35, enemy74 has41, donor38 has3. The old actual order38->56 places relief on a square the enemy can immediately capture. The candidate instead proposes38->37, allowing37->55 while holding either retained two-step approach via56 or73. The actual opponent chose73, the original relief reached home, and the historical general survived with0 troops at191. The alternative covers the unchosen donor-cut branch; it is not a repaired human defeat or an executed win.",
+          "mechanics": "A minimal local version of that two-approach geometry is tested, along with merged-route demand, insufficient relief, earlier-seat donor removal and stopped attackers.",
+          "actual_loss": "outputs/analysis/razor-v8-rescue-ledger-20261017/rescue-loss138.json",
+          "actual_loss_finding": "364 guarded calls, zero mismatches. At355 the first-feasible rescue sends148->149 and displaces a queued40-troop column107->128 with five orders left to home. At356 the new model no longer certifies a complete rescue. The opponent holds its main army near home and collects another group; game ends364. This motivates pricing the force available after the response, not merely the earliest feasible response. It does not prove that keeping the original order alone wins.",
+          "followup": "Among the same feasible rescue trees, prefer useful reinforcement per remaining command up to the existing readiness target. Subtract natural home growth from reinforcement credit. Resume only if the remaining plan still passes the shared-ledger checks.",
+          "human_followup": "outputs/analysis/razor-v8-rescue-ledger-20261017/queuet-189-194.txt",
+          "alternative_probe": {
+            "report": "outputs/analysis/razor-v8-rescue-ledger-20261017/margin-alternative138.json",
+            "finding": "On the first rescue trial history, the readiness variant first differs at349 by starting65->86, and at355 chooses107->128 instead of148->149. These alternative orders were not executed; at356 the observation is still from the earlier source."
+          },
+          "executed_followup": {
+            "report": "outputs/analysis/razor-v8-rescue-ledger-20261017/margin-actual138.json",
+            "calls": 383,
+            "action_mismatches": 0,
+            "finding": "In the actually executed readiness trial game138, the seven-order rescue at349-355 successfully delivers the moving column: home reaches141 at356 against the nearby enemy111. The game nevertheless ends in defeat at383. By380 another enemy86 army is visible, and at382 the merged196 stands adjacent to home189 while our69-troop field army at282 is assigned to a distant assault. This confirms first-wave relief but not sustained survival; the earlier diagnosis cannot be called a repaired match."
+          },
+          "public_economy_followup": {
+            "report": "outputs/analysis/razor-v8-rescue-ledger-20261017/margin-economy138.json",
+            "finding": "At355-382 we have3 cities. Our public army deficit closes by exactly2 on each even tick and0 on odd ticks, with no own neutral-garrison attacks and no global land pulse. This is consistent with a recurring production advantage, even though total army remains behind. The planned distant assault therefore occurs while the observed army trend is already improving. Hidden enemy city positions and spending are not read; this is not proof that waiting alone wins."
+          }
+        },
+        "remaining": "Tie ongoing field missions and home coverage to the opponent's next deployable wave. The current policy estimates our income and public army pressure but does not infer opponent recurring production from the public duel army-difference ledger. Do not treat dispersed surplus or a first-wave rescue as durable military control.",
+        "mechanics": {
+          "runner": "heristic/gpt-6-razor/tests/test_v8_route_rescue_trials.py",
+          "log": "outputs/analysis/razor-v8-rescue-ledger-20261017/tests-all-archived.log"
+        },
+        "limits": [
+          "Existing attack routes are bounded visible approaches, not all adaptive enemy actions, future waves or hidden positions. Sequential adjacent attacks are tested in two orders, not all permutations.",
+          "A feasible emergency reinforcement does not itself provide productive offense, reconnaissance or durable field roles.",
+          "The development schedule is heavily reused; game-level paired p-values do not account for correlations within rotated maps.",
+          "Historical alternative-policy actions are never substituted for the recorded subsequent observations and are not alternative wins."
+        ],
+        "decision": "No trial promoted; development advance gate121/160 not reached. No new400-game holdout, online match or formal evaluation. Working source remains byte-for-byte unchanged."
       }
     },
     "paired_reconnaissance_comparison": {
@@ -12375,6 +12724,12 @@
       "source_directory": "heristic/gpt-6-razor/experiments/1d425946bda1a7de08da21f345e06c36c393d3c703aaabf4a52db418d875b22b",
       "test_log": "outputs/analysis/razor-v8-response-budget-20261017/tests-counter-prehalf.log",
       "reason": "First conditional counter-capture draft. Existing response mechanics passed; no full regression suite or native games. Replaced by explicit full and half enemy launches before evaluation."
+    },
+    {
+      "version": "deeb91f6e1e9958309ca5fe13084fb2228411fd6d76f7cb87f185a6a8354f6e6",
+      "source_directory": "heristic/gpt-6-razor/experiments/deeb91f6e1e9958309ca5fe13084fb2228411fd6d76f7cb87f185a6a8354f6e6",
+      "test_log": "outputs/analysis/razor-v8-rescue-ledger-20261017/tests-margin-full.log",
+      "reason": "Passed14 regressions. Before native or probe, corrected the subtraction of natural home growth from the prospective reinforcement credit. No native games."
     }
   ],
   "online_experiments": [
