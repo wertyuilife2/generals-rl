@@ -12,6 +12,7 @@ import numpy as np
 
 from generals.backends.online.protocol import ObservationDecoder
 from generals.protocol.actions import Action
+from review_owned_transport import owned_transport
 
 
 def load_frames(record):
@@ -103,6 +104,7 @@ def review(record, outcome=None):
                 "largest_field_army": int(max(obs.army.ravel()[field], default=0)),
                 "ever_seen_cells": int(ever_seen.sum()),
                 "board_cells": obs.size,
+                "owned_transport": owned_transport(obs),
             })
     for episode in active.values():
         episode.update(first_observed_loss=None,
@@ -141,7 +143,10 @@ def main():
         "scope": "Actual own legal observations only. No hidden-board reconstruction, "
                  "opponent identity assertion, or counterfactual win claim. A submitted "
                  "departure is not proof of execution. City durations are observed "
-                 "ownership intervals, not guarantees of future retention.",
+                 "ownership intervals, not guarantees of future retention. Owned "
+                 "transport curves use one static shortest-path tree, consume one "
+                 "order per transfer and ignore growth and enemy responses; they "
+                 "are not globally optimal collection bounds or survival proofs.",
         "losses": len(losses),
         "records_without_observations": [g["record"] for g in games
                                          if g["observation_status"] != "decoded"],

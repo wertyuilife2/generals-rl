@@ -2577,15 +2577,23 @@
         "max_ns": 2031000,
         "invalid_actions": 0
       },
-      "completed_games": 560,
+      "completed_games": 562,
       "timeouts": 0,
       "errors": 0,
-      "max_ns": 2031000,
+      "max_ns": 6317000,
       "invalid_actions": 0,
-      "online_reports": [],
-      "online_completed_games": 0,
-      "online_attempted_games": 0,
-      "hard_limit_qualified": true
+      "online_reports": [
+        "outputs/online/razor-v8-land-main-20261017/report.json"
+      ],
+      "online_completed_games": 2,
+      "online_attempted_games": 2,
+      "hard_limit_qualified": true,
+      "online_timing": {
+        "calls": 749,
+        "max_ns": 6317000,
+        "timeouts": 0,
+        "errors": 0
+      }
     },
     "b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96": {
       "source_directory": "heristic/gpt-6-razor/experiments/b77c6e2baac96abedb1a3e9bd42d65d63afff15ed35f9d23260ec8719eac5f96",
@@ -2719,6 +2727,52 @@
       "timeouts": 0,
       "errors": 0,
       "max_ns": 1934000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "d44c4babfb46912da6c024d6f6d57c8f89b5d479199aaa7bb235bf00874d6fb1": {
+      "source_directory": "heristic/gpt-6-razor/experiments/d44c4babfb46912da6c024d6f6d57c8f89b5d479199aaa7bb235bf00874d6fb1",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e9644422b10e8095d8e96c4204eedda04c88cb7820cf15cf2f9c517bfcfcd7ce/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1870000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1870000,
+      "invalid_actions": 0,
+      "online_reports": [],
+      "online_completed_games": 0,
+      "online_attempted_games": 0,
+      "hard_limit_qualified": true
+    },
+    "5be547d15680c9f138c224cda3d4875bf44a9491a6846ef76719ea69aa4233c2": {
+      "source_directory": "heristic/gpt-6-razor/experiments/5be547d15680c9f138c224cda3d4875bf44a9491a6846ef76719ea69aa4233c2",
+      "source_identity_verified": true,
+      "reports": [
+        "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0870078fee5a5d543423231be4e927f7af455a81dabea11d84356d0418a3da94/report.json"
+      ],
+      "native_summary": {
+        "completed_games": 160,
+        "timeouts": 0,
+        "errors": 0,
+        "max_ns": 1869000,
+        "invalid_actions": 0
+      },
+      "completed_games": 160,
+      "timeouts": 0,
+      "errors": 0,
+      "max_ns": 1869000,
       "invalid_actions": 0,
       "online_reports": [],
       "online_completed_games": 0,
@@ -7888,6 +7942,64 @@
       "violations": 0,
       "hard_limit_qualified": true,
       "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-city-control",
+      "version": "d44c4babfb46912da6c024d6f6d57c8f89b5d479199aaa7bb235bf00874d6fb1",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e9644422b10e8095d8e96c4204eedda04c88cb7820cf15cf2f9c517bfcfcd7ce/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.71875,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.28125,
+          "pair_score": 0.71875,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 80347,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1870000,
+        "timeouts": 0,
+        "total_ns": 59152978000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
+    },
+    {
+      "label": "goal-capability-scouts",
+      "version": "5be547d15680c9f138c224cda3d4875bf44a9491a6846ef76719ea69aa4233c2",
+      "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0870078fee5a5d543423231be4e927f7af455a81dabea11d84356d0418a3da94/report.json",
+      "ok": true,
+      "completed_games": 160,
+      "metrics": {
+        "2": {
+          "game_win_rate": 0.64375,
+          "games": 160,
+          "invalid_actions": 0,
+          "mean_rank": 1.35625,
+          "pair_score": 0.64375,
+          "scored_games": 160,
+          "tick_limit_games": 0
+        }
+      },
+      "timing": {
+        "calls": 83555,
+        "errors": 0,
+        "limit_ns": 10000000,
+        "max_ns": 1869000,
+        "timeouts": 0,
+        "total_ns": 63380270000
+      },
+      "violations": 0,
+      "hard_limit_qualified": true,
+      "source_hard_limit_qualified": true
     }
   ],
   "controls": [
@@ -10536,6 +10648,226 @@
           "source": "heristic/gpt-6-razor/v8/controller.h",
           "finding": "resumeOperation clears a kind-23 occupation task as soon as its goal is owned. Acquisition is a complete task; holding, resupply and the next sortie are subsequent separately ranked proposals. Existing local city reserves and recapture discounts do not constitute a continuing shared occupation schedule. This code observation motivates a redesign; it is not proof that retaining every captured city would improve results."
         }
+      },
+      "regional_control_review_20261017": {
+        "scope": "Own recorded legal observations only. QueueT is the user-confirmed human opponent; main-site identities are not inferred from names. Historical candidate actions are not executed. The evidence separates visibility at the decision from later revelations.",
+        "analyzers": [
+          "heristic/gpt-6-razor/tests/review_recorded_campaigns.py",
+          "heristic/gpt-6-razor/tests/review_owned_transport.py"
+        ],
+        "reports": [
+          "outputs/analysis/razor-human-response-20261017/batch02.json",
+          "outputs/analysis/razor-human-response-20261017/main-v7.json"
+        ],
+        "visuals": [
+          "outputs/analysis/razor-human-response-20261017/queuet-4.png",
+          "outputs/analysis/razor-human-response-20261017/queuet-5.png"
+        ],
+        "transport_detail": "outputs/analysis/razor-human-response-20261017/supply-cuts.json",
+        "transport_tests": {
+          "passed": 4,
+          "log": "outputs/analysis/razor-human-response-20261017/tests-transport.log"
+        },
+        "observed_sequences": [
+          {
+            "record": "outputs/online/razor-100-20261014T125242Z/batch-02/game-003.jsonl",
+            "ticks": [
+              150,
+              152,
+              157,
+              170,
+              178,
+              186
+            ],
+            "finding": "The first visible wave reaches the home neighbourhood at 150. Own home withdrawal orders at 152,157,170 precede a new observed 62-troop column at 178 while home has 13. A fixed shortest-path collection tree delivers only 27 home troops in eight own orders before growth or enemy interference. This is not an optimality or impossibility bound."
+          },
+          {
+            "record": "outputs/online/razor-100-20261014T125242Z/batch-02/game-004.jsonl",
+            "ticks": [
+              130,
+              150,
+              200,
+              250,
+              280,
+              291
+            ],
+            "finding": "Own land temporarily leads 61:59 at 130, but trails 54:74 at 150, 57:81 at 200 and 66:87 at 250. Army deficits step from 14 to 34,58,79 over those land-growth periods. The repeated visible raids and own small recapture columns therefore lose retained income as well as tempo. At 280 land nearly recovers to 79:80, yet army remains 171:250 and home has only 11."
+          },
+          {
+            "record": "outputs/online/razor-100-20261014T125242Z/batch-02/game-005.jsonl",
+            "ticks": [
+              156,
+              169,
+              188,
+              205,
+              220,
+              235,
+              245
+            ],
+            "finding": "At 156 own army is 183 and home is 11. The owned transport graph uses cell325 (guard2) as a connection whose loss disconnects 47 other owned tiles and 111 spare troops from home. One concrete shortest-path tree can collect 24 at home in eight own orders or 69 in twelve, ignoring future growth and enemy moves. The 53-troop sortie spends down to14 before finding the opposing general; the visible60-troop response follows its thin trail. After surviving that wave, fresh small withdrawals resume at205 and220. At235 enemy65 is visible, home10; the next wave wins at245."
+          },
+          {
+            "record": "outputs/online/razor-v7-main-10-20261015T161905Z/game-007.jsonl",
+            "ticks": [
+              367,
+              372,
+              373,
+              380,
+              384,
+              387,
+              401,
+              410,
+              490,
+              501
+            ],
+            "finding": "Own home98 is split and routed through city177, forming75 at178; buying city179 for47 leaves27. The opposing87 is first visible at373, AFTER purchase, so the purchasing decision cannot be assessed as if it had already seen87. The observed response takes city179 at380, city177 at384, and returns to179 at387 instead of charging the defended king. Another74-troop wave appears at401 and takes177 at410. These moves retain useful field force and production positions while our defenses repeatedly withdraw and separately recapture."
+          },
+          {
+            "record": "outputs/online/razor-v7-main-10-20261015T161905Z/game-009.jsonl",
+            "ticks": [
+              1312,
+              1324,
+              1329,
+              1331,
+              1341
+            ],
+            "finding": "The visible490-troop column is not simply a shortest-route king charge. It takes city160 at1324, diverts to city71 at1329 and removes our42-troop stack at50 by1331, then approaches home with345 at1341 against189. Our132-troop field stack remains at258 from1313 through1341 and the remote city403 reaches119. The opponent can choose useful intermediate objectives because the local concentration remains superior even after these detours."
+          }
+        ],
+        "current_policy_diagnostic": {
+          "source_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+          "result": "outputs/analysis/razor-human-response-20261017/current-regional-response.json",
+          "calls": 400,
+          "max_ns": 1286000,
+          "timeouts": 0,
+          "errors": 0,
+          "probe_orders": [
+            [
+              244,
+              222,
+              false
+            ],
+            [
+              179,
+              178,
+              false
+            ],
+            [
+              222,
+              200,
+              false
+            ],
+            [
+              200,
+              178,
+              false
+            ]
+          ],
+          "diagnostic_columns": [
+            "permitted_first",
+            "legal_first",
+            "danger_after_first",
+            "risk_first",
+            "collection_arrival",
+            "program_score",
+            "home_reserve",
+            "home_ready",
+            "city179_reserve"
+          ],
+          "finding": "At historical game7 tick373 the existing policy still withdraws city27 toward home. An illustrative four-order home-and-city concentration has a legal first move and short-horizon dangerAfter=0, yet permitted=false with risk=100000 and collectionArrival=-INF: the fixed home reserve is62 while home has52. The ordinary scheduler cannot express substituting a forward mobile defense for that stationary home reserve. The manually priced programScore is10 even though the collection validator rejects it, showing why simply bypassing one gate would be unsound.",
+          "limits": "No alternative orders were executed. The illustrative concentration is not validated against every opponent response or hidden reinforcement and is not claimed to save the game. Debug data are copied inside arena_act before observation expiry."
+        },
+        "design_requirements": [
+          "The controller must choose a region to retain, a deployable main army and its next supply route, rather than letting independent capture and retreat tasks compete only on their first order.",
+          "A mobile reserve may protect several assets only when actual joint return or interception schedules exist. Those troops must not also be counted as stationary blocking garrisons or as donors to another simultaneous mission.",
+          "Price a territory by retained income and the orders needed to move its army to a useful position; account for vulnerable shared transport connections without assuming every articulation needs a huge stationary garrison.",
+          "Scouting must have an independent continuing route toward unresolved enemy-general regions and a funded defense behind it. Removing a main-column protection percentage alone is not a substitute for this allocation.",
+          "Test full campaigns with the policy controlling its own future observations. Passing fixed historical first-action checks is necessary for concrete bugs but cannot establish that a human loss is repaired."
+        ],
+        "trial_results": {
+          "control": {
+            "summary": {
+              "label": "goal-city-control",
+              "version": "d44c4babfb46912da6c024d6f6d57c8f89b5d479199aaa7bb235bf00874d6fb1",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/e9644422b10e8095d8e96c4204eedda04c88cb7820cf15cf2f9c517bfcfcd7ce/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.71875,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.28125,
+                  "pair_score": 0.71875,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 80347,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1870000,
+                "timeouts": 0,
+                "total_ns": 59152978000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "paired": "outputs/analysis/razor-v8-city-control-20261017/control-paired.json",
+            "regression_tests": 14,
+            "regression_log": "outputs/analysis/razor-v8-city-control-20261017/tests-control.log",
+            "status": "evaluated_not_promoted"
+          },
+          "capability": {
+            "summary": {
+              "label": "goal-capability-scouts",
+              "version": "5be547d15680c9f138c224cda3d4875bf44a9491a6846ef76719ea69aa4233c2",
+              "report": "/Users/bzy/project/generals-rl/outputs/arena/native_1000/runs/0870078fee5a5d543423231be4e927f7af455a81dabea11d84356d0418a3da94/report.json",
+              "ok": true,
+              "completed_games": 160,
+              "metrics": {
+                "2": {
+                  "game_win_rate": 0.64375,
+                  "games": 160,
+                  "invalid_actions": 0,
+                  "mean_rank": 1.35625,
+                  "pair_score": 0.64375,
+                  "scored_games": 160,
+                  "tick_limit_games": 0
+                }
+              },
+              "timing": {
+                "calls": 83555,
+                "errors": 0,
+                "limit_ns": 10000000,
+                "max_ns": 1869000,
+                "timeouts": 0,
+                "total_ns": 63380270000
+              },
+              "violations": 0,
+              "hard_limit_qualified": true
+            },
+            "paired": "outputs/analysis/razor-v8-city-control-20261017/capability-paired.json",
+            "regression_tests": 14,
+            "regression_log": "outputs/analysis/razor-v8-city-control-20261017/tests-capability.log",
+            "status": "evaluated_not_promoted"
+          },
+          "archive_tests": "outputs/analysis/razor-v8-city-control-20261017/tests-archived.log",
+          "interpretation": "City control matched parent115/160 with7 gains and7 losses and changed none of the selected human-city actions. Relaxing the fixed scout split protection won103/160 with7 gains and19 losses versus the same parent. Both use the extensively reused development schedule; no fresh holdout or stronger-play claim follows."
+        },
+        "decision": "Neither new native trial is promoted. No new official evaluation. Human-level play and the 80% v7 duel goal remain unmet; next work should address regional force allocation instead of another isolated valuation tweak.",
+        "current_online": {
+          "report": "outputs/online/razor-v8-land-main-20261017/report.json",
+          "source_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+          "completed_games": 2,
+          "wins": 2,
+          "timeouts": 0,
+          "errors": 0,
+          "max_ns": 6317000,
+          "analysis": "outputs/analysis/razor-v8-city-control-20261017/current-online-review.json",
+          "qualification": "Neither opponent identity nor expert strength is established. In the second win the opposing general visibly drops from35 to2, and our6-troop scout captures it. Two such wins are not evidence of human-expert strength."
+        }
       }
     },
     "paired_reconnaissance_comparison": {
@@ -10803,6 +11135,25 @@
       "hard_limit_qualified": false,
       "identity_note": "Public main-site names do not independently establish human identity.",
       "runtime_conditions": "Initial online play was isolated. During the prolonged second game, one regression suite, two instrumented replay probes and sequential local Arena tests were run on the same host. The timeout is retained and disqualifies this exact source regardless of its cause; concurrency has not been established as the cause."
+    },
+    {
+      "label": "goal-land-main",
+      "source_version": "11da822e492e2d307071d798f70efdfdccdbdbbc0dfba33090d31909d8523bb5",
+      "report": "outputs/online/razor-v8-land-main-20261017/report.json",
+      "status": "complete",
+      "requested_games": 2,
+      "completed_games": 2,
+      "attempted_games": 2,
+      "wins": 2,
+      "losses": 0,
+      "failures": 0,
+      "scope": "Current qualified experimental checkpoint against the main-site public queue. Opponent identities are not inferred from usernames. This sample is evidence for diagnosis, not a human-level certificate.",
+      "timing": {
+        "calls": 749,
+        "max_ns": 6317000,
+        "timeouts": 0,
+        "errors": 0
+      }
     }
   ],
   "hard_limit_failures": [
