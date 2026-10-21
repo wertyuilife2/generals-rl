@@ -194,7 +194,7 @@ class ModelDuelTests(unittest.TestCase):
         self.assertEqual(games[0]["reference_invalid_actions"], 1)
         self.assertEqual(games[0]["outcome"], "draw")
 
-    def test_real_vit_h4_resnet_h8_loading_provenance_and_no_privileged_actor_inputs(self):
+    def test_real_vit_h4_resnet_h4_loading_provenance_and_no_privileged_actor_inputs(self):
         base = {
             "task": {"width": 9, "height": 9, "num_envs": 1, "max_episode_steps": 32,
                      "history_length": 4, "opponent": "wait", "persistent_knowledge": True},
@@ -208,7 +208,6 @@ class ModelDuelTests(unittest.TestCase):
             paths = []
             for role in range(2):
                 config = deepcopy(base)
-                config["task"]["history_length"] = config["runner"]["policy"]["history_length"] = 4 if role == 0 else 8
                 config["runner"]["policy"]["backbone"] = "vit" if role == 0 else "resnet"
                 run = Path(directory) / str(role)
                 run.mkdir()
@@ -235,7 +234,7 @@ class ModelDuelTests(unittest.TestCase):
             with patch.object(ScaledInformationSpatialPPOPolicy, "action_probabilities", local_only):
                 report = evaluate_duel(*paths, maps=1, max_ticks=2, output=output)
             torch.testing.assert_close(torch.get_rng_state(), caller_rng, rtol=0, atol=0)
-            self.assertEqual(set(seen), {4, 8})
+            self.assertEqual(set(seen), {4})
             self.assertEqual(report["completed_games"], 2)
             self.assertEqual(report["overall"]["score"], .5)
             self.assertEqual(report, json.loads(output.read_text()))

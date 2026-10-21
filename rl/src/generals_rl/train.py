@@ -2,7 +2,7 @@
 import argparse
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -15,12 +15,12 @@ import torch
 import torch.distributed as dist
 from rsl_rl.runners import OnPolicyRunnerCTS
 
-from .config import merge_config, seed_everything, task_config
-from .cts import GeneralsCTSVecEnv, runner_config
+from .config import DEFAULT_ITERATIONS, default_training_config, merge_config, seed_everything, task_config
+from .cts import GeneralsCTSVecEnv
 from .curriculum import CurriculumConfig, RolloutCurriculum
 from .distributed_training import DistributedConfig, distributed_process_group
 from .self_play_training import SelfPlayConfig, prepare_self_play
-from .task import GeneralsTask, TaskConfig
+from .task import GeneralsTask
 from .training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from .training_control import TrainingControlConfig, TrainingController, TrainingStopped, prune_checkpoints
 
@@ -433,7 +433,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, help="JSON overrides for task, runner, self_play and evaluation")
+    parser.add_argument("--config", type=Path, help="complete training recipe or sparse JSON overrides")
     parser.add_argument("--replace-policy", action="store_true",
                         help="replace runner.policy with the complete JSON subtree; preserve other recursive overrides")
     parser.add_argument("--backend", choices=("cpu", "gpu"))
@@ -443,7 +443,7 @@ def main(argv=None):
     parser.add_argument("--seed", type=int)
     parser.add_argument("--no-eval", action="store_true", help="disable periodic evaluation (enabled by default)")
     budget = parser.add_mutually_exclusive_group()
-    budget.add_argument("--iterations", type=int)
+    budget.add_argument("--iterations", type=int, help=f"PPO updates; defaults to {DEFAULT_ITERATIONS}")
     budget.add_argument("--steps-per-env", type=int, help="exact vector ticks per lane")
     parser.add_argument("--output", type=Path)
     initialization = parser.add_mutually_exclusive_group()
@@ -453,16 +453,21 @@ def main(argv=None):
     if args.resume:
         config = json.loads(args.resume.with_name("run_config.json").read_text())
     else:
-        config = {"task": asdict(TaskConfig(opponent="current_self_play", productive_actions=True,
-                                                  combat_features=True, king_threat_distance=True,
-                                                  persistent_knowledge=True)), "runner": runner_config(),
-                  "self_play": asdict(SelfPlayConfig()), "evaluation": asdict(TrainingEvalConfig()),
-                  "torch_threads": 1}
+        config = default_training_config()
     if args.config:
         overrides = json.loads(args.config.read_text())
-        config = merge_config(config, overrides)
-        if args.replace_policy:
-            policy = overrides.get("runner", {}).get("policy")
+        previous_policy_class = config["runner"]["policy"]["class_name"]
+        runner_overrides = overrides.get("runner", {})
+        complete = ("task" in overrides and "num_steps_per_env" in runner_overrides
+                    and all(isinstance(runner_overrides.get(key), dict)
+                            and "class_name" in runner_overrides[key] for key in ("policy", "algorithm")))
+        # Complete recipes are independent baselines. Inheriting new AMP,
+        # curriculum or optimizer fields would silently change old experiments.
+        config = (deepcopy(overrides) if complete and not args.resume
+                  else merge_config(config, overrides))
+        policy = runner_overrides.get("policy")
+        if args.replace_policy or (isinstance(policy, dict) and
+                                   policy.get("class_name", previous_policy_class) != previous_policy_class):
             if not isinstance(policy, dict) or "class_name" not in policy:
                 parser.error("--replace-policy requires --config with a complete runner.policy and class_name")
             config["runner"]["policy"] = deepcopy(policy)
@@ -476,8 +481,8 @@ def main(argv=None):
         config["task"]["device"] = "cuda:0"
     if args.no_eval:
         config.setdefault("evaluation", {})["enabled"] = False
-    iterations = None if args.steps_per_env is not None else (args.iterations if args.iterations is not None else 1000)
-    destination = args.output or Path("outputs/moe_cts") / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    iterations = None if args.steps_per_env is not None else (args.iterations if args.iterations is not None else DEFAULT_ITERATIONS)
+    destination = args.output or Path("outputs/rl") / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     train(config, destination, iterations=iterations, steps_per_env=args.steps_per_env,
           resume=str(args.resume) if args.resume else None,
           warm_start=str(args.warm_start) if args.warm_start else None)

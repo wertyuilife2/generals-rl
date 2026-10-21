@@ -4,9 +4,11 @@
 
 与外部工作的特征、网络和训练方案对照见 [AverageJoe 调研](averagejoe_paper_comparison.md)，其本地比较对象固定为 2026-10-16 的调研快照。
 
-## 最终选择
+当前默认已改为 F03 消融最终继承的 ViT1M dense／H4／recent8／缩窄共享LR／gamma课程配方，配置随包保存在 `generals_rl/default.json`。完整结果分别见 [H200 scaling 报告](h200_scaling.md) 与 [F03 消融报告](f03_ablation.md)。下文的 v32／v32-opt 结论保留其历史口径，不代表当前默认仍为 LightCNN。
 
-**正式 v32-opt 是严格 current-policy self-play、desired KL=.01，而不是中途的 history8 回退。** 在原 v32 的网络容量、输入和 PPO 预算下，完整训练计算吞吐为129,114.81 fresh learner transitions/s，约为 v32 的1.826倍；final 与 best 均通过原配对非劣和直接对战门槛。仍保留 v32 与历史池，是因为恢复、F03 对照和后续消融需要它们。
+## 历史阶段：v32-opt
+
+**该阶段选定的 v32-opt 是严格 current-policy self-play、desired KL=.01，而不是中途的 history8 回退。** 在原 v32 的网络容量、输入和 PPO 预算下，完整训练计算吞吐为129,114.81 fresh learner transitions/s，约为 v32 的1.826倍；final 与 best 均通过原配对非劣和直接对战门槛。仍保留 v32 与 v32-opt 配置作为历史对照。
 
 | 项目 | v32-opt |
 | --- | --- |
@@ -108,7 +110,7 @@ final SHA256为 `0e7c3da6e83fe0e56662fd0db5169f7c565c7831e103b5d5645a9ee9316c8d0
 
 多卡采用同步PPO：每rank独立模拟与随机流、初始权重同步，按全局样本归一化advantage/调节KL，logical minibatch梯度平均后统一clip/Adam；rank0负责快照与文件，其他rank只读刷新池。支持LightCNN及Scaled的1M/10M/100M **actor＋critic总预算**，BF16只作用于网络计算；physical microbatch/inference chunk不改变logical预算。
 
-F03不是直接读取当前 `v32-opt.json`。它的冻结基线为 `ScaledInformationSpatialPPOPolicy`、ViT1M、H4/K11、独立组合critic、projection0、BF16和编译，阶段配置从冻结 `F03_run_config.json` 生成。必须保留以下消融开关与工具：
+F03不是直接读取 `v32-opt.json`。它的冻结基线为 `ScaledInformationSpatialPPOPolicy`、ViT1M、H4/K11、独立组合critic、projection0、BF16和编译，阶段配置从冻结 `F03_run_config.json` 生成。七阶段当时比较了以下候选：
 
 | 阶段 | 候选 |
 | --- | --- |
@@ -120,7 +122,7 @@ F03不是直接读取当前 `v32-opt.json`。它的冻结基线为 `ScaledInform
 | S6 | 匹配ViT1M与ResNet1M dense/pyramid |
 | S7 | actor与critic H4→H8 |
 
-2026-10-21只读核验的H200状态文件显示S7/completed、48个run completed、current_job=null；该信息只描述当时该实验文件，不代表扫描整机或重新验证全部模型。选择记录为S1 live、S2 lr_bounded、S3 incumbent、S4 gamma_course、S5–S7 incumbent；保留 `f03_ablation_suite.py`、`ablation_*`、共享helper和端点评估器支持复现与后续扩展，不以“非默认”判死代码。冻结release、receipt、配置、权重及结果保持原样。
+2026-10-21只读核验的H200状态文件显示S7/completed、48个run completed、current_job=null；该信息只描述当时该实验文件，不代表扫描整机或重新验证全部模型。S1原自动记录为live，实际经单独有效裁决继承recent8；后续S2选择lr_bounded、S3保留KL.01、S4选择gamma_course、S5–S7保留该配置。当前源码已退役七阶段调度、专用诊断和自动晋级工具；批量端点评估器继续保留。实验工具源码归档在 `outputs/archive/f03_ablation_tools/20261021/353812d.tar.gz`，原冻结release、receipt、配置、权重及结果保持原样。
 
 ### 当前Scaled架构与匹配结论
 
@@ -147,6 +149,6 @@ ResNet呈更高MOVE KL/clip/entropy和更多中段timeout，LR长期卡下界、
 
 CPU与GPU比赛均调用现有离线env；arena提供对战/回放/Elo，批量RL评估器提供当前网络加载、history/knowledge和GPU分片。原neko C++基础AI合并曾在64局/6,062 joint ticks上核对动作和状态digest一致；该小规模CPU评估总耗时约1.219倍改善，不能外推H200正式任务。新的批量native controllers还去除了旧Python worker池；`baseline_workers`仅保留输入兼容。官方迷雾/其他规则对齐须单独评估，不能将后来在线规则更新默认为训练后端已改变。
 
-本次清理只保留v32/v32-opt/F03及后续消融的checkpoint协议、当前训练评估和公共基础；不修改env规则，不部署H200，不删除outputs。未来MCTS保留算法独立`PolicyValue`和CPU整tick分支模拟器；selection/backup、belief及搜索训练尚未实现，搜索不得将特权全图误当局部观测。
+当前保留v32/v32-opt和Scaled H4的checkpoint协议、训练评估和公共基础；固定critic LR与Scaled H8专用分支退役，旧实验使用其冻结源码复现。此次整理不修改env规则、不部署H200、不删除既有outputs。未来MCTS保留算法独立`PolicyValue`和CPU整tick分支模拟器；selection/backup、belief及搜索训练尚未实现，搜索不得将特权全图误当局部观测。
 
 源码测试随保留功能组织：规则一致性、FOW隔离、当前模型/输入、PPO更新/恢复、历史池、分布式/评估协议和搜索分支仍应覆盖；旧模型迁移/蒸馏、旧配置和废弃架构分支专属测试成组移除。原始提交列表、清理候选审计及维护过程文档只作为本地资料，不再成为额外提交的研究记录。

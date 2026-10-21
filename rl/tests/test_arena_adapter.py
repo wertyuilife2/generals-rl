@@ -161,8 +161,8 @@ class ArenaAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "existing entrants"):
                 run_tournament(config, root / "arena", resume=True)
 
-    def test_current_model_families_and_h8_load_without_privileged_inference(self):
-        for family, history_length in (("information", 4), ("optimized", 4), ("scaled", 8)):
+    def test_current_model_families_load_without_privileged_inference(self):
+        for family, history_length in (("information", 4), ("optimized", 4), ("scaled", 4)):
             with self.subTest(family=family), tempfile.TemporaryDirectory() as tmp:
                 checkpoint, _ = make_checkpoint(Path(tmp), family=family, history_length=history_length)
                 controller = CTSController(checkpoint=checkpoint)
