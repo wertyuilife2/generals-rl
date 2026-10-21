@@ -18,12 +18,12 @@ from rsl_rl.storage import RolloutStorageCTS
 GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
 
 
-def observations(count=2, history_length=4):
+def observations(count=2):
     generator = torch.Generator().manual_seed(108)
-    frames = torch.rand(count, history_length, 985, generator=generator)
-    maps = frames[..., :972].reshape(count, history_length, 12, 9, 9)
+    frames = torch.rand(count, 4, 985, generator=generator)
+    maps = frames[..., :972].reshape(count, 4, 12, 9, 9)
     maps[:, :, 4:6].zero_()
-    for tick in range(history_length):
+    for tick in range(4):
         maps[:, tick, 4:6, tick, tick] = 1
     masks = torch.ones(count, 649, dtype=torch.bool)
     masks[:, 2::3] = False
@@ -230,7 +230,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
         restored.load_state_dict(policy.state_dict(), strict=True)
         with torch.no_grad():
             torch.testing.assert_close(restored.action_probabilities(obs), policy.action_probabilities(obs), rtol=0, atol=0)
-        for kwargs in ({"backbone": "unknown"}, {"model_size": "5m"}, {"history_length": 2},
+        for kwargs in ({"backbone": "unknown"}, {"model_size": "5m"}, {"history_length": 2}, {"history_length": 8},
                        {"knowledge_channels": 0}, {"critic_projection_channels": 8}, {"inference_chunk_size": 0},
                        {"critic_actor_information": False}, {"own_king_geometry": False}, {"input_channel_alignment": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
