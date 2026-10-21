@@ -40,7 +40,7 @@ class TrainingControlTests(unittest.TestCase):
 
     def test_budget_reserve_finishes_one_update_and_passes_nominal_evaluation_budget(self):
         config = small_training_config()
-        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
         # Exercise the synchronous evaluation-budget branch with no CUDA worker.
         config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_snapshots": 1}
         config["training_control"] = {
@@ -79,7 +79,7 @@ class TrainingControlTests(unittest.TestCase):
                     patch("generals_rl.train.perf_counter", side_effect=clock), \
                     patch("generals_rl.train.PeriodicEvaluator") as evaluator_type:
                 config = small_training_config()
-                config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+                config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
                 config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_snapshots": 1}
                 config["training_control"] = {"max_seconds": 100, "min_seconds": 60}
                 evaluator = evaluator_type.return_value
@@ -137,7 +137,7 @@ class TrainingControlTests(unittest.TestCase):
     def test_plateau_minimum_updates_uses_absolute_resumed_callback_count(self):
         config = small_training_config()
         config["evaluation"] = {"enabled": False}
-        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
         observed = []
         original_stop_reason = TrainingController.stop_reason
 
@@ -231,7 +231,7 @@ class TrainingControlTests(unittest.TestCase):
     def test_warm_start_loads_full_or_weights_only_checkpoints_with_fresh_optimizers_and_pool(self):
         config = small_training_config()
         config["evaluation"] = {"enabled": False}
-        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3}
+        config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             source = Path(directory) / "source"
             train(config, source, iterations=2)

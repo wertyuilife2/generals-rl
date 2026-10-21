@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-from generals_rl.self_play_training import prepare_self_play
+from generals_rl.self_play_training import SelfPlayConfig, prepare_self_play
 from generals_rl.train import train
 from rl_test_utils import assert_nested_equal, small_training_config
 
@@ -21,7 +21,8 @@ from rl_test_utils import assert_nested_equal, small_training_config
 def self_play_config():
     cfg = small_training_config()
     cfg["self_play"] = {"pool_size": 3, "snapshot_interval": 1,
-                        "stochastic": True, "seed": 10019, "sampling": "uniform"}
+                        "stochastic": True, "seed": 10019, "sampling": "uniform",
+                        "retain_seed": True}
     cfg["runner"]["save_interval"] = 1
     return cfg
 
@@ -186,9 +187,29 @@ class SelfPlayTrainingTests(unittest.TestCase):
             self.assertEqual([s["iteration"] for s in pool["snapshots"]], [-1, 1, 2])
             assert_nested_equal(self, observed["session"].pool.get(2).model.state_dict(), checkpoint["model_state_dict"])
 
+    def test_default_history_training_and_resume_expire_the_initial_random_policy(self):
+        config = self_play_config()
+        config["self_play"].pop("retain_seed")
+        self.assertFalse(SelfPlayConfig().retain_seed)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            summary, checkpoint, records, observed = self.run_training(config, output, iterations=4)
+            self.assertEqual([record["self_play_pool_ids"] for record in records],
+                             [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3, 4]])
+            session = observed["session"]
+            self.assertEqual(session.pool.ids, (2, 3, 4))
+            self.assertFalse(any(session.pool.get(value).metadata["seed"] for value in session.pool.ids))
+            assert_nested_equal(self, session.pool.get(4).model.state_dict(), checkpoint["model_state_dict"])
+            before = directory_hashes(output)
+            _, resumed, _, continued = self.run_training(
+                config, Path(directory) / "continued", iterations=1, resume=str(output / "checkpoint.pt"))
+            self.assertEqual(continued["session"].pool.ids, (4, 5, 6))
+            self.assertEqual(resumed["iter"], 4)
+            self.assertEqual(directory_hashes(output), before)
+
     def test_invalid_self_play_settings_fail_before_creating_run_output(self):
         cases = ({"pool_size": 1}, {"pool_size": True}, {"snapshot_interval": 0},
-                 {"seed": -1}, {"stochastic": "yes"}, {"sampling": "pfsp"})
+                 {"seed": -1}, {"stochastic": "yes"}, {"sampling": "pfsp"}, {"retain_seed": 1})
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "run"
             for settings in cases:

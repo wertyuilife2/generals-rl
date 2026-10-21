@@ -97,7 +97,8 @@
     "snapshot_interval": 50,
     "stochastic": true,
     "seed": 120261013,
-    "sampling": "uniform"
+    "sampling": "uniform",
+    "retain_seed": false
   },
   "evaluation": {
     "enabled": true,

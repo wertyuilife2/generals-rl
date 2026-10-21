@@ -42,6 +42,78 @@ def file_hashes(path):
 
 
 class HistoricalPoolTests(unittest.TestCase):
+    def test_default_pool_evicts_bootstrap_and_samples_only_newest_eight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = pool(directory, max_size=8)
+            source = TinyPolicy()
+            bootstrap = history.publish(source, iteration=-1)
+            original = bootstrap.model.actor.weight.clone()
+            for iteration in range(12):
+                with torch.no_grad():
+                    source.actor.weight.add_(0.1)
+                history.publish(source, iteration=iteration)
+            self.assertEqual(history.ids, tuple(range(5, 13)))
+            self.assertFalse((Path(directory) / bootstrap.metadata["filename"]).exists())
+            torch.testing.assert_close(bootstrap.model.actor.weight, original, rtol=0, atol=0)
+            candidates = history.sample(1000, generator=torch.Generator().manual_seed(8))
+            self.assertEqual({snapshot.snapshot_id for snapshot in candidates}, set(range(5, 13)))
+            self.assertFalse(any(snapshot.metadata["seed"] for snapshot in candidates))
+            self.assertEqual(len(list(Path(directory).glob("snapshot_*.pt"))), 8)
+            self.assertFalse(history.describe()["retain_seed"])
+
+    def test_recent_pool_resume_and_reader_preserve_retention_after_seed_expiry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            history = pool(source, max_size=3, retain_seed=False)
+            policy = TinyPolicy()
+            for iteration in range(6):
+                history.publish(policy, iteration=iteration)
+            reader = pool(source, read_only=True, retain_seed=False)
+            self.assertEqual(reader.ids, (3, 4, 5))
+            active = reader.get(3)
+            history.publish(policy, iteration=6)
+            reader.refresh()
+            self.assertEqual(reader.ids, (4, 5, 6))
+            self.assertFalse(active.metadata["seed"])
+            before = file_hashes(source)
+            resumed = pool(Path(directory) / "resumed", max_size=2, retain_seed=False,
+                           resume_from=source, resume_iteration=5)
+            self.assertEqual(resumed.ids, (4, 5))
+            self.assertEqual(resumed.publish(policy, iteration=6).snapshot_id, 7)
+            self.assertEqual(resumed.ids, (5, 7))
+            reloaded = pool(resumed.directory, max_size=2, retain_seed=False)
+            self.assertEqual(reloaded.describe(), resumed.describe())
+            self.assertEqual(file_hashes(source), before)
+            with self.assertRaisesRegex(ValueError, "predates"):
+                pool(Path(directory) / "too_old", retain_seed=False, resume_from=source,
+                     resume_iteration=3)
+            for kwargs in ({}, {"read_only": True}, {"resume_from": source}):
+                destination = source if "resume_from" not in kwargs else Path(directory) / "wrong_mode"
+                with self.subTest(kwargs=kwargs), self.assertRaisesRegex(ValueError, "retain_seed"):
+                    pool(destination, retain_seed=True, **kwargs)
+            self.assertEqual(file_hashes(source), before)
+
+    def test_legacy_manifest_without_retention_field_uses_original_pinned_seed_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = pool(directory, max_size=2, retain_seed=True)
+            for iteration in range(4):
+                history.publish(TinyPolicy(), iteration=iteration)
+            path = Path(directory) / "manifest.json"
+            manifest = json.loads(path.read_text())
+            manifest.pop("retain_seed")
+            path.write_text(json.dumps(manifest))
+            before = file_hashes(directory)
+            reader = pool(directory, read_only=True, retain_seed=True)
+            self.assertEqual(reader.ids, (0, 3))
+            self.assertTrue(reader.retain_seed)
+            self.assertEqual(file_hashes(directory), before)
+            reloaded = pool(directory, retain_seed=True)
+            self.assertEqual(reloaded.ids, (0, 3))
+            with self.assertRaisesRegex(ValueError, "retain_seed"):
+                pool(directory)
+            with self.assertRaisesRegex(TypeError, "boolean"):
+                pool(Path(directory) / "invalid", retain_seed=1)
+
     def test_snapshot_ignores_nonleaf_distribution_and_freezes_independent_weights(self):
         source = TinyPolicy()
         obs = {"policy": torch.ones(2, 3), "action_mask": torch.tensor([[False, True, True]] * 2)}
@@ -76,7 +148,7 @@ class HistoricalPoolTests(unittest.TestCase):
 
     def test_pruning_retains_seed_and_active_handles_without_sampling_evicted_policies(self):
         with tempfile.TemporaryDirectory() as directory:
-            history = pool(directory, max_size=3)
+            history = pool(directory, max_size=3, retain_seed=True)
             source = TinyPolicy()
             snapshots = [history.publish(source, iteration=i - 1) for i in range(3)]
             active = snapshots[1]
@@ -112,14 +184,14 @@ class HistoricalPoolTests(unittest.TestCase):
 
     def test_read_only_refresh_reuses_models_without_writes_and_retains_active_handles(self):
         with tempfile.TemporaryDirectory() as directory:
-            writer = pool(directory, max_size=3)
+            writer = pool(directory, max_size=3, retain_seed=True)
             source = TinyPolicy()
             for iteration in (-1, 0, 1):
                 writer.publish(source, iteration=iteration)
             before = file_hashes(directory)
             with patch.object(HistoricalPolicyPool, "_write_manifest", side_effect=AssertionError("reader wrote")), \
                     patch.object(Path, "mkdir", side_effect=AssertionError("reader created directory")):
-                reader = pool(directory, read_only=True, max_size=2)
+                reader = pool(directory, read_only=True, max_size=2, retain_seed=True)
             self.assertEqual(file_hashes(directory), before)
             self.assertEqual(reader.ids, writer.ids)  # Readers never prune the shared pool.
             seed, active, kept = (reader.get(snapshot_id) for snapshot_id in reader.ids)
@@ -180,7 +252,7 @@ class HistoricalPoolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             old_path = Path(directory) / "old"
             new_path = Path(directory) / "new"
-            history = pool(old_path)
+            history = pool(old_path, retain_seed=True)
             source = TinyPolicy()
             for iteration in (-1, 10, 20, 30):
                 with torch.no_grad():
@@ -189,7 +261,8 @@ class HistoricalPoolTests(unittest.TestCase):
                                 source={"checkpoint_sha256": str(iteration), "version": 1})
             original_hashes = file_hashes(old_path)
             rng_before = torch.get_rng_state().clone()
-            resumed = pool(new_path, resume_from=old_path, resume_iteration=20, max_size=2)
+            resumed = pool(new_path, resume_from=old_path, resume_iteration=20, max_size=2,
+                           retain_seed=True)
             self.assertTrue(torch.equal(torch.get_rng_state(), rng_before))
             self.assertEqual(resumed.ids, (0, 2))
             self.assertEqual(resumed.describe()["next_id"], 4)
@@ -201,7 +274,7 @@ class HistoricalPoolTests(unittest.TestCase):
             newer = resumed.publish(source, iteration=25)
             self.assertEqual(newer.snapshot_id, 4)
             self.assertEqual(file_hashes(old_path), original_hashes)
-            reloaded = pool(new_path, max_size=2)
+            reloaded = pool(new_path, max_size=2, retain_seed=True)
             self.assertEqual(reloaded.ids, (0, 4))
             self.assertEqual(reloaded.describe(), resumed.describe())
             manifest = json.loads((new_path / "manifest.json").read_text())

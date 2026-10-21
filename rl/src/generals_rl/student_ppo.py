@@ -49,6 +49,8 @@ class StudentPPO(PPO):
                  schedule="adaptive", desired_kl=0.02, learning_rate=3e-4,
                  ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
                  physical_minibatch_size=None, amp_bfloat16=False,
+                 adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
+                 critic_learning_rate=None,
                  betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, StudentPPOPolicy):
@@ -64,7 +66,26 @@ class StudentPPO(PPO):
         if load_balance_coef != 0:
             raise ValueError("student-only PPO has no distillation/load-balance loss")
         if student_encoder_learning_rate not in (None, learning_rate):
-            raise ValueError("student PPO uses one learning rate for its single optimizer")
+            raise ValueError("student encoder learning rate must match the actor learning_rate")
+        for name, value in (("adaptive_lr_min", adaptive_lr_min),
+                            ("adaptive_lr_max", adaptive_lr_max),
+                            ("critic_learning_rate", critic_learning_rate)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                      or not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{name} must be positive and finite")
+            if value is None and name != "critic_learning_rate":
+                raise ValueError(f"{name} must be positive and finite")
+        if adaptive_lr_min > adaptive_lr_max:
+            raise ValueError("adaptive_lr_min must not exceed adaptive_lr_max")
+        self.adaptive_lr_min, self.adaptive_lr_max = adaptive_lr_min, adaptive_lr_max
+        self.critic_learning_rate = critic_learning_rate
+        self._custom_learning_rates = (critic_learning_rate is not None
+                                       or (adaptive_lr_min, adaptive_lr_max) != (1e-5, 1e-2))
+        if self._custom_learning_rates and policy.is_recurrent:
+            raise ValueError("custom actor/critic learning rates require feedforward student PPO")
+        if (self._custom_learning_rates and schedule == "adaptive"
+                and not adaptive_lr_min <= learning_rate <= adaptive_lr_max):
+            raise ValueError("initial learning_rate must be within adaptive LR bounds")
         if kwargs.get("rnd_cfg") is not None or kwargs.get("symmetry_cfg") is not None:
             raise ValueError("student-only PPO does not support RND or symmetry")
         if (physical_minibatch_size is not None
@@ -100,9 +121,18 @@ class StudentPPO(PPO):
         if self.num_learning_epochs < 1 or self.num_mini_batches < 1:
             raise ValueError("PPO epoch and minibatch counts must be positive")
         self._check_sample_count()
-        self.optimizer = torch.optim.Adam(
-            (parameter for parameter in policy.parameters() if parameter.requires_grad),
-            lr=learning_rate, betas=betas, weight_decay=weight_decay)
+        parameters = [parameter for parameter in policy.parameters() if parameter.requires_grad]
+        if critic_learning_rate is not None:
+            critic_ids = {id(parameter) for parameter in policy.critic.parameters() if parameter.requires_grad}
+            actor_parameters = [parameter for parameter in parameters if id(parameter) not in critic_ids]
+            critic_parameters = [parameter for parameter in parameters if id(parameter) in critic_ids]
+            if not actor_parameters or not critic_parameters:
+                raise ValueError("fixed critic LR requires independent trainable actor and critic parameters")
+            parameters = [{"params": actor_parameters, "lr": learning_rate, "role": "actor"},
+                          {"params": critic_parameters, "lr": critic_learning_rate, "role": "critic"}]
+        # Keep the default single group, including parameter ordering and Adam
+        # execution, identical to the original implementation.
+        self.optimizer = torch.optim.Adam(parameters, lr=learning_rate, betas=betas, weight_decay=weight_decay)
         self.optimizer_stu_enc = None
         self.teacher_num_envs = 0
         self.student_num_envs = num_envs
@@ -111,6 +141,45 @@ class StudentPPO(PPO):
         self.monitor = PPOUpdateMonitor(enabled=ppo_monitor, probe_samples=ppo_probe_samples,
                                         probe_batch_size=ppo_probe_batch_size)
         self.update_metrics = {}
+
+    def restore_learning_rates(self):
+        """Restore the actor scheduler scalar after loading Adam state.
+
+        Resume requires the same optimizer grouping and fixed critic LR. A new
+        experiment with different LR semantics should warm-start weights instead.
+        """
+        groups = self.optimizer.param_groups
+        expected_roles = [None] if self.critic_learning_rate is None else ["actor", "critic"]
+        if [group.get("role") for group in groups] != expected_roles:
+            raise ValueError("resume optimizer groups do not match configured actor/critic LR semantics")
+        if self.critic_learning_rate is not None and groups[1]["lr"] != self.critic_learning_rate:
+            raise ValueError("resume fixed critic LR differs from checkpoint; use warm_start for a new experiment")
+        self.learning_rate = groups[0]["lr"]
+        if (self._custom_learning_rates and self.schedule == "adaptive"
+                and not self.adaptive_lr_min <= self.learning_rate <= self.adaptive_lr_max):
+            raise ValueError("checkpoint actor LR is outside configured adaptive LR bounds")
+
+    def _adapt_learning_rate(self, kl_mean):
+        """Actor KL drives the actor LR; an optional critic group stays fixed."""
+        if self.is_multi_gpu:
+            torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
+            kl_mean /= self.gpu_world_size
+        if self.gpu_global_rank == 0:
+            if kl_mean > self.desired_kl * 2.0:
+                self.learning_rate = max(self.adaptive_lr_min, self.learning_rate / 1.5)
+            elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                self.learning_rate = min(self.adaptive_lr_max, self.learning_rate * 1.5)
+        if self.is_multi_gpu:
+            lr_tensor = torch.tensor(self.learning_rate, device=self.device)
+            torch.distributed.broadcast(lr_tensor, src=0)
+            self.learning_rate = lr_tensor.item()
+        if self._custom_learning_rates:
+            # The float32 broadcast can round an exact endpoint just outside
+            # its bounds; enforce the same configured endpoints on every rank.
+            self.learning_rate = min(self.adaptive_lr_max, max(self.adaptive_lr_min, self.learning_rate))
+        for group in self.optimizer.param_groups:
+            group["lr"] = (self.critic_learning_rate if group.get("role") == "critic"
+                           else self.learning_rate)
 
     def _on_ppo_minibatch(self, log_ratio, entropy, grad_norm):
         self.monitor.minibatch(self, log_ratio, entropy, grad_norm)
@@ -124,9 +193,14 @@ class StudentPPO(PPO):
             # Distributed minibatch normalization uses the same adapter with
             # one physical chunk when memory splitting is disabled. Upstream
             # PPO would otherwise normalize each rank's advantages locally.
-            use_adapter = self._chunked_update or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch)
+            use_adapter = (self._chunked_update or self._custom_learning_rates
+                           or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch))
             losses = self._update_microbatched() if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
+            if self.monitor.enabled:
+                self.update_metrics.update(actor_learning_rate=self.learning_rate,
+                                           critic_learning_rate=(self.learning_rate if self.critic_learning_rate is None
+                                                                 else self.critic_learning_rate))
             if self._chunked_update:
                 self.update_metrics.update(self.microbatch_metrics)
             return losses
@@ -216,20 +290,7 @@ class StudentPPO(PPO):
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
                     kl_mean = (torch.expm1(log_ratio) - log_ratio).clamp_min(0).mean()
-                    if self.is_multi_gpu:
-                        torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
-                        kl_mean /= self.gpu_world_size
-                    if self.gpu_global_rank == 0:
-                        if kl_mean > self.desired_kl * 2.0:
-                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
-                    if self.is_multi_gpu:
-                        lr_tensor = torch.tensor(self.learning_rate, device=self.device)
-                        torch.distributed.broadcast(lr_tensor, src=0)
-                        self.learning_rate = lr_tensor.item()
-                    for group in self.optimizer.param_groups:
-                        group["lr"] = self.learning_rate
+                    self._adapt_learning_rate(kl_mean)
             # bf16 keeps float32 master weights/gradients and needs no fp16
             # scaler. Clip and Adam step only after the complete logical batch.
             if self.is_multi_gpu:

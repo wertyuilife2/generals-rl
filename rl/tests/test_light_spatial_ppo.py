@@ -76,7 +76,7 @@ class LightSpatialPPOTests(unittest.TestCase):
         cfg['runner']['algorithm'].update(
             class_name='generals_rl.student_ppo.StudentPPO', teacher_env_ratio=0,
             gamma=.995, load_balance_coef=0, schedule='fixed', desired_kl=None)
-        cfg['self_play'] = dict(pool_size=3, snapshot_interval=1, stochastic=True, seed=917, sampling='uniform')
+        cfg['self_play'] = dict(pool_size=3, snapshot_interval=1, retain_seed=True, stochastic=True, seed=917, sampling='uniform')
         cfg['evaluation'] = {'enabled': False}
         initial = {}
 

@@ -32,8 +32,13 @@ class CurriculumTrainingTests(unittest.TestCase):
             with self.subTest(tick_end_iteration=tick_end_iteration):
                 self._assert_real_rollouts_and_resume(tick_end_iteration)
 
-    def _assert_real_rollouts_and_resume(self, tick_end_iteration):
+    def test_ablation_gamma099_to0999_preserves_rollout_boundaries_after_resume(self):
+        self._assert_real_rollouts_and_resume(None, initial_gamma=.99)
+
+    def _assert_real_rollouts_and_resume(self, tick_end_iteration, initial_gamma=.995):
         config = self.config()
+        config["runner"]["algorithm"]["gamma"] = initial_gamma
+        config["task"]["reward"]["potential_gamma"] = initial_gamma
         config["curriculum"] = {"tick_decay": True, "gamma_final": .999,
                                 "gamma_end_iteration": 2}
         if tick_end_iteration is not None:
@@ -74,12 +79,12 @@ class CurriculumTrainingTests(unittest.TestCase):
                     self.assertEqual([value.step for value in values], list(steps))
                     for value in values:
                         tick_scale = max(0., 1 - value.step / endpoint)
-                        expected = {"gamma": .995 + .004 * min(value.step / 2, 1),
+                        expected = {"gamma": initial_gamma + (.999 - initial_gamma) * min(value.step / 2, 1),
                                     "tick_scale": tick_scale,
                                     "tick": -.001 * tick_scale}[tag]
                         self.assertAlmostEqual(value.value, expected, places=7)
         for stage, steps in zip(records, (range(3), range(3, 5)), strict=True):
-            expected = [(.999 if step >= 2 else .995 + .004 * step / 2,
+            expected = [(.999 if step >= 2 else initial_gamma + (.999 - initial_gamma) * step / 2,
                          -.001 * max(0., 1 - step / endpoint)) for step in steps]
             self.assertEqual(stage["returns"], expected)
             self.assertEqual(stage["update"], expected)
