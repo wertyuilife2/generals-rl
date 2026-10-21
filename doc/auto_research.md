@@ -2,6 +2,8 @@
 
 整理日期：2026-10-21。本文合并历史训练日志、旧实验计划及架构设计，保存研究路线、关键结果、正式方案与证据边界。旧曲线图片和逐版本 JSON 不再纳入源码历史；原文、配置、图像及完整 Git 历史由本次维护的仓库外备份保存，已有 `outputs/`、冻结 release、模型和收据不删除。本文是历史记录，不表示任何旧训练仍在运行。
 
+与外部工作的特征、网络和训练方案对照见 [AverageJoe 调研](averagejoe_paper_comparison.md)，其本地比较对象固定为 2026-10-16 的调研快照。
+
 ## 最终选择
 
 **正式 v32-opt 是严格 current-policy self-play、desired KL=.01，而不是中途的 history8 回退。** 在原 v32 的网络容量、输入和 PPO 预算下，完整训练计算吞吐为129,114.81 fresh learner transitions/s，约为 v32 的1.826倍；final 与 best 均通过原配对非劣和直接对战门槛。仍保留 v32 与历史池，是因为恢复、F03 对照和后续消融需要它们。
@@ -46,6 +48,8 @@ v1–v8含续训、warm-start、旧网络迁移和少量baseline训练对手，�
 
 v32采用H4/K11、组合critic、LightCNN、纯历史池8和KL=.02。当时初始随机策略永久保留，其余7位滚动更新，每50次update发布，整局固定随机对手。采样预算为N16,384/T32、gamma=.995、lambda=.95，4 epochs×64 minibatches。
 
+历史奖励为 `r_terminal + .995×Φ(s_next) − Φ(s) − .001×max(0,1−u/1000)`，其中 `Φ=.05×领地+.2×城市+.001×兵力`，胜/死奖励为+1/−1。真正终止时下一状态势函数为0；1,024tick时间截断保留势函数，并用reset前终态bootstrap，不人工判负。课程只衰减tick惩罚，PBRS与终局奖励始终保留；u999仍有−.000001，u1000起才为零。
+
 | 训练指标 | 实测 |
 | --- | ---: |
 | 完成更新 | 1,206 |
@@ -56,11 +60,17 @@ v32采用H4/K11、组合critic、LightCNN、纯历史池8和KL=.02。当时初�
 | Torch peak allocated/reserved | 15.26401/16.32617 GiB |
 | selector | 12次全部完成；best为u699 |
 
-best/u699在独立CUDA开发协议的aggressive/expansion/defensive/random胜率为93.25%/96.75%/100%/99.75%，overall97.4375%。相对v27固定tick控制，aggressive+3pp和overall+.75pp的配对区间均含0；u699的tick仍未归零。u1000..1199确实完成200轮零tick，但没有持续的末期收益，所以不能把最佳模型归因于零tick阶段。
+历史CPU selector每100次PPO更新评估一次：stochastic、seed/sampling271828，每AI200张地图换座共400局，四AI合计1,600局，FP32/B128、max2,000tick，观测时钟仍按1,024tick归一化。按 `(四AI最低胜率, aggressive胜率, overall胜率)` 字典序选模，因此best不一定是overall最高点。u从0编号；best/u699即第700次更新后的snapshot14，累计367,001,600 transitions、约86.43分钟，此时tick惩罚仍为−.000301。
+
+CPU selector的overall由u99的77.5625%升至u199的94.875%，之后进入平台；u699为96.375%，最后u1199为96.3125%。aggressive在u199后为87%–91.25%；u699→1199差−1pp，地图簇配对95%区间[−4.75,+2.75]，不足以确认末期退化。最后一个selector点u1199不是最终u1205权重的独立评测。
+
+另一套CUDA开发协议采用seed/sampling1001042、FP32/high/TF32、B128、相同1,600局规模；best/u699的aggressive/expansion/defensive/random胜率为93.25%/96.75%/100%/99.75%，overall97.4375%，不能与CPU selector数字混用。开发种子曾在其他版本复用，不是未见holdout。相对v27固定tick控制，aggressive+3pp和overall+.75pp的配对区间均含0；v27仅训练930轮，零tick阶段没有等预算对照。u1000..1199确实完成200轮零tick，但没有持续的末期收益，所以不能把最佳模型归因于零tick阶段。地图簇bootstrap区间仅反映给定模型的评测不确定性，不涵盖训练seed差异和多重选模影响。
+
+末100轮entropy均值1.07453、exact KL .025882、clip fraction .135777、critic EV .916213，未见数值异常或动作熵崩塌；高EV不能代替对战强度，末期KL尖峰仍需监控。PPO监控约占更新耗时2.17%。
 
 完整小批量H4/H8比较使用N8192/T32。v33 H4 best开发为86.5%/94.5%/98.75%/99%，v36 H8为37.5%/56.75%/83.25%/77.25%；aggressive差−49pp，地图簇95%区间[−54.5,−43.5]。H8 actor和critic同时改变、参数从26,074增至39,898，只有单训练seed，不能推广为所有网络长记忆无效。v36计算吞吐70,039.68/s但评估排空后的wall仅35,966.54/s，说明必须区分计算与全流程成本。
 
-v32的冻结来源为原提交 `817cb47e9ed5cabfeb3adf8064e3946b4d56fc05`，best SHA256为 `a1c3c940acdfd6bc92d2e1a383c140b78502a583641506de7867780f31cdaefc`。原始产物保留在 `outputs/moe_cts/iterations/v32/`；[v32摘要](rl_v32_summary.md)保留更详细的方案、选模、结果与限制。
+v32的冻结来源为原提交 `817cb47e9ed5cabfeb3adf8064e3946b4d56fc05`，best SHA256为 `a1c3c940acdfd6bc92d2e1a383c140b78502a583641506de7867780f31cdaefc`。原始产物保留在 `outputs/moe_cts/iterations/v32/`：`train/summary.json`记录训练预算，`final_best/development_report.json`记录CUDA开发评测，`diagnostic/final_tick_curriculum_comparison.json`记录v27配对比较；`frozen_config.json`与`source_manifest.json`记录历史配置/源码，当前默认配置不替代这些冻结输入。
 
 ## v32-opt 优化和最终验收
 
@@ -133,7 +143,7 @@ ResNet呈更高MOVE KL/clip/entropy和更多中段timeout，LR长期卡下界、
 
 ## 评估协议、已知限制与源码清理边界
 
-历史4个baseline仅为回归对手，高胜率不证明世界冠军强度、未见地图尺寸泛化或对所有rule-based策略的优势。训练自对弈胜率、baseline胜率、模型对战draw-adjusted score不能混为一个指标；selector与开发复用、单seed和不同训练预算均须保留说明。典型失败涉及更早的扩张、合兵和回援，不宜只将最后WAIT归为根因；记忆正确也不等于模型有效使用。
+历史4个baseline仅为回归对手，高胜率不证明世界冠军强度、未见地图尺寸泛化或对所有rule-based策略的优势。训练自对弈胜率、baseline胜率、模型对战draw-adjusted score不能混为一个指标；selector与开发复用、单seed和不同训练预算均须保留说明。典型失败涉及更早的扩张、合兵和回援，不宜只将最后WAIT归为根因；记忆正确也不等于模型有效使用。v32八例录像重放核对了1,257个决策tick和局部H4，未独立重建K11，不能据此断言模型忘记了已探索敌王；defensive输局来自另设的397胜/3负诊断，未混入主开发集。
 
 CPU与GPU比赛均调用现有离线env；arena提供对战/回放/Elo，批量RL评估器提供当前网络加载、history/knowledge和GPU分片。原neko C++基础AI合并曾在64局/6,062 joint ticks上核对动作和状态digest一致；该小规模CPU评估总耗时约1.219倍改善，不能外推H200正式任务。新的批量native controllers还去除了旧Python worker池；`baseline_workers`仅保留输入兼容。官方迷雾/其他规则对齐须单独评估，不能将后来在线规则更新默认为训练后端已改变。
 

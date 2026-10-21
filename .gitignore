@@ -9,3 +9,4 @@ outputs/
 doc/*
 !doc/README.md
 !doc/auto_research.md
+!doc/averagejoe_paper_comparison.md
