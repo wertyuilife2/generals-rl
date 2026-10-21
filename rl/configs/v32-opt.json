@@ -97,6 +97,7 @@
   },
   "self_play": {
     "pool_size": 2,
+    "retain_seed": false,
     "snapshot_interval": 50,
     "stochastic": true,
     "seed": 120261013,

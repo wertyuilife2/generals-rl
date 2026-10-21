@@ -41,3 +41,10 @@ python -m pytest -q rl/tests rl/tools/tests
 随机流绑定地图与绝对座位，报告按地图配对的 bootstrap 得分区间。
 Arena 已支持当前模型、history 和 knowledge，其单局 greedy 执行与该批量采样协议分开。
 统一对战入口、回放与 Elo 将在后续接入 arena；训练评估继续保留固定采样协议。
+
+## 可选训练控制
+
+`adaptive_lr_min/max` 配置 actor 自适应学习率范围；`critic_learning_rate` 可固定 critic 的独立学习率。
+恢复训练校验 optimizer 分组、固定 critic LR 和 actor 范围；省略这些设置保持原默认更新路径。
+Scaled ViT/ResNet 支持 H4/H8，默认 H4 和原 checkpoint 布局不变。
+新历史池默认 `self_play.retain_seed=false`，初始随机模型可正常淘汰；旧 manifest 缺字段仍按 true 解释，恢复须匹配原模式。

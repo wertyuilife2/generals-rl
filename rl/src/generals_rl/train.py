@@ -175,7 +175,10 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         if resume:
             runner.load(str(Path(resume).resolve()), map_location=str(task.device))
             # Restore the adaptive scheduler scalar and continue after the saved index.
-            runner.alg.learning_rate = runner.alg.optimizer.param_groups[0]["lr"]
+            if hasattr(runner.alg, "restore_learning_rates"):
+                runner.alg.restore_learning_rates()
+            else:
+                runner.alg.learning_rate = runner.alg.optimizer.param_groups[0]["lr"]
             runner.current_learning_iteration += 1
         elif warm_start is not None:
             checkpoint = Path(warm_start).resolve()

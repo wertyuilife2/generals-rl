@@ -148,6 +148,24 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(asdict(reward.config), expected)
         self.assertEqual(algorithm.gamma, .999)
 
+    def test_ablation_gamma_course_reaches_final_at_update112_and_preserves_it_through224(self):
+        settings = CurriculumConfig(gamma_final=.999, gamma_end_iteration=112)
+        algorithm = SimpleNamespace(gamma=.99)
+        reward = ShapedReward(RewardConfig(potential_gamma=.99))
+        course = RolloutCurriculum(settings, algorithm, reward)
+        for iteration in range(224):
+            metrics = course.apply(iteration)
+            expected = .999 if iteration >= 112 else .99 + .009 * iteration / 112
+            self.assertAlmostEqual(metrics["gamma"], expected, places=14)
+            self.assertEqual(algorithm.gamma, reward.config.potential_gamma)
+            self.assertEqual(reward.config.tick, course.base_reward.tick)
+            # Resume reconstruction uses configured initial gamma, not the
+            # previously scheduled checkpoint discount.
+            resumed_algorithm = SimpleNamespace(gamma=.99)
+            resumed_reward = ShapedReward(RewardConfig(potential_gamma=.99))
+            resumed = RolloutCurriculum(settings, resumed_algorithm, resumed_reward)
+            self.assertEqual(resumed.apply(iteration), metrics)
+
     def test_enabled_requires_original_matching_potential_gamma(self):
         settings = CurriculumConfig(tick_decay=True)
         for potential in (None, .99):

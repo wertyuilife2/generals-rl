@@ -16,6 +16,7 @@ class SelfPlayConfig:
     stochastic: bool = True
     seed: int = 1000042
     sampling: str = "uniform"
+    retain_seed: bool = False
 
     def __post_init__(self):
         for name, minimum in (("pool_size", 2), ("snapshot_interval", 1), ("seed", 0)):
@@ -24,6 +25,8 @@ class SelfPlayConfig:
                 raise ValueError(f"self_play.{name} must be an integer >= {minimum}")
         if not isinstance(self.stochastic, bool):
             raise TypeError("self_play.stochastic must be boolean")
+        if not isinstance(self.retain_seed, bool):
+            raise TypeError("self_play.retain_seed must be boolean")
         if self.sampling != "uniform":
             raise ValueError("only uniform historical sampling is implemented")
 
@@ -112,7 +115,7 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         policy_spec=signature, device=task.device, max_size=settings.pool_size,
         resume_from=resume_pool,
         resume_iteration=initial_iteration if resume_pool is not None else None,
-        read_only=read_only,
+        read_only=read_only, retain_seed=settings.retain_seed,
     )
     session = SelfPlaySession(pool, task.opponent, policy, settings)
     # Even when an old pool is restored, make the resumed learner selectable.

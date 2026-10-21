@@ -89,7 +89,7 @@ def student_config():
     config["runner"]["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO",
                                              teacher_env_ratio=0, schedule="fixed", desired_kl=None,
                                              load_balance_coef=0)
-    config["self_play"] = {"pool_size": 3, "snapshot_interval": 1}
+    config["self_play"] = {"pool_size": 3, "snapshot_interval": 1, "retain_seed": True}
     # Omit enabled: exercise the default real subprocess evaluation path.
     config["evaluation"] = {"every_n_snapshots": 2, "maps_per_ai": 1, "max_ticks": 3, "batch_size": 8}
     return config

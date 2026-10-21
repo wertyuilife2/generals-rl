@@ -68,7 +68,7 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
                                     for name, value in policy.named_parameters() if name.startswith(prefix)))
             session = observed["session"]
             self.assertIs(session.opponent.policy, policy)
-            self.assertEqual(session.pool.ids, (0, 3))
+            self.assertEqual(session.pool.ids, (2, 3))
             snapshot = session.pool.get(3).model
             self.assertIsNot(snapshot, policy)
             self.assertFalse(snapshot.training)

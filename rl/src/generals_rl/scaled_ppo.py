@@ -13,6 +13,8 @@ ViT 10m      4,957,961    4,975,297    9,933,258
 ViT 100m    49,477,001   49,481,025   98,958,026
 
 Projection0 retains all raw history/knowledge and adds 5,856 critic parameters.
+H8 uses the same layout with eight chronological frames and wider input layers;
+the tabulated budgets and the checkpoint-compatible default remain H4.
 Rollout chunks bound hidden activation memory; PPO training uses StudentPPO's
 physical_minibatch_size to backward/release each graph before the next chunk.
 """
@@ -300,10 +302,12 @@ class ScaledInformationSpatialPPOPolicy(MapPPOPolicy):
         if not isinstance(model_size, str) or model_size.lower() not in RESNET_TOTAL_PRESETS:
             raise ValueError("model_size must be 1m, 10m, or 100m")
         self.backbone_kind, self.model_size = backbone, model_size.lower()
-        schema = (players, map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
+        schema = (players, map_width, map_height, map_planes, public_dim, knowledge_channels)
         if (any(isinstance(value, bool) or not isinstance(value, int) for value in schema)
-                or schema != (2, 9, 9, 4, 12, 13, 11)):
-            raise ValueError("scaled policy requires the v32 P2 9x9 H4/K11 twelve-plane/public13 schema")
+                or schema != (2, 9, 9, 12, 13, 11)
+                or isinstance(history_length, bool) or not isinstance(history_length, int)
+                or history_length not in (4, 8)):
+            raise ValueError("scaled policy requires the v32 P2 9x9 H4 or H8/K11 twelve-plane/public13 schema")
         if action_distribution != "categorical" or actor_obs_normalization is not False or critic_obs_normalization is not False:
             raise ValueError("scaled policy uses categorical actions and unnormalized explicit features")
         for name, value in (("critic_actor_information", critic_actor_information), ("own_king_geometry", own_king_geometry),
@@ -346,6 +350,7 @@ class ScaledInformationSpatialPPOPolicy(MapPPOPolicy):
                                                critic_projection_channels, head_channels, spatial_mode)
         self.distribution = None
         self._update_dimensions()
+        self.semantics = self.semantics.replace("hist4", f"hist{history_length}")
         self.semantics += f"_{backbone}_{self.model_size}_projection{critic_projection_channels}_head{head_channels}"
         if spatial_mode == "pyramid":
             self.semantics += "_spatial_pyramid_v1"
