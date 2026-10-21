@@ -23,6 +23,15 @@ class MoECTS:
     policy: ActorCriticMoECTS
     """The actor critic module."""
 
+    @staticmethod
+    def teacher_environment_count(num_envs: int, teacher_env_ratio: float) -> int:
+        """Keep both groups nonempty, including small or non-divisible vector batches."""
+        if num_envs < 2:
+            raise ValueError("MoECTS requires at least two environments for teacher/student training.")
+        if not 0.0 < teacher_env_ratio < 1.0:
+            raise ValueError("teacher_env_ratio must be strictly between zero and one.")
+        return min(max(int(num_envs * teacher_env_ratio), 1), num_envs - 1)
+
     def __init__(
         self,
         policy: ActorCriticMoECTS,
@@ -121,13 +130,22 @@ class MoECTS:
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
         
         # Teacher-student environment split
-        self.teacher_num_envs = max(int(num_envs * teacher_env_ratio), 1)
+        self.teacher_num_envs = self.teacher_environment_count(num_envs, teacher_env_ratio)
         self.student_num_envs = num_envs - self.teacher_num_envs
-        student_env_ratio = 1 - teacher_env_ratio
-        self.teacher_env_idxs = torch.tensor([i for i in range(num_envs) if i % int(1/student_env_ratio) != 0], device=self.device)
-        self.student_env_idxs = torch.tensor([i for i in range(num_envs) if i % int(1/student_env_ratio) == 0], device=self.device)
-        assert len(self.teacher_env_idxs) == self.teacher_num_envs, f"{len(self.teacher_env_idxs)=} != {self.teacher_num_envs=}"
-        assert len(self.student_env_idxs) == self.student_num_envs, f"{len(self.student_env_idxs)=} != {self.student_num_envs=}"
+        self.student_env_idxs = torch.div(
+            torch.arange(self.student_num_envs, device=self.device) * num_envs,
+            self.student_num_envs,
+            rounding_mode="floor",
+        )
+        teacher_mask = torch.ones(num_envs, dtype=torch.bool, device=self.device)
+        teacher_mask[self.student_env_idxs] = False
+        self.teacher_env_idxs = teacher_mask.nonzero(as_tuple=True)[0]
+        if storage.num_envs != num_envs or storage.teacher_num_envs != self.teacher_num_envs:
+            raise ValueError("CTS storage must use the same environment and teacher group sizes as the algorithm.")
+        if num_learning_epochs < 1 or num_mini_batches < 1:
+            raise ValueError("num_learning_epochs and num_mini_batches must be positive.")
+        if min(self.teacher_num_envs, self.student_num_envs) * storage.num_transitions_per_env < num_mini_batches:
+            raise ValueError("Every minibatch must contain both teacher and student samples.")
         
     def act(self, obs: TensorDict) -> torch.Tensor:
         # Compute the actions and values
@@ -188,8 +206,22 @@ class MoECTS:
         if "time_outs" in extras:
             time_outs = extras["time_outs"].to(self.device)
             reordered_time_outs = torch.cat([time_outs[ti], time_outs[si]], dim=0)
+            timeout_values = self.transition.values
+            terminal_obs = extras.get("terminal_observations")
+            if terminal_obs is not None and time_outs.any():
+                terminal_obs = terminal_obs.to(self.device)
+                timeout_values = timeout_values.clone()
+                with torch.no_grad():
+                    for indices, is_teacher, offset in (
+                        (ti, True, 0), (si, False, self.teacher_num_envs)
+                    ):
+                        timed_out = time_outs[indices].bool()
+                        if timed_out.any():
+                            timeout_values[offset + timed_out.nonzero(as_tuple=True)[0]] = self.policy.evaluate(
+                                terminal_obs[indices[timed_out]], is_teacher
+                            ).detach()
             self.transition.rewards += self.gamma * torch.squeeze(
-                self.transition.values * reordered_time_outs.unsqueeze(1).to(self.device), 1
+                timeout_values * reordered_time_outs.unsqueeze(1).to(self.device), 1
             )
 
         # Record the transition
@@ -219,7 +251,7 @@ class MoECTS:
             # Return: R_t = A(s_t, a_t) + V(s_t)
             st.returns[step] = advantage + st.values[step]
         # Compute the advantages
-        st.advantages = st.returns - st.values
+        st.advantages = st.returns[:st.num_transitions_per_env] - st.values[:st.num_transitions_per_env]
         # Normalize the advantages if per minibatch normalization is not used
         if not self.normalize_advantage_per_mini_batch:
             st.advantages = (st.advantages - st.advantages.mean()) / (st.advantages.std() + 1e-8)
@@ -233,9 +265,9 @@ class MoECTS:
         # RND loss
         mean_rnd_loss = 0 if self.rnd else None
 
-        # Get mini batch generator
-        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
-        data = list(generator)
+        # Share only the fixed random index plan; gather one minibatch at a time.
+        # PPO still completes every epoch before student distillation starts.
+        indices = self.storage.mini_batch_indices()
 
         # Iterate over batches
         teacher_samples = self.teacher_num_envs * self.storage.num_transitions_per_env // self.num_mini_batches
@@ -251,7 +283,9 @@ class MoECTS:
             old_sigma_batch,
             hidden_states_batch,
             masks_batch,
-        ) in data:
+        ) in self.storage.mini_batch_generator(
+            self.num_mini_batches, self.num_learning_epochs, indices=indices
+        ):
             original_batch_size = obs_batch.batch_size[0]
 
             # Check if we should normalize advantages per mini batch
@@ -277,13 +311,20 @@ class MoECTS:
             # Compute KL divergence and adapt the learning rate
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
-                    kl = torch.sum(
-                        torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
-                        + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
-                        / (2.0 * torch.square(sigma_batch))
-                        - 0.5,
-                        axis=-1,
-                    )
+                    if self.policy.action_distribution == "categorical":
+                        tiny = torch.finfo(mu_batch.dtype).tiny
+                        kl = torch.sum(
+                            old_mu_batch * (old_mu_batch.clamp_min(tiny).log() - mu_batch.clamp_min(tiny).log()),
+                            dim=-1,
+                        )
+                    else:
+                        kl = torch.sum(
+                            torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                            + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
+                            / (2.0 * torch.square(sigma_batch))
+                            - 0.5,
+                            axis=-1,
+                        )
                     kl_mean = torch.mean(kl)
 
                     # Reduce the KL divergence across all GPUs
@@ -388,7 +429,9 @@ class MoECTS:
             old_sigma_batch,
             hidden_states_batch,
             masks_batch,
-        ) in data:
+        ) in self.storage.mini_batch_generator(
+            self.num_mini_batches, self.num_learning_epochs, indices=indices
+        ):
             # Student encoder loss
             obs_a_batch = self.policy.get_actor_obs(obs_batch)
             obs_a_batch = self.policy.actor_obs_normalizer(obs_a_batch)

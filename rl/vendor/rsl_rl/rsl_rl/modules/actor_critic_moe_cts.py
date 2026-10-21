@@ -8,7 +8,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from tensordict import TensorDict
-from torch.distributions import Normal
+from torch.distributions import Categorical, Normal
 from typing import Any, NoReturn
 from rsl_rl.networks.moe import MLP
 
@@ -58,6 +58,7 @@ class ActorCriticMoECTS(nn.Module):
         init_noise_std: float = 1.0,
         noise_std_type: str = "scalar",
         state_dependent_std: bool = False,
+        action_distribution: str = "normal",
         latent_dim: int = 32,
         norm_type: str = 'l2norm',
         **kwargs: dict[str, Any],
@@ -72,6 +73,11 @@ class ActorCriticMoECTS(nn.Module):
         super().__init__()
         
         self.num_actions = num_actions
+        if action_distribution not in ("normal", "categorical"):
+            raise ValueError("action_distribution must be 'normal' or 'categorical'.")
+        if action_distribution == "categorical" and state_dependent_std:
+            raise ValueError("Categorical actions do not support state_dependent_std.")
+        self.action_distribution = action_distribution
 
         # Get the observation dimensions
         self.obs_groups = obs_groups
@@ -140,7 +146,9 @@ class ActorCriticMoECTS(nn.Module):
 
         # Action noise
         self.noise_std_type = noise_std_type
-        if self.state_dependent_std:
+        if self.action_distribution == "categorical":
+            pass  # The actor outputs logits; no Gaussian noise parameters are needed.
+        elif self.state_dependent_std:
             torch.nn.init.zeros_(self.actor[-2].weight[num_actions:])
             if self.noise_std_type == "scalar":
                 torch.nn.init.constant_(self.actor[-2].bias[num_actions:], init_noise_std)
@@ -173,17 +181,34 @@ class ActorCriticMoECTS(nn.Module):
 
     @property
     def action_mean(self) -> torch.Tensor:
+        if self.action_distribution == "categorical":
+            return self.distribution.probs  # Stored as the old categorical distribution for PPO KL.
         return self.distribution.mean
 
     @property
     def action_std(self) -> torch.Tensor:
+        if self.action_distribution == "categorical":
+            # Categorical has no action standard deviation; keep a small logger placeholder.
+            return self.distribution.logits.new_ones((*self.distribution.batch_shape, 1))
         return self.distribution.stddev
 
     @property
     def entropy(self) -> torch.Tensor:
+        if self.action_distribution == "categorical":
+            return self.distribution.entropy()
         return self.distribution.entropy().sum(dim=-1)
 
-    def _update_distribution(self, latent_and_obs: torch.Tensor) -> None:
+    def _update_distribution(self, latent_and_obs: torch.Tensor, action_mask: torch.Tensor | None = None) -> None:
+        if self.action_distribution == "categorical":
+            logits = self.actor(latent_and_obs)
+            if action_mask is None:
+                raise ValueError("Categorical policies require obs['action_mask'].")
+            action_mask = action_mask.to(device=logits.device, dtype=torch.bool)
+            if action_mask.shape != logits.shape or not action_mask.any(dim=-1).all():
+                raise ValueError("action_mask must match logits and contain a legal action in every row.")
+            logits = logits.masked_fill(~action_mask, torch.finfo(logits.dtype).min)
+            self.distribution = Categorical(logits=logits)
+            return
         if self.state_dependent_std:
             # Compute mean and standard deviation
             mean_and_std = self.actor(latent_and_obs)
@@ -219,8 +244,9 @@ class ActorCriticMoECTS(nn.Module):
                 obs_a = self.actor_obs_normalizer(obs_a)
                 latent, _ = self.student_moe_encoder(obs_a)
         latent_and_obs = torch.cat([latent, single_obs], dim=-1)
-        self._update_distribution(latent_and_obs)
-        return self.distribution.sample()
+        self._update_distribution(latent_and_obs, obs.get("action_mask"))
+        actions = self.distribution.sample()
+        return actions.unsqueeze(-1) if self.action_distribution == "categorical" else actions
 
     def act_inference(self, obs: TensorDict) -> torch.Tensor:
         single_obs = self.single_obs_normalizer(obs['single_obs'])
@@ -228,10 +254,25 @@ class ActorCriticMoECTS(nn.Module):
         obs_a = self.actor_obs_normalizer(obs_a)
         latent, _ = self.student_moe_encoder(obs_a)
         latent_and_obs = torch.cat([latent, single_obs], dim=-1)
+        if self.action_distribution == "categorical":
+            self._update_distribution(latent_and_obs, obs.get("action_mask"))
+            return self.distribution.probs.argmax(dim=-1, keepdim=True)
         if self.state_dependent_std:
             return self.actor(latent_and_obs)[..., 0, :]
         else:
             return self.actor(latent_and_obs)
+
+    def action_probabilities(self, obs: TensorDict, is_teacher: bool = False) -> torch.Tensor:
+        """Return masked action priors without sampling; usable by a future search adapter."""
+        if self.action_distribution != "categorical":
+            raise ValueError("Action probabilities require a categorical policy.")
+        single_obs = self.single_obs_normalizer(obs["single_obs"])
+        if is_teacher:
+            latent = self.teacher_encoder(self.critic_obs_normalizer(self.get_critic_obs(obs)))
+        else:
+            latent, _ = self.student_moe_encoder(self.actor_obs_normalizer(self.get_actor_obs(obs)))
+        self._update_distribution(torch.cat([latent, single_obs], dim=-1), obs.get("action_mask"))
+        return self.distribution.probs
 
     def evaluate(self, obs: TensorDict, is_teacher: bool, **kwargs: dict[str, Any]) -> torch.Tensor:
         obs_c = self.get_critic_obs(obs)
@@ -254,6 +295,8 @@ class ActorCriticMoECTS(nn.Module):
         return torch.cat(obs_list, dim=-1)
 
     def get_actions_log_prob(self, actions: torch.Tensor) -> torch.Tensor:
+        if self.action_distribution == "categorical":
+            return self.distribution.log_prob(actions.long().squeeze(-1))
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def update_normalization(self, obs: TensorDict) -> None:

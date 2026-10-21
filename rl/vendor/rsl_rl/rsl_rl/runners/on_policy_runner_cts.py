@@ -153,7 +153,7 @@ class OnPolicyRunnerCTS:
             )
 
             # Save model
-            if it % self.cfg["save_interval"] == 0:
+            if self.logger.log_dir is not None and not self.logger.disable_logs and it % self.cfg["save_interval"] == 0:
                 self.save(os.path.join(self.logger.log_dir, f"model_{it}.pt"), it=it, last_model=False)  # type: ignore
 
         # Save the final model after training
@@ -169,7 +169,8 @@ class OnPolicyRunnerCTS:
         saved_dict = {
             "model_state_dict": self.alg.policy.state_dict(),
             "optimizer_state_dict": self.alg.optimizer.state_dict(),
-            "optimizer_stu_enc_state_dict": self.alg.optimizer_stu_enc.state_dict(),
+            "optimizer_stu_enc_state_dict": (self.alg.optimizer_stu_enc.state_dict()
+                                             if self.alg.optimizer_stu_enc is not None else None),
             "iter": self.current_learning_iteration,
             "infos": infos,
         }
@@ -269,7 +270,8 @@ class OnPolicyRunnerCTS:
             # Algorithm optimizer
             self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
             # Student encoder optimizer
-            self.alg.optimizer_stu_enc.load_state_dict(loaded_dict["optimizer_stu_enc_state_dict"])
+            if self.alg.optimizer_stu_enc is not None:
+                self.alg.optimizer_stu_enc.load_state_dict(loaded_dict["optimizer_stu_enc_state_dict"])
             # RND optimizer if used
             if self.alg_cfg["rnd_cfg"]:
                 self.alg.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
@@ -337,7 +339,7 @@ class OnPolicyRunnerCTS:
         }
 
         # Check if user has device specified for local rank
-        if self.device != f"cuda:{self.gpu_local_rank}":
+        if self.device != f"cuda:{self.gpu_local_rank}" and self.device != "cpu":
             raise ValueError(
                 f"Device '{self.device}' does not match expected device for local rank '{self.gpu_local_rank}'."
             )
@@ -352,9 +354,16 @@ class OnPolicyRunnerCTS:
             )
 
         # Initialize torch distributed
-        torch.distributed.init_process_group(backend="nccl", rank=self.gpu_global_rank, world_size=self.gpu_world_size)
+        if torch.distributed.is_initialized():
+            if (torch.distributed.get_rank() != self.gpu_global_rank
+                    or torch.distributed.get_world_size() != self.gpu_world_size):
+                raise ValueError("existing process group does not match torchrun rank/world size")
+        else:
+            backend = "gloo" if self.device == "cpu" else "nccl"
+            torch.distributed.init_process_group(backend=backend, rank=self.gpu_global_rank, world_size=self.gpu_world_size)
         # Set device to the local rank
-        torch.cuda.set_device(self.gpu_local_rank)
+        if self.device != "cpu":
+            torch.cuda.set_device(self.gpu_local_rank)
 
     def _construct_algorithm(self, obs: TensorDict) -> MoECTS:
         """Construct the actor-critic algorithm."""
@@ -377,20 +386,42 @@ class OnPolicyRunnerCTS:
                 self.policy_cfg["critic_obs_normalization"] = self.cfg["empirical_normalization"]
 
         # Initialize the policy
-        # actor_critic_class = resolve_callable(self.policy_cfg.pop("class_name"))
-        actor_critic_class = eval(self.policy_cfg.pop("class_name")) # temporally use eval to avoid import bugs
+        actor_critic_class = resolve_callable(self.policy_cfg.pop("class_name"))
         actor_critic: ActorCriticMoECTS = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
         ).to(self.device)
 
-        # Initialize the storage
+        alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
+
+        # Initialize the storage; policy construction and live observations stay complete.
+        storage_obs = obs
+        storage_obs_keys = self.cfg.get("storage_obs_keys")
+        if storage_obs_keys is not None:
+            if (not isinstance(storage_obs_keys, (list, tuple)) or not storage_obs_keys
+                    or any(not isinstance(key, str) for key in storage_obs_keys)):
+                raise ValueError("storage_obs_keys must be a nonempty list/tuple of observation names or None")
+            if (len(set(storage_obs_keys)) != len(storage_obs_keys)
+                    or any(key not in obs for key in storage_obs_keys)):
+                raise ValueError("storage_obs_keys must contain unique existing observation names")
+            storage_obs = obs.select(*storage_obs_keys)
+        categorical = actor_critic.action_distribution == "categorical"
         storage = RolloutStorageCTS(
-            "rl", self.env.num_envs, max(int(self.env.num_envs*self.alg_cfg["teacher_env_ratio"]), 1), self.cfg["num_steps_per_env"], obs, [self.env.num_actions], self.device
+            "rl",
+            self.env.num_envs,
+            getattr(alg_class, "teacher_environment_count", MoECTS.teacher_environment_count)(
+                self.env.num_envs, self.alg_cfg["teacher_env_ratio"]
+            ),
+            self.cfg["num_steps_per_env"],
+            storage_obs,
+            [1] if categorical else [self.env.num_actions],
+            self.device,
+            distribution_shape=[self.env.num_actions],
+            action_dtype=torch.long if categorical else torch.float32,
+            store_action_std=not categorical,
+            store_action_mean=getattr(alg_class, "requires_old_distribution", True),
         )
 
         # Initialize the algorithm
-        # alg_class = resolve_callable(self.alg_cfg.pop("class_name"))
-        alg_class = eval(self.alg_cfg.pop("class_name")) # temporally use eval to avoid import bugs
         alg: MoECTS = alg_class(
             actor_critic, storage, self.env.num_envs, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )
