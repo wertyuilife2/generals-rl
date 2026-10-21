@@ -1,6 +1,7 @@
 """Real subprocess evaluations, snapshot eviction and learner RNG isolation."""
 from contextlib import redirect_stdout
 from copy import deepcopy
+from dataclasses import asdict
 from hashlib import sha256
 import io
 import json
@@ -42,6 +43,7 @@ def completion_fixture(evaluator):
     report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
               "completed_games": 8, "scheduled_games": 8, "policy": "student_local",
               "device": evaluator.settings.device, "stochastic": True,
+              "reference_inference": evaluator.settings.reference_inference,
               "matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": False,
               "parameter_dtype": "float32", "inference_dtype": "float32",
               "overall": {"win_rate": 0.0},
@@ -60,10 +62,11 @@ def completion_fixture(evaluator):
 
 
 class TrainingEvaluationTests(unittest.TestCase):
-    def test_report_must_match_requested_parallel_baseline_workers(self):
+    def test_legacy_baseline_workers_are_input_only_and_do_not_constrain_reports(self):
         with tempfile.TemporaryDirectory() as directory:
             evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, baseline_workers=4),
                                           {}, directory, None)
+            self.assertNotIn("baseline_workers", asdict(evaluator.settings))
             path, report, job = completion_fixture(evaluator)
             for workers in (None, 1, 2):
                 with self.subTest(workers=workers):
@@ -71,9 +74,9 @@ class TrainingEvaluationTests(unittest.TestCase):
                     if workers is not None:
                         report["baseline_workers"] = workers
                     path.write_text(json.dumps(report))
-                    with self.assertRaisesRegex(RuntimeError, "baseline workers"):
-                        evaluator._complete(job)
-                    self.assertIsNone(evaluator.best_completed)
+                    evaluator._complete(job)
+                    self.assertIsNotNone(evaluator.best_completed)
+                    self.assertNotIn("baseline_workers", evaluator.best_completed)
 
     def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_precision_before_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,9 +114,9 @@ class TrainingEvaluationTests(unittest.TestCase):
                 self.assertFalse((evaluator.directory / "best.pt").exists())
 
     def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_benchmark(self):
-        for actual in (None, False):
-            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
-                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
+        for reference, actual in ((False, None), (False, True), (True, None), (True, False)):
+            with self.subTest(reference=reference, actual=actual), tempfile.TemporaryDirectory() as directory:
+                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0", reference_inference=reference),
                                               {"cudnn_benchmark": True}, directory, None)
                 path, report, job = completion_fixture(evaluator)
                 if actual is None:
@@ -156,7 +159,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                                               config, directory, None)
                 path, report, job = completion_fixture(evaluator)
                 report.update(matmul_precision=matmul, inference_dtype=dtype,
-                              cudnn_benchmark=config.get("cudnn_benchmark", False))
+                              cudnn_benchmark=False)
                 path.write_text(json.dumps(report))
                 evaluator._complete(job)
                 self.assertEqual(job["status"], "completed")
@@ -173,6 +176,16 @@ class TrainingEvaluationTests(unittest.TestCase):
             path, report, job = completion_fixture(evaluator)
             for key in ("matmul_precision", "cudnn_allow_tf32", "cudnn_benchmark", "inference_dtype"):
                 report.pop(key)
+            path.write_text(json.dumps(report))
+            evaluator._complete(job)
+            self.assertEqual(job["status"], "completed")
+
+    def test_reference_cuda_report_preserves_training_cudnn_benchmark(self):
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0", reference_inference=True),
+                                          {"cudnn_benchmark": True}, directory, None)
+            path, report, job = completion_fixture(evaluator)
+            report["cudnn_benchmark"] = True
             path.write_text(json.dumps(report))
             evaluator._complete(job)
             self.assertEqual(job["status"], "completed")
@@ -196,16 +209,25 @@ class TrainingEvaluationTests(unittest.TestCase):
         self.assertEqual(settings.every_n_snapshots, 10)
         self.assertEqual(settings.maps_per_ai, 50)
         self.assertEqual(settings.device, "cpu")
-        self.assertEqual(settings.baseline_workers, 1)
+        self.assertNotIn("baseline_workers", asdict(settings))
+        self.assertEqual(settings.batch_size, 0)
+        self.assertEqual(settings.env_backend, "cpu")
         self.assertFalse(settings.synchronous)
         self.assertIsNone(settings.worker_timeout_seconds)
         self.assertTrue(TrainingEvalConfig(device="cuda:0").synchronous)
         self.assertEqual(TrainingEvalConfig(device="cuda").worker_timeout_seconds, 1800)
         self.assertEqual(TrainingEvalConfig(device="cuda", timeout_seconds=15).worker_timeout_seconds, 15)
-        cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
-                 {"batch_size": 0}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0},
-                 {"baseline_workers": 0}, {"baseline_workers": True},
+        cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"reference_inference": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
+                 {"batch_size": -1}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0},
+                 {"env_backend": "gpu"}, {"env_backend": "unknown"}, {"baseline_workers": 0}, {"baseline_workers": True},
                  {"device": None}, {"device": "invalid"}, {"device": "mps"},
+                 {"cuda_visible_devices": "1"}, {"device": "cuda", "cuda_visible_devices": 1},
+                 {"device": "cuda", "cuda_visible_devices": "1,,2"},
+                 {"device": "cuda", "cuda_visible_devices": "1,01"},
+                 {"device": "cuda", "cuda_visible_devices": "1,GPU-aaaa"},
+                 {"allow_shared_gpus": True}, {"allow_shared_gpus": "yes"},
+                 {"device": "cuda:1", "cuda_visible_devices": "2"},
+                 {"device": "cuda", "cuda_visible_devices": ""},
                  {"timeout_seconds": 0}, {"timeout_seconds": True}, {"timeout_seconds": float("inf")})
         with tempfile.TemporaryDirectory() as directory:
             for values in cases:
@@ -215,6 +237,31 @@ class TrainingEvaluationTests(unittest.TestCase):
                 with self.subTest(values=values), self.assertRaises((TypeError, ValueError)):
                     train(config, output, iterations=1)
                 self.assertFalse(output.exists())
+
+    def test_dedicated_gpu_is_async_and_must_be_excluded_from_training(self):
+        settings = TrainingEvalConfig(device="cuda", cuda_visible_devices="7")
+        self.assertEqual(settings.device, "cuda:0")
+        self.assertFalse(settings.synchronous)
+        self.assertEqual(settings.worker_timeout_seconds, 1800)
+        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6"}):
+            settings.validate_training_devices("cuda:0")
+        shared = TrainingEvalConfig(device="cuda:0", cuda_visible_devices="0,1", allow_shared_gpus=True)
+        self.assertFalse(shared.synchronous)
+        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1"}):
+            shared.validate_training_devices("cuda:0")
+        for visible in ("", "0,7", "0,07", "GPU-aaaa"):
+            with self.subTest(visible=visible), patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": visible}):
+                with self.assertRaises(ValueError):
+                    settings.validate_training_devices("cuda:0")
+        # CPU learners need not reserve CUDA devices.
+        settings.validate_training_devices("cpu")
+        uuid = TrainingEvalConfig(device="cuda:0", cuda_visible_devices="GPU-abcdef-1234")
+        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "GPU-fedcba-4321"}):
+            uuid.validate_training_devices("cuda:0")
+        for visible in ("GPU-abcdef", "GPU-abcdef-1234-5678", "7"):
+            with self.subTest(visible=visible), patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": visible}):
+                with self.assertRaises(ValueError):
+                    uuid.validate_training_devices("cuda:0")
 
     def test_real_eval_survives_eviction_records_four_ai_in_tensorboard_and_preserves_training(self):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
@@ -296,7 +343,7 @@ class TrainingEvaluationTests(unittest.TestCase):
     def test_synchronous_path_completes_at_update_boundary_and_preserves_learner(self):
         """Exercise real workers on CPU; CUDA device routing is tested separately."""
         config = small_config()
-        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1)
+        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1, timeout_seconds=1800)
         observed = []
         original_on_snapshot = PeriodicEvaluator.on_snapshot
 
@@ -349,7 +396,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                 evaluator.poll()
             command = popen.call_args.args[0]
             self.assertEqual(command[command.index("--device") + 1], "cuda:0")
-            self.assertEqual(command[command.index("--baseline-workers") + 1], "4")
+            self.assertNotIn("--baseline-workers", command)
             self.assertTrue(popen.call_args.kwargs["start_new_session"])
             self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "test-device")
             self.assertEqual(popen.call_args.kwargs["env"]["PYTHONPATH"], "frozen-source")
@@ -358,6 +405,68 @@ class TrainingEvaluationTests(unittest.TestCase):
             empty_cache.assert_called_once_with()
             # This is a fake routing worker; no CUDA context or process exists.
             evaluator.running = None
+
+    def test_dedicated_cuda_worker_overrides_visibility_without_touching_learner_cuda(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0", cuda_visible_devices="6,7"),
+                                          {}, directory, None)
+            job = {"checkpoint": "snapshot.pt", "report": "report.json",
+                   "worker_log": str(evaluator.directory / "worker.log"), "status": "queued"}
+            evaluator.jobs.append(job)
+            evaluator.pending.append(job)
+            process = SimpleNamespace(pid=123, poll=lambda: None)
+            with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6"}), \
+                    patch("generals_rl.training_evaluation.subprocess.Popen", return_value=process) as popen, \
+                    patch("generals_rl.training_evaluation.torch.cuda.synchronize") as synchronize, \
+                    patch("generals_rl.training_evaluation.torch.cuda.empty_cache") as empty_cache:
+                evaluator.poll()
+                self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "0,1,2,3,4,5,6")
+            self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "6,7")
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("--device") + 1], "cuda:0")
+            self.assertEqual(command[command.index("--devices") + 1:], ["cuda:0", "cuda:1", "--trace-directory",
+                             str(Path(job["report"]).parent / "demo_traces")])
+            synchronize.assert_not_called()
+            empty_cache.assert_not_called()
+            evaluator.running = None
+
+    @unittest.skipUnless(os.environ.get("GENERALS_TEST_EVAL_GPU"), "set GENERALS_TEST_EVAL_GPU to a reserved GPU")
+    def test_real_dedicated_cuda_eval_does_not_pause_or_change_gpu_learner(self):
+        config = small_config()
+        config["task"].update(backend="gpu", device="cuda:0")
+        config["evaluation"].update(device="cuda:0", cuda_visible_devices=os.environ["GENERALS_TEST_EVAL_GPU"],
+                                    every_n_snapshots=2)
+        observed = []
+        original = PeriodicEvaluator.on_snapshot
+
+        def on_snapshot(evaluator, *args, **kwargs):
+            scheduled = original(evaluator, *args, **kwargs)
+            if scheduled:
+                observed.append((evaluator.jobs[-1]["iteration"], evaluator.jobs[-1]["status"]))
+                self.assertIsNotNone(evaluator.running)
+            return scheduled
+
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
+            output = Path(directory) / "async"
+            with patch.object(PeriodicEvaluator, "on_snapshot", on_snapshot):
+                summary = train(config, output, iterations=6)
+            learner_rng = torch.get_rng_state().clone()
+            learner_cuda_rng = torch.cuda.get_rng_state().clone()
+            self.assertEqual([iteration for iteration, _ in observed], [1, 3, 5])
+            self.assertTrue(all(status in ("running", "queued") for _, status in observed))
+            self.assertEqual(summary["evaluation"]["completed"], 3)
+            points = json.loads((output / "evaluations/index.json").read_text())["jobs"]
+            self.assertTrue(all(not point["synchronous"] for point in points))
+            self.assertTrue(all(point["cuda_visible_devices"] == os.environ["GENERALS_TEST_EVAL_GPU"] for point in points))
+            config["evaluation"]["enabled"] = False
+            disabled = Path(directory) / "disabled"
+            train(config, disabled, iterations=6)
+            torch.testing.assert_close(torch.get_rng_state(), learner_rng, rtol=0, atol=0)
+            torch.testing.assert_close(torch.cuda.get_rng_state(), learner_cuda_rng, rtol=0, atol=0)
+            actual = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
+            expected = torch.load(disabled / "checkpoint.pt", weights_only=False, map_location="cpu")
+            for key in ("model_state_dict", "optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+                assert_nested_equal(self, actual[key], expected[key])
 
     def test_worker_group_cleanup_kills_a_child_that_ignores_sigterm(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -405,7 +514,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                            "sys.exit(7)\n")
             process = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(ready)],
                                        start_new_session=True)
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(baseline_workers=4, keep_snapshots=1),
+            evaluator = PeriodicEvaluator(TrainingEvalConfig(keep_snapshots=1),
                                           {}, root / "run", None)
             checkpoint = root / "snapshot.pt"
             checkpoint.write_bytes(b"immutable test stub; no model")
@@ -436,7 +545,7 @@ class TrainingEvaluationTests(unittest.TestCase):
                 while state_path.exists():
                     try:
                         state = state_path.read_text().rsplit(") ", 1)[1].split()[0]
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
                         break
                     if state in ("Z", "X"):
                         break

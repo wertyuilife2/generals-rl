@@ -29,3 +29,15 @@ python rl/tools/benchmark_training.py --config rl/configs/v32-opt.json --help
 ```bash
 python -m pytest -q rl/tests rl/tools/tests
 ```
+
+## 批量评估
+
+四个基础 AI 统一使用 native C++ batch；旧 `baseline_workers` 仅接受旧输入，不影响执行。
+`evaluate_builtin` 支持 CPU/GPU VecEnv、CUDA Graph、数组动作 trace 与 `--devices` 多卡固定赛程分片。
+周期评估可用 `evaluation.cuda_visible_devices` 分配独立 GPU 异步运行；默认检查训练与评估 GPU 隔离。
+训练结束排空评估时，其他 rank 使用 CPU/Gloo 等待，释放 GPU 计算资源。
+
+`python -m generals_rl.evaluate_duel --help` 提供两个当前模型的批量采样对战：同地图换座，
+随机流绑定地图与绝对座位，报告按地图配对的 bootstrap 得分区间。
+Arena 已支持当前模型、history 和 knowledge，其单局 greedy 执行与该批量采样协议分开。
+统一对战入口、回放与 Elo 将在后续接入 arena；训练评估继续保留固定采样协议。

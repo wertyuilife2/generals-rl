@@ -96,7 +96,7 @@ class LightSpatialPPOTests(unittest.TestCase):
             # rollouts must never construct one, even with threat observations.
             with patch('generals_rl.train.OnPolicyRunnerCTS', side_effect=capture_runner), \
                     patch('generals.controllers.make_controllers', side_effect=AssertionError('baseline training')), \
-                    patch('generals_rl.evaluate_builtin.make_controllers', side_effect=AssertionError('baseline training')):
+                    patch('generals_baselines.base.BaseAI.__init__', side_effect=AssertionError('baseline training')):
                 summary = train(cfg, root / 'cold', iterations=2)
             seed = torch.load(root / 'cold/history_pool/snapshot_00000000.pt',
                               weights_only=True, map_location='cpu')

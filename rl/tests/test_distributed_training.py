@@ -28,6 +28,7 @@ def group_worker(rank, directory):
         results["stop"] = config.broadcast_control(
             {"stop_reason": "requested_stop", "next_rollout_steps": None} if rank == 0 else None)
         results["transitions"] = config.global_transitions(4, 3)
+        config.wait_on_cpu()
         # Nested contexts borrow the group and must leave it alive.
         with distributed_process_group(config, backend="gloo"):
             assert dist.is_initialized()
@@ -68,6 +69,7 @@ class DistributedTrainingTests(unittest.TestCase):
         self.assertEqual(config.max_timings(.5, 1.), (.5, 1.))
         self.assertEqual(config.sum_counts(2, 3), (2, 3))
         self.assertTrue(config.all_true(True))
+        config.wait_on_cpu()
         control = {"stop_reason": None}
         self.assertIs(config.broadcast_control(control), control)
         with patch.object(dist, "is_initialized", return_value=False), \
@@ -123,6 +125,24 @@ class DistributedTrainingTests(unittest.TestCase):
                     raise ValueError("training failure")
         self.assertEqual(initialize.call_args.kwargs["backend"], "gloo")
         destroy.assert_called_once()
+
+    def test_nccl_final_wait_uses_gloo_and_cleans_up_after_errors(self):
+        config = DistributedConfig(world_size=2, device="cuda:0")
+        group = object()
+        for error in (None, RuntimeError("wait failed")):
+            with self.subTest(error=error), patch.object(DistributedConfig, "_verify_group"), \
+                    patch.object(dist, "get_backend", return_value="nccl"), \
+                    patch.object(dist, "new_group", return_value=group) as create, \
+                    patch.object(dist, "barrier", side_effect=error) as barrier, \
+                    patch.object(dist, "destroy_process_group") as destroy:
+                if error is None:
+                    config.wait_on_cpu()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "wait failed"):
+                        config.wait_on_cpu()
+                create.assert_called_once_with(backend="gloo")
+                barrier.assert_called_once_with(group=group)
+                destroy.assert_called_once_with(group)
 
     @unittest.skipUnless(dist.is_available() and dist.is_gloo_available(), "CPU Gloo is unavailable")
     def test_two_ranks_share_control_reduce_timings_and_clean_up_groups(self):

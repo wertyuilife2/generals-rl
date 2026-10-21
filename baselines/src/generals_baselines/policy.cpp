@@ -266,6 +266,47 @@ public:
 };
 
 static thread_local std::string error;
+
+// The adapter alone sees engine arrays. Policy::act always receives the same
+// local fogged arrays as Python observe(..., "local"), with no privileged data.
+// Scratch is reused across lanes/ticks; each Policy and NumPy stream stays owned
+// by its Python controller. A call is serialized by the Python batch owner.
+class PolicyBatch {
+public:
+    int lanes, h, w, n, players;
+    std::vector<Policy *> policies;
+    std::vector<Options> options;
+    std::vector<Random> random;
+    std::vector<std::uint8_t> terrain, structure, visible;
+    std::vector<std::int16_t> owner;
+    std::vector<i64> army;
+    PolicyBatch(Policy *const *p,const Options *o,const Random *r,int count,int height,int width,int seats)
+        :lanes(count),h(height),w(width),n(height*width),players(seats),
+         policies(p,p+count),options(o,o+count),random(r,r+count),
+         terrain(n),structure(n),visible(n),owner(n),army(n) {}
+    i64 act(int lane,const std::uint8_t *raw_terrain,const std::uint8_t *raw_structure,
+            const std::int16_t *raw_owner,const i64 *raw_army,const std::uint8_t *alive,
+            i64 tick,bool terminated) {
+        const int pid=policies[lane]->pid;
+        std::fill(visible.begin(),visible.end(),0);
+        for(int c=0;c<n;++c) if(raw_owner[c]==pid) {
+            int y=c/w,x=c%w;
+            for(int dy=std::max(0,y-1);dy<=std::min(h-1,y+1);++dy)
+                for(int dx=std::max(0,x-1);dx<=std::min(w-1,x+1);++dx)
+                    visible[dy*w+dx]=1;
+        }
+        for(int c=0;c<n;++c) {
+            terrain[c]=visible[c]?raw_terrain[c]:UNKNOWN;
+            structure[c]=visible[c]?raw_structure[c]:UNKNOWN;
+            owner[c]=visible[c]?raw_owner[c]:UNKNOWN_OWNER;
+            army[c]=visible[c]?raw_army[c]:-1;
+        }
+        Observation observation{terrain.data(),structure.data(),owner.data(),army.data(),
+                                visible.data(),alive,h,w,players,pid,tick,terminated};
+        return policies[lane]->act(observation,options[lane],random[lane]);
+    }
+};
+
 extern "C" {
 const char *baseline_error() { return error.c_str(); }
 void *baseline_create(int kind,int pid) {
@@ -300,4 +341,43 @@ int baseline_set_path(Policy *p,const i64 *path,int size) {
     catch(const std::exception &e) {error=e.what(); return -1;}
 }
 void baseline_set_pending(Policy *p,i64 action) {p->pending=action;}
+void *baseline_batch_create(Policy *const *policies,const Options *options,const Random *random,
+                            int lanes,int height,int width,int players) {
+    try {
+        if(lanes<1 || height<1 || width<1 || i64(height)*width>1024*1024 || players<2 || players>8)
+            throw std::runtime_error("invalid baseline batch dimensions");
+        for(int lane=0;lane<lanes;++lane)
+            if(!policies[lane] || policies[lane]->pid>=players)
+                throw std::runtime_error("invalid baseline batch player");
+        return new PolicyBatch(policies,options,random,lanes,height,width,players);
+    } catch(const std::exception &e) {error=e.what(); return nullptr;}
+}
+void baseline_batch_destroy(PolicyBatch *batch) {delete batch;}
+int baseline_batch_act(PolicyBatch *batch,const std::uint8_t *terrain,const std::uint8_t *structure,
+                       const std::int16_t *owner,const i64 *army,const std::uint8_t *alive,
+                       const i64 *tick,const std::uint8_t *terminated,const std::uint8_t *active,i64 *actions) {
+    try {
+        for(int lane=0;lane<batch->lanes;++lane) {
+            actions[lane]=0;
+            if(!active[lane]) continue;
+            std::size_t base=std::size_t(lane)*batch->n;
+            actions[lane]=batch->act(lane,terrain+base,structure+base,owner+base,army+base,
+                                     alive+std::size_t(lane)*batch->players,tick[lane],terminated[lane]);
+        }
+        return 0;
+    } catch(const std::exception &e) {error=e.what(); return -1;}
+}
+void baseline_batch_result(PolicyBatch *batch,const i64 *moves,const i64 *actions,
+                          int action_stride,const std::uint8_t *active) {
+    for(int lane=0;lane<batch->lanes;++lane) {
+        if(active && !active[lane]) continue;
+        Policy *policy=batch->policies[lane];
+        const i64 *row=moves+(std::size_t(lane)*batch->players+policy->pid)*9;
+        if(!row[0]) continue;
+        i64 action=actions[std::size_t(lane)*action_stride+(action_stride==1?0:policy->pid)];
+        // WAIT's encoded source is canonical -1 even if an engine row uses 0.
+        int source=action>0?int((action-1)/8):-1;
+        baseline_result(policy,policy->pid,action,int(row[1]),int(row[7]),source,int(row[3]));
+    }
+}
 }

@@ -5,12 +5,13 @@ The evaluator reuses the complete, paired built-in-controller match protocol.
 Only the parent writes TensorBoard, with the evaluated iteration as its x axis.
 """
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 from hashlib import sha256
 import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -22,24 +23,52 @@ import torch
 from generals_baselines import AI_KINDS
 
 
+def _gpu_selectors(value):
+    if not isinstance(value, str):
+        raise ValueError("CUDA_VISIBLE_DEVICES must be a comma-separated string of GPU ordinals or UUIDs")
+    selectors = tuple(part.strip() for part in value.split(","))
+    if not all(re.fullmatch(r"(?:[0-9]+|GPU-[0-9a-fA-F-]+)", part) for part in selectors):
+        raise ValueError("CUDA_VISIBLE_DEVICES must use GPU ordinals or UUIDs")
+    if len({part.isdecimal() for part in selectors}) != 1:
+        raise ValueError("CUDA_VISIBLE_DEVICES cannot mix GPU ordinals and UUIDs")
+    selectors = tuple(str(int(part)) if part.isdecimal() else "GPU-" + part[4:].lower() for part in selectors)
+    for index, part in enumerate(selectors):
+        if any(_same_gpu(part, other) for other in selectors[:index]):
+            raise ValueError("CUDA_VISIBLE_DEVICES must not select the same GPU twice")
+    return selectors
+
+
+def _same_gpu(first, second):
+    if first.isdecimal() and second.isdecimal():
+        return int(first) == int(second)
+    return first.lower().startswith(second.lower()) or second.lower().startswith(first.lower())
+
+
 @dataclass(frozen=True)
 class TrainingEvalConfig:
     enabled: bool = True
     stochastic: bool = True
+    reference_inference: bool = False
     every_n_snapshots: int = 10
     maps_per_ai: int = 50
-    batch_size: int = 128
+    batch_size: int = 0
     max_ticks: int = 2000
     seed: int = 1000042
     cpu_threads: int = 1
-    baseline_workers: int = 1
+    # Input-only compatibility for configs predating batched native opponents.
+    baseline_workers: InitVar[int | None] = None
     keep_snapshots: int | None = None
     device: str = "cpu"
+    cuda_visible_devices: str | None = None
+    allow_shared_gpus: bool = False
+    env_backend: str = "cpu"
     timeout_seconds: float | None = None
 
-    def __post_init__(self):
+    def __post_init__(self, baseline_workers):
         if not isinstance(self.enabled, bool):
             raise TypeError("evaluation.enabled must be boolean")
+        if not isinstance(self.reference_inference, bool):
+            raise TypeError("evaluation.reference_inference must be boolean")
         if not isinstance(self.stochastic, bool):
             raise TypeError("evaluation.stochastic must be boolean")
         if not isinstance(self.device, str):
@@ -51,29 +80,62 @@ class TrainingEvalConfig:
         if device.type not in ("cpu", "cuda"):
             raise ValueError("evaluation.device must be a CPU or CUDA device string")
         object.__setattr__(self, "device", str(device))
+        if not isinstance(self.allow_shared_gpus, bool):
+            raise TypeError("evaluation.allow_shared_gpus must be boolean")
+        if self.allow_shared_gpus and self.cuda_visible_devices is None:
+            raise ValueError("evaluation.allow_shared_gpus requires explicit evaluation.cuda_visible_devices")
+        if self.cuda_visible_devices is not None:
+            object.__setattr__(self, "cuda_visible_devices", ",".join(_gpu_selectors(self.cuda_visible_devices)))
+            if device.type != "cuda" or device.index not in (None, 0):
+                raise ValueError("a dedicated evaluation GPU requires evaluation.device=cuda:0")
+            object.__setattr__(self, "device", "cuda:0")
         if self.timeout_seconds is not None and (isinstance(self.timeout_seconds, bool)
                 or not isinstance(self.timeout_seconds, (int, float))
                 or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
             raise ValueError("evaluation.timeout_seconds must be positive and finite or null")
-        for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "baseline_workers", "seed"):
-            minimum = 0 if name == "seed" else 1
+        if baseline_workers is not None and (isinstance(baseline_workers, bool)
+                or not isinstance(baseline_workers, int) or baseline_workers < 1):
+            raise ValueError("evaluation.baseline_workers must be a positive integer or null")
+        for name in ("every_n_snapshots", "maps_per_ai", "batch_size", "max_ticks", "cpu_threads", "seed"):
+            minimum = 0 if name in ("seed", "batch_size") else 1
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
                 raise ValueError(f"evaluation.{name} must be an integer >= {minimum}")
+        if self.env_backend not in ("cpu", "gpu") or (self.env_backend == "gpu" and device.type != "cuda"):
+            raise ValueError("evaluation.env_backend must be cpu or gpu; gpu requires evaluation.device=cuda")
         if self.keep_snapshots is not None and (not isinstance(self.keep_snapshots, int)
                 or isinstance(self.keep_snapshots, bool) or self.keep_snapshots < 1):
             raise ValueError("evaluation.keep_snapshots must be a positive integer or null")
 
     @property
     def synchronous(self):
-        """A CUDA worker shares the learner's device only while it is paused."""
-        return torch.device(self.device).type == "cuda"
+        """Only a CUDA worker without a dedicated GPU pauses the learner."""
+        return torch.device(self.device).type == "cuda" and self.cuda_visible_devices is None
+
+    def validate_training_devices(self, device):
+        """Require the dedicated GPU to be excluded from trainer visibility.
+
+        Compare selectors in the same namespace, including abbreviated UUIDs;
+        mixing ordinals and UUIDs would conceal accidental device sharing.
+        """
+        reserved = self.cuda_visible_devices
+        if (not self.enabled or reserved is None or self.allow_shared_gpus
+                or torch.device(device).type != "cuda"):
+            return
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if not visible:
+            raise ValueError("dedicated GPU evaluation requires explicit training CUDA_VISIBLE_DEVICES")
+        selectors, evaluation = _gpu_selectors(visible), _gpu_selectors(reserved)
+        if selectors[0].isdecimal() != evaluation[0].isdecimal():
+            raise ValueError("training and evaluation CUDA_VISIBLE_DEVICES must both use ordinals or both use UUIDs")
+        if any(_same_gpu(first, second) for first in selectors for second in evaluation):
+            raise ValueError("the dedicated evaluation GPU must be excluded from training CUDA_VISIBLE_DEVICES")
 
     @property
     def worker_timeout_seconds(self):
         if self.timeout_seconds is not None:
             return self.timeout_seconds
-        return 1800.0 if self.synchronous else None
+        return 1800.0 if torch.device(self.device).type == "cuda" else None
 
 
 def _write_json(path, value):
@@ -103,7 +165,7 @@ def _stop_worker(process):
 
 
 class PeriodicEvaluator:
-    """One worker at a time; CPU evaluation queues and CUDA evaluation blocks.
+    """One worker at a time; a dedicated eval GPU or CPU runs asynchronously.
 
     An evaluation owns an exact copy of its snapshot before pool eviction can
     delete it. Neither policy inference nor RNG operations run in the training
@@ -181,6 +243,8 @@ class PeriodicEvaluator:
             "worker_log": str(target / "worker.log"),
             "stochastic": self.settings.stochastic,
             "device": self.settings.device,
+            "cuda_visible_devices": self.settings.cuda_visible_devices,
+            "allow_shared_gpus": self.settings.allow_shared_gpus,
             "synchronous": self.settings.synchronous,
             "timeout_seconds": timeout, "deadline": deadline, "deadline_reason": deadline_reason,
             "status": "queued",
@@ -241,15 +305,22 @@ class PeriodicEvaluator:
                        job["checkpoint"], "--maps-per-ai", str(settings.maps_per_ai),
                        "--batch-size", str(settings.batch_size), "--max-ticks", str(settings.max_ticks),
                        "--seed", str(settings.seed), "--cpu-threads", str(settings.cpu_threads),
-                       "--baseline-workers", str(settings.baseline_workers),
-                       "--device", settings.device, "--output", job["report"]]
+                       "--device", settings.device, "--env-backend", settings.env_backend, "--output", job["report"]]
             command.append("--stochastic" if settings.stochastic else "--greedy")
+            if settings.reference_inference:
+                command.append("--reference-inference")
+            if settings.cuda_visible_devices is not None:
+                count = len(_gpu_selectors(settings.cuda_visible_devices))
+                if count > 1:
+                    command.extend(["--devices", *(f"cuda:{index}" for index in range(count))])
             if torch.device(settings.device).type == "cuda":
                 command.extend(["--trace-directory", str(Path(job["report"]).parent / "demo_traces")])
             environment = os.environ.copy()
             environment.update(OMP_NUM_THREADS="1", MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1")
             if torch.device(settings.device).type == "cpu":
                 environment["CUDA_VISIBLE_DEVICES"] = ""
+            elif settings.cuda_visible_devices is not None:
+                environment["CUDA_VISIBLE_DEVICES"] = settings.cuda_visible_devices
             elif torch.cuda.is_initialized():
                 # Release only unused allocator blocks. Live learner, optimizer
                 # and historical opponent tensors remain on their devices.
@@ -279,8 +350,14 @@ class PeriodicEvaluator:
                 or report["policy"] != "student_local"
                 or report["device"] != self.settings.device or report["stochastic"] != self.settings.stochastic):
             raise RuntimeError("evaluation report does not match the requested snapshot/protocol")
-        if report.get("baseline_workers", 1) != self.settings.baseline_workers:
-            raise RuntimeError("evaluation baseline workers differ from the requested run")
+        if report.get("reference_inference", False) != self.settings.reference_inference:
+            raise RuntimeError("evaluation inference mode differs from the requested run")
+        if report.get("env_backend", "cpu") != self.settings.env_backend:
+            raise RuntimeError("evaluation environment backend differs from the requested run")
+        if self.settings.cuda_visible_devices is not None:
+            expected_devices = [f"cuda:{i}" for i in range(len(_gpu_selectors(self.settings.cuda_visible_devices)))]
+            if report.get("devices", [report["device"]]) != expected_devices:
+                raise RuntimeError("evaluation worker devices differ from the requested run")
         for kind in AI_KINDS:
             if report["by_ai"][kind]["games"] != 2 * self.settings.maps_per_ai:
                 raise RuntimeError(f"evaluation did not finish all scheduled {kind} games")
@@ -289,7 +366,8 @@ class PeriodicEvaluator:
             if requested_cudnn is not None and report.get("cudnn_allow_tf32") != requested_cudnn:
                 raise RuntimeError("evaluation cuDNN TF32 setting differs from the requested run")
             requested_benchmark = self.run_config.get("cudnn_benchmark")
-            if requested_benchmark is not None and report.get("cudnn_benchmark") != requested_benchmark:
+            expected_benchmark = requested_benchmark if self.settings.reference_inference else False
+            if expected_benchmark is not None and report.get("cudnn_benchmark") != expected_benchmark:
                 raise RuntimeError("evaluation cuDNN benchmark setting differs from the requested run")
             requested_matmul = self.run_config.get("matmul_precision")
             if requested_matmul is not None and report.get("matmul_precision") != requested_matmul:
@@ -330,7 +408,8 @@ class PeriodicEvaluator:
         point["selection_score"] = list(score)
         point["stochastic"] = report["stochastic"]
         for key in ("device", "matmul_precision", "cudnn_allow_tf32", "cudnn_benchmark",
-                    "parameter_dtype", "inference_dtype", "baseline_workers"):
+                    "parameter_dtype", "inference_dtype", "env_backend",
+                    "opponent_execution", "parallel_games", "reference_inference", "inference_execution"):
             if key in report:
                 point[key] = job[key] = report[key]
         if self.best_completed is None or score > tuple(self.best_completed["selection_score"]):

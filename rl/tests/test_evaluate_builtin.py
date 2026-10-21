@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from generals import VecEnv
-from generals_baselines import AI_KINDS, make_controllers
+from generals_baselines import AI_KINDS
 from generals.core.engine import CoreEngine
 from generals.core.recording import state_digest
 from generals.core.state import Action, Direction, GameState, MapLayout, MoveResult
@@ -58,7 +58,7 @@ class WaitStudent:
 
 
 class BuiltinEvaluationTests(unittest.TestCase):
-    def test_parallel_original_controllers_preserve_sampled_games_and_joint_traces(self):
+    def test_legacy_workers_keyword_preserves_sampled_games_joint_traces_and_rng(self):
         class SampleStudent:
             def action_probabilities(self, obs):
                 self_keys = set(obs.keys())
@@ -80,14 +80,14 @@ class BuiltinEvaluationTests(unittest.TestCase):
         specs = make_schedule(maps_per_ai=1, seed=73)
         states = [tiny_state() for _ in specs]
         config = TaskConfig(width=5, height=5, persistent_knowledge=True)
-        serial, parallel = Traces(), Traces()
+        default, legacy = Traces(), Traces()
         rng = torch.get_rng_state().clone()
         original, _ = battle_batch(specs, states, SampleStudent(), config, max_ticks=96,
-                                   sampling_seed=419, baseline_workers=1, recorder=serial)
+                                   sampling_seed=419, recorder=default)
         actual, _ = battle_batch(specs, states, SampleStudent(), config, max_ticks=96,
-                                 sampling_seed=419, baseline_workers=4, recorder=parallel)
+                                 sampling_seed=419, baseline_workers=4, recorder=legacy)
         self.assertEqual(actual, original)
-        self.assertEqual(parallel.ticks, serial.ticks)
+        self.assertEqual(legacy.ticks, default.ticks)
         torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
 
     def test_information_checkpoint_report_and_selected_demo_replay_match(self):
@@ -139,6 +139,8 @@ class BuiltinEvaluationTests(unittest.TestCase):
                         repeated = evaluate_builtin(checkpoint, maps_per_ai=2, seed=73, sampling_seed=419,
                                                     opponents=("aggressive",), batch_size=1, max_ticks=192)
                         self.assertTrue(report["persistent_knowledge"])
+                        self.assertNotIn("baseline_workers", report)
+                        self.assertNotIn("baseline_lifecycle_seconds", report["timing"])
                         self.assertEqual(report["cudnn_benchmark"], torch.backends.cudnn.benchmark)
                         self.assertNotEqual(report["cudnn_benchmark"], config["cudnn_benchmark"])
                         self.assertTrue(report["stochastic"])
@@ -351,48 +353,56 @@ class BuiltinEvaluationTests(unittest.TestCase):
             self.assertEqual(move, reference.moves[0])
             self.assertIsNone(decode_move(native.moves[0, 1], 1, actions[1]))
 
-    def test_original_controllers_receive_pre_growth_local_obs_and_typed_results(self):
+    def test_native_batch_receives_pre_growth_arrays_and_preserves_local_fog_feedback(self):
+        from generals_baselines import BatchBaselineControllers
+
         factory_calls, callbacks = [], []
 
-        class RecordingController:
-            def __init__(self, original):
-                self.original = original
+        class RecordingBatch(BatchBaselineControllers):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
                 self.ticks = []
+                self.kinds = [type(controller).__name__ for controller in self.controllers]
+                factory_calls.append(self)
 
-            def act(self, obs):
-                self.ticks.append(obs.tick)
-                self.assert_local(obs)
-                return self.original.act(obs)
+            def act(self, state, active):
+                self.ticks.append(state["tick"].copy())
+                encoded = super().act(state, active)
+                assert encoded.dtype == np.int64 and encoded.shape == (2,)
+                # Real native planners receive local fog despite the adapter's
+                # input containing the engine's complete host arrays.
+                for controller in self.controllers:
+                    enemy_general = 24 if controller.player_id == 0 else 0
+                    assert controller.terrain.flat[enemy_general] == 255
+                    assert controller.structure.flat[enemy_general] == 255
+                    assert controller.owner.flat[enemy_general] == -3
+                    assert controller.army.flat[enemy_general] == -1
+                return encoded
 
-            @staticmethod
-            def assert_local(obs):
-                assert obs.visibility == "local"
-                assert obs.stats.cities[1 - obs.player_id] == -1
-
-            def on_result(self, result):
-                callbacks.append(result)
-                self.original.on_result(result)
-
-        def recording_factory(kinds, seed):
-            originals = make_controllers(kinds, seed=seed)
-            wrappers = [RecordingController(controller) for controller in originals]
-            factory_calls.append((kinds, originals, wrappers))
-            return wrappers
+            def on_result(self, moves, actions=None, active=None):
+                callbacks.append((moves.copy(), actions.copy(), active.copy()))
+                super().on_result(moves, actions, active)
 
         specs = [GameSpec(0, "aggressive", 0, 5, 6, 0), GameSpec(1, "defensive", 0, 5, 6, 1)]
         config = TaskConfig(width=5, height=5, num_envs=2, max_episode_steps=64, history_length=2)
         policy = WaitStudent()
-        with patch("generals_rl.evaluate_builtin.make_controllers", side_effect=recording_factory):
+        with patch("generals_rl.evaluate_builtin.BatchBaselineControllers", RecordingBatch):
             games, timing = battle_batch(specs, [tiny_state(), tiny_state()], policy, config, max_ticks=2)
         self.assertEqual([game["game_id"] for game in games], [0, 1])
         self.assertEqual([game["outcome"] for game in games], ["draw", "draw"])
         self.assertEqual([game["ticks"] for game in games], [2, 2])
-        self.assertEqual(factory_calls[0][1][1].__class__.__name__, "AggressiveAI")
-        self.assertEqual(factory_calls[1][1][0].__class__.__name__, "DefensiveAI")
-        self.assertEqual(factory_calls[0][2][1].ticks, [0, 1])
-        self.assertEqual(factory_calls[1][2][0].ticks, [0, 1])
-        self.assertEqual(len(callbacks), 4)
-        self.assertTrue(all(isinstance(result, MoveResult) and result.valid and result.reason == "WAIT" for result in callbacks))
+        self.assertEqual(len(factory_calls), 1)
+        self.assertEqual(factory_calls[0].kinds, ["AggressiveAI", "DefensiveAI"])
+        np.testing.assert_array_equal(factory_calls[0].ticks, [[0, 0], [1, 1]])
+        self.assertEqual(len(callbacks), 2)  # One native feedback call per tick.
+        for moves, actions, active in callbacks:
+            self.assertEqual(moves.dtype, np.int64)
+            self.assertEqual(moves.shape, (2, 2, 9))
+            self.assertTrue(active.all())
+            self.assertFalse(actions.any())
+            self.assertTrue(moves[:, :, :2].all())  # Both seats acted; WAIT valid.
+            np.testing.assert_array_equal(moves[:, :, 8], np.ones((2, 2)))
+        self.assertIsNone(factory_calls[0]._handle)  # Context closes native ownership.
         self.assertEqual(timing["student_decisions"], 4)
         self.assertEqual(timing["environment_ticks"], 4)
         # Last two features encode absolute seat; the preceding three are clocks.
