@@ -40,6 +40,12 @@ def _library():
         'baseline_copy': ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p], ctypes.c_int),
         'baseline_set_path': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int], ctypes.c_int),
         'baseline_set_pending': ([ctypes.c_void_p, ctypes.c_int64], None),
+        'baseline_batch_create': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
+        'baseline_batch_destroy': ([ctypes.c_void_p], None),
+        'baseline_batch_act': ([ctypes.c_void_p, *([ctypes.c_void_p] * 9)], ctypes.c_int),
+        'baseline_batch_result': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_int, ctypes.c_void_p], None),
     }
     for name, (args, result) in signatures.items():
         function = getattr(lib, name)

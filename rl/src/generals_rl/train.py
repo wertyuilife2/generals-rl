@@ -123,6 +123,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     if config["runner"]["policy"].get("value_potential_offset", False) is not False:
         raise ValueError("analytic value_potential_offset is retired")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
+    evaluation_settings.validate_training_devices(distributed.device)
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
     if settings.opponent in ("self_play", "current_self_play"):
@@ -354,6 +355,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 self_play.publish(runner.current_learning_iteration, source={"kind": "final_learner"})
             if evaluator is not None:
                 evaluator.finish()
+            if evaluation_settings.enabled and not evaluation_settings.synchronous:
+                distributed.wait_on_cpu()
             transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
             wall_seconds, = distributed.max_timings(perf_counter() - started)
             completed_episodes, terminated_episodes, truncated_episodes = distributed.sum_counts(

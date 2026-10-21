@@ -107,14 +107,14 @@
     "stochastic": true,
     "every_n_snapshots": 2,
     "maps_per_ai": 200,
-    "batch_size": 128,
+    "batch_size": 0,
     "max_ticks": 2000,
     "seed": 271828,
     "cpu_threads": 1,
-    "baseline_workers": 4,
     "keep_snapshots": 3,
     "device": "cpu",
-    "timeout_seconds": null
+    "timeout_seconds": null,
+    "env_backend": "cpu"
   },
   "torch_threads": 1,
   "run_id": "v32-opt-current",

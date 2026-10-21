@@ -98,7 +98,7 @@ def test_eight_real_baseline_traces_replay_without_policy_or_controller_and_reje
     rng = torch.get_rng_state().clone()
     with patch("generals_rl.evaluate_builtin._load_student", side_effect=AssertionError("no reinference")), \
             patch("generals_rl.evaluate_builtin.battle_batch", side_effect=AssertionError("no new battles")), \
-            patch("generals_rl.evaluate_builtin.make_controllers", side_effect=AssertionError("no new controllers")):
+            patch("generals_rl.evaluate_builtin.BatchBaselineControllers", side_effect=AssertionError("no new controllers")):
         demos = analyze.demos(checkpoint, report, tmp_path / "demos", render=False)
     torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
     assert len(demos["cases"]) == 8 and demos["replay_mode"] == "recorded_joint_actions"
