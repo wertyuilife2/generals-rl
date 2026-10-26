@@ -9,9 +9,10 @@ from tensordict import TensorDict
 from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 
-from generals_rl.scaled_ppo import (DEFAULT_PARAMETER_COUNTS, RESNET_TOTAL_PRESETS, VIT_TOTAL_PRESETS,
-                                    ScaledInformationSpatialPPOPolicy)
-from generals_rl.student_ppo import StudentPPO, StudentPPOPolicy
+from generals_rl.policy.scaled import RESNET_TOTAL_PRESETS, VIT_TOTAL_PRESETS
+from generals_rl.scaled_ppo import DEFAULT_PARAMETER_COUNTS, ScaledInformationSpatialPPOPolicy
+from generals_rl.student_ppo import StudentPPO
+from generals_rl.actor_critic import CategoricalActorCritic
 from rsl_rl.storage import RolloutStorageCTS
 
 
@@ -47,7 +48,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
         for (family, size), (actor_count, critic_count) in DEFAULT_PARAMETER_COUNTS.items():
             with self.subTest(family=family, size=size), torch.device("meta"):
                 policy = construct(obs, family, size, amp_bfloat16=True)
-                self.assertIsInstance(policy, StudentPPOPolicy)
+                self.assertIsInstance(policy, CategoricalActorCritic)
                 self.assertEqual(policy.parameter_counts(), {"actor": actor_count, "critic": critic_count,
                                                              "total": actor_count + critic_count})
                 budget = {"1m": 1_000_000, "10m": 10_000_000, "100m": 100_000_000}[size]

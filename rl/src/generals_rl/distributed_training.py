@@ -119,19 +119,19 @@ class DistributedConfig:
     def wait_on_cpu(self):
         """Wait for rank zero's background work without a spinning NCCL kernel.
 
-        All ranks call this before returning to GPU collectives. In particular,
-        non-main ranks must leave shared eval GPUs idle while rank zero drains
-        the evaluation queue at the end of training.
+        All ranks call this before returning to training collectives after
+        synchronous evaluation, including initialization and final queue drains.
         """
         if not self.is_distributed:
             return
         self._verify_group()
-        group = dist.new_group(backend="gloo") if dist.get_backend() == "nccl" else None
+        # Draining a queue can outlast the training collective timeout. Use a
+        # separate CPU group even when the learner itself runs with Gloo.
+        group = dist.new_group(backend="gloo", timeout=timedelta(days=1))
         try:
             dist.barrier(group=group)
         finally:
-            if group is not None:
-                dist.destroy_process_group(group)
+            dist.destroy_process_group(group)
 
 
 @contextmanager

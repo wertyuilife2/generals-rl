@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 from copy import deepcopy
 import io
 import json
+import math
 from pathlib import Path
 import tempfile
 from types import MethodType
@@ -14,10 +15,12 @@ from tensordict import TensorDict
 
 from generals_baselines import AI_KINDS
 from generals_rl.self_play_training import prepare_self_play
-from generals_rl.student_ppo import StudentPPO, StudentPPOPolicy
+from generals_rl.student_ppo import StudentPPO
+from generals_rl.actor_critic import CategoricalActorCritic
 from generals_rl.train import train
 from rsl_rl.algorithms import PPO
 from rsl_rl.networks import EmpiricalNormalization
+from generals_rl.policy.distributions import make_distribution
 from rsl_rl.storage import RolloutStorageCTS
 from rl_test_utils import assert_nested_equal, small_training_config
 
@@ -28,7 +31,7 @@ def observation(count=8):
                        "action_mask": torch.ones(count, 5, dtype=torch.bool)}, batch_size=[count])
 
 
-class TinyStudentPolicy(StudentPPOPolicy):
+class TinyStudentPolicy(CategoricalActorCritic):
     """Small independent actor/critic for algorithm math, without a legacy model."""
     def __init__(self, obs, normalization=(False, False)):
         torch.nn.Module.__init__(self)
@@ -50,7 +53,8 @@ class TinyStudentPolicy(StudentPPOPolicy):
     def action_probabilities(self, obs, is_teacher=False, *, validate_mask=True):
         if is_teacher:
             raise ValueError("student-only policy has no teacher inference branch")
-        self._update_distribution(self.actor_obs_normalizer(obs["policy"]), obs["action_mask"])
+        self.distribution = make_distribution(self.actor(self.actor_obs_normalizer(obs["policy"])),
+                                              obs["action_mask"], factorized=False)
         return self.distribution.probs
 
     def act_inference(self, obs):
@@ -87,11 +91,11 @@ def collect(alg, obs):
 def student_config():
     config = small_training_config(runner_overrides={"learning_epochs": 1})
     config["runner"]["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO",
-                                             teacher_env_ratio=0, schedule="fixed", desired_kl=None,
-                                             load_balance_coef=0)
+                                             teacher_env_ratio=0, schedule="fixed", desired_kl=None)
     config["self_play"] = {"pool_size": 3, "snapshot_interval": 1, "retain_seed": True}
     # Omit enabled: exercise the default real subprocess evaluation path.
-    config["evaluation"] = {"every_n_snapshots": 2, "maps_per_ai": 1, "max_ticks": 3, "batch_size": 8}
+    config["evaluation"] = {"every_n_updates": 2, "maps_per_opponent": 1, "max_ticks": 3,
+                            "batch_size": 8, "final_top_k": 0}
     return config
 
 
@@ -214,10 +218,15 @@ class StudentPPOTests(unittest.TestCase):
         torch.testing.assert_close(alg.storage.advantages, expected)
         self.assertTrue(all(torch.isfinite(torch.tensor(value)) for value in alg.update().values()))
 
+    def test_removed_options_are_unknown_including_former_default_values(self):
+        for options in ({"load_balance_coef": 0}, {"student_encoder_learning_rate": None},
+                        {"critic_learning_rate": None}):
+            with self.subTest(options=options), self.assertRaises(TypeError):
+                algorithm(observation(), **options)
+
     def test_config_active_sample_guards_and_empty_teacher(self):
         cases = ({"schedule": "unknown"}, {"desired_kl": None}, {"desired_kl": 0},
-                 {"desired_kl": float("nan")}, {"desired_kl": True}, {"load_balance_coef": .01},
-                 {"teacher_env_ratio": .75}, {"student_encoder_learning_rate": .001},
+                 {"desired_kl": float("nan")}, {"desired_kl": True}, {"teacher_env_ratio": .75},
                  {"rnd_cfg": {}}, {"symmetry_cfg": {}})
         for options in cases:
             with self.subTest(options=options), self.assertRaises(ValueError):
@@ -278,14 +287,17 @@ class StudentPPOTests(unittest.TestCase):
                             "PPO/exact_update_kl", "PPO/epoch_1/wait_move_gate_kl"):
                     self.assertIn(tag, events.Tags()["scalars"])
                     self.assertEqual(len(events.Scalars(tag)), evidence["iterations"])
-                self.assertEqual((evidence["evaluation"]["completed"], evidence["evaluation"]["failed"]), (1, 0))
+                expected_evaluations = 2 if run.name == "warm" else 3
+                self.assertEqual((evidence["evaluation"]["completed"], evidence["evaluation"]["failed"]),
+                                 (expected_evaluations, 0))
                 jobs = json.loads((run / "evaluations/index.json").read_text())["jobs"]
                 self.assertEqual(jobs[0]["status"], "completed")
                 report = json.loads(Path(jobs[0]["report"]).read_text())
-                self.assertEqual((report["completed_games"], report["device"]), (8, "cpu"))
-                self.assertEqual(set(report["by_ai"]), set(AI_KINDS))
-                self.assertTrue(all(metrics["games"] == 2 for metrics in report["by_ai"].values()))
-                self.assertEqual(report["policy"], "student_local")
+                self.assertEqual((report["games"], report["device"]), (10, "cpu"))
+                self.assertEqual(set(report["by_opponent"]), {*AI_KINDS, "WAIT"})
+                self.assertTrue(all(metrics["games"] == 2 for metrics in report["by_opponent"].values()))
+                self.assertEqual(report["status"], "completed")
+                self.assertTrue(math.isfinite(report["elo"]))
 
 
 if __name__ == "__main__":

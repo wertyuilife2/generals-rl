@@ -40,8 +40,8 @@ def run():
                 target.write_bytes(subprocess.check_output(['git','show',f'{revision}:{name}'],cwd=root))
         sys.path.insert(0,temporary)
         from generals_baselines import create_controller
-        from generals_arena.league.config import LeagueConfig
-        from generals_arena.league.game import RecordedGame
+        from generals_arena.competitions.config import LeagueConfig
+        from generals_arena.matches.game import RecordedGame
         fixture=json.loads(args.fixture.read_text())
         timings=[]
         for _ in range(args.repeat):

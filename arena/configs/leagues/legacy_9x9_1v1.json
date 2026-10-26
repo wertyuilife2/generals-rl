@@ -1,0 +1,13 @@
+{
+  "player_counts": [
+    2
+  ],
+  "min_side": 9,
+  "max_side": 9,
+  "side_cap": 9,
+  "mountain_min": 0.1,
+  "mountain_max": 0.1,
+  "city_min": 0.05,
+  "city_max": 0.05,
+  "max_ticks": 2000
+}

@@ -1,78 +1,93 @@
-"""Information is relative to WAIT and cannot be multiplied by duplicate seats."""
+"""Raw-coordinate GoR and mean-constrained CF confidence intervals."""
 import math
 
 import pytest
 
-from generals_arena.league.rating import LOGISTIC_SLOPE
-from generals_arena.league.uncertainty import RatingUncertainty
-from generals_arena.league.rating_policy import POLICY
+from generals_arena.competitions.rating import POLICY
+from generals_arena.competitions.rating import slope
+from generals_arena.competitions.uncertainty import RatingUncertainty
 
 
-def report():
-    return {'anchor':'wait', 'ranking':[{'entrant_id':key, 'elo':0.} for key in ('wait','a','b')]}
+def report(mode='1v1',ids=('wait','a','b'),raw=None,offset=0,anchor='wait'):
+    raw=raw or {key:0. if mode=='1v1' else 1000. for key in ids}
+    return {'rating_mode':mode,'anchor':anchor if mode=='1v1' else None,
+            'ranking':[{'entrant_id':key,'raw_elo':raw[key],'elo':raw[key]-offset} for key in ids]}
 
 
-def add_maps(model, ids, seeds):
+def add_maps(model,ids,seeds,rotations=1):
     for seed in seeds:
-        model.add({'game_id':str(seed), 'entrant_ids':ids,
-                   'map_seed':seed, 'map':{'width':15,'height':15}}, 'job')
+        for rotation in range(rotations):
+            game=dict(game_id=f'{seed}-{rotation}-'+','.join(ids),entrant_ids=ids,map_seed=seed,map={'width':9,'height':9},
+                      elimination_ticks=[None]*len(ids),rating_policy=POLICY,rating_group_size=rotations)
+            model.add(game,'job')
+            model.add(game,'job')
 
 
-def test_two_player_interval_and_inverse_square_root_sample_size():
-    model = RatingUncertainty()
-    add_maps(model, ['wait','a'], range(100))
-    board = report()
+def test_gor_interval_scales_with_independent_map_count():
+    model=RatingUncertainty('1v1')
+    add_maps(model,['wait','a'],range(100))
+    board=report()
     model.annotate(board)
-    origin, a, disconnected = board['ranking']
-    expected = 1.959963984540054 * 2 / (LOGISTIC_SLOPE * math.sqrt(100))
-    assert origin['elo_ci']['half_width'] == 0
+    origin,a,disconnected=board['ranking']
+    expected=1.959963984540054*2/(slope('1v1',0)*math.sqrt(100))
+    assert origin['elo_ci']['half_width']==0
     assert a['elo_ci']['half_width'] == pytest.approx(expected)
-    assert a['elo_ci']['lower'] == -a['elo_ci']['upper']
     assert disconnected['elo_ci'] is None
-    add_maps(model, ['wait','a'], range(100,400))
+    add_maps(model,['wait','a'],range(100,400))
     model.annotate(board)
-    assert a['elo_ci']['half_width'] == pytest.approx(expected / 2)
+    assert a['elo_ci']['half_width'] == pytest.approx(expected/2)
 
 
-def test_repeated_seats_rotations_and_self_play_do_not_shrink_intervals():
-    plain, repeated = RatingUncertainty(), RatingUncertainty()
-    add_maps(plain, ['wait','a'], range(20))
-    for _ in range(8):
-        add_maps(repeated, ['a']*7 + ['wait'], range(20))
-    add_maps(repeated, ['a']*8, range(100))
-    left, right = report(), report()
-    plain.annotate(left)
-    repeated.annotate(right)
-    assert left == right
+def test_rotations_and_duplicate_ffa_seats_do_not_multiply_information():
+    plain,repeated=RatingUncertainty('ffa'),RatingUncertainty('ffa')
+    add_maps(plain,['a','wait','b'],range(20))
+    add_maps(repeated,['a','wait','wait','wait','b'],range(20),rotations=8)
+    add_maps(repeated,['a']*8,range(100))
+    left,right=report('ffa'),report('ffa')
+    plain.annotate(left);repeated.annotate(right)
+    assert left==right
+    assert repeated.blocks['a']==20
+    assert repeated.pairs['a','wait'] == pytest.approx(5)
 
 
-def test_indirect_reference_uncertainty_propagates_and_sparse_samples_are_hidden():
-    model = RatingUncertainty()
-    add_maps(model, ['wait','a'], range(100))
-    add_maps(model, ['a','b'], range(100,200))
-    board = report()
+def test_gor_uses_raw_coordinates_before_translating_display_to_wait_zero():
+    model=RatingUncertainty('1v1')
+    add_maps(model,['a','wait'],range(100))
+    values={'wait':-800.,'a':300.}
+    raw=report(ids=('wait','a'),raw=values)
+    displayed=report(ids=('wait','a'),raw=values,offset=-800)
+    model.annotate(raw);model.annotate(displayed)
+    first,second=raw['ranking'][1]['elo_ci'],displayed['ranking'][1]['elo_ci']
+    assert second['half_width']==first['half_width']
+    assert second['lower'] == pytest.approx(first['lower']+800)
+    assert displayed['ranking'][0]['elo_ci']['half_width']==0
+
+
+def test_ffa_uses_the_sum_zero_subspace_and_rejects_disconnected_pool_offsets():
+    model=RatingUncertainty('ffa')
+    add_maps(model,['a','b','c'],range(100))
+    board=report('ffa',ids=('wait','a','b','c'))
     model.annotate(board)
-    _, a, b = board['ranking']
-    assert b['elo_ci']['half_width'] == pytest.approx(a['elo_ci']['half_width'] * math.sqrt(2))
-    sparse = RatingUncertainty()
-    add_maps(sparse, ['wait','a'], range(5))
-    sparse.annotate(board)
+    edge=100*.25*.25*slope('ffa',1000)**2
+    expected=1.959963984540054*math.sqrt(2/(9*edge))
+    assert board['ranking'][0]['elo_ci'] is None
+    assert all(row['elo_ci']['half_width']==pytest.approx(expected) for row in board['ranking'][1:])
+    add_maps(model,['d','e','f'],range(100))
+    board=report('ffa',ids=('a','b','c','d','e','f'))
+    model.annotate(board)
+    assert all(row['elo_ci'] is None for row in board['ranking'])
+
+
+def test_gor_without_wait_sparse_samples_and_mixed_modes_do_not_invent_precision():
+    model=RatingUncertainty('1v1')
+    add_maps(model,['a','wait'],range(5))
+    board=report()
+    model.annotate(board)
     assert board['ranking'][1]['elo_ci'] is None
-    assert board['ranking'][2]['elo_ci'] is None
-
-
-def test_current_model_uses_rotation_weights_but_not_pseudo_observations():
-    model = RatingUncertainty()
-    for seed in range(10):
-        for rotation in range(2):
-            result = dict(game_id=f'{seed}-{rotation}',map_seed=seed,map={},
-                          entrant_ids=['a','wait'],elimination_ticks=[None,1],
-                          rating_policy=POLICY,rating_group_size=2)
-            model.add(result, 'job')
-            model.add(result, 'job')  # Idempotent repeated reads.
-    board = report()
+    board=report(ids=('a','b'),anchor=None)
     model.annotate(board)
-    assert model.pairs['a','wait'] == 10
-    assert board['ranking'][1]['ci_blocks'] == 10
-    assert board['ranking'][1]['elo_ci']['half_width'] == pytest.approx(
-        1.959963984540054*2/(LOGISTIC_SLOPE*math.sqrt(10)))
+    assert all(row['elo_ci'] is None for row in board['ranking'])
+    with pytest.raises(ValueError,match='different rating'):
+        model.add(dict(game_id='ffa',entrant_ids=['a','b','c']))
+    with pytest.raises(ValueError,match='different rating'):
+        model.annotate(report('ffa'))

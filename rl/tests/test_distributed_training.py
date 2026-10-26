@@ -1,5 +1,6 @@
 """Rank configuration, collective control, timing and process-group ownership."""
 import os
+from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -140,7 +141,7 @@ class DistributedTrainingTests(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "wait failed"):
                         config.wait_on_cpu()
-                create.assert_called_once_with(backend="gloo")
+                create.assert_called_once_with(backend="gloo", timeout=timedelta(days=1))
                 barrier.assert_called_once_with(group=group)
                 destroy.assert_called_once_with(group)
 

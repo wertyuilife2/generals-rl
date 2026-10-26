@@ -5,13 +5,13 @@ import json
 import multiprocessing
 import time
 
-from generals_arena.execution import replay_frames
-from generals_arena.league.store import LeagueStore
+from generals_arena.matches.replay import replay_frames
+from generals_arena.competitions.store import CompetitionStore
 
 
 def verify(item):
     directory,game_id=item
-    store=LeagueStore(directory)
+    store=CompetitionStore(directory)
     result,blob=store.replay(game_id)
     replay_frames(blob,result,stride=max(1,result['ticks']),compact=True)
     return result['ticks']
@@ -22,7 +22,7 @@ def main():
     parser.add_argument('directory')
     parser.add_argument('--workers',type=int,default=4)
     args=parser.parse_args()
-    store=LeagueStore(args.directory)
+    store=CompetitionStore(args.directory)
     with store.connect() as db:
         ids=[row[0] for row in db.execute("SELECT id FROM games WHERE status='complete' ORDER BY sequence")]
     start=time.perf_counter()

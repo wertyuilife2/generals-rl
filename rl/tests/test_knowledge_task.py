@@ -12,7 +12,7 @@ from tensordict import TensorDict
 
 from generals.core.state import Action, Direction
 from generals.vector import VecEnv
-from generals_rl.mdp import KnowledgeState
+from generals_rl.policy.knowledge import KnowledgeState
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.task import GeneralsTask, TaskConfig
 from test_mdp import capture_state, example_state, hidden_world_variant

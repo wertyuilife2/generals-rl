@@ -1,6 +1,5 @@
 """Train local-information PPO with historical or current-policy self-play."""
 import argparse
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
@@ -9,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import resource
+import shutil
 from time import perf_counter
 
 import torch
@@ -21,34 +21,9 @@ from .curriculum import CurriculumConfig, RolloutCurriculum
 from .distributed_training import DistributedConfig, distributed_process_group
 from .self_play_training import SelfPlayConfig, prepare_self_play
 from .task import GeneralsTask
+from .policy.precision import matmul_precision, validate_precision
 from .training_evaluation import PeriodicEvaluator, TrainingEvalConfig
 from .training_control import TrainingControlConfig, TrainingController, TrainingStopped, prune_checkpoints
-
-
-@contextmanager
-def _matmul_precision(precision, cudnn_allow_tf32=None, cudnn_benchmark=None):
-    """Change this process's precision only for an explicitly configured run."""
-    if precision is None and cudnn_allow_tf32 is None and cudnn_benchmark is None:
-        yield
-        return
-    previous = torch.get_float32_matmul_precision()
-    previous_cudnn = torch.backends.cudnn.allow_tf32
-    previous_benchmark = torch.backends.cudnn.benchmark
-    try:
-        if precision is not None:
-            torch.set_float32_matmul_precision(precision)
-        if cudnn_allow_tf32 is not None:
-            torch.backends.cudnn.allow_tf32 = cudnn_allow_tf32
-        if cudnn_benchmark is not None:
-            torch.backends.cudnn.benchmark = cudnn_benchmark
-        yield
-    finally:
-        if cudnn_allow_tf32 is not None:
-            torch.backends.cudnn.allow_tf32 = previous_cudnn
-        if precision is not None:
-            torch.set_float32_matmul_precision(previous)
-        if cudnn_benchmark is not None:
-            torch.backends.cudnn.benchmark = previous_benchmark
 
 
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
@@ -91,7 +66,6 @@ def _publish_shared_history(distributed, session, publish):
         if refresh_error is not None:
             raise refresh_error
         raise RuntimeError("historical pool refresh failed on another rank")
-    return snapshot
 
 
 def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start, distributed):
@@ -102,14 +76,9 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     if resume is not None and warm_start is not None:
         raise ValueError("resume and warm_start are mutually exclusive")
     precision = config.get("matmul_precision")
-    if precision is not None and precision not in ("highest", "high", "medium"):
-        raise ValueError("matmul_precision must be highest, high, medium or null")
     cudnn_allow_tf32 = config.get("cudnn_allow_tf32")
-    if cudnn_allow_tf32 is not None and not isinstance(cudnn_allow_tf32, bool):
-        raise TypeError("cudnn_allow_tf32 must be boolean or null")
     cudnn_benchmark = config.get("cudnn_benchmark")
-    if cudnn_benchmark is not None and not isinstance(cudnn_benchmark, bool):
-        raise TypeError("cudnn_benchmark must be boolean or null")
+    validate_precision(precision, cudnn_allow_tf32, cudnn_benchmark)
     if (iterations is None) == (steps_per_env is None):
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
@@ -120,16 +89,12 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         algorithm_gamma = config["runner"]["algorithm"].get("gamma")
         if isinstance(algorithm_gamma, bool) or algorithm_gamma != potential_gamma:
             raise ValueError("reward potential_gamma requires an explicit matching runner.algorithm.gamma")
-    if config["runner"]["policy"].get("value_potential_offset", False) is not False:
-        raise ValueError("analytic value_potential_offset is retired")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
     evaluation_settings.validate_training_devices(distributed.device)
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
     if settings.opponent in ("self_play", "current_self_play"):
         SelfPlayConfig(**config.get("self_play", {}))
-        if evaluation_settings.enabled and settings.players != 2:
-            raise ValueError("periodic built-in evaluation requires players=2; use --no-eval for multiplayer training")
     if rollout_steps < 1:
         raise ValueError("rollout steps must be positive")
     if steps_per_env is not None:
@@ -163,13 +128,35 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         if setup_error is not None:
             raise setup_error
         raise RuntimeError(f"rank-zero output setup failed: {setup['error']}")
+    deployment, source_error = None, None
+    if distributed.is_main:
+        try:
+            from .export import prepare_policy_source, resolve_policy_source
+            previous = {}
+            if resume is not None:
+                saved = torch.load(Path(resume), weights_only=True, map_location="cpu", mmap=True)
+                previous = {**(saved.get("infos") or {}), **saved}
+                previous = {key: previous.get(key) for key in ("source_path", "source_id", "policy_spec")}
+                del saved
+            deployment = prepare_policy_source(config, output,
+                                               source=resolve_policy_source(resume, previous) if resume else None,
+                                               policy_spec=previous.get("policy_spec"))
+            if previous.get("source_id") not in (None, deployment["source_id"]):
+                raise ValueError("resume policy source differs; use the recorded source or --warm-start")
+        except Exception as error:
+            source_error = error
+    prepared = distributed.broadcast_control({"error": str(source_error) if source_error is not None else None})
+    if prepared["error"] is not None:
+        if source_error is not None:
+            raise source_error
+        raise RuntimeError(f"rank-zero policy source preparation failed: {prepared['error']}")
     sampled_ticks = 0
     completed_updates = 0
     collection_seconds = update_seconds = 0.0
     last_losses = None
     stop_reason = None
     warm_source = None
-    with _matmul_precision(precision, cudnn_allow_tf32, cudnn_benchmark), GeneralsTask(settings) as task:
+    with matmul_precision(precision, cudnn_allow_tf32, cudnn_benchmark), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output) if distributed.is_main else None, str(task.device))
         if resume:
@@ -235,24 +222,54 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
                 task.opponent.attach_policy(runner.alg.policy, stochastic=opponent_settings.stochastic,
                                             seed=distributed.rank_seed(opponent_settings.seed))
-        evaluator = (PeriodicEvaluator(evaluation_settings, config, output, runner.logger.writer,
-                                       on_complete=controller.on_evaluation)
-                     if distributed.is_main and self_play is not None and evaluation_settings.enabled else None)
+        evaluator, evaluation_error = None, None
+        if distributed.is_main and evaluation_settings.enabled:
+            try:
+                evaluator = PeriodicEvaluator(evaluation_settings, config, output, runner.logger.writer,
+                                              on_complete=controller.on_evaluation, resume=resume,
+                                              resume_updates=runner.current_learning_iteration if resume else None,
+                                              source=deployment)
+                if evaluation_settings.synchronous:
+                    evaluator.drain()
+            except Exception as error:
+                evaluation_error = error
+        if evaluation_settings.enabled and evaluation_settings.synchronous:
+            distributed.wait_on_cpu()
+        initialized = distributed.broadcast_control({"error": str(evaluation_error) if evaluation_error is not None else None})
+        if initialized["error"] is not None:
+            if evaluation_error is not None:
+                raise evaluation_error
+            raise RuntimeError(f"rank-zero Arena evaluation preparation failed: {initialized['error']}")
         original_save = runner.save
         final_iteration = runner.current_learning_iteration + iterations - 1
+        save_interval = config["runner"].get("save_interval", 14)
+        last_saved = None
 
-        def save_checkpoint(path, it, last_model, infos=None):
+        def write_checkpoint(path, it, last_model=False, infos=None):
+            nonlocal last_saved
             if not distributed.is_main:
                 return
-            # Route upstream's final save to one canonical checkpoint. A periodic
-            # save on that same iteration would otherwise duplicate its weights.
-            if it == final_iteration and not last_model:
-                return
-            if last_model:
-                path = str(output / "checkpoint.pt")
-            result = original_save(path, it=it, last_model=last_model, infos=infos)
+            path = Path(path)
+            temporary = path.with_suffix(".tmp.pt")
+            if last_saved is not None and last_saved[0] == it and last_saved[1].exists():
+                if last_saved[1] != path:
+                    shutil.copyfile(last_saved[1], temporary)
+                    temporary.replace(path)
+            else:
+                metadata = dict(infos or {})
+                metadata.update(deployment, completed_ppo_updates=it + 1)
+                metadata["run_config_sha256"] = sha256((output / "run_config.json").read_bytes()).hexdigest()
+                original_save(str(temporary), it=it, last_model=last_model, infos=metadata)
+                temporary.replace(path)
+            last_saved = (it, path)
             prune_checkpoints(output, control_settings.keep_checkpoints)
-            return result
+            return path
+
+        def save_checkpoint(path, it, last_model, infos=None):
+            # The runner's legacy modulo is zero-based. Periodic saves now
+            # happen in on_update with the same one-based cadence as evaluation.
+            if last_model:
+                return write_checkpoint(output / "checkpoint.pt", it, True, infos)
 
         runner.save = save_checkpoint
         if steps_per_env is not None and steps_per_env < rollout_steps:
@@ -280,25 +297,37 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             if not distributed.all_true(all(math.isfinite(value) for value in update_metrics.values())):
                 raise FloatingPointError(f"non-finite PPO update metric: {update_metrics}")
             if shared_history:
-                snapshot = _publish_shared_history(
+                _publish_shared_history(
                     distributed, self_play, lambda: self_play.after_update(kwargs["it"]))
-            else:
-                snapshot = self_play.after_update(kwargs["it"]) if self_play is not None else None
+            elif self_play is not None:
+                self_play.after_update(kwargs["it"])
             original_log(**kwargs)
-            if evaluator is not None:
-                evaluator.poll()
-                if snapshot is not None:
-                    evaluation_budget = {}
-                    if evaluation_settings.synchronous and control_settings.max_seconds is not None:
-                        evaluation_budget["remaining_seconds"] = max(
-                            0.0, control_settings.max_seconds - (perf_counter() - started))
-                    evaluator.on_snapshot(
-                        snapshot, self_play.pool.directory,
-                        publication_index=(kwargs["it"] + 1) // self_play.config.snapshot_interval,
-                        steps_per_environment=sampled_ticks,
-                        environment_steps=distributed.global_transitions(task.num_envs, sampled_ticks),
-                        **evaluation_budget,
-                    )
+            absolute_updates = kwargs["it"] + 1
+            due = evaluation_settings.due(absolute_updates)
+            hook_error = None
+            if distributed.is_main:
+                try:
+                    if evaluator is not None:
+                        evaluator.poll()
+                    if absolute_updates % save_interval == 0 or due:
+                        checkpoint = write_checkpoint(
+                            output / ("checkpoint.pt" if kwargs["it"] == final_iteration else f"model_{absolute_updates}.pt"),
+                            kwargs["it"], kwargs["it"] == final_iteration)
+                    if due:
+                        evaluation_budget = {}
+                        if evaluation_settings.synchronous and control_settings.max_seconds is not None:
+                            evaluation_budget["remaining_seconds"] = max(
+                                0.0, control_settings.max_seconds - (perf_counter() - started))
+                        evaluator.on_checkpoint(
+                            checkpoint, completed_updates=absolute_updates,
+                            steps_per_environment=sampled_ticks,
+                            environment_steps=distributed.global_transitions(task.num_envs, sampled_ticks),
+                            **evaluation_budget,
+                        )
+                except Exception as error:
+                    hook_error = error
+            if due and evaluation_settings.synchronous:
+                distributed.wait_on_cpu()
             elapsed = perf_counter() - started
             if runner.logger.writer is not None:
                 writer = runner.logger.writer
@@ -326,8 +355,13 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                         and evaluator.budget_exhausted is True
                         and elapsed >= control_settings.min_seconds):
                     stop_reason = "budget_reserve"
-                control = {"stop_reason": stop_reason}
-            stop_reason = distributed.broadcast_control(control)["stop_reason"]
+                control = {"stop_reason": stop_reason, "error": str(hook_error) if hook_error is not None else None}
+            control = distributed.broadcast_control(control)
+            if control["error"] is not None:
+                if hook_error is not None:
+                    raise hook_error
+                raise RuntimeError(f"rank-zero checkpoint/evaluation publication failed: {control['error']}")
+            stop_reason = control["stop_reason"]
             if stop_reason is not None:
                 raise TrainingStopped(stop_reason)
             if steps_per_env is not None:
@@ -356,10 +390,24 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     runner.current_learning_iteration, source={"kind": "final_learner"}))
             elif self_play is not None:
                 self_play.publish(runner.current_learning_iteration, source={"kind": "final_learner"})
+            final_evaluation_error = None
             if evaluator is not None:
-                evaluator.finish()
-            if evaluation_settings.enabled and not evaluation_settings.synchronous:
+                try:
+                    evaluator.on_checkpoint(
+                        output / "checkpoint.pt", completed_updates=runner.current_learning_iteration + 1,
+                        steps_per_environment=sampled_ticks,
+                        environment_steps=distributed.global_transitions(task.num_envs, sampled_ticks), final=True)
+                    evaluator.finish()
+                except Exception as error:
+                    final_evaluation_error = error
+            if evaluation_settings.enabled:
                 distributed.wait_on_cpu()
+            finalized = distributed.broadcast_control({
+                "error": str(final_evaluation_error) if final_evaluation_error is not None else None})
+            if finalized["error"] is not None:
+                if final_evaluation_error is not None:
+                    raise final_evaluation_error
+                raise RuntimeError(f"rank-zero final Arena evaluation failed: {finalized['error']}")
             transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
             wall_seconds, = distributed.max_timings(perf_counter() - started)
             completed_episodes, terminated_episodes, truncated_episodes = distributed.sum_counts(

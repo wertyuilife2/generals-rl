@@ -24,15 +24,15 @@ from generals.backends.cpu import CPUEnv
 from generals.core.engine import CoreEngine
 from generals.core.recording import state_digest, state_from_dict
 from generals.core.state import Action, compute_stats
-from generals_arena.league.config import LeagueConfig
-from generals_arena.league.game import RecordedGame
-from generals_arena.league.store import LeagueStore
+from generals_arena.competitions.config import LeagueConfig
+from generals_arena.matches.game import RecordedGame
+from generals_arena.competitions.store import CompetitionStore
 from generals_baselines import create_controller
 from generals.backends.cpu.env import _library
 
 
 def cases_from_league(directory):
-    store = LeagueStore(directory)
+    store = CompetitionStore(directory)
     entries = store.entrants()
     with store.connect() as db:
         results = [json.loads(row[0]) for row in db.execute(

@@ -3,7 +3,8 @@ from inspect import signature
 
 import torch
 
-from .mdp import KnowledgeState, ObservationHistory
+from .policy.knowledge import KnowledgeState
+from .policy.observations import ObservationHistory
 
 
 class WaitOpponent:

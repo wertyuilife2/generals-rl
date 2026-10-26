@@ -41,6 +41,10 @@ def test_other_model_config_replaces_the_policy_without_vit_fields(tmp_path):
         assert "backbone" not in actual["runner"]["policy"]
         assert "amp_bfloat16" not in actual["runner"]["algorithm"]
         assert "gamma_final" not in actual["curriculum"]
+        assert actual["evaluation"]["every_n_updates"] == 100
+        assert actual["evaluation"]["maps_per_opponent"] == 200
+        assert actual["evaluation"].get("backend", "cpu") == "cpu"
+        assert actual["inference"] == {"mode": "stochastic", "precision": "from_config", "execution": "eager"}
         assert execute.call_args.kwargs["iterations"] == 1
 
 

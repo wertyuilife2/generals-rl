@@ -1,68 +1,70 @@
-"""Plot a training run and optionally replay one loss/win per built-in AI.
-
-Example: python rl/tools/analyze_iteration.py outputs/rl_iterations/v1/train
-Add --demo to record the selected checkpoint's evaluated games, and --render
-to turn the recordings into MP4 files. Selection uses worst-AI win rate first.
-"""
+"""Plot current Arena evaluation jobs and render their verified selected games."""
 import argparse
-from dataclasses import replace
 from hashlib import sha256
 import json
 from pathlib import Path
-from time import perf_counter
 
 import numpy as np
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-
-
-KINDS = ("aggressive", "expansion", "defensive", "random")
 
 
 def read_json(path):
     return json.loads(Path(path).read_text())
 
 
-def score(report):
-    rates = report["by_ai"]
-    return (min(rates[k]["win_rate"] for k in KINDS),
-            rates["aggressive"]["win_rate"], report["overall"]["win_rate"])
-
-
 def read_run(directory):
-    """Use reports as the source of outcomes; index/request supply run coordinates."""
+    """Read persisted job coordinates and reports without loading any policy."""
     index = directory / "evaluations/index.json"
-    jobs = read_json(index).get("jobs", []) if index.exists() else []
-    by_path = {Path(job["report"]).resolve(): job for job in jobs if job.get("report")}
-    evaluations = []
-    for path in sorted((directory / "evaluations").glob("snapshot_*/report.json")):
-        report = read_json(path)
-        if set(KINDS) - report.get("by_ai", {}).keys():
+    saved = read_json(index) if index.exists() else {}
+    recorded = Path(saved.get("directory", index.parent)).resolve()
+    by_path = {}
+    for job in saved.get("jobs", []):
+        if job.get("status") != "completed":
             continue
-        metadata = report.get("training_evaluation") or by_path.get(path.resolve(), {})
-        request = path.with_name("request.json")
-        if not metadata and request.exists():
-            metadata = read_json(request)
-        evaluations.append({"report": str(path.resolve()), "data": report,
-                            "iteration": metadata.get("iteration"),
-                            "steps_per_environment": metadata.get("steps_per_environment"),
-                            "snapshot_id": metadata.get("snapshot_id", int(path.parent.name.split("_")[-1]))})
+        job = dict(job)
+        for key in ("report", "checkpoint", "bundle"):
+            if job.get(key):
+                path = Path(job[key])
+                relative = path.relative_to(recorded) if path.is_absolute() else path
+                job[key] = str((index.parent / relative).resolve())
+        by_path[Path(job["report"])] = job
+    evaluations = []
+    for path, metadata in sorted(by_path.items()):
+        report = read_json(path)
+        if report.get("status") != "completed" or "elo" not in report:
+            raise ValueError("completed job requires a current Arena Elo report; use archived tools for historical reports")
+        if metadata.get("report_sha256") and sha256(path.read_bytes()).hexdigest() != metadata["report_sha256"]:
+            raise ValueError("evaluation report changed after training accepted it")
+        evaluations.append({"report": str(path), "data": report, "iteration": metadata["iteration"],
+                            "completed_ppo_updates": metadata["completed_ppo_updates"], "stage": metadata["stage"],
+                            "checkpoint": metadata["checkpoint"],
+                            "checkpoint_sha256": metadata["checkpoint_sha256"],
+                            "bundle": metadata.get("bundle"),
+                            "steps_per_environment": metadata.get("steps_per_environment")})
+    evaluations.sort(key=lambda entry: (entry["completed_ppo_updates"] or 0, entry["stage"]))
     events = EventAccumulator(str(directory), size_guidance={"scalars": 0})
     events.Reload()
-    tags = events.Tags()["scalars"]
     scalars = {tag: [(entry.step, entry.value) for entry in events.Scalars(tag)]
-               for tag in tags if not tag.endswith("/time")}
+               for tag in events.Tags()["scalars"] if not tag.endswith("/time")}
     return evaluations, scalars
 
 
-def checkpoint_for(directory, evaluation):
-    candidates = [Path(evaluation["data"]["checkpoint"]),
-                  Path(evaluation["report"]).with_name("snapshot.pt"),
-                  directory / "evaluations/best.pt"]
-    expected = evaluation["data"].get("checkpoint_sha256")
-    for candidate in candidates:
-        if candidate.exists() and (not expected or sha256(candidate.read_bytes()).hexdigest() == expected):
-            return candidate.resolve()
-    return None
+def checkpoint_for(evaluation):
+    candidate = Path(evaluation["checkpoint"])
+    expected = evaluation["checkpoint_sha256"]
+    return candidate.resolve() if candidate.exists() and sha256(candidate.read_bytes()).hexdigest() == expected else None
+
+
+def select_best(directory, evaluations):
+    selected = directory / "best_model.json"
+    if selected.exists() and evaluations:
+        best = read_json(selected)
+        matching = [entry for entry in evaluations if (entry["data"]["policy_id"], entry["data"]["profile_id"])
+                    == (best["policy_id"], best["profile_id"])]
+        if matching:
+            return matching[0]
+    eligible = [entry for entry in evaluations if entry["stage"] == "periodic"] or evaluations
+    return max(eligible, key=lambda entry: (entry["data"]["elo"], -entry["completed_ppo_updates"])) if eligible else None
 
 
 def plot(scalars, evaluations, output):
@@ -71,22 +73,20 @@ def plot(scalars, evaluations, output):
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 9), layout="constrained")
-    for index, kind in enumerate(KINDS):
-        points = [(e["iteration"], 100 * e["data"]["by_ai"][kind]["win_rate"])
-                  for e in evaluations if e["iteration"] is not None]
-        if not points:
-            points = [(step, 100 * value) for step, value in scalars.get(f"Eval/{kind}/win_rate", [])]
-        if points:
-            x, y = zip(*sorted(points))
-            axes[0, 0].plot(x, y, color=f"C{index}", label=kind)
-        diagnostic = scalars.get(f"DiagnosticReuse/{kind}/win_rate", [])
-        if diagnostic:
-            x, y = zip(*sorted(diagnostic))
-            axes[0, 0].plot(x, np.asarray(y) * 100, "--o", color=f"C{index}", markersize=3,
-                           label=f"{kind} (reused diagnostic)")
-    axes[0, 0].set(title="Student vs built-in AIs", ylabel="Wins / all games (%)", ylim=(0, 100))
+    for stage, marker in (("periodic", "o-"), ("confirmation", "x")):
+        rows = sorted((entry for entry in evaluations if entry["stage"] == stage),
+                      key=lambda entry: entry["completed_ppo_updates"])
+        if rows:
+            x = [entry["completed_ppo_updates"] for entry in rows]
+            y = [entry["data"]["elo"] for entry in rows]
+            axes[0, 0].plot(x, y, marker, label=stage)
+            intervals = [entry["data"].get("elo_ci") for entry in rows]
+            if all(interval is not None for interval in intervals):
+                axes[0, 0].fill_between(x, [ci["lower"] for ci in intervals],
+                                       [ci["upper"] for ci in intervals], alpha=.15)
+    axes[0, 0].set(title="Fixed-profile Arena Elo", ylabel="Elo (95% approximate interval)")
     if axes[0, 0].get_legend_handles_labels()[0]:
-        axes[0, 0].legend(fontsize=7, ncol=2)
+        axes[0, 0].legend(fontsize=7)
     panels = [((0, 1), "Loss", ["Loss/value", "Loss/surrogate"]),
               ((0, 2), "Entropy", ["Loss/entropy"]),
               ((1, 0), "Training throughput", ["Perf/total_fps"]),
@@ -100,119 +100,69 @@ def plot(scalars, evaluations, output):
             if not values:
                 continue
             data = np.array(values)
-            axis.plot(data[:, 0], data[:, 1], alpha=.2, linewidth=.4)
+            axis.plot(data[:, 0] + 1, data[:, 1], alpha=.2, linewidth=.4)
             window = min(100, max(1, len(data) // 20))
             smooth = np.convolve(data[:, 1], np.ones(window) / window, mode="valid")
-            axis.plot(data[window - 1:, 0], smooth, label=tag.split("/")[-1])
+            axis.plot(data[window - 1:, 0] + 1, smooth, label=tag.split("/")[-1])
         if axis.get_legend_handles_labels()[0]:
             axis.legend()
     if scalars.get("Loss/learning_rate"):
         axes[1, 1].set_yscale("log")
     axes[1, 0].set_ylabel("Environment transitions / second")
     for axis in axes.flat:
-        axis.set_xlabel("Learner iteration")
+        axis.set_xlabel("Completed PPO updates")
         axis.grid(alpha=.15)
     fig.savefig(output / "curves.png", dpi=150)
     plt.close(fig)
 
 
-def demos(checkpoint, report, output, *, render=False):
-    """Prefer actual recorded actions; legacy CPU reports reuse policy inference."""
-    import torch
-    from tensordict import TensorDict
-    from generals import MapConfig
-    from generals.core.mapgen import generate_map
-    from generals_rl.config import seed_everything, task_config
-    from generals_rl.evaluate_builtin import GameSpec, _load_student, battle_batch
-    from generals_rl.task import GeneralsTask
-    from recordings import MatchRecorder, replay_evaluation_trace
+def _match_evidence(game):
+    """Keep match behavior and identities, excluding paths and measured latency."""
+    value = {key: item for key, item in game.items() if key not in ('replay', 'decision_timing')}
+    if 'forfeits' in value:
+        value['forfeits'] = [{key: item for key, item in event.items() if key != 'elapsed_ns'}
+                             for event in value['forfeits']]
+    return value
 
-    stochastic = report.get("stochastic", False)
-    if stochastic and report.get("sampling_protocol") != "per_game_numpy_uniform_cdf_v1":
-        raise ValueError("sampled demo replay requires per-game sampling metadata")
-    if sha256(checkpoint.read_bytes()).hexdigest() != report["checkpoint_sha256"]:
-        raise ValueError("demo report and checkpoint differ; provide the matching --report")
+
+def demos(checkpoint, report, output, *, render=False):
+    """Use Arena for re-evaluation and its verified replay for presentation."""
+    from generals_arena.competitions.evaluation import evaluate
+    from generals_arena.policies.artifacts import validate_bundle
+    from generals_rl.export import export_policy
+    from recordings import replay_arena_game
+
+    bundle = export_policy(checkpoint, output / "demo_bundle")
+    if validate_bundle(bundle)["policy_id"] != report["policy_id"]:
+        raise ValueError("demo checkpoint does not identify the evaluated policy")
+    games = report["results"]
+    if not all(game.get("replay") and Path(game["replay"]).is_file() for game in games):
+        recorded = evaluate(bundle, report["profile"], output / "recorded_evaluation.json",
+                            device=report["device"], backend=report["backend"],
+                            batch_size=report["batch_size"], cpu_threads=report["cpu_threads"],
+                            record_replays=True)
+        if (recorded["policy_id"] != report["policy_id"] or recorded["profile_id"] != report["profile_id"]
+                or [_match_evidence(game) for game in recorded["results"]]
+                != [_match_evidence(game) for game in games]):
+            raise RuntimeError("Arena re-evaluation did not reproduce the evaluated games; retain the new report separately")
+        games = recorded["results"]
     chosen = []
-    trace_info = report.get("selected_game_traces")
-    selection = "one median-duration loss then win per AI when available"
-    extra = {}
-    if trace_info is not None:
-        if trace_info["protocol"] != "recorded_joint_actions_core_v1":
-            raise ValueError("unsupported evaluated action trace protocol")
-        pairs = {(trace["opponent"], trace["outcome"]): trace for trace in trace_info["cases"]}
-        if len(pairs) != len(trace_info["cases"]) or len(pairs) > 8:
-            raise ValueError("evaluated action traces must contain at most one win/loss per AI")
-        games = {game["game_id"]: game for game in report["games"]}
-        cases = []
-        started = perf_counter()
-        for kind in KINDS:
-            for outcome in ("loss", "win"):
-                if (kind, outcome) not in pairs:
-                    continue
-                trace = pairs[kind, outcome]
-                match = games[trace["game_id"]]
-                cases.append(replay_evaluation_trace(trace, match, output / "recordings",
-                              metadata={"checkpoint_sha256": report["checkpoint_sha256"]}))
-                chosen.append(match)
-        completed = [case["match"] for case in cases]
-        timing = {"recorded_action_replay_seconds": perf_counter() - started}
-        selection = trace_info["selection"]
-        extra = {"replay_mode": "recorded_joint_actions", "missing": trace_info["missing"]}
-    else:
-        if torch.device(report.get("device", "cpu")).type != "cpu":
-            raise ValueError("GPU evaluated demos require recorded actions; policy reinference cannot guarantee exact replay")
-        config = read_json(checkpoint.with_name("run_config.json"))
-        task = task_config(config["task"])
-        seed_everything(report["seed"])
-        torch.set_num_threads(1)
-        for kind in KINDS:
-            for outcome in ("loss", "win"):
-                candidates = sorted([game for game in report["games"]
-                                     if game["opponent"] == kind and game["outcome"] == outcome],
-                                    key=lambda game: (game["ticks"], game["game_id"]))
-                if candidates:
-                    chosen.append(candidates[len(candidates) // 2])
-        if not chosen:
-            return {"cases": [], "reason": "evaluation contains only draws"}
-        specs = [GameSpec(**{key: game[key] for key in GameSpec.__dataclass_fields__}) for game in chosen]
-        map_config = MapConfig(task.width, task.height, 2, task.mountain_density, task.city_density)
-        states = [generate_map(map_config, spec.map_seed) for spec in specs]
-        # Obtain feature shapes through the task composition, including future MDP changes.
-        with GeneralsTask(replace(task, backend="cpu", device="cpu", num_envs=1,
-                                  threads=1, opponent="wait", map_pool_size=0)) as example:
-            observations = TensorDict(example.get_observations(), batch_size=[1], device="cpu")
-            policy = _load_student(checkpoint, config, observations, "cpu")
-        names = {spec.game_id: f"{spec.opponent}_{game['outcome']}" for spec, game in zip(specs, chosen)}
-        with MatchRecorder(output / "recordings", names=names,
-                           metadata={"checkpoint_sha256": report["checkpoint_sha256"],
-                                     "evaluation_seed": report["seed"], "stochastic": stochastic,
-                                     "sampling_seed": report.get("sampling_seed"),
-                                     "sampling_protocol": report.get("sampling_protocol")}) as recorder:
-            completed, timing = battle_batch(specs, states, policy, task,
-                                              max_ticks=report["max_ticks"], device="cpu",
-                                              stochastic=stochastic,
-                                              sampling_seed=report["sampling_seed"] if stochastic else 1000042,
-                                              cpu_threads=1, recorder=recorder)
-            cases = recorder.finish()
-    for case, expected, actual in zip(cases, chosen, completed, strict=True):
-        if actual != expected:
-            raise RuntimeError("demo did not reproduce the complete evaluated game")
-        case.update(opponent=actual["opponent"], outcome=actual["outcome"],
-                    learner_seat=actual["learner_seat"], match=actual)
-        import gzip
-        with gzip.open(case["frames"], "rt") as stream:
-            frames = json.load(stream)["frames"][1:]
-        seat = actual["learner_seat"]
-        waits = sum(frame["actions"][seat][0] == 0 for frame in frames)
-        zero_moves = sum(frame["actions"][seat][0] != 0 and frame["moves"][seat][1]
-                         and frame["moves"][seat][4] == 0 for frame in frames)
-        case["action_diagnostics"] = {"wait_actions": waits, "zero_troop_moves": int(zero_moves),
-                                      "zero_troop_move_fraction": zero_moves / len(frames)}
+    for opponent in sorted({game["opponent"] for game in games}):
+        for outcome in ("loss", "win"):
+            matches = sorted((game for game in games if game["opponent"] == opponent and game["outcome"] == outcome),
+                             key=lambda game: (game["ticks"], game["game_id"]))
+            if matches:
+                chosen.append(matches[len(matches) // 2])
+    cases = []
+    for game in chosen:
+        case = replay_arena_game(game, output / "recordings",
+                                 metadata={"policy_id": report["policy_id"], "profile_id": report["profile_id"]})
         if render:
             from render_recording import render_recording
             case["video"] = render_recording(case["frames"], output / "videos" / f"{case['name']}.mp4")
-    return {"cases": cases, "timing": timing,
-            "selection": selection, **extra,
+        cases.append(case)
+    return {"cases": cases, "selection": "one median-duration loss and win per opponent when available",
+            "reason": "evaluation contains only draws" if not cases else None,
             "examples_are_not_an_unbiased_win_rate_estimate": True}
 
 
@@ -226,20 +176,19 @@ def main(argv=None):
     parser.add_argument("--render", action="store_true", help="also render selected demos as MP4")
     args = parser.parse_args(argv)
     directory = args.run.resolve()
-    if not (directory / "run_config.json").exists() and (directory / "train/run_config.json").exists():
-        directory /= "train"
     output = (args.output or directory / "analysis").resolve()
     output.mkdir(parents=True, exist_ok=True)
     evaluations, scalars = read_run(directory)
-    best = max(evaluations, key=lambda entry: score(entry["data"])) if evaluations else None
-    best_checkpoint = checkpoint_for(directory, best) if best else None
+    best = select_best(directory, evaluations)
+    best_checkpoint = checkpoint_for(best) if best else None
     summary = {"run": str(directory), "evaluations": len(evaluations),
-               "selection_criterion": ["worst_ai_win_rate", "aggressive_win_rate", "overall_win_rate"],
+               "selection_criterion": "fixed_profile_elo",
                "best": ({key: value for key, value in best.items() if key != "data"} |
-                        {"by_ai": best["data"]["by_ai"], "overall": best["data"]["overall"],
+                        {**{key: best["data"][key] for key in ("elo", "elo_ci", "policy_id", "profile_id", "by_opponent")},
                          "checkpoint": str(best_checkpoint) if best_checkpoint else None,
-                         "checkpoint_sha256": best["data"].get("checkpoint_sha256")}) if best else None,
-               "latest": evaluations[-1]["data"]["by_ai"] if evaluations else None,
+                         "checkpoint_sha256": best["checkpoint_sha256"]}) if best else None,
+               "latest": ({key: evaluations[-1]["data"][key] for key in ("elo", "elo_ci", "by_opponent")}
+                          if evaluations else None),
                "scalar_summary": {tag: {"count": len(values), "last": values[-1][1],
                                          "last_100_mean": float(np.mean([value for _, value in values[-100:]]))}
                                   for tag, values in scalars.items() if values}}
@@ -257,8 +206,8 @@ def main(argv=None):
         summary["demos"] = demos(demo_checkpoint, report, output, render=args.render)
         summary["demo_selection"] = {
             "checkpoint": str(demo_checkpoint),
-            "checkpoint_sha256": report["checkpoint_sha256"],
-            "report": str(demo_report_path), "seed": report["seed"],
+            "checkpoint_sha256": sha256(demo_checkpoint.read_bytes()).hexdigest(),
+            "report": str(demo_report_path), "seed": report["profile"]["seed"],
         }
     (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps({"curves": str(output / "curves.png"),

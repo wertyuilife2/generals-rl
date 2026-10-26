@@ -1,739 +1,492 @@
-"""Real subprocess evaluations, snapshot eviction and learner RNG isolation."""
+"""Persistent Arena jobs, equal-budget Elo selection and learner isolation."""
 from contextlib import redirect_stdout
-from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
 import io
 import json
 import os
 from pathlib import Path
-import subprocess
 import signal
+import subprocess
 import sys
-import tempfile
 import time
-from types import SimpleNamespace
 import unittest
-from unittest.mock import patch, PropertyMock
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import pytest
 import torch
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
-from torch.utils.tensorboard import SummaryWriter
+from generals_arena.competitions.evaluation import expected_games
 
-from generals_baselines import AI_KINDS
-from generals_rl.evaluate_builtin import _inference_metadata, evaluate_builtin
 from generals_rl.train import train
 from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfig, _stop_worker
 from rl_test_utils import assert_nested_equal, small_training_config
 
 
 def small_config():
-    config = small_training_config(runner_overrides={"learning_epochs": 1})
-    config["self_play"] = {"pool_size": 2, "snapshot_interval": 1}
-    # Retain the default cadence, but keep the actual match workload tiny.
-    config["evaluation"] = {"maps_per_ai": 1, "max_ticks": 3, "batch_size": 8}
+    config = small_training_config(runner_overrides={'learning_epochs': 1})
+    config['self_play'] = {'pool_size': 2, 'snapshot_interval': 1}
+    config['evaluation'] = {'enabled': True, 'every_n_updates': 2, 'maps_per_opponent': 1,
+                            'max_ticks': 3, 'batch_size': 8, 'final_top_k': 0}
     return config
 
 
-def completion_fixture(evaluator):
-    """A complete worker report stub; never launches inference or a process."""
-    checkpoint = evaluator.directory / "snapshot.pt"
-    checkpoint.write_bytes(b"immutable stub weights")
-    report_path = evaluator.directory / "report.json"
-    report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
-              "completed_games": 8, "scheduled_games": 8, "policy": "student_local",
-              "device": evaluator.settings.device, "stochastic": True,
-              "reference_inference": evaluator.settings.reference_inference,
-              "matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": False,
-              "parameter_dtype": "float32", "inference_dtype": "float32",
-              "overall": {"win_rate": 0.0},
-              "by_ai": {kind: {"games": 2, "win_rate": 0.0} for kind in AI_KINDS},
-              "games": [{"game_id": index, "opponent": kind, "outcome": "draw"}
-                        for index, kind in enumerate(kind for kind in AI_KINDS for _ in range(2))],
-              "selected_game_traces": {"protocol": "recorded_joint_actions_core_v1", "cases": [],
-                  "missing": [{"opponent": kind, "outcome": outcome}
-                              for kind in AI_KINDS for outcome in ("loss", "win")]}}
-    job = {"status": "running", "snapshot_id": 1, "iteration": 2, "publication_index": 1,
-           "steps_per_environment": 32, "environment_steps": 128,
-           "checkpoint": str(checkpoint), "checkpoint_sha256": report["checkpoint_sha256"],
-           "report": str(report_path), "worker_seconds": 0.1}
-    evaluator.jobs.append(job)
-    return report_path, report, job
+@pytest.fixture
+def evaluator(tmp_path):
+    return PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, max_ticks=3, final_top_k=0),
+                             small_config(), tmp_path / 'run', None)
 
 
-class TrainingEvaluationTests(unittest.TestCase):
-    def test_legacy_baseline_workers_are_input_only_and_do_not_constrain_reports(self):
-        with tempfile.TemporaryDirectory() as directory:
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, baseline_workers=4),
-                                          {}, directory, None)
-            self.assertNotIn("baseline_workers", asdict(evaluator.settings))
-            path, report, job = completion_fixture(evaluator)
-            for workers in (None, 1, 2):
-                with self.subTest(workers=workers):
-                    report.pop("baseline_workers", None)
-                    if workers is not None:
-                        report["baseline_workers"] = workers
-                    path.write_text(json.dumps(report))
-                    evaluator._complete(job)
-                    self.assertIsNotNone(evaluator.best_completed)
-                    self.assertNotIn("baseline_workers", evaluator.best_completed)
+def enqueue(evaluator, updates, *, stage='periodic', profile=None):
+    target = evaluator.directory / 'candidates' / f'synthetic_{updates}'
+    target.mkdir(parents=True, exist_ok=True)
+    checkpoint = target / 'checkpoint.pt'
+    checkpoint.write_bytes(f'synthetic full resume checkpoint {updates}'.encode())
+    (target / 'run_config.json').write_text(json.dumps(evaluator.run_config))
+    bundle = target / 'bundle'
+    bundle.mkdir(exist_ok=True)
+    return evaluator._enqueue(bundle, checkpoint, sha256(checkpoint.read_bytes()).hexdigest(), f'{updates:064x}',
+                               profile or evaluator.profile, updates, updates * 4, updates * 16, stage=stage)
 
-    def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_precision_before_acceptance(self):
-        with tempfile.TemporaryDirectory() as directory:
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
-                                          {"cudnn_allow_tf32": False}, directory, None)
-            report_path = evaluator.directory / "report.json"
-            report = {"checkpoint_sha256": "snapshot", "completed_games": 8, "scheduled_games": 8,
-                      "policy": "student_local", "device": "cuda:0", "stochastic": True,
-                      "by_ai": {kind: {"games": 2} for kind in AI_KINDS}}
-            for actual in (None, True):
-                if actual is None:
-                    report.pop("cudnn_allow_tf32", None)
-                else:
-                    report["cudnn_allow_tf32"] = actual
-                report_path.write_text(json.dumps(report))
-                with self.subTest(actual=actual), self.assertRaisesRegex(RuntimeError, "cuDNN TF32"):
-                    evaluator._complete({"report": str(report_path), "checkpoint_sha256": "snapshot"})
-                self.assertIsNone(evaluator.best_completed)
-                self.assertFalse((evaluator.directory / "best.pt").exists())
 
-    def test_cuda_report_rejects_missing_or_wrong_explicit_matmul_precision(self):
-        for actual in (None, "high"):
-            with self.subTest(actual=actual), tempfile.TemporaryDirectory() as directory:
-                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
-                                              {"matmul_precision": "highest"}, directory, None)
-                path, report, job = completion_fixture(evaluator)
-                if actual is None:
-                    report.pop("matmul_precision")
-                else:
-                    report["matmul_precision"] = actual
-                path.write_text(json.dumps(report))
-                with self.assertRaisesRegex(RuntimeError, "matmul precision"):
-                    evaluator._complete(job)
-                self.assertIsNone(evaluator.best_completed)
-                self.assertFalse((evaluator.directory / "best.pt").exists())
+def report_for(job, elo=100):
+    profile = json.loads(Path(job['profile_path']).read_text())
+    opponents = [spec['name'] for spec in profile['opponents']]
+    per_opponent = job['expected_games'] // len(opponents)
+    return {'status': 'completed', 'policy_id': job['policy_id'], 'profile_id': job['profile_id'],
+            'elo': elo, 'elo_ci': {'lower': elo - 20, 'upper': elo + 20, 'half_width': 20},
+            'games': job['expected_games'], 'expected_games': job['expected_games'], 'errors': [],
+            'device': job['device'], 'backend': job['backend'],
+            'by_opponent': {name: {'games': per_opponent} for name in opponents},
+            'results': [{'game_id': f'{name}-{index}', 'opponent': name}
+                        for name in opponents for index in range(per_opponent)]}
 
-    def test_cuda_report_rejects_missing_or_wrong_explicit_cudnn_benchmark(self):
-        for reference, actual in ((False, None), (False, True), (True, None), (True, False)):
-            with self.subTest(reference=reference, actual=actual), tempfile.TemporaryDirectory() as directory:
-                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0", reference_inference=reference),
-                                              {"cudnn_benchmark": True}, directory, None)
-                path, report, job = completion_fixture(evaluator)
-                if actual is None:
-                    report.pop("cudnn_benchmark")
-                else:
-                    report["cudnn_benchmark"] = actual
-                path.write_text(json.dumps(report))
-                with self.assertRaisesRegex(RuntimeError, "cuDNN benchmark"):
-                    evaluator._complete(job)
-                self.assertIsNone(evaluator.best_completed)
-                self.assertFalse((evaluator.directory / "best.pt").exists())
 
-    def test_cuda_report_rejects_missing_or_wrong_policy_inference_dtype(self):
-        for amp, actual in ((False, None), (False, "bfloat16"), (True, None), (True, "float32")):
-            with self.subTest(amp=amp, actual=actual), tempfile.TemporaryDirectory() as directory:
-                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
-                    {"runner": {"policy": {"amp_bfloat16": amp}}}, directory, None)
-                path, report, job = completion_fixture(evaluator)
-                if actual is None:
-                    report.pop("inference_dtype")
-                else:
-                    report["inference_dtype"] = actual
-                path.write_text(json.dumps(report))
-                with self.assertRaisesRegex(RuntimeError, "inference dtype"):
-                    evaluator._complete(job)
-                self.assertIsNone(evaluator.best_completed)
-                self.assertFalse((evaluator.directory / "best.pt").exists())
+def complete(evaluator, job, elo=100):
+    job['worker_seconds'] = .1
+    Path(job['report']).write_text(json.dumps(report_for(job, elo)))
+    evaluator._complete(job)
+    evaluator.pending = type(evaluator.pending)(j for j in evaluator.pending if j is not job)
 
-    def test_cuda_report_accepts_matching_precision_and_default_fp32_metadata(self):
-        cases = (({}, "high", "float32"),
-                 ({"matmul_precision": None}, "medium", "float32"),
-                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False,
-                   "runner": {"policy": {"amp_bfloat16": False}}}, "highest", "float32"),
-                 ({"matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": True,
-                   "runner": {"policy": {"amp_bfloat16": True}}}, "highest", "bfloat16"))
-        for config, matmul, dtype in cases:
-            with self.subTest(config=config), tempfile.TemporaryDirectory() as directory, \
-                    redirect_stdout(io.StringIO()):
-                evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0"),
-                                              config, directory, None)
-                path, report, job = completion_fixture(evaluator)
-                report.update(matmul_precision=matmul, inference_dtype=dtype,
-                              cudnn_benchmark=False)
-                path.write_text(json.dumps(report))
-                evaluator._complete(job)
-                self.assertEqual(job["status"], "completed")
-                self.assertEqual(evaluator.latest_completed["matmul_precision"], matmul)
-                self.assertEqual(evaluator.latest_completed["inference_dtype"], dtype)
-                self.assertEqual(evaluator.latest_completed["cudnn_benchmark"], report["cudnn_benchmark"])
-                self.assertEqual((evaluator.directory / "best.pt").read_bytes(), b"immutable stub weights")
 
-    def test_cpu_report_keeps_precision_validation_disabled(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1),
-                {"matmul_precision": "highest", "cudnn_allow_tf32": False, "cudnn_benchmark": True,
-                 "runner": {"policy": {"amp_bfloat16": True}}}, directory, None)
-            path, report, job = completion_fixture(evaluator)
-            for key in ("matmul_precision", "cudnn_allow_tf32", "cudnn_benchmark", "inference_dtype"):
-                report.pop(key)
-            path.write_text(json.dumps(report))
-            evaluator._complete(job)
-            self.assertEqual(job["status"], "completed")
+def test_settings_use_one_based_updates_and_only_configure_evaluation_execution():
+    value = TrainingEvalConfig(every_n_updates=3, maps_per_opponent=2, backend='cpu')
+    assert value.every_n_updates == 3 and value.maps_per_opponent == 2
+    assert [value.due(update) for update in (0, 1, 2, 3, 4, 6)] == [False, False, False, True, False, True]
+    assert not TrainingEvalConfig(enabled=False, every_n_updates=3).due(3)
+    assert 'inference' not in asdict(value)
+    assert not value.synchronous and value.worker_timeout_seconds is None
+    assert TrainingEvalConfig(device='cuda').synchronous
+    assert TrainingEvalConfig(device='cuda').worker_timeout_seconds == 1800
 
-    def test_reference_cuda_report_preserves_training_cudnn_benchmark(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, device="cuda:0", reference_inference=True),
-                                          {"cudnn_benchmark": True}, directory, None)
-            path, report, job = completion_fixture(evaluator)
-            report["cudnn_benchmark"] = True
-            path.write_text(json.dumps(report))
-            evaluator._complete(job)
-            self.assertEqual(job["status"], "completed")
 
-    def test_precision_metadata_distinguishes_cuda_autocast_from_cpu_parameters(self):
-        policy = torch.nn.Linear(2, 1)
-        policy.amp_bfloat16 = True
-        self.assertEqual(_inference_metadata(policy, "cpu"),
-                         {"parameter_dtype": "float32", "inference_dtype": "float32"})
-        # Device strings inspect the contract without creating a CUDA context.
-        self.assertEqual(_inference_metadata(policy, "cuda:0"),
-                         {"parameter_dtype": "float32", "inference_dtype": "bfloat16"})
-        policy.amp_bfloat16 = False
-        self.assertEqual(_inference_metadata(policy, "cuda:0"),
-                         {"parameter_dtype": "float32", "inference_dtype": "float32"})
+@pytest.mark.parametrize('values', [
+    {'enabled': 'yes'}, {'every_n_updates': 0}, {'maps_per_opponent': True}, {'batch_size': -1},
+    {'max_ticks': 0}, {'seed': -1}, {'cpu_threads': 0}, {'final_top_k': -1},
+    {'final_games_multiplier': 0}, {'keep_snapshots': 0}, {'backend': 'gpu'}, {'backend': 'other'},
+    {'device': None}, {'device': 'invalid'}, {'device': 'mps'}, {'timeout_seconds': True},
+    {'timeout_seconds': 0}, {'timeout_seconds': float('inf')},
+    {'allow_shared_gpus': True}, {'allow_shared_gpus': 'yes'},
+    {'device': 'cuda', 'cuda_visible_devices': ''}, {'device': 'cuda', 'cuda_visible_devices': '1,01'},
+    {'device': 'cuda', 'cuda_visible_devices': '1,GPU-aaa'}, {'device': 'cuda:1', 'cuda_visible_devices': '2'},
+    {'device': 'cuda', 'cuda_visible_devices': '6,7'},
+    {'profile': []},
+])
+def test_invalid_settings_fail_early(values):
+    with pytest.raises((TypeError, ValueError)):
+        TrainingEvalConfig(**values)
 
-    def test_default_is_enabled_every_ten_learned_snapshots_and_validates_early(self):
-        settings = TrainingEvalConfig()
-        self.assertTrue(settings.enabled)
-        self.assertTrue(settings.stochastic)
-        self.assertEqual(settings.every_n_snapshots, 10)
-        self.assertEqual(settings.maps_per_ai, 50)
-        self.assertEqual(settings.device, "cpu")
-        self.assertNotIn("baseline_workers", asdict(settings))
-        self.assertEqual(settings.batch_size, 0)
-        self.assertEqual(settings.env_backend, "cpu")
-        self.assertFalse(settings.synchronous)
-        self.assertIsNone(settings.worker_timeout_seconds)
-        self.assertTrue(TrainingEvalConfig(device="cuda:0").synchronous)
-        self.assertEqual(TrainingEvalConfig(device="cuda").worker_timeout_seconds, 1800)
-        self.assertEqual(TrainingEvalConfig(device="cuda", timeout_seconds=15).worker_timeout_seconds, 15)
-        cases = ({"enabled": "yes"}, {"stochastic": "yes"}, {"reference_inference": "yes"}, {"every_n_snapshots": 0}, {"maps_per_ai": True},
-                 {"batch_size": -1}, {"max_ticks": -1}, {"seed": -1}, {"cpu_threads": 0},
-                 {"env_backend": "gpu"}, {"env_backend": "unknown"}, {"baseline_workers": 0}, {"baseline_workers": True},
-                 {"device": None}, {"device": "invalid"}, {"device": "mps"},
-                 {"cuda_visible_devices": "1"}, {"device": "cuda", "cuda_visible_devices": 1},
-                 {"device": "cuda", "cuda_visible_devices": "1,,2"},
-                 {"device": "cuda", "cuda_visible_devices": "1,01"},
-                 {"device": "cuda", "cuda_visible_devices": "1,GPU-aaaa"},
-                 {"allow_shared_gpus": True}, {"allow_shared_gpus": "yes"},
-                 {"device": "cuda:1", "cuda_visible_devices": "2"},
-                 {"device": "cuda", "cuda_visible_devices": ""},
-                 {"timeout_seconds": 0}, {"timeout_seconds": True}, {"timeout_seconds": float("inf")})
-        with tempfile.TemporaryDirectory() as directory:
-            for values in cases:
-                config = small_config()
-                config["evaluation"].update(values)
-                output = Path(directory) / "run"
-                with self.subTest(values=values), self.assertRaises((TypeError, ValueError)):
-                    train(config, output, iterations=1)
-                self.assertFalse(output.exists())
 
-    def test_dedicated_gpu_is_async_and_must_be_excluded_from_training(self):
-        settings = TrainingEvalConfig(device="cuda", cuda_visible_devices="7")
-        self.assertEqual(settings.device, "cuda:0")
-        self.assertFalse(settings.synchronous)
-        self.assertEqual(settings.worker_timeout_seconds, 1800)
-        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6"}):
-            settings.validate_training_devices("cuda:0")
-        shared = TrainingEvalConfig(device="cuda:0", cuda_visible_devices="0,1", allow_shared_gpus=True)
-        self.assertFalse(shared.synchronous)
-        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1"}):
-            shared.validate_training_devices("cuda:0")
-        for visible in ("", "0,7", "0,07", "GPU-aaaa"):
-            with self.subTest(visible=visible), patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": visible}):
-                with self.assertRaises(ValueError):
-                    settings.validate_training_devices("cuda:0")
-        # CPU learners need not reserve CUDA devices.
-        settings.validate_training_devices("cpu")
-        uuid = TrainingEvalConfig(device="cuda:0", cuda_visible_devices="GPU-abcdef-1234")
-        with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "GPU-fedcba-4321"}):
-            uuid.validate_training_devices("cuda:0")
-        for visible in ("GPU-abcdef", "GPU-abcdef-1234-5678", "7"):
-            with self.subTest(visible=visible), patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": visible}):
-                with self.assertRaises(ValueError):
-                    uuid.validate_training_devices("cuda:0")
+def test_dedicated_gpu_requires_disjoint_training_visibility():
+    settings = TrainingEvalConfig(device='cuda', cuda_visible_devices='7')
+    assert settings.device == 'cuda:0' and not settings.synchronous
+    with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1,2,3,4,5,6'}):
+        settings.validate_training_devices('cuda:0')
+    for visible in ('', '0,7', '0,07', 'GPU-aaaa'):
+        with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': visible}), pytest.raises(ValueError):
+            settings.validate_training_devices('cuda:0')
+    settings.validate_training_devices('cpu')
+    shared = TrainingEvalConfig(device='cuda', cuda_visible_devices='0', allow_shared_gpus=True)
+    with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1'}):
+        shared.validate_training_devices('cuda:0')
 
-    def test_real_eval_survives_eviction_records_four_ai_in_tensorboard_and_preserves_training(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "enabled"
-            config = small_config()
-            original = deepcopy(config)
-            summary = train(config, output, iterations=13)
-            learner_rng_after_eval = torch.get_rng_state().clone()
-            self.assertEqual(config, original)
-            evidence = summary["evaluation"]
-            self.assertEqual((evidence["scheduled"], evidence["completed"], evidence["failed"]), (1, 1, 0))
-            point = evidence["latest_completed"]
-            self.assertEqual((point["snapshot_id"], point["iteration"], point["publication_index"]), (10, 9, 10))
-            self.assertEqual(point["steps_per_environment"], 40)
-            self.assertEqual(point["environment_steps"], 160)
-            frozen = output / "evaluations/snapshot_00000010/snapshot.pt"
-            self.assertTrue(frozen.exists())
-            self.assertFalse((output / "history_pool/snapshot_00000010.pt").exists())
-            self.assertEqual(sha256(frozen.read_bytes()).hexdigest(), point["checkpoint_sha256"])
-            report = json.loads(Path(point["report"]).read_text())
-            self.assertEqual(report["training_opponent"], "self_play")
-            self.assertEqual(report["device"], "cpu")
-            self.assertEqual(report["parameter_dtype"], "float32")
-            self.assertEqual(report["inference_dtype"], "float32")
-            self.assertIn(report["matmul_precision"], ("highest", "high", "medium"))
-            self.assertEqual(report["policy"], "student_local")
-            self.assertEqual(report["completed_games"], 8)
-            self.assertTrue(report["stochastic"])
-            self.assertEqual(report["sampling_seed"], report["seed"])
-            self.assertEqual(report["sampling_protocol"], "per_game_numpy_uniform_cdf_v1")
-            self.assertEqual(set(report["by_ai"]), set(AI_KINDS))
-            for metrics in report["by_ai"].values():
-                self.assertEqual(metrics["games"], 2)
-                self.assertEqual(metrics["wins"] + metrics["losses"] + metrics["draws"], 2)
-            events = EventAccumulator(str(output)).Reload()
-            self.assertEqual(events.Scalars("Eval/stochastic")[0].value, 1)
-            for kind in (*AI_KINDS, "overall"):
-                logged = events.Scalars(f"Eval/{kind}/win_rate")
-                self.assertEqual(len(logged), 1)
-                self.assertEqual(logged[0].step, 9)
-                metrics = report["overall"] if kind == "overall" else report["by_ai"][kind]
-                self.assertAlmostEqual(logged[0].value, metrics["win_rate"])
-                for key, value in metrics["action_metrics"].items():
-                    action = events.Scalars(f"Eval/{kind}/action/{key}")
-                    self.assertEqual(action[0].step, 9)
-                    self.assertAlmostEqual(action[0].value, value, places=5)
-            jobs = json.loads((output / "evaluations/index.json").read_text())["jobs"]
-            self.assertEqual([job["status"] for job in jobs], ["completed"])
-            # The independent process must not consume learner RNG, update its
-            # policy, alter either optimizer, or change self-play assignments.
-            disabled = Path(directory) / "disabled"
-            config["evaluation"]["enabled"] = False
-            disabled_summary = train(config, disabled, iterations=13)
-            torch.testing.assert_close(torch.get_rng_state(), learner_rng_after_eval, rtol=0, atol=0)
-            self.assertFalse((disabled / "evaluations").exists())
-            actual = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
-            expected = torch.load(disabled / "checkpoint.pt", weights_only=False, map_location="cpu")
-            for key in ("model_state_dict", "optimizer_state_dict", "optimizer_stu_enc_state_dict"):
-                assert_nested_equal(self, actual[key], expected[key])
-            for key in ("episode_assignments", "active_snapshot_counts"):
-                self.assertEqual(summary["self_play"][key], disabled_summary["self_play"][key])
 
-    def test_all_due_evaluations_are_queued_and_reported_in_snapshot_order(self):
-        config = small_config()
-        config["evaluation"]["every_n_snapshots"] = 2
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "run"
-            summary = train(config, output, iterations=6)
-            self.assertEqual(summary["evaluation"]["completed"], 3)
-            self.assertEqual(summary["evaluation"]["queued"], 0)
-            self.assertEqual(summary["evaluation"]["running"], 0)
-            points = json.loads((output / "evaluations/index.json").read_text())["jobs"]
-            self.assertTrue(all(point["status"] == "completed" for point in points))
-            self.assertEqual([p["publication_index"] for p in points], [2, 4, 6])
-            self.assertEqual([p["iteration"] for p in points], [1, 3, 5])
-            events = EventAccumulator(str(output)).Reload()
-            self.assertEqual([p.step for p in events.Scalars("Eval/overall/win_rate")], [1, 3, 5])
+@pytest.mark.parametrize('field,value', [
+    ('policy_id', 'wrong'), ('profile_id', 'wrong'), ('status', 'partial'), ('games', 7),
+    ('expected_games', 7), ('errors', ['failure']), ('device', 'cuda:0'), ('backend', 'gpu'),
+    ('elo', float('nan')), ('elo', True), ('elo_ci', {'lower': 120, 'upper': 80}),
+    ('results', []), ('by_opponent', {}),
+])
+def test_mismatched_reports_cannot_promote_best(evaluator, field, value):
+    job = enqueue(evaluator, 2)
+    report = report_for(job)
+    report[field] = value
+    Path(job['report']).write_text(json.dumps(report))
+    with pytest.raises(RuntimeError):
+        evaluator._complete(job)
+    assert evaluator.best_completed is None
+    assert not (evaluator.output / 'best_model.json').exists()
 
-    def test_synchronous_path_completes_at_update_boundary_and_preserves_learner(self):
-        """Exercise real workers on CPU; CUDA device routing is tested separately."""
-        config = small_config()
-        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1, timeout_seconds=1800)
-        observed = []
-        original_on_snapshot = PeriodicEvaluator.on_snapshot
 
-        def on_snapshot(evaluator, *args, **kwargs):
-            scheduled = original_on_snapshot(evaluator, *args, **kwargs)
-            if scheduled:
-                observed.append(evaluator.jobs[-1]["iteration"])
-                self.assertEqual(evaluator.jobs[-1]["status"], "completed")
-                self.assertIsNone(evaluator.running)
-                self.assertFalse(evaluator.pending)
-            return scheduled
+def test_best_uses_elo_and_retains_full_resume_reference(evaluator):
+    first, second = enqueue(evaluator, 2), enqueue(evaluator, 4)
+    complete(evaluator, first, 100)
+    complete(evaluator, second, 80)
+    best = json.loads((evaluator.output / 'best_model.json').read_text())
+    assert best['policy_id'] == first['policy_id']
+    assert best['elo'] == 100 and best['elo_ci']['lower'] == 80
+    assert Path(best['checkpoint']).read_bytes().startswith(b'synthetic full resume')
+    assert Path(best['bundle']).is_dir()
+    assert not (evaluator.directory / 'best.pt').exists()
 
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "sync"
-            with patch.object(TrainingEvalConfig, "synchronous", new_callable=PropertyMock, return_value=True), \
-                    patch.object(PeriodicEvaluator, "on_snapshot", on_snapshot):
-                summary = train(config, output, iterations=6)
-            learner_rng = torch.get_rng_state().clone()
-            self.assertEqual(observed, [1, 3, 5])
-            self.assertEqual(summary["evaluation"]["completed"], 3)
-            points = json.loads((output / "evaluations/index.json").read_text())["jobs"]
-            self.assertTrue(all(point["synchronous"] for point in points))
-            self.assertEqual(sum(Path(point["checkpoint"]).exists() for point in points), 1)
-            events = EventAccumulator(str(output)).Reload()
-            self.assertEqual([point.step for point in events.Scalars("Eval/overall/win_rate")], [1, 3, 5])
-            wall_times = events.Scalars("Perf/wall_seconds")
-            self.assertGreaterEqual(wall_times[-1].value, sum(point["worker_seconds"] for point in points))
-            disabled = Path(directory) / "disabled"
-            config["evaluation"]["enabled"] = False
-            train(config, disabled, iterations=6)
-            torch.testing.assert_close(torch.get_rng_state(), learner_rng, rtol=0, atol=0)
-            actual = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
-            expected = torch.load(disabled / "checkpoint.pt", weights_only=False, map_location="cpu")
-            for key in ("model_state_dict", "optimizer_state_dict", "optimizer_stu_enc_state_dict"):
-                assert_nested_equal(self, actual[key], expected[key])
 
-    def test_cuda_worker_inherits_devices_and_releases_only_unused_cache(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0", baseline_workers=4), {}, directory, None)
-            job = {"checkpoint": "snapshot.pt", "report": "report.json",
-                   "worker_log": str(evaluator.directory / "worker.log"), "status": "queued"}
-            evaluator.jobs.append(job)
-            evaluator.pending.append(job)
-            process = SimpleNamespace(pid=123, poll=lambda: None)
-            with patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "test-device", "PYTHONPATH": "frozen-source"}), \
-                    patch("generals_rl.training_evaluation.subprocess.Popen", return_value=process) as popen, \
-                    patch("generals_rl.training_evaluation.torch.cuda.is_initialized", return_value=True), \
-                    patch("generals_rl.training_evaluation.torch.cuda.synchronize") as synchronize, \
-                    patch("generals_rl.training_evaluation.torch.cuda.empty_cache") as empty_cache:
-                evaluator.poll()
-            command = popen.call_args.args[0]
-            self.assertEqual(command[command.index("--device") + 1], "cuda:0")
-            self.assertNotIn("--baseline-workers", command)
-            self.assertTrue(popen.call_args.kwargs["start_new_session"])
-            self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "test-device")
-            self.assertEqual(popen.call_args.kwargs["env"]["PYTHONPATH"], "frozen-source")
-            self.assertEqual(popen.call_args.kwargs["env"]["OPENBLAS_NUM_THREADS"], "1")
-            synchronize.assert_called_once_with()
-            empty_cache.assert_called_once_with()
-            # This is a fake routing worker; no CUDA context or process exists.
-            evaluator.running = None
+def test_persistent_key_deduplicates_same_model_profile(evaluator):
+    job = enqueue(evaluator, 2)
+    assert evaluator._enqueue(job['bundle'], job['checkpoint'], job['checkpoint_sha256'], job['policy_id'],
+        evaluator.profile, 2, 8, 32, stage='periodic', final=True) is None
+    assert len(evaluator.jobs) == 1 and job['final'] is True
 
-    def test_dedicated_cuda_worker_overrides_visibility_without_touching_learner_cuda(self):
-        with tempfile.TemporaryDirectory() as directory:
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(device="cuda:0", cuda_visible_devices="6,7"),
-                                          {}, directory, None)
-            job = {"checkpoint": "snapshot.pt", "report": "report.json",
-                   "worker_log": str(evaluator.directory / "worker.log"), "status": "queued"}
-            evaluator.jobs.append(job)
-            evaluator.pending.append(job)
-            process = SimpleNamespace(pid=123, poll=lambda: None)
-            with patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6"}), \
-                    patch("generals_rl.training_evaluation.subprocess.Popen", return_value=process) as popen, \
-                    patch("generals_rl.training_evaluation.torch.cuda.synchronize") as synchronize, \
-                    patch("generals_rl.training_evaluation.torch.cuda.empty_cache") as empty_cache:
-                evaluator.poll()
-                self.assertEqual(os.environ["CUDA_VISIBLE_DEVICES"], "0,1,2,3,4,5,6")
-            self.assertEqual(popen.call_args.kwargs["env"]["CUDA_VISIBLE_DEVICES"], "6,7")
-            command = popen.call_args.args[0]
-            self.assertEqual(command[command.index("--device") + 1], "cuda:0")
-            self.assertEqual(command[command.index("--devices") + 1:], ["cuda:0", "cuda:1", "--trace-directory",
-                             str(Path(job["report"]).parent / "demo_traces")])
-            synchronize.assert_not_called()
-            empty_cache.assert_not_called()
-            evaluator.running = None
 
-    @unittest.skipUnless(os.environ.get("GENERALS_TEST_EVAL_GPU"), "set GENERALS_TEST_EVAL_GPU to a reserved GPU")
-    def test_real_dedicated_cuda_eval_does_not_pause_or_change_gpu_learner(self):
-        config = small_config()
-        config["task"].update(backend="gpu", device="cuda:0")
-        config["evaluation"].update(device="cuda:0", cuda_visible_devices=os.environ["GENERALS_TEST_EVAL_GPU"],
-                                    every_n_snapshots=2)
-        observed = []
-        original = PeriodicEvaluator.on_snapshot
+def test_restart_recovers_queue_and_new_output_adopts_immutable_files(evaluator, tmp_path):
+    job = enqueue(evaluator, 2)
+    job.update(status='running', pid=99999999, deadline=1.0, timeout_seconds=.1)
+    evaluator._save_index()
+    old_index = (evaluator.directory / 'index.json').read_bytes()
+    restarted = PeriodicEvaluator(evaluator.settings, evaluator.run_config, evaluator.output, None)
+    assert restarted.jobs[0]['status'] == 'queued' and len(restarted.pending) == 1
+    assert restarted.jobs[0]['deadline'] is None and restarted.jobs[0]['timeout_seconds'] is None
+    resumed = PeriodicEvaluator(evaluator.settings, evaluator.run_config, tmp_path / 'resumed', None,
+                                 resume=evaluator.output / 'checkpoint.pt')
+    imported = resumed.jobs[0]
+    assert imported['key'] == job['key'] and imported['status'] == 'queued'
+    assert Path(imported['checkpoint']).is_relative_to(tmp_path / 'resumed')
+    assert Path(imported['checkpoint']).read_bytes() == Path(job['checkpoint']).read_bytes()
+    assert Path(imported['profile_path']).is_file() and Path(imported['bundle']).is_dir()
+    # The first explicit restart may normalize the old running status; import
+    # must subsequently leave that old run untouched.
+    assert json.loads(old_index)['jobs'][0]['status'] == 'running'
+    assert json.loads((evaluator.directory / 'index.json').read_text())['jobs'][0]['status'] == 'queued'
 
-        def on_snapshot(evaluator, *args, **kwargs):
-            scheduled = original(evaluator, *args, **kwargs)
-            if scheduled:
-                observed.append((evaluator.jobs[-1]["iteration"], evaluator.jobs[-1]["status"]))
-                self.assertIsNotNone(evaluator.running)
-            return scheduled
 
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "async"
-            with patch.object(PeriodicEvaluator, "on_snapshot", on_snapshot):
-                summary = train(config, output, iterations=6)
-            learner_rng = torch.get_rng_state().clone()
-            learner_cuda_rng = torch.cuda.get_rng_state().clone()
-            self.assertEqual([iteration for iteration, _ in observed], [1, 3, 5])
-            self.assertTrue(all(status in ("running", "queued") for _, status in observed))
-            self.assertEqual(summary["evaluation"]["completed"], 3)
-            points = json.loads((output / "evaluations/index.json").read_text())["jobs"]
-            self.assertTrue(all(not point["synchronous"] for point in points))
-            self.assertTrue(all(point["cuda_visible_devices"] == os.environ["GENERALS_TEST_EVAL_GPU"] for point in points))
-            config["evaluation"]["enabled"] = False
-            disabled = Path(directory) / "disabled"
-            train(config, disabled, iterations=6)
-            torch.testing.assert_close(torch.get_rng_state(), learner_rng, rtol=0, atol=0)
-            torch.testing.assert_close(torch.cuda.get_rng_state(), learner_cuda_rng, rtol=0, atol=0)
-            actual = torch.load(output / "checkpoint.pt", weights_only=False, map_location="cpu")
-            expected = torch.load(disabled / "checkpoint.pt", weights_only=False, map_location="cpu")
-            for key in ("model_state_dict", "optimizer_state_dict", "optimizer_stu_enc_state_dict"):
-                assert_nested_equal(self, actual[key], expected[key])
+def test_completed_report_tampering_is_rejected_on_resume(evaluator):
+    job = enqueue(evaluator, 2)
+    complete(evaluator, job)
+    Path(job['report']).write_text('{}')
+    with pytest.raises(ValueError, match='report changed'):
+        PeriodicEvaluator(evaluator.settings, evaluator.run_config, evaluator.output, None)
 
-    def test_worker_group_cleanup_kills_a_child_that_ignores_sigterm(self):
-        with tempfile.TemporaryDirectory() as directory:
-            ready = Path(directory) / "child_pid"
-            child_code = ("import os, signal, sys, time; from pathlib import Path; "
-                          "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-                          "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)")
-            parent_code = ("import subprocess, sys, time; "
-                           "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]]); time.sleep(60)")
-            process = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(ready)],
-                                       start_new_session=True)
-            try:
-                deadline = time.monotonic() + 5
-                while not ready.exists() and time.monotonic() < deadline:
-                    time.sleep(.01)
-                self.assertTrue(ready.exists())
-                child_pid = int(ready.read_text())
-                _stop_worker(process)
-                self.assertIsNotNone(process.poll())
-                state_path = Path(f"/proc/{child_pid}/stat")
-                deadline = time.monotonic() + 2
-                while state_path.exists():
-                    state = state_path.read_text().rsplit(") ", 1)[1].split()[0]
-                    if state in ("Z", "X"):
-                        break
-                    self.assertLess(time.monotonic(), deadline)
-                    time.sleep(.01)
-            finally:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait(timeout=5)
 
-    def test_nonzero_worker_exit_poll_reaps_surviving_sigterm_ignoring_child(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            root = Path(directory)
-            ready = root / "child_pid"
-            child_code = ("import os, signal, sys, time; from pathlib import Path; "
-                          "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-                          "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)")
-            parent_code = ("import subprocess, sys, time\nfrom pathlib import Path\n"
-                           "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2]])\n"
-                           "while not Path(sys.argv[2]).exists():\n    time.sleep(.01)\n"
-                           "sys.exit(7)\n")
-            process = subprocess.Popen([sys.executable, "-c", parent_code, child_code, str(ready)],
-                                       start_new_session=True)
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(keep_snapshots=1),
-                                          {}, root / "run", None)
-            checkpoint = root / "snapshot.pt"
-            checkpoint.write_bytes(b"immutable test stub; no model")
-            job = {"status": "running", "snapshot_id": 1, "iteration": 0,
-                   "publication_index": 1, "checkpoint": str(checkpoint),
-                   "report": str(root / "report.json"), "worker_log": str(root / "worker.log")}
-            evaluator.jobs.append(job)
-            try:
-                self.assertEqual(process.wait(timeout=5), 7)
-                self.assertTrue(ready.exists())
-                child_pid = int(ready.read_text())
-                state_path = Path(f"/proc/{child_pid}/stat")
-                self.assertTrue(state_path.exists())
-                self.assertNotIn(state_path.read_text().rsplit(") ", 1)[1].split()[0], ("Z", "X"))
-                evaluator.running = job, process, time.perf_counter()
-                evaluator.poll()
-                self.assertIsNone(evaluator.running)
-                self.assertEqual(job["status"], "failed")
-                self.assertEqual(job["returncode"], 7)
-                self.assertIn("exited with code 7", job["error"])
-                self.assertEqual(evaluator.describe()["failed"], 1)
-                self.assertIsNone(evaluator.latest_completed)
-                self.assertIsNone(evaluator.best_completed)
-                index = json.loads((evaluator.directory / "index.json").read_text())
-                self.assertEqual(index["jobs"][0]["status"], "failed")
-                self.assertEqual(index["jobs"][0]["returncode"], 7)
-                deadline = time.monotonic() + 2
-                while state_path.exists():
-                    try:
-                        state = state_path.read_text().rsplit(") ", 1)[1].split()[0]
-                    except (FileNotFoundError, ProcessLookupError):
-                        break
-                    if state in ("Z", "X"):
-                        break
-                    self.assertLess(time.monotonic(), deadline)
-                    time.sleep(.01)
-            finally:
-                evaluator.close()
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait(timeout=5)
+@pytest.mark.parametrize('keep', [None, 1])
+def test_retention_preserves_pending_best_and_finalists(tmp_path, keep):
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, keep_snapshots=keep, final_top_k=2),
+                                  small_config(), tmp_path / 'run', None)
+    jobs = [enqueue(evaluator, value) for value in (1, 2, 3, 4, 5)]
+    jobs[3]['status'] = 'running'
+    for job in jobs:
+        bundle = Path(job['bundle'])
+        (bundle / 'actor.pt').write_bytes(b'opaque actor weights')
+        (bundle / 'policy').mkdir()
+        (bundle / 'policy' / 'runtime.py').write_text('# frozen runtime\n')
+        Path(job['worker_log']).write_text('evaluation log\n')
+    complete(evaluator, jobs[0], 100)
+    complete(evaluator, jobs[1], 90)
+    complete(evaluator, jobs[2], 20)
+    assert all(Path(job['checkpoint']).exists() and Path(job['bundle']).is_dir() for job in jobs)
+    complete(evaluator, jobs[3], 10)
+    evaluator._prune_snapshots()  # Repeated cleanup also sees already removed pairs.
+    for index, job in enumerate(jobs):
+        retained = keep is None or index != 2
+        assert Path(job['checkpoint']).exists() == retained
+        assert Path(job['bundle']).exists() == retained
+        assert job['checkpoint_retained'] == retained
+        assert Path(job['profile_path']).is_file() and Path(job['worker_log']).is_file()
+        if job['status'] == 'completed':
+            assert sha256(Path(job['report']).read_bytes()).hexdigest() == job['report_sha256']
 
-    def test_timeout_and_exception_cleanup_reap_workers_and_bound_failed_weights(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            root = Path(directory)
-            pool = root / "pool"
-            pool.mkdir()
-            checkpoint = pool / "snapshot.pt"
-            checkpoint.write_bytes(b"test immutable weights")
-            snapshot = lambda sid: SimpleNamespace(snapshot_id=sid, metadata={
-                "iteration": sid, "filename": checkpoint.name,
-                "sha256": sha256(checkpoint.read_bytes()).hexdigest(), "seed": False})
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(every_n_snapshots=1, keep_snapshots=1,
-                                                             timeout_seconds=0.02), {}, root / "run", None)
-            real_popen = subprocess.Popen
-            workers = []
 
-            def sleeping_worker(*args, **kwargs):
-                process = real_popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
-                workers.append(process)
-                return process
+def test_earlier_resume_recovers_pruned_candidate_from_exact_resume_bytes(tmp_path):
+    from generals_arena.policies.artifacts import validate_bundle
+    from generals_rl.export import prepare_policy_source
+    from rl_policy_test_utils import make_checkpoint
 
-            kwargs = {"steps_per_environment": 4, "environment_steps": 16}
-            try:
-                with patch("generals_rl.training_evaluation.subprocess.Popen", side_effect=sleeping_worker):
-                    evaluator.on_snapshot(snapshot(1), pool, publication_index=1, **kwargs)
-                    evaluator.finish()
-                    self.assertEqual(evaluator.jobs[0]["status"], "failed")
-                    self.assertIn("TimeoutError", evaluator.jobs[0]["error"])
-                    self.assertIsNotNone(workers[0].poll())
-                    self.assertIsNone(evaluator.latest_completed)
-                    self.assertFalse((evaluator.directory / "best.pt").exists())
-                    evaluator.settings = TrainingEvalConfig(every_n_snapshots=1, keep_snapshots=1)
-                    evaluator.on_snapshot(snapshot(2), pool, publication_index=2, **kwargs)
-                    evaluator.on_snapshot(snapshot(3), pool, publication_index=3, **kwargs)
-                    evaluator.close()
-                self.assertTrue(all(process.poll() is not None for process in workers))
-                self.assertFalse(evaluator.pending)
-                self.assertIsNone(evaluator.running)
-                self.assertEqual([job["status"] for job in evaluator.jobs], ["failed", "cancelled", "cancelled"])
-                self.assertEqual(sum(Path(job["checkpoint"]).exists() for job in evaluator.jobs), 1)
-                index = json.loads((evaluator.directory / "index.json").read_text())
-                self.assertEqual([job["status"] for job in index["jobs"]], ["failed", "cancelled", "cancelled"])
-            finally:
-                evaluator.close()
+    root = tmp_path / 'run'
+    root.mkdir()
+    resume, config = make_checkpoint(root, filename='model_2.pt')
+    source = prepare_policy_source(config, root)
+    saved = torch.load(resume, weights_only=True)
+    saved['infos'] = {**source, 'completed_ppo_updates': 2}
+    torch.save(saved, resume)
+    settings = TrainingEvalConfig(every_n_updates=2, maps_per_opponent=1, keep_snapshots=1, final_top_k=0)
+    evaluator = PeriodicEvaluator(settings, config, root, None, source=source)
+    with patch.object(evaluator, 'poll'):
+        evaluator.on_checkpoint(resume, completed_updates=2, steps_per_environment=8, environment_steps=32)
+    first = evaluator.jobs[0]
+    original_manifest = validate_bundle(first['bundle'])['manifest']
+    for job, elo in ((first, 100), (enqueue(evaluator, 4), 200), (enqueue(evaluator, 6), 300)):
+        complete(evaluator, job, elo)
+    assert not Path(first['checkpoint']).exists()
+    assert not Path(first['bundle']).exists()
+    resumed = PeriodicEvaluator(settings, config, tmp_path / 'branch', None,
+                                resume=resume, resume_updates=2)
+    best = json.loads((resumed.output / 'best_model.json').read_text())
+    assert best['completed_ppo_updates'] == 2
+    assert Path(best['checkpoint']).read_bytes() == resume.read_bytes()
+    restored = validate_bundle(best['bundle'])
+    assert restored['policy_id'] == first['policy_id']
+    assert restored['manifest'] == original_manifest
+    assert resumed.jobs[0]['checkpoint_retained']
+    assert not Path(first['checkpoint']).exists()  # Do not alter the source run.
+    assert not Path(first['bundle']).exists()
 
-    def test_retention_keeps_recent_weights_best_and_all_reports(self):
-        config = small_config()
-        config["evaluation"].update(every_n_snapshots=2, keep_snapshots=1)
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            output = Path(directory) / "run"
-            summary = train(config, output, iterations=6)
-            evaluations = output / "evaluations"
-            jobs = json.loads((evaluations / "index.json").read_text())["jobs"]
-            self.assertEqual([Path(job["checkpoint"]).exists() for job in jobs], [False, False, True])
-            self.assertTrue(all(Path(job["report"]).is_file() for job in jobs))
-            best = summary["evaluation"]["best_completed"]
-            self.assertEqual(sha256((evaluations / "best.pt").read_bytes()).hexdigest(), best["checkpoint_sha256"])
-            self.assertEqual(json.loads((evaluations / "run_config.json").read_text()), config)
-            best_report = json.loads((evaluations / "best_report.json").read_text())
-            self.assertEqual(best_report["checkpoint_sha256"], best["checkpoint_sha256"])
-            deployed = evaluate_builtin(evaluations / "best.pt", maps_per_ai=1, batch_size=8, max_ticks=3)
-            self.assertEqual(deployed["completed_games"], 8)
-            self.assertEqual(deployed["checkpoint_sha256"], best["checkpoint_sha256"])
-            events = EventAccumulator(str(output)).Reload()
-            self.assertEqual([point.step for point in events.Scalars("Eval/worst_ai/win_rate")], [1, 3, 5])
 
-    def test_best_prioritizes_worst_ai_then_aggressive_and_retention_does_not_delete_pending(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_ai=1, keep_snapshots=1), {}, directory, None)
-            queued_checkpoint = evaluator.directory / "queued.pt"
-            queued_checkpoint.write_bytes(b"still needed by worker")
-            evaluator.jobs.append({"status": "queued", "checkpoint": str(queued_checkpoint)})
-            # Higher overall/ aggressive scores cannot compensate for a weaker
-            # worst opponent. Exact ties use aggressive, then overall.
-            cases = ((0.4, 0.4, 0.8, 1), (0.5, 0.5, 0.6, 2),
-                     (0.45, 0.7, 0.9, 2), (0.5, 0.55, 0.55, 4), (0.5, 0.55, 0.7, 5))
-            for index, (worst, aggressive, overall, expected_best) in enumerate(cases, 1):
-                checkpoint = evaluator.directory / f"candidate_{index}.pt"
-                checkpoint.write_bytes(f"weights {index}".encode())
-                report_path = evaluator.directory / f"report_{index}.json"
-                report = {"checkpoint_sha256": sha256(checkpoint.read_bytes()).hexdigest(),
-                          "scheduled_games": 8, "completed_games": 8, "policy": "student_local",
-                          "device": "cpu", "stochastic": True, "overall": {"win_rate": overall},
-                          "by_ai": {kind: {"games": 2, "win_rate": aggressive if kind == "aggressive" else worst}
-                                    for kind in AI_KINDS}}
-                report_path.write_text(json.dumps(report))
-                job = {"status": "running", "snapshot_id": index, "iteration": index,
-                       "publication_index": index, "steps_per_environment": index * 4,
-                       "environment_steps": index * 16, "checkpoint": str(checkpoint),
-                       "checkpoint_sha256": report["checkpoint_sha256"],
-                       "report": str(report_path), "worker_seconds": 0.1}
-                evaluator.jobs.append(job)
-                evaluator._complete(job)
-                self.assertEqual(evaluator.best_completed["snapshot_id"], expected_best)
-                self.assertEqual((evaluator.directory / "best.pt").read_bytes(), f"weights {expected_best}".encode())
-                self.assertTrue(queued_checkpoint.exists())
-            self.assertEqual(len(list(evaluator.directory.glob("candidate_*.pt"))), 1)
+def test_unavailable_candidates_remain_in_curves_but_cannot_be_best_or_finalists(evaluator, tmp_path):
+    first = enqueue(evaluator, 2)
+    complete(evaluator, first, 200)
+    Path(first['checkpoint']).unlink()
+    # An unrelated resume file must never be substituted for this candidate.
+    resume = evaluator.output / 'model_2.pt'
+    resume.write_bytes(b'different checkpoint')
+    restored = PeriodicEvaluator(evaluator.settings, evaluator.run_config, evaluator.output, None,
+                                  resume=resume, resume_updates=2)
+    assert len(restored.jobs) == 1 and restored.latest_completed['elo'] == 200
+    assert restored.best_completed is None and not (restored.output / 'best_model.json').exists()
+    complete(restored, enqueue(restored, 4), 100)
+    assert restored.best_completed['completed_ppo_updates'] == 4
+    assert [job['completed_ppo_updates'] for job in restored._candidates()] == [4]
 
-    def test_trace_retention_preserves_best_and_recent_finished_without_deleting_metrics(self):
-        with tempfile.TemporaryDirectory() as directory:
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(keep_snapshots=1), {}, directory, None)
-            for index, status in enumerate(("completed", "failed", "cancelled", "completed", "queued"), 1):
-                target = evaluator.directory / f"snapshot_{index:08d}"
-                target.mkdir()
-                (target / "snapshot.pt").write_bytes(f"weights {index}".encode())
-                trace = target / "demo_traces"
-                trace.mkdir()
-                (trace / "loss.jsonl").write_text(f"actions {index}\n")
-                (target / "report.json").write_text(f"metrics {index}\n")
-                (target / "worker.log").write_text(f"log {index}\n")
-                evaluator.jobs.append({"status": status, "checkpoint": str(target / "snapshot.pt"),
-                                       "report": str(target / "report.json")})
-            best = evaluator.jobs[0]
-            evaluator.best_completed = {"report": best["report"]}
-            (evaluator.directory / "best.pt").write_bytes(b"protected best weights")
-            best_report = {"selected_game_traces": {"cases": [{"path": str(
-                Path(best["report"]).parent / "demo_traces/loss.jsonl")} ]}}
-            (evaluator.directory / "best_report.json").write_text(json.dumps(best_report))
-            evaluator._prune_snapshots()
-            evaluator._save_index()
-            self.assertEqual([Path(job["checkpoint"]).exists() for job in evaluator.jobs],
-                             [False, False, False, True, True])
-            self.assertEqual([(Path(job["report"]).parent / "demo_traces").exists()
-                              for job in evaluator.jobs], [True, False, False, True, True])
-            self.assertEqual([job.get("trace_retained") for job in evaluator.jobs],
-                             [True, False, False, True, None])
-            self.assertTrue(Path(best_report["selected_game_traces"]["cases"][0]["path"]).exists())
-            self.assertEqual((evaluator.directory / "best.pt").read_bytes(), b"protected best weights")
-            for index, job in enumerate(evaluator.jobs, 1):
-                self.assertEqual(Path(job["report"]).read_text(), f"metrics {index}\n")
-                self.assertEqual((Path(job["report"]).parent / "worker.log").read_text(), f"log {index}\n")
-            self.assertFalse(json.loads((evaluator.directory / "index.json").read_text())["jobs"][1]["trace_retained"])
-            # Once a newer best replaces it, the old best's traces can expire.
-            evaluator.best_completed = {"report": evaluator.jobs[3]["report"]}
-            evaluator._prune_snapshots()
-            self.assertFalse((Path(best["report"]).parent / "demo_traces").exists())
-            self.assertFalse(best["trace_retained"])
-            # Historical CPU jobs without traces keep their index shape.
-            cpu = evaluator.directory / "cpu"
-            cpu.mkdir()
-            (cpu / "snapshot.pt").write_bytes(b"cpu weights")
-            evaluator.jobs.append({"status": "completed", "checkpoint": str(cpu / "snapshot.pt"),
-                                   "report": str(cpu / "report.json")})
-            evaluator._prune_snapshots()
-            self.assertNotIn("trace_retained", evaluator.jobs[-1])
 
-    def test_seed_is_not_counted_and_worker_failure_is_visible_without_a_false_win_rate(self):
-        with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
-            root = Path(directory)
-            source = root / "pool"
-            source.mkdir()
-            path = source / "snapshot_00000010.pt"
-            path.write_bytes(b"test frozen snapshot")
-            digest = sha256(path.read_bytes()).hexdigest()
-            snapshot = SimpleNamespace(snapshot_id=10, metadata={
-                "iteration": 499, "filename": path.name, "sha256": digest, "seed": False})
-            writer = SummaryWriter(root / "run")
-            evaluator = PeriodicEvaluator(TrainingEvalConfig(), {}, root / "run", writer)
-            seed = SimpleNamespace(snapshot_id=0, metadata={"seed": True})
-            kwargs = {"steps_per_environment": 16000, "environment_steps": 262144000}
-            self.assertFalse(evaluator.on_snapshot(seed, source, publication_index=0, **kwargs))
-            self.assertFalse(evaluator.on_snapshot(snapshot, source, publication_index=9, **kwargs))
-            with patch("generals_rl.training_evaluation.subprocess.Popen", side_effect=OSError("test spawn failure")):
-                self.assertTrue(evaluator.on_snapshot(snapshot, source, publication_index=10, **kwargs))
-            self.assertFalse(evaluator.on_snapshot(snapshot, source, publication_index=10, **kwargs))
-            evidence = evaluator.describe()
-            self.assertEqual((evidence["scheduled"], evidence["failed"], evidence["completed"]), (1, 1, 0))
-            self.assertIsNone(evidence["latest_completed"])
-            self.assertIn("test spawn failure", evaluator.jobs[0]["error"])
+def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monkeypatch):
+    from generals_arena.competitions.evaluation import make_profile, profile_id
+    root = tmp_path / 'profiles'
+    root.mkdir()
+    (root / 'weights.dat').write_bytes(b'opaque weights')
+    profile = make_profile({'width': 9, 'height': 9, 'players': 2}, opponents=[{
+        'name': 'custom', 'kind': 'custom', 'version': 'test', 'factory': 'example:create_controller',
+        'artifacts': {'weights': 'weights.dat'}}], max_ticks=2, maps_per_opponent=1)
+    path = root / 'profile.json'
+    path.write_text(json.dumps(profile))
+    monkeypatch.chdir(tmp_path)
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(profile=str(path)), small_config(), tmp_path / 'run', None)
+    assert evaluator.profile_id == profile_id(path)
+    job = enqueue(evaluator, 2)
+    assert profile_id(job['profile_path']) == evaluator.profile_id
+
+
+def test_top_k_confirmation_uses_identical_held_out_budget_and_changes_best(tmp_path):
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, keep_snapshots=1, final_top_k=2),
+                                  small_config(), tmp_path / 'run', None)
+    for value, elo in ((2, 100), (4, 200), (6, 50)):
+        complete(evaluator, enqueue(evaluator, value), elo)
+
+    def drain():
+        for job in list(evaluator.pending):
+            complete(evaluator, job, 300 if job['completed_ppo_updates'] == 2 else 100)
+
+    with patch.object(evaluator, 'drain', drain):
+        evaluator.finish()
+    finalists = [job for job in evaluator.jobs if job['stage'] == 'confirmation']
+    assert len(finalists) == 2
+    assert len({job['profile_id'] for job in finalists}) == 1
+    assert finalists[0]['profile_id'] != evaluator.profile_id
+    assert all(job['expected_games'] == expected_games(json.loads(Path(job['profile_path']).read_text())) == 20
+               for job in finalists)
+    assert evaluator.best_completed['completed_ppo_updates'] == 2
+    assert evaluator.best_completed['stage'] == 'confirmation'
+    assert json.loads((evaluator.output / 'best_model.json').read_text())['confirmation_complete']
+    for job in finalists:
+        periodic = next(candidate for candidate in evaluator.jobs
+                        if candidate['stage'] == 'periodic' and candidate['policy_id'] == job['policy_id'])
+        assert job['checkpoint'] == periodic['checkpoint'] and job['bundle'] == periodic['bundle']
+        assert Path(job['checkpoint']).is_file() and Path(job['bundle']).is_dir()
+    discarded = next(job for job in evaluator.jobs if job['completed_ppo_updates'] == 6)
+    assert not Path(discarded['checkpoint']).exists() and not Path(discarded['bundle']).exists()
+    assert Path(discarded['report']).is_file()
+    with patch.object(evaluator, 'drain', drain):
+        evaluator.finish()
+    assert len(evaluator.jobs) == 5
+
+
+@pytest.mark.parametrize('dedicated', [False, True])
+def test_gpu_worker_routing_without_cuda_context(tmp_path, dedicated):
+    settings = TrainingEvalConfig(device='cuda:0', cuda_visible_devices='7' if dedicated else None,
+                                   maps_per_opponent=1, final_top_k=0)
+    evaluator = PeriodicEvaluator(settings, small_config(), tmp_path / 'run', None)
+    job = enqueue(evaluator, 2)
+    process = SimpleNamespace(pid=123, poll=lambda: None)
+    with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1', 'PYTHONPATH': 'preserved'}), \
+         patch('generals_rl.training_evaluation.subprocess.Popen', return_value=process) as popen, \
+         patch('generals_rl.training_evaluation.torch.cuda.is_initialized', return_value=True), \
+         patch('generals_rl.training_evaluation.torch.cuda.synchronize') as sync, \
+         patch('generals_rl.training_evaluation.torch.cuda.empty_cache') as empty:
+        evaluator.poll()
+    command = popen.call_args.args[0]
+    assert command[command.index('-m') + 1:command.index('-m') + 3] == ['generals_arena', 'evaluate']
+    assert command[command.index('--bundle') + 1] == job['bundle']
+    assert popen.call_args.kwargs['start_new_session']
+    env = popen.call_args.kwargs['env']
+    assert env['CUDA_VISIBLE_DEVICES'] == ('7' if dedicated else '0,1')
+    assert env['PYTHONPATH'] == 'preserved' and env['OPENBLAS_NUM_THREADS'] == '1'
+    assert sync.call_count == empty.call_count == int(not dedicated)
+    evaluator.running = None  # This is a routing stub, never a live process.
+
+
+def test_real_training_evaluates_periodic_and_final_and_preserves_rng_and_optimizers(tmp_path):
+    config = small_config()
+    with redirect_stdout(io.StringIO()):
+        summary = train(config, tmp_path / 'enabled', iterations=3)
+        actual_rng = torch.get_rng_state().clone()
+        config['evaluation']['enabled'] = False
+        train(config, tmp_path / 'disabled', iterations=3)
+    torch.testing.assert_close(torch.get_rng_state(), actual_rng, rtol=0, atol=0)
+    evidence = summary['evaluation']
+    assert (evidence['scheduled'], evidence['completed'], evidence['failed']) == (2, 2, 0)
+    jobs = json.loads((tmp_path / 'enabled/evaluations/index.json').read_text())['jobs']
+    assert [job['completed_ppo_updates'] for job in jobs] == [2, 3]
+    assert jobs[-1]['final'] is True
+    for job in jobs:
+        saved = torch.load(job['checkpoint'], weights_only=True, map_location='cpu')
+        assert saved['iter'] + 1 == job['completed_ppo_updates']
+        assert saved['infos']['policy_spec'] and saved['infos']['source_id']
+        assert saved['optimizer_state_dict']['state']
+    actual = torch.load(tmp_path / 'enabled/checkpoint.pt', weights_only=True, map_location='cpu')
+    expected = torch.load(tmp_path / 'disabled/checkpoint.pt', weights_only=True, map_location='cpu')
+    for key in ('model_state_dict', 'optimizer_state_dict', 'optimizer_stu_enc_state_dict'):
+        assert_nested_equal(unittest.TestCase(), actual[key], expected[key])
+    events = EventAccumulator(str(tmp_path / 'enabled')).Reload()
+    assert [point.step for point in events.Scalars('Arena/elo')] == [2, 3]
+    best = json.loads((tmp_path / 'enabled/best_model.json').read_text())
+    assert Path(best['bundle']).is_dir() and Path(best['checkpoint']).is_file()
+
+
+def test_resume_into_new_output_recovers_pending_job_and_keeps_optimizer(tmp_path):
+    config = small_config()
+    config['evaluation']['enabled'] = False
+    with redirect_stdout(io.StringIO()):
+        train(config, tmp_path / 'first', iterations=2)
+    checkpoint = tmp_path / 'first/checkpoint.pt'
+    config['evaluation']['enabled'] = True
+    settings = TrainingEvalConfig(**config['evaluation'])
+    evaluator = PeriodicEvaluator(settings, config, tmp_path / 'first', None)
+    with patch.object(evaluator, 'poll'):
+        evaluator.on_checkpoint(checkpoint, completed_updates=2, steps_per_environment=8, environment_steps=32)
+    evaluator.close()
+    old_index = (evaluator.directory / 'index.json').read_bytes()
+    relocated = tmp_path / 'relocated'
+    (tmp_path / 'first').rename(relocated)
+    checkpoint = relocated / 'checkpoint.pt'
+    with redirect_stdout(io.StringIO()):
+        summary = train(config, tmp_path / 'resumed', iterations=1, resume=str(checkpoint))
+    assert summary['evaluation']['completed'] == 2 and summary['evaluation']['failed'] == 0
+    jobs = json.loads((tmp_path / 'resumed/evaluations/index.json').read_text())['jobs']
+    assert [job['completed_ppo_updates'] for job in jobs] == [2, 3]
+    assert all(Path(job['checkpoint']).is_relative_to(tmp_path / 'resumed') for job in jobs)
+    assert (relocated / 'evaluations/index.json').read_bytes() == old_index
+    saved = torch.load(tmp_path / 'resumed/checkpoint.pt', weights_only=True, map_location='cpu')
+    assert saved['iter'] == 2
+    assert {int(value['step']) for value in saved['optimizer_state_dict']['state'].values()} == {6}
+
+
+def test_resume_cannot_change_feature_contract_under_the_old_policy_spec(tmp_path):
+    config = small_config()
+    config['evaluation']['enabled'] = False
+    with redirect_stdout(io.StringIO()):
+        train(config, tmp_path / 'first', iterations=1)
+    config['task']['productive_actions'] = not config['task']['productive_actions']
+    with pytest.raises(ValueError, match='spec|Spec|config|warm.start'):
+        train(config, tmp_path / 'incompatible', iterations=1, resume=str(tmp_path / 'first/checkpoint.pt'))
+
+
+def test_continued_training_rebuilds_confirmation_finalists(tmp_path):
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, final_top_k=1),
+                                  small_config(), tmp_path / 'run', None)
+    complete(evaluator, enqueue(evaluator, 2), 100)
+
+    def drain():
+        for job in list(evaluator.pending):
+            complete(evaluator, job, job['completed_ppo_updates'] * 100)
+
+    with patch.object(evaluator, 'drain', drain):
+        evaluator.finish()
+    assert evaluator.confirmation['policies'] == [f'{2:064x}']
+    complete(evaluator, enqueue(evaluator, 4), 300)
+    assert evaluator.confirmation is None
+    with patch.object(evaluator, 'drain', drain):
+        evaluator.finish()
+    assert evaluator.confirmation['policies'] == [f'{4:064x}']
+    assert evaluator.best_completed['completed_ppo_updates'] == 4
+
+
+@pytest.mark.parametrize('changes', [{'batch_size': 64}, {'cpu_threads': 2}, {'final_top_k': 3}])
+def test_resume_pins_deployment_and_confirmation_budget(evaluator, changes):
+    settings = asdict(evaluator.settings)
+    settings.update(changes)
+    with pytest.raises(ValueError, match='deployment|selection budget'):
+        PeriodicEvaluator(TrainingEvalConfig(**settings), evaluator.run_config, evaluator.output, None)
+
+
+def test_resume_from_earlier_checkpoint_excludes_original_future_models(evaluator, tmp_path):
+    complete(evaluator, enqueue(evaluator, 2), 100)
+    complete(evaluator, enqueue(evaluator, 4), 200)
+    enqueue(evaluator, 6)
+    resumed = PeriodicEvaluator(evaluator.settings, evaluator.run_config, tmp_path / 'branch', None,
+                                 resume=evaluator.output / 'checkpoint.pt', resume_updates=2)
+    assert [job['completed_ppo_updates'] for job in resumed.jobs] == [2]
+    assert resumed.best_completed['completed_ppo_updates'] == 2
+    assert not resumed.pending
+
+
+def test_confirmation_recovers_if_interrupted_between_finalist_enqueue_operations(tmp_path):
+    settings = TrainingEvalConfig(maps_per_opponent=1, final_top_k=2)
+    evaluator = PeriodicEvaluator(settings, small_config(), tmp_path / 'run', None)
+    for update in (2, 4):
+        complete(evaluator, enqueue(evaluator, update), update * 100)
+    original = evaluator._enqueue
+
+    def interrupt_after_first(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError('simulated interruption')
+
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_enqueue', interrupt_after_first):
+        with pytest.raises(RuntimeError, match='simulated interruption'):
             evaluator.finish()
-            evaluator.close()
-            writer.close()
-            events = EventAccumulator(str(root / "run")).Reload()
-            self.assertEqual(events.Scalars("Eval/failed_jobs")[0].value, 1)
-            self.assertNotIn("Eval/overall/win_rate", events.Tags()["scalars"])
+    evaluator.close()
+    resumed = PeriodicEvaluator(settings, small_config(), evaluator.output, None)
+
+    def drain():
+        for job in list(resumed.pending):
+            complete(resumed, job, job['completed_ppo_updates'] * 100)
+
+    with patch.object(resumed, 'drain', drain):
+        resumed.finish()
+    finalists = [job for job in resumed.jobs if job['stage'] == 'confirmation']
+    assert len(finalists) == 2 and all(job['status'] == 'completed' for job in finalists)
+    assert resumed.best_completed['stage'] == 'confirmation'
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_worker_group_cleanup_kills_surviving_child(tmp_path):
+    ready = tmp_path / 'child_pid'
+    child = ("import os,signal,sys,time;from pathlib import Path;"
+             "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+             "Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(60)")
+    parent = "import subprocess,sys,time;subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]]);time.sleep(60)"
+    process = subprocess.Popen([sys.executable, '-c', parent, child, str(ready)], start_new_session=True)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert ready.exists()
+        child_pid = int(ready.read_text())
+        _stop_worker(process)
+        assert process.poll() is not None
+        stat = Path(f'/proc/{child_pid}/stat')
+        deadline = time.monotonic() + 2
+        while stat.exists() and stat.read_text().rsplit(') ', 1)[1].split()[0] not in ('Z', 'X'):
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=5)

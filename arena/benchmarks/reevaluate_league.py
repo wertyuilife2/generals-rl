@@ -10,36 +10,35 @@ from pathlib import Path
 import time
 import uuid
 
-from generals_arena.league.service import process_lock, run_jobs
-from generals_arena.league.store import LeagueStore
-from generals_arena.research import summarize, worker_count, refresh_publications
-from generals_arena.util import canonical, integer, write_json
+from generals_arena.util import process_lock
+from generals_arena.competitions.jobs import run_jobs
+from generals_arena.competitions.store import CompetitionStore
+from generals_arena.competitions.private import summarize
+from generals_arena.competitions.jobs import worker_count
+from generals_arena.competitions.submission import refresh_publications
+from generals_arena.competitions.submission import publication_ratings
+from generals_arena.competitions.rating import POLICY
+from generals_arena.util import integer
+from generals_arena.util import write_json
 
 
 def reset(store, games):
     integer('games', games, 1)
     store.verify_execution()
-    with process_lock(store, '.server.lock'), process_lock(store, '.worker.lock'), process_lock(store, '.registry.lock'):
+    with process_lock(store.directory, '.server.lock'), process_lock(store.directory, '.worker.lock'), process_lock(store.directory, '.registry.lock'):
         entrants = store.entrants()
-        wait = next(e['entrant_id'] for e in entrants.values() if e['name'] == 'WAIT' and e['kind'] == 'cpp')
+        wait = store.reference
         jobs = {job['entrant_id']:job['id'] for job in reversed(store.jobs())}
         # All resets are one transaction; there is deliberately no data backup.
         with store.connect(write=True) as db:
             db.execute('DELETE FROM games')
             db.execute('DELETE FROM ratings')
-            if db.execute("SELECT 1 FROM sqlite_master WHERE name='rating_pairs'").fetchone():
-                db.execute('DELETE FROM rating_pairs')
             db.execute('DELETE FROM jobs')
-            for key in ('anchor', 'rating_reference'):
-                db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, canonical(wait)))
             for i, entry in enumerate(entrants.values()):
                 key = entry['entrant_id']
                 if entry['kind'] != 'human' and key != wait:
                     db.execute('INSERT INTO jobs(id,entrant_id,budget,created) VALUES (?,?,?,?)',
                                (jobs.get(key, uuid.uuid4().hex), key, games, time.time()+i/1000))
-        store.anchor = wait
-        for suffix in ('', '-wal', '-shm'):
-            (store.directory / ('statistics.sqlite3'+suffix)).unlink(missing_ok=True)
         for report in (store.directory/'commits').glob('*/publication.json'):
             report.unlink()
         for name in ('reevaluation.json', 'leaderboard.json', 'schedule_source.json',
@@ -66,14 +65,14 @@ def evaluate(store, workers):
                 last = now
         run_jobs(store, workers=workers, job_id=job['id'], progress=progress)
         entry = entries[job['entrant_id']]
-        board = store.leaderboard()
-        row = next(r for r in board['ranking'] if r['entrant_id'] == entry['entrant_id'])
+        boards = store.leaderboards()
+        ratings = publication_ratings(boards, entry['entrant_id'])
         report = {**summarize(store, entry['entrant_id'], job['id']), 'name':entry['name'],
                   'version':entry['version'], 'entrant_id':entry['entrant_id'],
-                  'rating':row['elo'], 'rank':1+sum(r['elo'] > row['elo'] for r in board['ranking']),
-                  'leaderboard':board, 'publication_games':job['budget'], 'workers':workers,
+                  'ratings':ratings, 'leaderboards':boards, 'rating_policy':POLICY,
+                  'publication_games':job['budget'], 'workers':workers,
                   'reevaluation':True, 'last_run_seconds':time.monotonic()-start}
-        if entry['kind'] == 'cpp':
+        if entry['kind'] in ('cpp', 'package'):
             directory = store.directory/'commits'/entry['version']
             path = directory/'commit.json'
             if path.exists():
@@ -81,10 +80,11 @@ def evaluate(store, workers):
                 report['preflight_report'] = metadata.get('preflight_report')
                 report['report'] = str((directory/'publication.json').resolve())
                 write_json(directory/'publication.json', report)
-        print(f"{entry['name']}: completed, Elo {row['elo']:.1f}", flush=True)
-    board = store.leaderboard()
-    report = {'completed_games':board['completed_games'], 'workers':workers,
-              'seconds':time.monotonic()-start, 'jobs':store.jobs(), 'leaderboard':board}
+        print(f"{entry['name']}: completed, ratings {json.dumps(ratings)}", flush=True)
+    boards = store.leaderboards()
+    report = {'completed_games':sum(board['completed_games'] for board in boards.values()), 'workers':workers,
+              'seconds':time.monotonic()-start, 'jobs':store.jobs(), 'leaderboards':boards,
+              'rating_policy':POLICY}
     write_json(store.directory/'reevaluation.json', report)
     refresh_publications(store)
     print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
@@ -97,7 +97,7 @@ def main():
     parser.add_argument('--games', type=int, default=1000, help='new target games for every non-WAIT bot')
     parser.add_argument('--workers', type=int, default=None)
     args = parser.parse_args()
-    store = LeagueStore(args.directory)
+    store = CompetitionStore(args.directory)
     workers = worker_count(args.workers)
     if args.reset:
         reset(store, args.games)

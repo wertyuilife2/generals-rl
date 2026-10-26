@@ -13,14 +13,14 @@ import multiprocessing
 from pathlib import Path
 from time import perf_counter
 
-from generals_arena.league.game import RecordedGame
-from generals_arena.league.store import LeagueStore
+from generals_arena.matches.game import RecordedGame
+from generals_arena.competitions.store import CompetitionStore
 from generals_baselines import create_controller
 
 
 def verify(item):
     directory, key = item
-    store = LeagueStore(directory)
+    store = CompetitionStore(directory)
     result, blob = store.replay(key)
     entries = store.entrants()
     policies = []
@@ -53,7 +53,7 @@ def main():
     parser.add_argument('--workers', type=int, default=8)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    store = LeagueStore(args.directory)
+    store = CompetitionStore(args.directory)
     with store.connect() as db:
         ids = [row[0] for row in db.execute("SELECT id FROM games WHERE status='complete' AND json_extract(plan,'$.human')=0 ORDER BY sequence")]
     # Compile before timing; each worker gets independent native policy/RNG state.

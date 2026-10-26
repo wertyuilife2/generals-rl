@@ -4,6 +4,7 @@ import { MoveInput } from './input.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
 let meta, names = new Map(), pool = 0, page = 0, tab = 'ranking', player = null;
+let rankingMode = null, rankingRequest = 0;
 let historyRequest = 0;
 let token = '', tokenKey = null;
 let live = null, board = null, sending = false;
@@ -37,7 +38,16 @@ function renderMeta(value) {
     player = null; live = null;
   }
   names = new Map(meta.entrants.map(e => [e.entrant_id, e.name]));
-  $('rating-reference').textContent = names.get(meta.anchor) || 'WAIT';
+  if (!meta.rating_modes.includes(rankingMode)) rankingMode = meta.default_rating_mode;
+  const modeSelect = $('rating-mode');
+  if ([...modeSelect.options].map(option => option.value).join() !== meta.rating_modes.join()) {
+    modeSelect.replaceChildren(...meta.rating_modes.map(mode => {
+      const option = el('option', '', mode === '1v1' ? '1v1 · GoR' : 'FFA · Codeforces');
+      option.value = mode;
+      return option;
+    }));
+  }
+  modeSelect.value = rankingMode;
   const options = ['0', ...meta.config.player_counts.map(String)];
   if ([...$('pool').options].map(n => n.value).join() !== options.join()) {
     for (const id of ['pool', 'play-players']) {
@@ -62,7 +72,6 @@ function renderMeta(value) {
   const counts=meta.config.player_counts;
   const first=meta.map_ranges[counts[0]],last=meta.map_ranges[counts[counts.length-1]];
   $('map-description').textContent = `宽高按人数随机：${counts[0]} 人 ${first[0]}–${first[1]} 格，${counts[counts.length-1]} 人 ${last[0]}–${last[1]} 格。同一 AI 可有多个独立实例。`;
-  $('pool-caption').textContent = '统一 rating · 所有人数的对局共同计分';
   $('turn-description').textContent = `每 ${meta.config.tick_seconds} 秒执行至多一步。关闭页面后对局继续，按最终结果计分。`;
   const active = meta.jobs.filter(j => j.status !== 'complete');
   $('job-count').textContent = active.length;
@@ -80,28 +89,32 @@ function renderMeta(value) {
   renderPlayer();
 }
 async function loadRank() {
-  const data = await api('/api/leaderboard');
+  const request = ++rankingRequest, mode = rankingMode;
+  const data = await api(`/api/leaderboard?mode=${mode}`);
+  if (request !== rankingRequest || rankingMode !== mode) return;
+  $('rating-reference').textContent = mode === '1v1' ? `${names.get(data.anchor) || 'WAIT'} = 0` : '均值 1000';
+  $('pool-caption').textContent = `${mode === '1v1' ? '1v1 · GoR' : 'FFA · Codeforces'} · ${number(data.completed_games)} 局 · 独立评分池`;
   $('ranking').replaceChildren();
   data.ranking.forEach((row, i) => {
     const tr = el('tr'), name = el('td'), wrap = el('div', 'rank-player'), detail = el('div');
-    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
+    detail.append(el('div', 'player-name', row.name), el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '显示参照' : row.provisional ? '定级中' : '已定级'].join(' · ')));
     wrap.append(el('span', `rank-no${i < 3 ? ' top' : ''}`, String(i + 1).padStart(2, '0')), detail); name.append(wrap);
     const change = Number.isFinite(row.elo_delta) ? Math.round(row.elo_delta * 10) / 10 : null;
     const delta = el('td', `elo-delta${change > 0 ? ' positive' : change < 0 ? ' negative' : ''}`,
       change === null ? '—' : `${change > 0 ? '+' : ''}${change.toFixed(1)}`);
-    delta.title = row.previous_version ? `相对 ${row.previous_version} 的当前 Elo${change === null ? '（双方均完成对局后显示）' : ''}` : '暂无可比较的上一版本';
+    delta.title = row.previous_version ? `相对 ${row.previous_version} 在本评分池的变化${change === null ? '（双方均完成对局后显示）' : ''}` : '暂无可比较的上一版本';
     const elo = el('td', 'elo'), estimate = el('span', 'elo-value', row.elo.toFixed(1));
     const ci = el('span', 'elo-ci', row.elo_ci ? `±${row.elo_ci.half_width.toFixed(1)}` : '± —');
-    ci.title = row.anchor ? '零分基准固定为 0' : row.elo_ci
-      ? `95% 估计区间 [${row.elo_ci.lower.toFixed(1)}, ${row.elo_ci.upper.toFixed(1)}] · ${row.ci_blocks} 组独立地图；基于名次模型的近似估计`
-      : '95% 估计区间：独立地图或基准校准样本不足';
+    ci.title = row.anchor ? '显示分数为相对 WAIT 的 0；WAIT 原始 GoR 分数仍正常更新' : row.elo_ci
+      ? `95% 估计区间 [${row.elo_ci.lower.toFixed(1)}, ${row.elo_ci.upper.toFixed(1)}] · ${row.ci_blocks} 组独立地图；当前评分模型的局部近似`
+      : '95% 估计区间：独立地图不足或相对分数尚未识别';
     ci.setAttribute('aria-label', ci.title);
     elo.append(estimate, ci);
     tr.append(name, elo, delta,
       ...['win_rate', 'survival_index', 'kill_index'].map(key =>
         el('td', 'metric', Number.isFinite(row[key]) ? `${(100 * row[key]).toFixed(1)}%` : '—')));
     $('ranking').append(tr);
-    if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `统一榜单 · ${row.elo.toFixed(1)} Elo · ${row.games} 局`;
+    if (player && row.entrant_id === player.entrant_id) $('player-rating').textContent = `${mode === '1v1' ? '1v1 · GoR' : 'FFA · Codeforces'} · ${row.elo.toFixed(1)} 分 · ${row.games} 局`;
   });
 }
 async function loadHistory() {
@@ -204,7 +217,7 @@ function updateLive(value, force=false) {
   if(dialogMode!=='live'||!$('board-dialog').open)return;
   board=live.board;
   $('board-title').textContent=`${live.entrants.length} 人排位 · ${board.width} × ${board.height}`;
-  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入排行榜`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
+  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 榜单`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
   draw();renderGamePlayers(live.entrants);
   if(live.done)renderPlayer();
 }
@@ -306,6 +319,10 @@ $('board-dialog').addEventListener('keydown',event=>{
 });
 for(const button of document.querySelectorAll('[data-dir]'))button.addEventListener('click',()=>move(Number(button.dataset.dir)));
 for(const button of document.querySelectorAll('.tab'))button.addEventListener('click',()=>showTab(button.dataset.tab));
+$('rating-mode').addEventListener('change', () => {
+  rankingMode = $('rating-mode').value;
+  loadRank().catch(error => notice(error.message));
+});
 function filterHistory() {
   pool = Number($('pool').value); page = 0;
   loadHistory().catch(e => notice(e.message));

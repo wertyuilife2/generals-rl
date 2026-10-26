@@ -9,6 +9,5 @@
   "city_max": 0.035,
   "max_ticks": 3000,
   "seed": 1000042,
-  "k_factor": 32,
   "tick_seconds": 0.5
 }

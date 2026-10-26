@@ -9,7 +9,7 @@ from generals import VecEnv
 from generals.core.engine import CoreEngine
 from generals.core.state import GameState, MapLayout
 from generals_rl.mdp import GameBatch, LocalObservationEncoder, make_observation_encoder
-from generals_rl.mdp.combat import _neighbor_max
+from generals_rl.policy.combat import _neighbor_max
 from generals_rl.task import GeneralsTask, TaskConfig
 
 

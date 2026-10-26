@@ -11,26 +11,9 @@ import torch
 from torch.distributions import Categorical
 
 from rsl_rl.algorithms import MoECTS, PPO
-from rsl_rl.modules import ActorCriticMoECTS
 
+from .actor_critic import CategoricalActorCritic
 from .ppo_monitor import PPOUpdateMonitor
-
-
-class StudentPPOPolicy(ActorCriticMoECTS):
-    def __init__(self, *args, **kwargs):
-        raise ValueError("dense StudentPPOPolicy is retired; use a v32, v32-opt or F03 policy")
-
-    def action_probabilities(self, obs, is_teacher=False):
-        raise NotImplementedError("spatial students provide their own local actor")
-
-    def act(self, obs, is_teacher=False, **kwargs):
-        # action_probabilities computes the student latent with gradients. The
-        # inherited act(False) explicitly disables them and cannot be reused.
-        self.action_probabilities(obs, is_teacher=is_teacher)
-        return self.distribution.sample().unsqueeze(-1)
-
-    def evaluate(self, obs, is_teacher=False, **kwargs):
-        raise NotImplementedError("spatial students provide their own critic")
 
 
 class StudentPPO(PPO):
@@ -45,17 +28,14 @@ class StudentPPO(PPO):
         return 0
 
     def __init__(self, policy, storage, num_envs, *, teacher_env_ratio=0.0,
-                 student_encoder_learning_rate=None, load_balance_coef=0.0,
                  schedule="adaptive", desired_kl=0.02, learning_rate=3e-4,
                  ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
                  physical_minibatch_size=None, amp_bfloat16=False,
                  adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
                  betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
-        if kwargs.pop("critic_learning_rate", None) is not None:
-            raise ValueError("critic_learning_rate is retired; actor and critic share one learning rate")
         self.teacher_environment_count(num_envs, teacher_env_ratio)
-        if not isinstance(policy, StudentPPOPolicy):
-            raise TypeError("StudentPPO requires StudentPPOPolicy")
+        if not isinstance(policy, CategoricalActorCritic):
+            raise TypeError("StudentPPO requires CategoricalActorCritic")
         if storage.num_envs != num_envs or storage.teacher_num_envs != 0:
             raise ValueError("student PPO requires matching all-student storage")
         if schedule not in ("fixed", "adaptive"):
@@ -64,10 +44,6 @@ class StudentPPO(PPO):
                                       or not math.isfinite(desired_kl) or desired_kl <= 0)
                 or schedule == "adaptive" and desired_kl is None):
             raise ValueError("adaptive PPO requires a positive finite desired_kl")
-        if load_balance_coef != 0:
-            raise ValueError("student-only PPO has no distillation/load-balance loss")
-        if student_encoder_learning_rate not in (None, learning_rate):
-            raise ValueError("student encoder learning rate must match the actor learning_rate")
         for name, value in (("adaptive_lr_min", adaptive_lr_min),
                             ("adaptive_lr_max", adaptive_lr_max)):
             if (isinstance(value, bool) or not isinstance(value, (int, float))

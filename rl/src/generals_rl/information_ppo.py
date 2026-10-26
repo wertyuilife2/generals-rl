@@ -10,29 +10,9 @@ from copy import deepcopy
 import torch
 from torch import nn
 
-from .spatial_ppo import (FRAME_DIM, HISTORY, MAP_PLANES, MAP_SIZE, PUBLIC_DIM,
-                          LightSpatialPPOPolicy, OwnKingRelativeGeometry,
-                          _validate_history_length)
-
-
-def _extend_conv(old, extra_channels, trailing_channels=0):
-    """Preserve old inputs and append zero-initialized information before XY."""
-    devices = [old.weight.device.index] if old.weight.is_cuda else []
-    with torch.random.fork_rng(devices=devices):
-        new = nn.Conv2d(old.in_channels + extra_channels, old.out_channels,
-                        old.kernel_size, stride=old.stride, padding=old.padding,
-                        dilation=old.dilation, groups=old.groups,
-                        bias=old.bias is not None, padding_mode=old.padding_mode,
-                        device=old.weight.device, dtype=old.weight.dtype)
-    with torch.no_grad():
-        new.weight.zero_()
-        prefix = old.in_channels - trailing_channels
-        new.weight[:, :prefix].copy_(old.weight[:, :prefix])
-        if trailing_channels:
-            new.weight[:, -trailing_channels:].copy_(old.weight[:, -trailing_channels:])
-        if old.bias is not None:
-            new.bias.copy_(old.bias)
-    return new
+from .policy.cnn import (FRAME_DIM, HISTORY, MAP_PLANES, MAP_SIZE, PUBLIC_DIM,
+                         _extend_conv, _validate_history_length, add_actor_knowledge)
+from .spatial_ppo import LightSpatialPPOPolicy
 
 
 class HistoryStateCritic(nn.Module):
@@ -98,14 +78,8 @@ class InformationSpatialPPOPolicy(LightSpatialPPOPolicy):
         super().__init__(obs, {"policy": ["policy"], "critic": ["critic"]}, num_actions, **kwargs)
         self.obs_groups = deepcopy(obs_groups)
         self.critic_actor_information = critic_actor_information
-        self.actor.knowledge_channels = knowledge_channels
+        add_actor_knowledge(self.actor, knowledge_channels)
         if knowledge_channels:
-            geometry = isinstance(self.actor.trunk[0], OwnKingRelativeGeometry)
-            index = int(geometry)
-            self.actor.trunk[index] = _extend_conv(self.actor.trunk[index], knowledge_channels,
-                                                  trailing_channels=2 if geometry else 0)
-            if geometry:
-                self.actor.trunk[0].knowledge_channels = knowledge_channels
             self.num_actor_obs += knowledge_channels * MAP_SIZE * MAP_SIZE
         if critic_actor_information:
             self.critic = HistoryStateCritic(self.critic, knowledge_channels, history_length=self.history_length)

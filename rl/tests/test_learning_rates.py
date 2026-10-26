@@ -58,8 +58,7 @@ class LearningRateTests(unittest.TestCase):
         torch.manual_seed(97)
         obs = observation()
         original = algorithm(obs)
-        explicit = algorithm(obs, adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
-                             critic_learning_rate=None)
+        explicit = algorithm(obs, adaptive_lr_min=1e-5, adaptive_lr_max=1e-2)
         explicit.policy.load_state_dict(original.policy.state_dict())
         self.assertEqual(len(original.optimizer.param_groups), 1)
         self.assertFalse(original._custom_learning_rates)
@@ -115,7 +114,7 @@ class LearningRateTests(unittest.TestCase):
 
     def test_retired_fixed_critic_rate_is_explicitly_rejected(self):
         for value in (False, 0, 1e-4, float("nan")):
-            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "critic_learning_rate is retired"):
+            with self.subTest(value=value), self.assertRaisesRegex(TypeError, "critic_learning_rate"):
                 algorithm(observation(), critic_learning_rate=value)
 
     def test_loaded_adam_restores_shared_scheduler_and_checks_bounds_and_groups(self):
@@ -142,8 +141,7 @@ class LearningRateTests(unittest.TestCase):
     def test_real_training_resume_retains_actual_shared_lr(self):
         config = student_config()
         config["runner"]["algorithm"].update(schedule="adaptive", desired_kl=.01,
-                                             learning_rate=1e-4, adaptive_lr_max=.001,
-                                             student_encoder_learning_rate=None)
+                                             learning_rate=1e-4, adaptive_lr_max=.001)
         config["evaluation"] = {"enabled": False}
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             first, resumed = Path(directory) / "first", Path(directory) / "resumed"

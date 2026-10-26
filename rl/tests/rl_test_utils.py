@@ -21,7 +21,7 @@ def light_policy_config():
 
 def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory=False):
     from tensordict import TensorDict
-    from generals_rl.mdp.layout import ObservationLayout
+    from generals_rl.policy.layout import ObservationLayout
     layout = ObservationLayout(width, height, history_length=history_length,
                                knowledge_channels=11 if memory else 0)
     frames = torch.randn(count, history_length, layout.frame_dim)
@@ -52,10 +52,10 @@ def small_training_config(*, task_overrides=None, runner_overrides=None):
     runner["policy"].update(class_name="generals_rl.information_ppo.InformationSpatialPPOPolicy",
                             own_king_geometry=True, wait_move_factorization=True)
     runner["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO",
-                                teacher_env_ratio=0, load_balance_coef=0,
+                                teacher_env_ratio=0,
                                 schedule="fixed", desired_kl=None)
-    runner["algorithm"].pop("student_encoder_learning_rate", None)
-    return {"task": asdict(TaskConfig(**task)), "runner": runner, "torch_threads": 1}
+    return {"task": asdict(TaskConfig(**task)), "runner": runner, "torch_threads": 1,
+            "evaluation": {"enabled": False}}
 
 
 def assert_nested_equal(test, actual, expected):

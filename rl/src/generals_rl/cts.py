@@ -53,10 +53,10 @@ def runner_config(*, rollout_steps=32, learning_epochs=4, mini_batches=4,
         "algorithm": {
             "class_name": "generals_rl.student_ppo.StudentPPO", "teacher_env_ratio": 0,
             "num_learning_epochs": learning_epochs, "num_mini_batches": mini_batches,
-            "learning_rate": 1e-4, "student_encoder_learning_rate": 1e-4,
+            "learning_rate": 1e-4,
             "schedule": "adaptive", "desired_kl": 0.01,
             "gamma": 0.995, "lam": 0.95, "entropy_coef": 0.01,
-            "load_balance_coef": 0, "rnd_cfg": None,
+            "rnd_cfg": None,
         },
         "storage_obs_keys": ["policy", "critic", "action_mask", "knowledge"],
     }
