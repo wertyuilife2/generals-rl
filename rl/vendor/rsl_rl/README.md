@@ -1,5 +1,11 @@
 # RSL-RL
 
+This directory is the vendored RSL-RL 3.3.0 fork used by Generals training, including its CTS runner.
+For this repository, follow the [Generals RL guide](../../README.md) and install this directory
+with `python -m pip install -e ./rl/vendor/rsl_rl --no-deps --no-build-isolation` from the repository root
+after preparing the documented dependencies. The upstream PyPI/clone instructions below describe
+the standalone library; they do not replace this project's vendored training dependency.
+
 A fast and simple implementation of learning algorithms for robotics. For an overview of the library please have a look at https://arxiv.org/pdf/2509.10771.
 
 Environment repositories using the framework:
