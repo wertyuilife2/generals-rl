@@ -9,6 +9,7 @@ from generals.core.mapgen import generate_map
 from generals.core.observation import observe, visibility_mask
 from generals.core.state import Action, MoveResult
 from generals_baselines import AI_KINDS, BatchBaselineControllers, make_controllers
+from generals_baselines.registry import create_controller
 
 
 def _specs():
@@ -16,9 +17,12 @@ def _specs():
             for i, kind in enumerate(AI_KINDS) for seat in (0, 1)]
 
 
-def _single_controllers(specs):
+def _single_controllers(specs, seat_seeds=None):
     result = []
-    for spec in specs:
+    for index, spec in enumerate(specs):
+        if seat_seeds is not None:
+            result.append(create_controller(spec.opponent, 1 - spec.learner_seat, int(seat_seeds[index])))
+            continue
         kinds = ["random", "random"]
         kinds[1 - spec.learner_seat] = spec.opponent
         pair = make_controllers(kinds, spec.controller_seed)
@@ -37,11 +41,13 @@ def _assert_planner_equal(left, right):
 
 
 @pytest.mark.parametrize("shape", [(9, 9), (11, 13)])
-def test_batch_matches_single_lane_actions_rng_memory_and_feedback(shape):
+@pytest.mark.parametrize("direct_seeds", [False, True])
+def test_batch_matches_single_lane_actions_rng_memory_and_feedback(shape, direct_seeds):
     specs = _specs()
     states = [generate_map(MapConfig(shape[1], shape[0], 2), 22 + i) for i in range(len(specs))]
-    singles = _single_controllers(specs)
-    baseline = BatchBaselineControllers(specs, height=shape[0], width=shape[1])
+    seat_seeds = [2**48 + 100 + i for i in range(len(specs))] if direct_seeds else None
+    singles = _single_controllers(specs, seat_seeds)
+    baseline = BatchBaselineControllers(specs, height=shape[0], width=shape[1], seat_seeds=seat_seeds)
     learner = np.random.default_rng(971)
     active = np.ones(len(specs), dtype=bool)
     seen_half = False

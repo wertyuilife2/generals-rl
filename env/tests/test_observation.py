@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -9,7 +10,7 @@ from generals.core.engine import CoreEngine
 from generals.core.observation import observe, snapshot, visibility_mask, legal_action_mask
 from generals.core.state import (
     Action, Direction, EMPTY, GameState, MapLayout, MoveMode, Structure,
-    Terrain, UNKNOWN, UNKNOWN_OWNER,
+    Terrain, UNKNOWN, UNKNOWN_OWNER, compute_stats,
 )
 
 
@@ -39,6 +40,38 @@ class ObservationTests(unittest.TestCase):
         expected_enemy = np.zeros_like(owner, dtype=bool)
         expected_enemy[3:5, 4:6] = True
         np.testing.assert_array_equal(visibility_mask(owner, 1), expected_enemy)
+
+    def test_axis_expansion_matches_original_nine_slice_visibility(self):
+        rng = np.random.default_rng(42)
+        for shape in ((1, 1), (1, 9), (9, 1), (9, 9), (17, 23)):
+            owner = rng.integers(-2, 8, size=shape, dtype=np.int16)
+            for pid in range(8):
+                padded = np.pad(owner == pid, 1)
+                expected = np.zeros(shape, dtype=bool)
+                for dy in range(3):
+                    for dx in range(3):
+                        expected |= padded[dy:dy + shape[0], dx:dx + shape[1]]
+                np.testing.assert_array_equal(visibility_mask(owner, pid), expected)
+
+    def test_precomputed_stats_reuse_preserves_validation_and_readonly_boundary(self):
+        state = state_with_generals()
+        stats = compute_stats(state)
+        for mode in ("local", "full"):
+            expected = observe(state, 0, mode)
+            with patch("generals.core.observation.compute_stats", side_effect=AssertionError("recomputed")):
+                actual = observe(state, 0, mode, stats=stats)
+            for name in ("terrain", "structure", "owner", "army", "visible", "alive"):
+                np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+                self.assertFalse(getattr(actual, name).flags.writeable)
+            for name in ("army", "territory", "cities"):
+                np.testing.assert_array_equal(getattr(actual.stats, name), getattr(expected.stats, name))
+                with self.assertRaises(ValueError):
+                    getattr(actual.stats, name).flags.writeable = True
+        for pid, error in ((-1, ValueError), (2, ValueError), (True, TypeError), (0.5, TypeError)):
+            with self.assertRaises(error):
+                observe(state, pid, stats=stats)
+        with self.assertRaises(ValueError):
+            observe(state, 0, "omniscient", stats=stats)
 
     def test_hidden_fields_use_unknown_and_only_own_general_is_exposed(self):
         state = state_with_generals()

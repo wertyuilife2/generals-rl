@@ -99,6 +99,14 @@ class VecEnv:
     def height(self):
         return self.unwrapped.height
 
+    def observer(self, player_ids):
+        """Bind a public on-device observation batch to fixed lane seats."""
+        from .core.batch_observation import batch_observer
+        return batch_observer(self, player_ids)
+
+    def observe(self, player_ids):
+        return self.observer(player_ids)()
+
     def __enter__(self):
         return self
 
