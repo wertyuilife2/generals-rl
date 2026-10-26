@@ -1,6 +1,6 @@
 # Generals 环境开发与使用说明
 
-更新日期：2026-10-10。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。
+更新日期：2026-10-26。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应其记录的实验环境。训练、策略导出见 [RL README](../rl/README.md)，统一比赛管理见 [Arena README](../arena/README.md)。
 
 项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则源自原 JS 游戏，交互参考 generals.io；不保证与官网或原 JS 的随机决策逐步相同。强化学习算法独立放在 `rl/`，本文说明环境本身及其接口。
 
@@ -11,7 +11,7 @@
 - [批量环境 API](#api)
 - [观测、路径与 RL 扩展](#features)
 - [Benchmark 与 profiling](#benchmark)
-- [当前性能验证](#results)
+- [性能验证记录](#results)
 - [验证与历史存档](#verification)
 
 <a id="quickstart"></a>
@@ -25,7 +25,7 @@
 | AI 策略 / 无界面 AI 模拟 | 额外需要 Linux/macOS 与 C++17 编译器，baseline 在 C++ 中执行 |
 | GUI | 额外需要 Tk 和图形桌面；Linux/X11 已实测，内置 AI 目前要求 Linux/macOS |
 | CPU 单局 / 批量模拟 | 支持 Linux/macOS；需要 C++17/OpenMP，macOS 需 clang 与 libomp；编译器可用 `CXX` 指定 |
-| GPU 批量模拟 | Linux、PyTorch ≥2.13、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件 |
+| GPU 批量模拟 | Linux、PyTorch ≥2.6、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件；H200 已用 PyTorch 2.8.0+cu129 实训验证 |
 
 在仓库根目录安装到现有 conda 环境：
 
@@ -36,13 +36,13 @@ conda run -n generals-rl python -m generals play --players 4 --seed 42
 
 `--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
 
-不安装包时，可在仓库根目录设置源码路径运行（Windows 的路径分隔符用 `;`）：
+不安装包时，可在仓库根目录设置源码路径运行（以下使用 Bash 等 POSIX shell）：
 
 ```bash
 PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-也可在 Linux 仓库根目录使用 `PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals ...`。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。
+同一写法也适用于其他 `generals` 子命令。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。当前内置 AI 和 CPU 原生后端仅支持 Linux/macOS，Windows 的 Tk 可用不等于完整 GUI 对战已受支持。
 
 ### 常用命令
 
@@ -127,6 +127,7 @@ env/
     protocol/                配置、动作、Controller、数组字段、BatchStep/VectorBackend
     core/                    独立参考规则、状态、地图、观测、路径、记录
       batch.py               CPU/GPU 共用的冷初始化和状态转换
+      batch_observation.py   CPU/GPU 共用的原始局部观测接口
     backends/cpu/            C++/OpenMP 单 tick 执行、NumPy/ctypes 缓冲区
     backends/gpu/            CUDA 单 tick 内核、Torch 状态与原生启动桥
     controllers/             人类队列及按需加载 baseline 的交互工厂
@@ -136,19 +137,19 @@ env/
   benchmarks/                benchmark_step.py、profile_step.py 两个入口
   tests/                     规则、设备、接口、GUI 和工具测试
 baselines/                   独立的手写策略包 generals_baselines
-arena/                       统一对战、版本登记、结果记录与 Elo 排名
-rl/                          算法、模型、训练与模型专用特征
+arena/                       policies / matches / competitions / web：策略接入、执行、赛程评分、界面
+rl/                          训练与评估调度；policy/ 统一特征、actor 和导出包推理
 outputs/                     运行结果与本地历史归档
 doc/README.md                本文，统一文档入口
 ```
 
-依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；环境不反向导入训练代码。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
+依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；Arena 使用内置基础策略时还需安装 baselines，加载神经网络包时由包声明自身推理依赖。env 与 Arena 不导入 RL 训练实现。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
 
 CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部仍按玩家顺序行动。增量维护统计及城市/主城增长索引，周期性全图增长、继承、重置和缓存重建保留必要扫描。
 
 GPU 使用 CUDA 单 tick 内核：棋盘常驻设备张量，统计和增长索引跨调用缓存；默认根据 batch 选择 32×4（B≤2048）、8×16（2048<B<32768）、32×8（B≥32768），组内 leader 执行顺序行动。共享库与 launch 参数持久保存，正常 step 经 CPython 原生桥更新动作指针和当前 stream；宽高/玩家数为编译常量，缓存已占领结构的增长索引、统计和计数，总格点数至少 2000 万时还使用 32 位格点元数据缓存。不发生逐 tick CPU 地图处理或状态上传。
 
-`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只接受默认配置或兼容参数 `kernel_backend="cuda"`。
+`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只有 CUDA 实现，`kernel_backend` 可省略或设为 `"cuda"`。
 
 公开根包为 `make_engine, make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
 
@@ -260,11 +261,17 @@ CPU step 同步完成，CUDA 在当前 stream 上异步提交。计时使用 `sy
 
 LOCAL 视野覆盖己方领土及八邻域，移动仍是四邻接；山脉不遮挡该范围视野。未知地形/结构为 255、归属为 −3、兵力为 −1，这些值只出现在观测中。总兵力、领土和存活状态公开，敌方城市数在 LOCAL 下为 −1。FULL 明确开放全图；观战 GUI 可显示全图，AI 默认仍各用局部视野。
 
-参考接口位于 `generals.core.observation`：`observe`、`snapshot`、`legal_action_mask` 返回独立观测/掩码。GPU 通过 `env.unwrapped.observe(player_id=0, mode="local")` 和 `legal_action_mask(player_id=0)` 在设备端构建独立张量；地图形状 `[B,H,W]`，移动掩码 `[B,N,4,2]`、WAIT 掩码 `[B]`。观测根据当前状态计算，因此自动重置后属于新局。0/1 兵和预期打不赢的移动仍可合法，掩码不保证后续玩家行动时状态不变。
+CPU/GPU 的统一批量接口为 `env.observe(player_ids)`；反复读取固定席位时先创建 `observer = env.observer(player_ids)`，之后调用 `observer()`。`player_ids` 可为所有环境共用的整数席位，或每个环境一个席位的 `[B]` 整数数组。CPU 返回 NumPy 数组，GPU 返回设备上的 Torch 张量；复用 observer 可避免每 tick 重新绑定席位。
+
+返回字典包含局部棋盘 `state`、`visible[B,N]`、`stats[B,P,3]`、`player_ids[B]`、自身 `general_pos[B]`、`active[B]` 及尺寸信息。`state` 中四种棋盘字段为 `[B,N]`，并含 `alive/tick/terminated/winner_id`。敌方主城位置不公开，敌方城市统计为 −1。数组与后端状态、observer 的席位绑定相互独立，可保存；这里不构造神经网络特征或动作掩码。
+
+单局参考接口位于 `generals.core.observation`：`observe`、`snapshot`、`legal_action_mask` 返回独立观测/掩码。GPU 专用的 `env.unwrapped.observe(player_id=0, mode="local")` 保留 `[B,H,W]` 棋盘接口，`env.unwrapped.legal_action_mask(player_id=0)` 返回 `[B,N,4,2]` 移动掩码及 `[B]` WAIT 掩码。观测根据当前状态计算，因此自动重置后属于新局。0/1 兵和预期打不赢的移动仍可合法，掩码不保证后续玩家行动时状态不变。
+
+离线算法与 RL 观测目前没有迷雾中“山脉或城市”的混淆提示；Arena 浏览器真人视图另有这个标记。两者的信息边界仍有差异，不能把真人页面的显示行为当作已更新的训练规则。
 
 路径工具在 `generals.core.pathfinding`：`neighbors`、`single_source_distances`、`shortest_path`、`DistanceCache`、`prepare_map`、`all_pairs_distances`。距离为四邻接非山脉图上的边数，不包含留兵、攻城或动态威胁；不可达距离为 −1，路径为 `None`。全点对距离显式计算为 `int32[N,N]`，默认输出预算 128 MiB，需要约 `4N²` 字节；单源缓存按地形内容、尺寸、未知格策略和来源区分，并限制容量。
 
-LOCAL 策略只可使用观测/已知地形及其记忆。`prepare_map(state.layout)`、真值全图距离和 `env.state` 是特权数据，不能通过预计算路径绕过迷雾。未来模型的通道编码、归一化、历史堆叠、奖励及多智能体训练适配放在 `rl/`，游戏规则和通用拓扑保留在环境。
+LOCAL 策略只可使用观测/已知地形及其记忆。`prepare_map(state.layout)`、真值全图距离和 `env.state` 是特权数据，不能通过预计算路径绕过迷雾。通道编码、归一化、历史堆叠、持久知识及动作映射由 `rl/src/generals_rl/policy/` 实现并随模型导出；训练奖励与任务适配留在 `rl/`，游戏规则和通用拓扑保留在环境。
 
 参考引擎/控制器的最小示例：
 
@@ -351,13 +358,13 @@ GPU 先在测量 marker 外预热 profiler 回调、恢复初态，再采集逐�
 基准代码分为配置、工作负载准备、计时和 profiling。`native.cpp` 只有动作采样及实际 CPU 规则源码的 profiling 包装，没有第二份模拟实现。
 
 <a id="results"></a>
-## 8. 当前性能验证
+## 8. 性能验证记录
 
-清理前后的对照使用相同冻结地图和 1000 tick 动作轨迹，25×25、4 玩家、seed=42、每 500 tick 自动重置。只测每 tick 的 `env.step(action)` 和完成同步，排除决策、初始化及预热。CPU 使用 26 线程，GPU 使用默认自适应配置；硬件为 i7-14700KF / RTX 4090。
+2026-10-03 清理前后的对照使用相同冻结地图和 1000 tick 动作轨迹，25×25、4 玩家、seed=42、每 500 tick 自动重置。只测每 tick 的 `env.step(action)` 和完成同步，排除决策、初始化及预热。CPU 使用 26 线程，GPU 使用默认自适应配置；硬件为 i7-14700KF / RTX 4090。
 
 清理前后各重复 5 轮，在 1k、10k、100k 三个规模下，CPU/GPU 的最终状态、统计、动作诊断、done/errors、计数器和 RNG 指纹全部与冻结参考轨迹一致。原始样本保存在本地 `outputs/cleanup/20261003/{cpu,gpu}-comparison.json`。
 
-本轮测量期间另有训练进程持续占用 GPU 和一个 CPU 核，GPU 延迟出现明显的阶段性波动。因此这批计时数据只存档，**不据此认定提速或证明没有性能回退**；空闲设备上的性能复测仍待完成。当前保留此前选定的增量统计、增长索引、原生启动、自适应线程和压缩元数据优化。1k/10k/100k 配置的 CUDA 寄存器数仍为 40/40/48，理论驻留块数仍为 12/9/5；共享内存占用从 2464/9856/4928 降至 2368/9472/4736 字节。
+该次测量期间另有训练进程持续占用 GPU 和一个 CPU 核，GPU 延迟出现明显的阶段性波动。因此这批计时数据只存档，**不据此认定提速或证明没有性能回退**；不能用后续训练的 transitions/s 代替空闲设备上的纯 env.step 复测。当前保留此前选定的增量统计、增长索引、原生启动、自适应线程和压缩元数据优化。该次记录中1k/10k/100k配置的CUDA寄存器数为40/40/48，理论驻留块数为12/9/5；共享内存占用从2464/9856/4928降至2368/9472/4736字节。
 
 这些结果适用于该工作负载；不同地图、玩家数、动作分布和机器负载会改变吞吐。线程配置和压缩元数据阈值可以显式覆盖，便于在其他设备复测。
 
@@ -368,8 +375,8 @@ GPU 先在测量 marker 外预热 profiler 回调、恢复初态，再采集逐�
 conda run -n generals-rl python -m unittest discover -s env/tests -v
 ```
 
-GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。本轮 163 项环境测试（含 Linux GUI 和 CUDA）通过；独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。规则覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
+GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。2026-10-03 清理验收记录为 163 项环境测试（含 Linux GUI 和 CUDA）通过；当时独立 wheel 的 CPU/GPU 启动、两种 profile 入口以及 CUDA memcheck/racecheck/synccheck/initcheck 均通过。这是历史记录，不是当前工作区的测试数量。规则测试覆盖独立 Python/CPU/CUDA 逐 tick 一致性、0/1 兵转移、半兵、按座位继承与淘汰、增长周期、迷雾、动作掩码、重置、冻结、缓存失效、非默认流和打包安装。GPU 检查 int64 有效范围内的精度；CPU 另外检查溢出错误语义。
 
-本次清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证结论。恢复历史实现时应解压到独立目录。
+2026-10-03 清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证记录。恢复历史实现时应解压到独立目录。
 
 跨算法与模型版本的统一评测见 [Arena 使用说明](../arena/README.md)。

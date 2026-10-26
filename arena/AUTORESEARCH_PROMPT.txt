@@ -11,17 +11,17 @@ Arena 提供全部比赛、计时、记录和全量评测服务；你只负责�
 
 1. 工作目录、命名与环境
 
-项目根目录：/Users/bzy/project/generals-rl
-当前开发分支：neko-dev
-Python：/Users/bzy/project/generals-rl/.venv/bin/python
-命令：/Users/bzy/project/generals-rl/.venv/bin/generals_arena
-等价调用：.venv/bin/python -m generals_arena
+项目根目录：当前检出的 generals-rl 仓库，开始前确认实际目录和分支，不自动切换分支。
+Python：使用已安装 env、baselines、arena 的项目环境；可以是 generals-rl conda 环境或项目 .venv。
+命令：激活环境后使用 generals-arena，等价调用为 python -m generals_arena。
+正式联赛默认使用 outputs/arena/main；须已初始化并与当前源码匹配，不能覆盖已有联赛。
+首次准备环境和联赛的步骤见 arena/README.md。
 
 以下路径相对于项目根目录：
 - env/：现有游戏环境和 CPU/C++ 后端。
 - arena/：统一比赛接口、评分、录像和网页。
 - heristic/<run_id>/：你交付的 C++ 策略代码目录。
-- outputs/arena/native_1000/：正式联赛，以及 Arena 自动管理的源码快照、自由测试和正式成绩。
+- outputs/arena/main/：正式联赛，以及 Arena 自动管理的源码快照、自由测试和正式成绩。
 
 命名格式为“模型名-模型自行选择的单词-版本号”。
 模型名使用执行本次研究的实际模型名；单词由你自己选择；版本号使用 v1、v2、v3 等。
@@ -38,18 +38,17 @@ Python：/Users/bzy/project/generals-rl/.venv/bin/python
 
 可阅读：
 - arena/RESEARCH.md：commit/run 命令、C++ 接口、时间预算及成绩约定。
-- arena/src/generals_arena/sdk/arena_policy.h：C++ 策略协议。
+- arena/src/generals_arena/policies/sdk/arena_policy.h：C++ 策略协议。
 - arena/examples/cpp_wait/policy.cpp：仅返回 WAIT 的接口示例。
 - doc/README.md 的战斗、地图、观测及环境 API 部分；跳过基础策略介绍。
 - env/src/generals/core/engine.py：参考游戏规则。
 - env/src/generals/core/observation.py：合法观测及信息边界。
 - env/src/generals/protocol/actions.py：动作编码与含义。
-- arena/src/generals_arena/league/rating.py：名次与 rating。
+- arena/src/generals_arena/competitions/rating.py：名次与 rating。
 
 正式比赛覆盖 2–8 人、宽高 15–35 的随机地图，使用局部视野，允许重复 AI。
-所有人数共用一个排行榜，按名次计算 rating，以 WAIT 为 0 分参照。
-新自动评测约 50% 为 1v1，1v1 的评分更新权重是多人的 2 倍；多人对重复席位先取平均，
-再对不同对手策略等权计分。WAIT 只参与少量 1v1 自动校准对局。
+评分分为独立的 1v1 GoR 与 3–8 人 FFA Codeforces 两池。1v1 展示原始 GoR 相对 WAIT 的分差；FFA 保持均值 1000。
+新自动评测约 50% 为 1v1，剩余预算为多人。重复策略先合并名次，循环换位分摊一组更新权重；WAIT 正常参赛，不额外安排校准配额。
 目标包括多人名次表现和夺冠能力，不限于二人局或某个固定对手。
 
 3. 实现与信息约束
@@ -96,7 +95,7 @@ arena_act 收到合法局部观测和上一动作的结果反馈。
 
 自由测试示例：
 
-.venv/bin/generals_arena run \
+generals-arena run \
   --player baseline/aggressive \
   --player heristic/<run_id>/policy.cpp \
   --player heristic/<run_id>/policy.cpp \
@@ -114,11 +113,11 @@ arena_act 收到合法局部观测和上一动作的结果反馈。
 使用已保存的 policy/<版本> 或 @别名 时保留该版本原来的参数。
 
 命令返回 JSON，包含每种策略的版本哈希、按人数的名次/夺冠率/两两名次得分、计时和失败信息。
-数据自动保存在 outputs/arena/native_1000/runs/<run_id>/；report 字段给出报告路径，
+数据自动保存在 outputs/arena/main/runs/<run_id>/；report 字段给出报告路径，
 league_directory 字段给出对局和录像数据库目录。可选 --output 目录 导出报告及录像数据库。
 自由测试不影响正式榜单，不占正式全量评测次数，但计入 60 分钟总预算。
 纯同版本自我对战的两两得分为 null，不能当作实力提升证据。
-查看自由测试回放可用 generals_arena serve <league_directory> --port 8087 --no-worker。
+查看自由测试回放可用 generals-arena serve <league_directory> --port 8087 --no-worker。
 
 5. Arena 全量评测（最多三次）
 
@@ -126,12 +125,12 @@ league_directory 字段给出对局和录像数据库目录。可选 --output �
 该次数限制是本次任务要求，即使通用 Arena 工具允许更多提交，也不得超过。
 私有测试次数不限，但所有工作均计入 60 分钟总预算。
 
-.venv/bin/generals_arena commit heristic/<run_id>/policy.cpp \
+generals-arena commit heristic/<run_id>/policy.cpp \
   --name "<模型名>-<自选单词>-v1"
 
 多文件策略将文件路径替换成对应源码目录。固定参数通过可选 --params 参数.json 提交。
 Arena 自动快照源码及参数、编译、进行 8 局接口预检，然后登记到正式联赛，
-默认最多 4 局并行执行该版本的 1000 局比赛（可用 --workers 调整，局内策略仍单线程串行），更新统一 rating 并保存全部录像和计时记录。
+默认最多 4 局并行执行该版本的 1000 局比赛（可用 --workers 调整，局内策略仍单线程串行），分别更新 1v1/FFA 评分并保存全部录像和计时记录。
 正式工件由 Arena 自己保存，后续修改开发工作区不会影响已提交版本。
 同一版本重复执行 commit 恢复原任务，不重复计分；不同实现使用新版本别名。
 预检通过后开始正式任务即计入一次全量评测；之后中断或失败仍占一次。
@@ -146,7 +145,7 @@ Arena 自动快照源码及参数、编译、进行 8 局接口预检，然后�
 最终交付的策略源码及固定参数必须与该次评测的版本一致，不能用旧版本成绩代表修改后的代码。
 如果最后一次评测未完成或发生违规，必须如实注明，不能用更早的成绩代替。
 
-查询任务进度：.venv/bin/generals_arena status
+查询任务进度：generals-arena status
 正式网页：http://localhost:8086，已有服务无需重启。
 
 6. 最终交付
@@ -155,8 +154,8 @@ Arena 自动快照源码及参数、编译、进行 8 局接口预检，然后�
 
 - heristic/<run_id>/ 下的最终 C++ 策略代码，包含编译所需的源码、头文件及使用的固定参数。
 - 该版本最后一次 Arena 全量评测成绩，引用 commit 返回的 report 路径：
-  outputs/arena/native_1000/commits/<version_hash>/publication.json。
-  简要给出“模型名-自选单词-版本号”别名、版本哈希、已用全量评测次数、完成局数、rating、榜单名次及超时/错误次数。
+  outputs/arena/main/commits/<version_hash>/publication.json。
+  简要给出“模型名-自选单词-版本号”别名、版本哈希、已用全量评测次数、完成局数、两个评分池各自的 rating/名次/实际局数及超时/错误次数。
 
 无需另写研究报告、实验过程总结、算法说明或各次提交的成绩汇总。
 Arena 自动保存的源码、实验和录像保留在原目录，作为最终成绩的依据。

@@ -9,7 +9,7 @@ conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps
 conda run -n generals-rl python -m generals play --players 4 --seed 42
 ```
 
-基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面。CPU 批量后端使用 Linux C++/OpenMP，GPU 使用可选的 PyTorch/CUDA。
+基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面，内置 AI 需要 Linux/macOS 与 C++17 编译器。CPU 原生后端使用 C++/OpenMP，GPU 使用可选的 PyTorch/CUDA；具体平台与依赖见下方环境文档。
 
 没有图形桌面时可运行 AI 模拟：
 
@@ -23,7 +23,7 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 - [游戏规则与地图生成](doc/README.md#rules)
 - [代码架构](doc/README.md#architecture)和 [CPU/GPU API](doc/README.md#api)
 - [逐 tick benchmark 与 profiling](doc/README.md#benchmark)
-- [当前实现的性能验证](doc/README.md#results)
+- [环境性能验证记录](doc/README.md#results)
 - [测试与历史存档](doc/README.md#verification)
 
 后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
@@ -36,20 +36,24 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 
 ```bash
 python -m pip install -e ./env -e ./baselines -e ./arena
-generals-arena serve outputs/arena/native_1000 --port 8086 --no-worker
+generals-arena league init outputs/arena/main --config arena/configs/league.json
+generals-arena serve outputs/arena/main --port 8086 --no-worker
 ```
 
-打开 http://localhost:8086 查看已完成的 1000 局榜单、录像，或作为人类玩家参赛。
-当前仅保留 `outputs/arena/native_1000` 正式联赛；新建联赛和 C++ 策略接入见 Arena 文档。
-2–8 人共用一个 rating，允许重复 AI 实例。新算法默认增量评测 1000 局，C++ 研究评测串行执行。
-random baseline 固定为 0 Elo，分差 500 对应 90% 的两两期望得分。
-正式随机地图联赛暂不接收固定尺寸的 RL 模型。Arena 的独立对战接口已支持当前 RL 模型、history 和 knowledge，但使用单局 greedy 推理；RL 训练与批量采样评估保持独立，后续再统一对战、回放与 Elo 协议。
+打开 http://localhost:8086 查看榜单、录像或参加人类对局。新建联赛尚无比赛记录，需要先按 Arena 文档登记对手并运行评测。
+`outputs/arena/native_1000` 是使用旧源码和评分规则的本地历史结果，不是上述命令生成的数据。
+评分按人数分成独立的 1v1 GoR 与 FFA Codeforces 两池，允许重复 AI 实例。新算法默认增量评测 1000 局，C++ 研究评测支持多进程单局并行。
+1v1 展示相对 WAIT 的 GoR；FFA 保持全池均值 1000。
+固定尺寸 RL 模型使用兼容的联赛配置；导出的策略包负责特征、记忆和推理，Arena 只管理通用包和比赛。
+Arena 的循环赛、持续联赛和训练评估共用比赛执行、结果、回放与评分基础。
+训练原子保存 checkpoint，自动导出策略包，调用 Arena 的 CPU/GPU 批量评估，记录 Elo/CI 并按固定 profile 的 Elo 选择 best；
+部署与共享流程见 [RL 文档](rl/README.md#模型导出与-arena-评估)。公开榜单和训练用相对 Elo 分开报告。
 
 C++ 策略可以直接提交或自由测试，无需手动注册：
 
 ```bash
-generals_arena commit ./heristic/my_agent/policy.cpp --name "my-model-comet-v1"
-generals_arena run --player baseline/aggressive --player ./heristic/my_agent/policy.cpp \
+generals-arena commit ./heristic/my_agent/policy.cpp --name "my-model-comet-v1"
+generals-arena run --player baseline/aggressive --player ./heristic/my_agent/policy.cpp \
   --size 15:35 --games 100 --output ./results/test01
 ```
 
