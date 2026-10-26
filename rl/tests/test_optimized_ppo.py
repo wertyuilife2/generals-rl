@@ -12,7 +12,7 @@ from tensordict import TensorDict
 from generals_rl.information_ppo import InformationSpatialPPOPolicy
 import generals_rl.optimized_ppo as optimized
 from generals_rl.optimized_ppo import OptimizedInformationSpatialPPOPolicy
-from generals_rl.spatial_ppo import FRAME_DIM, MAP_PLANES, MAP_SIZE, PUBLIC_DIM
+from generals_rl.policy.cnn import FRAME_DIM, MAP_PLANES, MAP_SIZE, PUBLIC_DIM
 
 
 def observations(count=4, history_length=4, knowledge_channels=11):
@@ -106,8 +106,7 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
                     (4, True, 4), (8, True, 8), (4, False, 0)):
                 with self.subTest(history_length=history_length, geometry=geometry, alignment=alignment):
                     obs = observations(history_length=history_length)
-                    options = policy_options(history_length=history_length, own_king_geometry=geometry,
-                                             spatial_dilation=1)
+                    options = policy_options(history_length=history_length, own_king_geometry=geometry)
                     baseline = InformationSpatialPPOPolicy(obs, groups(), 649, **options)
                     learned_weights(baseline)
                     policy = OptimizedInformationSpatialPPOPolicy(obs, groups(), 649,

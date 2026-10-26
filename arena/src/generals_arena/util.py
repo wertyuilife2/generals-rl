@@ -1,5 +1,7 @@
 """Stable identities and atomic JSON reports."""
 from hashlib import sha256
+from contextlib import contextmanager
+import fcntl
 from importlib.util import find_spec
 import json
 import os
@@ -53,3 +55,20 @@ def integer(name, value, minimum=0):
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ValueError(f"{name} must be an integer >= {minimum}")
     return value
+
+
+@contextmanager
+def process_lock(directory, name, *, blocking=False):
+    """Lock a managed directory; OS locks release automatically on process exit."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / name).open('a') as stream:
+        flags = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
+        try:
+            fcntl.flock(stream, flags)
+        except BlockingIOError as exc:
+            raise RuntimeError(f'another process holds {name}') from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)

@@ -27,7 +27,7 @@ from generals_rl.curriculum import CurriculumConfig, RolloutCurriculum
 from generals_rl.distributed_training import DistributedConfig
 from generals_rl.self_play_training import SelfPlayConfig, prepare_self_play
 from generals_rl.task import GeneralsTask, TaskConfig
-from generals_rl.train import _matmul_precision
+from generals_rl.policy.precision import matmul_precision
 
 
 STAGES = ("collection_seconds", "gae_seconds", "update_seconds", "total_seconds")
@@ -368,7 +368,7 @@ def benchmark(args):
     had_group = torch.distributed.is_initialized()
     profile_summary = None
     try:
-        with _matmul_precision(config.get("matmul_precision"), config.get("cudnn_allow_tf32"), config.get("cudnn_benchmark")), \
+        with matmul_precision(config.get("matmul_precision"), config.get("cudnn_allow_tf32"), config.get("cudnn_benchmark")), \
                 GeneralsTask(settings) as task:
             env = GeneralsCTSVecEnv(task)
             observations = env.get_observations()

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -126,7 +127,7 @@ def train_worker(rank, directory, opponent="current_self_play"):
             results["same_weights"] = True
             dist.barrier()  # Checkpoint is a rank-zero artifact, not an all-reduce output.
             source_pool = {path.name: path.read_bytes() for path in (root / "fresh/history_pool").iterdir()}
-            selected = root / "fresh/model_0.pt" if opponent == "self_play" else root / "fresh/checkpoint.pt"
+            selected = root / "fresh/model_1.pt" if opponent == "self_play" else root / "fresh/checkpoint.pt"
             selected_iteration = (torch.load(selected, map_location="cpu", weights_only=True))["iter"]
             results["resume"] = train(config, root / "resume", iterations=1,
                                        resume=str(selected))
@@ -189,7 +190,79 @@ def historical_failure_worker(rank, directory):
         dist.destroy_process_group()
 
 
+def evaluation_wait_worker(rank, directory):
+    """Every evaluation boundary can exceed the learner collective timeout."""
+    from generals_rl.distributed_training import DistributedConfig
+    torch.set_num_threads(1)
+    root = Path(directory)
+    dist.init_process_group('gloo', init_method=f'file://{root}/evaluation_group', rank=rank, world_size=2,
+                            timeout=timedelta(seconds=3))
+    results = {}
+    try:
+        for phase in ('initialization', 'periodic', 'final'):
+            for fail in (False, True):
+                def pause(stage):
+                    if stage != phase:
+                        return
+                    time.sleep(4)
+                    if fail:
+                        raise ValueError(f'injected {phase} evaluation failure')
+
+                class Evaluator:
+                    pending = ()
+                    budget_exhausted = False
+                    def __init__(self, *args, **kwargs): pass
+                    def poll(self): pass
+                    def on_checkpoint(self, *args, **kwargs):
+                        if not kwargs.get('final'):
+                            pause('periodic')
+                    def describe(self): return {'failed': 0}
+                    def close(self): pass
+                    def drain(self): pause('initialization')
+                    def finish(self): pause('final')
+
+                waits = []
+                wait_on_cpu = DistributedConfig.wait_on_cpu
+
+                def record_wait(config):
+                    waits.append(True)
+                    wait_on_cpu(config)
+
+                config = small_config()
+                config['task']['opponent'] = 'current_self_play'
+                config['evaluation'] = {'enabled': True, 'every_n_updates': 2, 'final_top_k': 0,
+                                        'device': 'cpu' if phase == 'final' else 'cuda:0'}
+                environment = {'WORLD_SIZE': '2', 'RANK': str(rank), 'LOCAL_RANK': str(rank)}
+                with patch.dict(os.environ, environment), redirect_stdout(io.StringIO()), \
+                        patch('generals_rl.train.PeriodicEvaluator', Evaluator), \
+                        patch.object(DistributedConfig, 'wait_on_cpu', record_wait):
+                    try:
+                        train(config, root / f'{phase}_{fail}', iterations=2)
+                        status = 'completed'
+                    except (ValueError, RuntimeError) as error:
+                        status = str(error)
+                results[f'{phase}_{fail}'] = {'status': status, 'waits': len(waits)}
+                dist.barrier()  # Success and failure both leave the learner group usable.
+        (root / f'evaluation_rank_{rank}.json').write_text(json.dumps(results))
+    finally:
+        dist.destroy_process_group()
+
+
 class DistributedTrainEntrypointTests(unittest.TestCase):
+    def test_evaluation_waits_on_cpu_at_each_boundary_and_propagates_errors(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': ''}):
+            mp.spawn(evaluation_wait_worker, args=(directory,), nprocs=2, join=True)
+            for rank in range(2):
+                results = json.loads((Path(directory) / f'evaluation_rank_{rank}.json').read_text())
+                for phase in ('initialization', 'periodic', 'final'):
+                    with self.subTest(rank=rank, phase=phase):
+                        success, failure = results[f'{phase}_False'], results[f'{phase}_True']
+                        self.assertEqual(success['status'], 'completed')
+                        self.assertIn(f'injected {phase} evaluation failure', failure['status'])
+                        # No CPU wait on update 1, when evaluation is not due.
+                        self.assertEqual(success['waits'], 1 if phase == 'final' else 3)
+                        self.assertEqual(failure['waits'], 2 if phase == 'periodic' else 1)
+
     def test_full_training_resume_partial_budget_rank_zero_stop_and_file_ownership(self):
         self._assert_lifecycle("current_self_play")
 

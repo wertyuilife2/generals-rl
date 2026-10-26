@@ -5,8 +5,10 @@ import torch
 
 from generals import MapConfig, make_env
 
-from .mdp import (ActionMetrics, GameBatch, KnowledgeState, ObservationHistory, RewardConfig,
-                  ShapedReward, make_action_space, make_observation_encoder)
+from .mdp import ActionMetrics, GameBatch, RewardConfig, ShapedReward, make_observation_encoder
+from .policy.actions import make_action_space
+from .policy.knowledge import KnowledgeState
+from .policy.observations import ObservationHistory
 from .opponents import make_opponent
 
 

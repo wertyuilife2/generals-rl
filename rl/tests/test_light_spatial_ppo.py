@@ -11,7 +11,10 @@ import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
 from rsl_rl.utils import resolve_callable
 from generals_rl.cts import runner_config
-from generals_rl.evaluate_builtin import evaluate_builtin
+from generals import MapConfig
+from generals_arena.competitions.evaluation import evaluate
+from generals_arena.competitions.evaluation import make_profile
+from generals_rl.export import export_policy
 from generals_rl.opponents import SelfPlayOpponent
 from generals_rl.spatial_ppo import LightSpatialPPOPolicy
 from generals_rl.information_ppo import InformationSpatialPPOPolicy
@@ -75,7 +78,7 @@ class LightSpatialPPOTests(unittest.TestCase):
         cfg['runner']['policy']['class_name'] = 'generals_rl.information_ppo.InformationSpatialPPOPolicy'
         cfg['runner']['algorithm'].update(
             class_name='generals_rl.student_ppo.StudentPPO', teacher_env_ratio=0,
-            gamma=.995, load_balance_coef=0, schedule='fixed', desired_kl=None)
+            gamma=.995, schedule='fixed', desired_kl=None)
         cfg['self_play'] = dict(pool_size=3, snapshot_interval=1, retain_seed=True, stochastic=True, seed=917, sampling='uniform')
         cfg['evaluation'] = {'enabled': False}
         initial = {}
@@ -116,9 +119,12 @@ class LightSpatialPPOTests(unittest.TestCase):
             self.assertEqual({int(v['step']) for v in saved['optimizer_state_dict']['state'].values()}, {8})
             self.assertTrue(any(not torch.equal(initial[name], saved['model_state_dict'][name])
                                 for name in initial))
-            evaluation = evaluate_builtin(root / 'cold/checkpoint.pt', maps_per_ai=1,
-                                          max_ticks=3, batch_size=8, cpu_threads=1)
-            self.assertEqual(evaluation['completed_games'], 8)
+            bundle = export_policy(root / 'cold/checkpoint.pt', root/'bundle')
+            profile = make_profile(MapConfig(**{key: cfg['task'][key] for key in (
+                'width', 'height', 'players', 'mountain_density', 'city_density')}),
+                maps_per_opponent=1, max_ticks=3)
+            evaluation = evaluate(bundle, profile, batch_size=8, cpu_threads=1)
+            self.assertEqual(evaluation['games'], 10)
 
     def test_legacy_baseline_config_rejected_before_any_training_side_effect(self):
         with tempfile.TemporaryDirectory() as directory:

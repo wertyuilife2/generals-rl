@@ -3,8 +3,8 @@ import unittest
 
 import torch
 
-from generals_rl.mdp.knowledge import KnowledgeState, knowledge_channels
-from generals_rl.mdp.observations import LocalObservationEncoder
+from generals_rl.policy.knowledge import KnowledgeState, knowledge_channels
+from generals_rl.policy.observations import LocalObservationEncoder
 from generals_rl.mdp.state import GameBatch
 
 

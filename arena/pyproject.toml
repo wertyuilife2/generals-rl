@@ -14,11 +14,10 @@ baselines = ["generals-baselines"]
 
 [project.scripts]
 generals-arena = "generals_arena.cli:main"
-generals_arena = "generals_arena.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["generals_arena*"]
 
 [tool.setuptools.package-data]
-generals_arena = ["web/*.html", "web/*.css", "web/*.js", "sdk/*.h", "sdk/*.cpp"]
+generals_arena = ["web/*.html", "web/*.css", "web/*.js", "policies/sdk/*.h", "policies/sdk/*.cpp"]

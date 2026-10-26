@@ -6,6 +6,8 @@ dist/
 .venv/
 .pytest_cache/
 outputs/
+*.pt
+*.pth
 doc/*
 !doc/README.md
 !doc/auto_research.md

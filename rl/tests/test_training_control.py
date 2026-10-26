@@ -42,7 +42,7 @@ class TrainingControlTests(unittest.TestCase):
         config = small_training_config()
         config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
         # Exercise the synchronous evaluation-budget branch with no CUDA worker.
-        config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_snapshots": 1}
+        config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_updates": 1}
         config["training_control"] = {
             "max_seconds": 100, "min_seconds": 60, "budget_reserve_seconds": 40,
         }
@@ -62,10 +62,12 @@ class TrainingControlTests(unittest.TestCase):
             for key in ("optimizer_state_dict",):
                 self.assertEqual({int(state["step"]) for state in checkpoint[key]["state"].values()}, {4})
             self.assertTrue(evaluator_type.call_args.args[0].synchronous)
-            evaluator.on_snapshot.assert_called_once()
-            self.assertEqual(evaluator.on_snapshot.call_args.kwargs["remaining_seconds"], 40)
-            self.assertEqual(evaluator.on_snapshot.call_args.kwargs["publication_index"], 1)
-            self.assertEqual(evaluator.on_snapshot.call_args.args[0].metadata["iteration"], 0)
+            self.assertEqual(evaluator.on_checkpoint.call_count, 2)
+            first = evaluator.on_checkpoint.call_args_list[0]
+            self.assertEqual(first.kwargs["remaining_seconds"], 40)
+            self.assertEqual(first.kwargs["completed_updates"], 1)
+            self.assertTrue(Path(first.args[0]).name.startswith("model_"))
+            self.assertTrue(evaluator.on_checkpoint.call_args.kwargs["final"])
             evaluator.finish.assert_called_once_with()
             evaluator.close.assert_called_once_with()
 
@@ -80,7 +82,7 @@ class TrainingControlTests(unittest.TestCase):
                     patch("generals_rl.train.PeriodicEvaluator") as evaluator_type:
                 config = small_training_config()
                 config["self_play"] = {"snapshot_interval": 1, "pool_size": 3, "retain_seed": True}
-                config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_snapshots": 1}
+                config["evaluation"] = {"enabled": True, "device": "cuda:0", "every_n_updates": 1}
                 config["training_control"] = {"max_seconds": 100, "min_seconds": 60}
                 evaluator = evaluator_type.return_value
                 evaluator.budget_exhausted = True
@@ -102,14 +104,14 @@ class TrainingControlTests(unittest.TestCase):
                 self.assertEqual([snapshot["iteration"] for snapshot in manifest["snapshots"]],
                                  [-1] + list(range(updates)))
                 self.assertEqual(summary["self_play"]["new_publications"], updates + 1)
-                self.assertEqual(evaluator.on_snapshot.call_count, updates)
+                self.assertEqual(evaluator.on_checkpoint.call_count, updates + 1)
                 evaluator.finish.assert_called_once_with()
                 evaluator.close.assert_called_once_with()
 
     def test_plateau_needs_successful_points_minimum_time_and_meaningful_progress(self):
         controller = TrainingController(TrainingControlConfig(
-            min_seconds=10, max_seconds=100, plateau_evaluations=3, min_improvement=0.02))
-        point = {"selection_score": [0.4, 0.4, 0.6]}
+            min_seconds=10, max_seconds=100, plateau_evaluations=3, min_improvement=2.0))
+        point = {"elo": 40.0}
         for _ in range(3):
             controller.on_evaluation(point)
         self.assertIsNone(controller.stop_reason(20))
@@ -117,7 +119,7 @@ class TrainingControlTests(unittest.TestCase):
         self.assertIsNone(controller.stop_reason(9))
         self.assertIsNone(controller.stop_reason(20, evaluation_healthy=False))
         self.assertEqual(controller.stop_reason(20), "evaluation_plateau")
-        controller.on_evaluation({"selection_score": [0.4, 0.45, 0.6]})
+        controller.on_evaluation({"elo": 45.0})
         self.assertIsNone(controller.stop_reason(20))
         self.assertEqual(controller.stop_reason(100, evaluation_healthy=False), "max_seconds")
 
@@ -126,7 +128,7 @@ class TrainingControlTests(unittest.TestCase):
         controller = TrainingController(TrainingControlConfig(
             max_seconds=100, budget_reserve_seconds=40,
             plateau_evaluations=1, min_completed_updates=5))
-        point = {"selection_score": [0.4, 0.4, 0.6]}
+        point = {"elo": 40.0}
         controller.on_evaluation(point)
         controller.on_evaluation(point)
         self.assertIsNone(controller.stop_reason(20, completed_updates=4))
@@ -150,7 +152,7 @@ class TrainingControlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             source = Path(directory) / "source"
             train(config, source, iterations=2)
-            config["evaluation"] = {"enabled": True, "every_n_snapshots": 1}
+            config["evaluation"] = {"enabled": True, "every_n_updates": 1}
             config["training_control"] = {"plateau_evaluations": 1, "min_completed_updates": 5}
             with patch("generals_rl.train.PeriodicEvaluator") as evaluator_type, \
                     patch.object(TrainingController, "stop_reason", capture_stop):
@@ -159,9 +161,9 @@ class TrainingControlTests(unittest.TestCase):
                 evaluator.describe.return_value = {"failed": []}
 
                 def fixed_evaluation(*args, **kwargs):
-                    evaluator_type.call_args.kwargs["on_complete"]({"selection_score": [0.4, 0.4, 0.6]})
+                    evaluator_type.call_args.kwargs["on_complete"]({"elo": 40.0})
 
-                evaluator.on_snapshot.side_effect = fixed_evaluation
+                evaluator.on_checkpoint.side_effect = fixed_evaluation
                 output = Path(directory) / "resumed"
                 summary = train(config, output, iterations=6, resume=str(source / "checkpoint.pt"))
             self.assertEqual(observed, [(3, 0, None), (4, 1, None), (5, 2, "evaluation_plateau")])
@@ -204,7 +206,7 @@ class TrainingControlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             output = Path(directory) / "run"
             train(config, output, iterations=5)
-            self.assertEqual({path.name for path in output.glob("*.pt")}, {"model_3.pt", "checkpoint.pt"})
+            self.assertEqual({path.name for path in output.glob("*.pt")}, {"model_4.pt", "checkpoint.pt"})
 
     def test_invalid_control_settings_fail_before_creating_output(self):
         cases = ({"max_seconds": 0}, {"max_seconds": float("nan")}, {"min_seconds": -1},
@@ -237,11 +239,11 @@ class TrainingControlTests(unittest.TestCase):
             train(config, source, iterations=2)
             manifest = source / "history_pool/manifest.json"
             original_manifest = manifest.read_bytes()
-            # The evaluator's best.pt has the same weights-only pool format.
+            # Historical pool snapshots remain valid weights-only warm-start inputs.
             newest = json.loads(original_manifest)["snapshots"][-1]["filename"]
             (source / "best.pt").write_bytes((source / "history_pool" / newest).read_bytes())
             config["runner"]["algorithm"].update(
-                schedule="fixed", learning_rate=1e-4, student_encoder_learning_rate=1e-4)
+                schedule="fixed", learning_rate=1e-4)
             for filename in ("checkpoint.pt", "best.pt"):
                 with self.subTest(source=filename):
                     config["task"]["productive_actions"] = filename == "best.pt"

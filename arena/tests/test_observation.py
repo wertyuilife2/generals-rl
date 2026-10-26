@@ -1,4 +1,4 @@
-"""Arena's fast observation path must preserve the environment information boundary."""
+"""Reusing engine totals in Arena preserves the single env information boundary."""
 from dataclasses import fields
 
 import numpy as np
@@ -9,7 +9,6 @@ from generals.core.engine import CoreEngine
 from generals.core.mapgen import generate_map
 from generals.core.observation import observe
 from generals.core.state import Action, compute_stats
-from generals_arena.league.observation import local_observation
 from generals_baselines import make_controllers
 
 
@@ -38,7 +37,7 @@ def test_observations_match_at_every_tick_and_remain_isolated(players):
     for _ in range(160):
         observations = []
         for seat in range(players):
-            actual, expected = local_observation(state, seat, stats), observe(state, seat)
+            actual, expected = observe(state, seat, stats=stats), observe(state, seat)
             assert_same(actual, expected)
             observations.append(actual)
             assert not np.shares_memory(actual.owner, state.owner)
@@ -56,7 +55,7 @@ def test_observations_match_at_every_tick_and_remain_isolated(players):
         assert_same(actual, expected)
     # Even deliberately re-enabling a board buffer cannot modify the engine or
     # another seat's observation. Public stats retain immutable backing bytes.
-    actual = local_observation(state, 0, stats)
+    actual = observe(state, 0, stats=stats)
     original = state.owner.copy()
     actual.owner.flags.writeable = True
     actual.owner[:] = 123
@@ -70,5 +69,5 @@ def test_exact_large_integer_totals_and_hidden_city_counts():
     state.army.ravel()[state.general_pos[0]] = 2**53 + 11
     stats = compute_stats(state)
     for seat in range(2):
-        assert_same(local_observation(state, seat, stats), observe(state, seat))
-        assert local_observation(state, seat, stats).stats.army[0] == 2**53 + 11
+        assert_same(observe(state, seat, stats=stats), observe(state, seat))
+        assert observe(state, seat, stats=stats).stats.army[0] == 2**53 + 11

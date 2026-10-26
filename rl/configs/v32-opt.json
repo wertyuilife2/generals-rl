@@ -61,7 +61,6 @@
       "public_dim": 13,
       "actor_obs_normalization": false,
       "critic_obs_normalization": false,
-      "value_potential_offset": false,
       "own_king_geometry": true,
       "wait_move_factorization": true,
       "knowledge_channels": 11,
@@ -76,13 +75,11 @@
       "num_learning_epochs": 4,
       "num_mini_batches": 64,
       "learning_rate": 0.0001,
-      "student_encoder_learning_rate": 0.0001,
       "schedule": "adaptive",
       "desired_kl": 0.01,
       "gamma": 0.995,
       "lam": 0.95,
       "entropy_coef": 0.01,
-      "load_balance_coef": 0,
       "rnd_cfg": null,
       "ppo_monitor": true,
       "ppo_probe_samples": 8192,
@@ -105,9 +102,6 @@
   },
   "evaluation": {
     "enabled": true,
-    "stochastic": true,
-    "every_n_snapshots": 2,
-    "maps_per_ai": 200,
     "batch_size": 0,
     "max_ticks": 2000,
     "seed": 271828,
@@ -115,7 +109,9 @@
     "keep_snapshots": 3,
     "device": "cpu",
     "timeout_seconds": null,
-    "env_backend": "cpu"
+    "every_n_updates": 100,
+    "maps_per_opponent": 200,
+    "backend": "cpu"
   },
   "torch_threads": 1,
   "run_id": "v32-opt-current",
@@ -123,13 +119,18 @@
   "training_control": {
     "max_seconds": 10800,
     "min_seconds": 3600,
-    "plateau_evaluations": 12,
-    "min_improvement": 0.02,
+    "plateau_evaluations": null,
+    "min_improvement": 10.0,
     "keep_checkpoints": 3,
     "min_completed_updates": 1200
   },
   "curriculum": {
     "tick_decay": true
   },
-  "cudnn_benchmark": true
+  "cudnn_benchmark": true,
+  "inference": {
+    "mode": "stochastic",
+    "precision": "from_config",
+    "execution": "eager"
+  }
 }

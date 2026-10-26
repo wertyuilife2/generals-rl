@@ -16,7 +16,10 @@ from tensordict import TensorDict
 from generals import VecEnv
 from generals.core.engine import CoreEngine
 from generals.core.state import Action, GameState, MapLayout
-from generals_rl.evaluate_builtin import evaluate_builtin
+from generals import MapConfig
+from generals_arena.competitions.evaluation import evaluate
+from generals_arena.competitions.evaluation import make_profile
+from generals_rl.export import export_policy
 from generals_rl.mdp import (CombatObservationEncoder, GameBatch, LocalObservationEncoder,
                              make_observation_encoder)
 from generals_rl.self_play_training import prepare_self_play
@@ -168,15 +171,15 @@ class CombatObservationTests(unittest.TestCase):
                 prepare_self_play(combat,runner,config,root/"semantic_rejected",resume=destination)
             config["task"]=asdict(combat.config)
             destination.with_name("run_config.json").write_text(json.dumps(config))
-            with patch("generals_rl.evaluate_builtin.make_observation_encoder",
-                       wraps=make_observation_encoder) as factory,redirect_stdout(io.StringIO()):
-                report=evaluate_builtin(destination,maps_per_ai=1,batch_size=8,max_ticks=2,
-                                        seed=91234,device="cpu",cpu_threads=1)
-            self.assertTrue(report["combat_features"])
-            self.assertEqual(report["completed_games"],8)
-            self.assertEqual(set(report["by_ai"]),{"random","defensive","expansion","aggressive"})
-            self.assertEqual(factory.call_count,2)  # Bootstrap shapes and native matches.
-            self.assertTrue(all(call.args[0].combat_features for call in factory.call_args_list))
+            with redirect_stdout(io.StringIO()):
+                bundle=export_policy(destination,root/"bundle",completed_updates=1)
+                profile=make_profile(MapConfig(**{key: config["task"][key] for key in (
+                    "width", "height", "players", "mountain_density", "city_density")}),
+                    maps_per_opponent=1,max_ticks=2,seed=91234)
+                report=evaluate(bundle,profile,batch_size=8,device="cpu",cpu_threads=1)
+            self.assertEqual(report["games"],10)
+            self.assertEqual(set(report["by_opponent"]),{"random","defensive","expansion","aggressive","WAIT"})
+
 
 
 if __name__=="__main__":

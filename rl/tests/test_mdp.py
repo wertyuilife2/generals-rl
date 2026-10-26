@@ -12,10 +12,9 @@ from generals.core.state import (
     Action, Direction, EMPTY, GameState, MapLayout, MoveMode, Structure, Terrain,
 )
 from generals.vector import VecEnv
-from generals_rl.mdp import (
-    EncodedActionSpace, GameBatch, LocalObservationEncoder, ObservationHistory,
-    RewardConfig, RewardResult, ShapedReward,
-)
+from generals_rl.mdp import GameBatch, LocalObservationEncoder, RewardConfig, RewardResult, ShapedReward
+from generals_rl.policy.actions import EncodedActionSpace
+from generals_rl.policy.observations import ObservationHistory
 from generals_rl.task import GeneralsTask, TaskConfig
 
 
@@ -341,32 +340,6 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(result.metrics["Action/wait_rate"].item(), 0.)
         self.assertEqual(result.metrics["Action/moved_army"].item(), 0.)
 
-    def test_productive_config_shared_by_task_and_builtin_evaluation(self):
-        from generals_rl.evaluate_builtin import GameSpec, battle_batch
-
-        class ProbeStudent:
-            def __init__(self):
-                self.masks = []
-
-            def act_inference(self, obs):
-                self.masks.append(obs["action_mask"].clone())
-                return torch.zeros((len(obs), 1), dtype=torch.long)
-
-            def action_probabilities(self, obs):
-                return torch.zeros_like(obs["action_mask"], dtype=torch.float32).scatter_(
-                    1, self.act_inference(obs), 1)
-
-        state = example_state()
-        forward = Action.move(0, Direction.RIGHT).encode()
-        for productive in (False, True):
-            task = self.task([state], productive_actions=productive)
-            initial_mask = task.get_observations()["action_mask"].clone()
-            self.assertEqual(bool(initial_mask[0, forward]), not productive)
-            student = ProbeStudent()
-            games, _ = battle_batch([GameSpec(0, "random", 0, 1, 2, 0)], [state],
-                                    student, task.config, max_ticks=1)
-            torch.testing.assert_close(student.masks[0], initial_mask)
-            self.assertEqual(games[0]["action_metrics"]["wait_rate"], 1.)
 
 
 if __name__ == "__main__":

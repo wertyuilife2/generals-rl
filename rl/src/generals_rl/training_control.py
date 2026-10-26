@@ -9,7 +9,7 @@ class TrainingControlConfig:
     max_seconds: float | None = None
     min_seconds: float = 0.0
     plateau_evaluations: int | None = None
-    min_improvement: float = 0.02
+    min_improvement: float = 10.0
     keep_checkpoints: int | None = None
     budget_reserve_seconds: float = 0.0
     min_completed_updates: int = 0
@@ -51,15 +51,14 @@ class TrainingController:
         self.reference = None
 
     def on_evaluation(self, point):
-        worst, aggressive = point["selection_score"][:2]
-        if not all(math.isfinite(value) for value in (worst, aggressive)):
-            raise ValueError("evaluation stopping requires finite win rates")
+        value = point["elo"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError("evaluation stopping requires finite Elo")
         self.completed_evaluations += 1
         margin = self.settings.min_improvement
-        improved = (self.reference is None or worst > self.reference[0] + margin
-                    or (worst >= self.reference[0] - margin and aggressive > self.reference[1] + margin))
+        improved = self.reference is None or value > self.reference + margin
         if improved:
-            self.reference = (worst, aggressive)
+            self.reference = value
             self.evaluations_without_improvement = 0
         else:
             self.evaluations_without_improvement += 1

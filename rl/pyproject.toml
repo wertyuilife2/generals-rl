@@ -14,7 +14,7 @@ video = ["Pillow>=10"]
 
 [project.scripts]
 generals-train = "generals_rl.train:main"
-generals-evaluate = "generals_rl.evaluate_builtin:main"
+generals-export = "generals_rl.export:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

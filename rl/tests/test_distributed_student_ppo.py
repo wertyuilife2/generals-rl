@@ -13,11 +13,12 @@ import torch.multiprocessing as mp
 from torch.distributions import Categorical
 from tensordict import TensorDict
 
-from generals_rl.student_ppo import StudentPPO, StudentPPOPolicy
+from generals_rl.student_ppo import StudentPPO
+from generals_rl.actor_critic import CategoricalActorCritic
 from rsl_rl.storage import RolloutStorageCTS
 
 
-class TinyStudentPolicy(StudentPPOPolicy):
+class TinyStudentPolicy(CategoricalActorCritic):
     def __init__(self):
         torch.nn.Module.__init__(self)
         self.actor = torch.nn.Linear(3, 3)

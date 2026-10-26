@@ -13,7 +13,10 @@ import torch
 from torch import nn
 from torch.distributions import Categorical, kl_divergence
 
-from generals_rl.evaluate_builtin import _load_student, evaluate_builtin
+from generals import MapConfig
+from generals_arena.competitions.evaluation import evaluate
+from generals_arena.competitions.evaluation import make_profile
+from generals_rl.export import export_policy
 from generals_rl.self_play import HistoricalPolicyPool
 from generals_rl.spatial_ppo import LightSpatialPPOPolicy
 from generals_rl.train import train
@@ -128,16 +131,14 @@ class WaitMoveFactorizationTests(unittest.TestCase):
         cfg["runner"]["policy"]["class_name"] = "generals_rl.information_ppo.InformationSpatialPPOPolicy"
         cfg["runner"]["policy"].update(own_king_geometry=True, wait_move_factorization=True)
         cfg["runner"]["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO", teacher_env_ratio=0,
-                load_balance_coef=0, schedule="fixed", desired_kl=None)
+                schedule="fixed", desired_kl=None)
         cfg["runner"]["storage_obs_keys"] = ["policy", "critic", "action_mask"]
         cfg["self_play"] = {"pool_size": 2, "snapshot_interval": 1}
         cfg["evaluation"] = {"enabled": False}
-        made, loaded = [], []
+        made = []
         original = HistoricalPolicyPool._make_model
         def tracked_factory(pool, state):
             model = original(pool, state); made.append(model.wait_move_factorization); return model
-        def tracked_loader(*args, **kwargs):
-            model = _load_student(*args, **kwargs); loaded.append(model.wait_move_factorization); return model
         with tempfile.TemporaryDirectory() as directory, redirect_stdout(io.StringIO()):
             run = Path(directory) / "run"
             with patch.object(HistoricalPolicyPool, "_make_model", tracked_factory):
@@ -154,10 +155,13 @@ class WaitMoveFactorizationTests(unittest.TestCase):
             signature["policy_config"]["wait_move_factorization"] = False
             with self.assertRaisesRegex(ValueError, "policy_spec differs"):
                 HistoricalPolicyPool(run / "history_pool", policy_factory=lambda: None, policy_spec=signature, max_size=2)
-            with patch("generals_rl.evaluate_builtin._load_student", side_effect=tracked_loader):
-                report = evaluate_builtin(run / "checkpoint.pt", maps_per_ai=1, seed=19, batch_size=8, max_ticks=3)
-            self.assertEqual(report["completed_games"], 8)
-            self.assertEqual(loaded, [True])
+            bundle = export_policy(run / "checkpoint.pt", run/"bundle")
+            profile = make_profile(MapConfig(**{key: cfg["task"][key] for key in (
+                "width", "height", "players", "mountain_density", "city_density")}),
+                maps_per_opponent=1, seed=19, max_ticks=3)
+            report = evaluate(bundle, profile, batch_size=8)
+            self.assertEqual(report["games"], 10)
+
 
 
 if __name__ == "__main__":

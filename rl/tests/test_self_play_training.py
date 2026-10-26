@@ -101,7 +101,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
             self.assertGreater(len(observed_opponents), 1)
             self.assertEqual(checkpoint["iter"], 3)
             self.assertEqual({path.name for path in output.glob("*.pt")},
-                             {"model_0.pt", "model_1.pt", "model_2.pt", "checkpoint.pt"})
+                             {"model_1.pt", "model_2.pt", "model_3.pt", "checkpoint.pt"})
 
             session = observed["session"]
             self.assertEqual(session.pool.ids, (0, 3, 4))
@@ -133,7 +133,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
             config["runner"]["algorithm"]["schedule"] = "fixed"
             main_lr = 1e-5
             self.run_training(config, source, iterations=4)
-            for filename in ("checkpoint.pt", "model_0.pt"):
+            for filename in ("checkpoint.pt", "model_1.pt"):
                 path = source / filename
                 selected = torch.load(path, map_location="cpu", weights_only=False)
                 for key, lr in (("optimizer_state_dict", main_lr),):
@@ -141,7 +141,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
                         group["lr"] = lr
                 torch.save(selected, path)
             source_hashes = directory_hashes(source)
-            for filename, expected_iteration in (("checkpoint.pt", 3), ("model_0.pt", 0)):
+            for filename, expected_iteration in (("checkpoint.pt", 3), ("model_1.pt", 0)):
                 with self.subTest(checkpoint=filename):
                     selected = torch.load(source / filename, map_location="cpu", weights_only=False)
                     target = Path(directory) / filename.removesuffix(".pt")

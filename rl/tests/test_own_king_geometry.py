@@ -11,11 +11,12 @@ from torch import nn
 from tensordict import TensorDict
 
 from generals import VecEnv
-from generals_rl.mdp import GameBatch, make_action_space, make_observation_encoder
+from generals_rl.mdp import GameBatch, make_observation_encoder
+from generals_rl.policy.actions import make_action_space
 from generals_rl.self_play import HistoricalPolicyPool
 from generals_rl.self_play_training import prepare_self_play
-from generals_rl.spatial_ppo import (LightSpatialPPOPolicy, OwnKingRelativeGeometry,
-                                    SpatialPPOPolicy)
+from generals_rl.policy.cnn import OwnKingRelativeGeometry
+from generals_rl.spatial_ppo import LightSpatialPPOPolicy, SpatialPPOPolicy
 from generals_rl.task import TaskConfig
 from test_king_threat_distance import distance_state
 from rl_test_utils import light_policy_config
@@ -112,8 +113,8 @@ class OwnKingGeometryTests(unittest.TestCase):
             torch.testing.assert_close(policy.action_probabilities(obs), legacy.action_probabilities(obs), rtol=0, atol=0)
             torch.testing.assert_close(policy.evaluate(obs), legacy.evaluate(obs), rtol=0, atol=0)
             self.assertEqual(policy.semantics, LightSpatialPPOPolicy.semantics)
-        base = construct(obs, spatial_dilation=1)
-        enabled = construct(obs, spatial_dilation=1, own_king_geometry=True)
+        base = construct(obs)
+        enabled = construct(obs, own_king_geometry=True)
         assert_nested_equal(self, enabled.critic.state_dict(), base.critic.state_dict())
         torch.testing.assert_close(enabled.evaluate(obs), base.evaluate(obs), rtol=0, atol=0)
         self.assertEqual(sum(p.numel() for p in enabled.parameters()) -

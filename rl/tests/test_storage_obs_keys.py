@@ -32,7 +32,7 @@ def config():
     cfg["runner"]["policy"]["own_king_geometry"] = True
     cfg["runner"]["algorithm"].update(
         class_name="generals_rl.student_ppo.StudentPPO", teacher_env_ratio=0,
-        schedule="fixed", desired_kl=None, load_balance_coef=0, gamma=.995)
+        schedule="fixed", desired_kl=None, gamma=.995)
     cfg["self_play"] = {"pool_size": 2, "snapshot_interval": 50, "seed": 917}
     return cfg
 
