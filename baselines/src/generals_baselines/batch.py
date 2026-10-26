@@ -11,7 +11,7 @@ import weakref
 import numpy as np
 
 from .base import _Options, _Random, _library
-from .registry import make_controllers
+from .registry import create_controller, make_controllers
 
 
 def _array(value, dtype, shape, name):
@@ -30,9 +30,11 @@ class BatchBaselineControllers:
     terminated and active use [N]. ``on_result`` accepts native [N,P,9] move
     rows and either enemy [N] actions or joint [N,P] actions. Calls on this
     owner are serialized, including all independent bit-generator locks.
+    Optional ``seat_seeds`` are final per-controller seeds and are never spawned
+    again; otherwise the original match-root ``controller_seed`` behavior applies.
     """
 
-    def __init__(self, specs, *, height, width, players=2, threads=1):
+    def __init__(self, specs, *, height, width, players=2, threads=1, seat_seeds=None):
         if isinstance(threads, bool) or threads != 1:
             raise ValueError("batch baselines currently use one native thread")
         if (isinstance(height, bool) or isinstance(width, bool)
@@ -45,6 +47,11 @@ class BatchBaselineControllers:
         self.specs = tuple(specs)
         if not self.specs:
             raise ValueError("provide at least one baseline spec")
+        self.seat_seeds = None if seat_seeds is None else tuple(seat_seeds)
+        if self.seat_seeds is not None and (len(self.seat_seeds) != len(self.specs) or any(
+                isinstance(seed, (bool, np.bool_)) or not isinstance(seed, (int, np.integer))
+                or not 0 <= seed < 2**64 for seed in self.seat_seeds)):
+            raise ValueError("seat_seeds must contain one uint64 seed per baseline")
         self.height, self.width, self.players = int(height), int(width), int(players)
         self.count = len(self.specs)
         self._lock = threading.RLock()
@@ -60,15 +67,18 @@ class BatchBaselineControllers:
             self.close()
             controllers = []
             try:
-                for spec in self.specs:
+                for index, spec in enumerate(self.specs):
                     if spec.learner_seat not in (0, 1):
                         raise ValueError("learner_seat must be 0 or 1")
-                    kinds = ["random", "random"]
                     seat = 1 - spec.learner_seat
-                    kinds[seat] = spec.opponent
-                    pair = make_controllers(kinds, seed=spec.controller_seed)
-                    controllers.append(pair[seat])
-                    pair[1 - seat].close()
+                    if self.seat_seeds is not None:
+                        controllers.append(create_controller(spec.opponent, seat, int(self.seat_seeds[index])))
+                    else:
+                        kinds = ["random", "random"]
+                        kinds[seat] = spec.opponent
+                        pair = make_controllers(kinds, seed=spec.controller_seed)
+                        controllers.append(pair[seat])
+                        pair[1 - seat].close()
                 options = (_Options * self.count)(*[
                     _Options(c.max_sources, c.max_path_attempts, c.path_lifetime,
                              c.memory_ttl, c.temperature,
