@@ -10,6 +10,7 @@ import pytest
 from generals import Action, Direction, make_engine
 from generals.core.recording import state_digest, state_to_dict
 from generals.core.state import GameState, MapLayout
+from generals_arena.matches.replay import encode_replay
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from recordings import replay_arena_game
@@ -40,7 +41,7 @@ def arena_recording(directory, adjacent):
     finally:
         engine.close()
     path = directory/'game.json.gz'
-    path.write_bytes(gzip.compress(json.dumps({'schema':1,'initial':initial,'actions':actions,'digests':digests}).encode()))
+    path.write_bytes(encode_replay(initial, actions, digests))
     return {'game_id':'testgame','opponent':'reference','candidate_seat':0,'ticks':state.tick,
             'initial_digest':initial_digest,'final_digest':state_digest(state),'winner_seat':state.winner_id,
             'replay':str(path),'outcome':'win' if state.winner_id==0 else 'draw'}

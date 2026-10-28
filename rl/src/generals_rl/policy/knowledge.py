@@ -1,7 +1,7 @@
 """Persistent, player-local facts, separate from short observation histories.
 
-Only visible cells update this memory. Terrain and observed original general
-locations persist; ownership and city structure mean *last observed*, not a
+Only visible valid cells update this memory. General identity can change
+after a mutual capture; all general markers mean last observed, not permanent; ownership and city structure mean *last observed*, not a
 prediction of the hidden board. Each lane/seat owns its own memory so resetting
 or rotating a learner cannot transfer another player's information.
 """
@@ -13,10 +13,10 @@ import torch.nn.functional as F
 from .state import GameBatch
 
 
-KNOWLEDGE_SCHEMA = "persistent_knowledge_v1"
+KNOWLEDGE_SCHEMA = "official_last_seen_knowledge_v2"
 KNOWLEDGE_BASE_CHANNELS = (
-    "explored", "mountain", "last_seen_city", "general_landmark",
-    "enemy_general_landmark", "not_enemy_general", "last_seen_empty",
+    "explored", "mountain", "last_seen_city", "last_seen_general",
+    "last_seen_enemy_general", "last_seen_non_general", "last_seen_empty",
     "last_seen_neutral",
 )
 
@@ -37,19 +37,16 @@ class KnowledgeState:
     channels are binary except age, which is elapsed ticks / ``age_scale``,
     capped at 1. Unknown cells have age 0 and explored 0.
 
-    General landmarks record the owner when a GENERAL was actually observed.
-    They survive conversion into a city. Consequently ``not_enemy_general``
-    excludes a known original enemy general even after its capture. For other
-    explored cells it means that an enemy general was ruled out by observation;
-    generals do not move or spawn during a game. No unseen original landmarks
-    are reconstructed from the simulator's privileged ``general_pos``.
+    General identity and structure are last-seen facts. Observing a converted
+    city clears its old general identity. A general trade can change ownership
+    in fog, so the memory never presents an old identity as a permanent fact.
     """
 
     semantics = KNOWLEDGE_SCHEMA
     _fields = ("terrain", "structure", "general_owner", "owner", "last_seen_tick")
 
     def __init__(self, num_envs: int, width: int, height: int, players: int,
-                 device="cpu", *, age_scale: int = 1024):
+                 device="cpu", *, age_scale: int = 2000):
         for name, value in (("num_envs", num_envs), ("width", width),
                             ("height", height), ("players", players),
                             ("age_scale", age_scale)):
@@ -98,6 +95,7 @@ class KnowledgeState:
             owned = (state["owner"] == ids[:, None]).float()
             visible = F.max_pool2d(owned.reshape(batch.num_envs, 1, self.height, self.width),
                                    kernel_size=3, stride=1, padding=1).flatten(1).bool()
+        visible = (visible | state["terminated"][:, None]) & batch.valid_cells
         if mask is not None:
             mask = torch.as_tensor(mask, device=self.device)
             if mask.shape != (batch.num_envs,) or mask.dtype != torch.bool:
@@ -109,7 +107,7 @@ class KnowledgeState:
             field[rows, ids] = torch.where(visible, state[name].to(field.dtype), old[name])
         observed_general = visible & (state["structure"] == 2)
         self.general_owner[rows, ids] = torch.where(
-            observed_general, state["owner"].to(self.general_owner.dtype), old["general_owner"])
+            visible, torch.where(observed_general, state["owner"].to(self.general_owner.dtype), -1), old["general_owner"])
         self.last_seen_tick[rows, ids] = torch.where(
             visible, state["tick"][:, None], old["last_seen_tick"])
 
@@ -131,7 +129,7 @@ class KnowledgeState:
         age = (now[:, None] - last_seen).clamp(min=0, max=self.age_scale).float() / self.age_scale
         age *= explored
         binary = torch.stack((explored, terrain == 1, structure == 1, general,
-                              enemy_general, explored & ~enemy_general,
+                              enemy_general, explored & ~general,
                               owner == -1, owner == -2), 1)
         planes = torch.cat((binary.float(), owners.float(), age[:, None]), 1)
         return planes.reshape(count, len(self.channels), self.height, self.width)

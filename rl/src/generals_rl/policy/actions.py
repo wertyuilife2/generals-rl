@@ -7,10 +7,9 @@ from .state import GameBatch
 class EncodedActionSpace:
     """WAIT=0; MOVE=1 + source*8 + direction*2 + mode (engine encoding)."""
 
-    def __init__(self, width: int, height: int, *, productive_actions: bool = False):
+    def __init__(self, width: int, height: int):
         self.width, self.height = width, height
         self.size = 1 + width * height * 8
-        self.productive_actions = productive_actions
         self._tables = {}
 
     def destinations(self, device):
@@ -28,23 +27,13 @@ class EncodedActionSpace:
     def mask(self, batch: GameBatch, player_ids: torch.Tensor) -> torch.Tensor:
         targets, in_bounds = self.destinations(batch.device)
         state = batch.state
-        owned = state["owner"] == player_ids[:, None]
+        owned = (state["owner"] == player_ids[:, None]) & (state['army'] > 1) & batch.valid_cells
         active = state["alive"].gather(1, player_ids[:, None]).squeeze(1) & ~state["terminated"]
-        if self.productive_actions:
-            # Growth precedes both players' moves. Own source strength and the
-            # clock are public; do not anticipate the other player's action.
-            next_tick = state["tick"][:, None] + 1
-            grows = (next_tick % 2 == 0) & ((state["structure"] != 0) | (next_tick % 50 == 0))
-            # Both ALL_BUT_ONE and HALF move positive armies exactly at >=2.
-            # Avoid adding to int64 army values at the representable limit.
-            productive = (state["army"] > 1) | ((state["army"] == 1) & grows)
-            owned = owned & productive
         moves = (owned[:, :, None] & in_bounds[None] &
-                 (state["terrain"][:, targets] != 1) & active[:, None, None])
+                 (state["terrain"][:, targets] != 1) & batch.valid_cells[:, targets] & active[:, None, None])
         moves = moves[..., None].expand(-1, -1, -1, 2).reshape(batch.num_envs, -1)
         # A terminal or eliminated player's observation still needs a valid
-        # distribution. WAIT is its absorbing action. The default matches core;
-        # the productive variant removes only publicly predictable zero moves.
+        # distribution. WAIT is its absorbing action.
         return torch.cat((torch.ones_like(active[:, None]), moves), -1)
 
     def validate(self, actions: torch.Tensor, mask: torch.Tensor):
@@ -62,5 +51,4 @@ class EncodedActionSpace:
 
 def make_action_space(config):
     """Use the same configured action boundary for training and deployment."""
-    return EncodedActionSpace(config.width, config.height,
-                              productive_actions=config.productive_actions)
+    return EncodedActionSpace(config.width, config.height)

@@ -43,8 +43,9 @@ class CompetitionStore:
         with self.connect() as db:
             meta = {row["key"]: json.loads(row["value"]) for row in db.execute("SELECT * FROM meta")}
         self.manifest = meta["manifest"]
-        if self.manifest.get("schema") != 6:
-            raise ValueError("this is an archived league schema; initialize a new dual-rating league directory")
+        from generals.protocol.rules import RULES_VERSION
+        if self.manifest.get("schema") != 7 or self.manifest.get('rules') != RULES_VERSION:
+            raise ValueError("this league uses archived rules; initialize a new league directory")
         self.config = LeagueConfig(**self.manifest["config"])
 
     @property

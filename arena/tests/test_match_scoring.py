@@ -1,4 +1,5 @@
 """All schedule modes replay current rating rules, with isolated pool origins."""
+from policy_test_utils import synthetic_placements
 from copy import deepcopy
 import json
 
@@ -12,6 +13,7 @@ def match(left, right, index, *, winner=None, rotation=0, rotations=1):
     ids = [left, right] if rotation == 0 else [right, left]
     winning_seat = None if winner is None else ids.index(winner)
     return {'game_id': f'{left}-{right}-{index}-{rotation}', 'entrant_ids': ids,
+            'placements': [1.5 if winning_seat is None else 1 if seat == winning_seat else 2 for seat in range(2)],
             'winner_seat': winning_seat, 'final_alive': [winner is None or seat == winning_seat for seat in range(2)],
             'elimination_ticks': [None if winner is None or seat == winning_seat else 10 for seat in range(2)],
             'ticks': 10, 'reason': 'tick_limit' if winner is None else 'capture',
@@ -55,7 +57,7 @@ def test_unobserved_policy_gets_no_interval_and_unreferenced_duel_gets_no_origin
 
 
 def test_ffa_preserves_mean_including_unplayed_policy_and_has_no_anchor():
-    rows = [{'game_id': f'{index}-{rotation}', 'entrant_ids': ['a', 'b', 'c'],
+    rows = [{'placements': synthetic_placements([None, 20, 10]), 'game_id': f'{index}-{rotation}', 'entrant_ids': ['a', 'b', 'c'],
              'winner_seat': 0, 'final_alive': [True, False, False], 'elimination_ticks': [None, 20, 10],
              'ticks': 20, 'reason': 'capture', 'map_seed': index,
              'map': {'width': 9, 'height': 9, 'players': 3}, 'rating_group_size': 3}

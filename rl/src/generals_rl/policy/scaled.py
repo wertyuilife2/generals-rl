@@ -60,7 +60,7 @@ class _TotalResNetBackbone(ResNetBackbone):
 
 class _TotalViTBackbone(ViTBackbone):
     """Existing one-token-per-cell timm adapter at balanced total budgets."""
-    def __init__(self, in_channels, size, spatial_mode="dense"):
+    def __init__(self, in_channels, size, spatial_mode="dense", map_shape=(23, 23)):
         nn.Module.__init__(self)
         if spatial_mode not in ("dense", "pyramid"):
             raise ValueError("spatial_mode must be dense or pyramid")
@@ -69,7 +69,7 @@ class _TotalViTBackbone(ViTBackbone):
         self.out_channels, self.depth, self.num_heads = VIT_TOTAL_PRESETS[size]
         self.local_channels = self.out_channels
         self.transformer = VisionTransformer(
-            img_size=(9, 9), patch_size=1, in_chans=in_channels,
+            img_size=map_shape, patch_size=1, in_chans=in_channels,
             num_classes=0, global_pool="", class_token=False,
             embed_dim=self.out_channels, depth=self.depth, num_heads=self.num_heads,
             mlp_ratio=4.0, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),
@@ -79,37 +79,39 @@ class _TotalViTBackbone(ViTBackbone):
 
 
     def forward_pyramid(self, x):
-        """All blocks survive; block0 keeps81 cells, then deep tokens pool25→9.
+        """Keep cell-resolution block zero, then pool spatial tokens twice.
 
         This changes spatial computation. It does not establish equal quality
         or measured efficiency. Dense forward remains the inherited ViT path.
         """
         if self.spatial_mode != "pyramid":
             raise ValueError("forward_pyramid requires spatial_mode=pyramid")
-        if x.ndim != 4 or x.shape[1] != self.in_channels or x.shape[-2:] != (9, 9):
-            raise ValueError("ViT pyramid requires packed NCHW9x9 inputs")
+        if x.ndim != 4 or x.shape[1] != self.in_channels :
+            raise ValueError("ViT pyramid requires packed NCHW inputs")
         transformer = self.transformer
-        count = x.shape[0]
+        count, height, width = x.shape[0], x.shape[2], x.shape[3]
         tokens = transformer.patch_embed(x)
-        # Add the original complete81-entry position table before either pool.
+        # Add the configured board position table before either pool.
         tokens = transformer.norm_pre(transformer.patch_drop(transformer._pos_embed(tokens)))
         tokens = transformer.blocks[0](tokens)
-        local = tokens.transpose(1, 2).reshape(count, self.out_channels, 9, 9)
+        local = tokens.transpose(1, 2).reshape(count, self.out_channels, height, width)
         coarse = F.avg_pool2d(local, 3, stride=2, padding=1, count_include_pad=False)
         tokens = coarse.flatten(2).transpose(1, 2)
         middle_blocks = 1 if self.depth == 4 else 2
         for index in range(1, self.depth):
             if index == middle_blocks + 1:
-                coarse = tokens.transpose(1, 2).reshape(count, self.out_channels, 5, 5)
+                coarse = tokens.transpose(1, 2).reshape(count, self.out_channels, (height + 1) // 2, (width + 1) // 2)
                 coarse = F.avg_pool2d(coarse, 3, stride=2, padding=1, count_include_pad=False)
                 tokens = coarse.flatten(2).transpose(1, 2)
             tokens = transformer.blocks[index](tokens)
-        deep = transformer.norm(tokens).transpose(1, 2).reshape(count, self.out_channels, 3, 3)
+        deep = transformer.norm(tokens).transpose(1, 2).reshape(count, self.out_channels, (height + 3) // 4, (width + 3) // 4)
         return local, deep
 
 
-def _build_total_backbone(kind, size, inputs, spatial_mode="dense"):
-    return {"resnet": _TotalResNetBackbone, "vit": _TotalViTBackbone}[kind](inputs, size, spatial_mode)
+def _build_total_backbone(kind, size, inputs, spatial_mode="dense", map_shape=(23, 23)):
+    if kind == "vit":
+        return _TotalViTBackbone(inputs, size, spatial_mode, map_shape)
+    return _TotalResNetBackbone(inputs, size, spatial_mode)
 
 
 class _ScaledInformationActor(nn.Module):
@@ -120,7 +122,7 @@ class _ScaledInformationActor(nn.Module):
         self.knowledge_channels = layout.knowledge_channels
         self.logical_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels + 2
         padding = (-self.logical_inputs) % alignment if alignment else 0
-        self.backbone = _build_total_backbone(kind, size, self.logical_inputs + padding, spatial_mode)
+        self.backbone = _build_total_backbone(kind, size, self.logical_inputs + padding, spatial_mode, (layout.height, layout.width))
         self.projection = nn.Conv2d(self.backbone.out_channels, head_channels, 1)
         self.context = nn.Sequential(nn.Linear(head_channels + layout.public_dim, head_channels), nn.SiLU())
         self.cell_head = nn.Conv2d(head_channels, 8, 1)

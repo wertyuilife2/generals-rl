@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from generals.core.recording import state_digest, state_to_dict
+from generals.protocol import MOVE_REASONS
 from generals_arena.matches.replay import verified_replay
 
 
@@ -23,7 +24,6 @@ def replay_arena_game(match, directory, *, metadata=None, name=None):
                'source_replay_sha256': sha256(blob).hexdigest(),
                'spectator_full_state_is_not_policy_input': True}
     frames = []
-    reasons = {'WAIT': 1, 'MOVED': 2, 'OUT_OF_BOUNDS': 3, 'NOT_OWNER': 4, 'MOUNTAIN': 5}
     for index, (state, outcome) in enumerate(verified_replay(blob, match)):
         moves = None
         if outcome is not None:
@@ -31,7 +31,7 @@ def replay_arena_game(match, directory, *, metadata=None, name=None):
             for move in outcome.moves:
                 moves[move.player_id] = [1, int(move.valid), move.source, move.target, move.moved,
                     int(move.captured), -1 if move.eliminated is None else move.eliminated,
-                    int(move.target_owned), reasons[move.reason]]
+                    int(move.target_owned), MOVE_REASONS.index(move.reason)]
         frames.append({'state': state_to_dict(state), 'digest': state_digest(state),
                        'actions': None if index == 0 else trace['actions'][index-1], 'moves': moves,
                        'done': [bool(state.terminated), bool(index == match['ticks'] and not state.terminated)]})

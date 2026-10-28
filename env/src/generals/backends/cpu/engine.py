@@ -2,6 +2,7 @@
 from collections.abc import Sequence
 import numpy as np
 from . import env as cpu
+from generals.protocol import MOVE_REASONS
 from generals.core.state import Action, ActionKind, GameState, MoveResult, PlayerStats, TickResult
 
 
@@ -21,7 +22,7 @@ class CPUEngine:
         shape = state.owner.shape
         for name in ('structure', 'owner', 'army'):
             setattr(state, name, self.env.state[name][0].reshape(shape))
-        for name in ('alive', 'general_pos'):
+        for name in ('alive', 'general_pos', 'leave_tick', 'death_order', 'kills', 'damage', 'spawn_pos', 'city_known', 'capture_mask', 'warn_afk'):
             setattr(state, name, self.env.state[name][0])
 
     def step(self, actions):
@@ -43,24 +44,27 @@ class CPUEngine:
             # keep their invalid-move semantics without overflowing int64 codes.
             self.actions[0, seat] = (0 if action.kind == ActionKind.WAIT else
                                     action.encode() if 0 <= action.source < state.layout.size else -1)
+        before_alive = state.alive.copy()
         result = self.env.step(self.actions)
         self.env.check_errors()
         state.tick = int(self.env.state['tick'][0])
+        for name in ('idle_ticks', 'afk_turn', 'end_reason'):
+            setattr(state, name, int(self.env.state[name][0]))
         state.terminated = bool(self.env.state['terminated'][0])
         winner = int(self.env.state['winner'][0])
         state.winner_id = None if winner < 0 else winner
         stats = result.stats[0]
         stats = PlayerStats(stats[:, 0], stats[:, 1], stats[:, 2])
-        reasons = ('SKIPPED', 'WAIT', 'MOVED', 'OUT_OF_BOUNDS', 'NOT_OWNER', 'MOUNTAIN')
         moves = []
         for seat, row in enumerate(result.moves[0]):
             active, valid, _, target, moved, captured, eliminated, owned, reason = map(int, row)
             if active:
-                moves.append(MoveResult(seat, actions[seat], bool(valid), reasons[reason],
+                moves.append(MoveResult(seat, actions[seat], bool(valid), MOVE_REASONS[reason],
                     actions[seat].source, target, moved, bool(captured),
                     eliminated if eliminated >= 0 else None, bool(owned)))
         return TickResult(state.tick, tuple(moves), stats, state.terminated, state.winner_id,
-                          tuple(move.eliminated for move in moves if move.eliminated is not None))
+                          tuple(map(int, sorted(np.flatnonzero(before_alive & ~state.alive),
+                                                key=lambda p: state.death_order[p]))))
 
     def close(self):
         self.env.close()
@@ -69,4 +73,11 @@ class CPUEngine:
         self.env.state['tick'][0] = self.state.tick
         self.env.state['terminated'][0] = self.state.terminated
         self.env.state['winner'][0] = -1 if self.state.winner_id is None else self.state.winner_id
+        for name in ('idle_ticks', 'afk_turn', 'end_reason'):
+            self.env.state[name][0] = getattr(self.state, name)
         self.env.invalidate_cache()
+
+    def surrender(self, pid):
+        from generals.core.engine import surrender
+        surrender(self.state, pid)
+        self.invalidate_cache()

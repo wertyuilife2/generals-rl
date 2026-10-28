@@ -1,5 +1,6 @@
 """The public rating contract has one rule and no historical algorithm fallback."""
 import pytest
+from policy_test_utils import synthetic_placements
 
 from generals_arena.competitions.rating import POLICY
 from generals_arena.competitions.rating import comparisons
@@ -11,7 +12,7 @@ from generals_arena.competitions.rating import validate_mode
 
 
 def result(ids=('a','wait'),ticks=(None,1),**extra):
-    return dict(dict(entrant_ids=list(ids),elimination_ticks=list(ticks),rating_policy=POLICY),**extra)
+    return dict(dict(entrant_ids=list(ids),elimination_ticks=list(ticks),placements=synthetic_placements(ticks),rating_policy=POLICY),**extra)
 
 
 def test_modes_follow_seat_count_and_rank_ties_follow_survival():

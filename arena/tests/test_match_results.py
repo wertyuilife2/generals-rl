@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from generals import MapConfig
+from generals.protocol.rules import RULES_VERSION
 from generals.core.mapgen import generate_map
 from generals.core.recording import state_digest, state_to_dict
 from generals.core.state import compute_stats
@@ -16,14 +17,14 @@ from generals_arena.matches.results import seat_outcome
 
 
 def test_build_result_preserves_plan_and_owns_final_arrays():
-    state = generate_map(MapConfig(9, 9, 2, 0, 0), 42)
+    state = generate_map(MapConfig(25, 25, 2, 0, 0), 42)
     stats = compute_stats(state)
     initial = state_digest(state)
     plan = {"game_id": "game", "entrant_ids": ["a", "b"], "map_seed": 42,
             "evaluation_block": 7, "rating_group_size": 2}
     invalid = np.array([0, 1])
     result = build_result(plan, state=state, stats=stats, elimination_ticks=[None, None],
-                          invalid_actions=invalid, initial_digest=initial, kills=np.array([0, 0]))
+                          invalid_actions=invalid, initial_digest=initial)
     assert {key: result[key] for key in plan} == plan
     assert result["winner_seat"] is None and result["reason"] == "tick_limit"
     assert result["initial_digest"] == result["final_digest"] == initial
@@ -37,25 +38,26 @@ def test_build_result_preserves_plan_and_owns_final_arrays():
 
 
 def test_build_result_accepts_batched_stats_dictionary():
-    state = generate_map(MapConfig(9, 9, 2, 0, 0), 42)
+    state = generate_map(MapConfig(25, 25, 2, 0, 0), 42)
     state.terminated, state.winner_id, state.tick = True, 0, 5
     state.alive[1] = False
+    state.end_reason = 1
     result = build_result({}, state=state, stats={name: np.array([3, 0])
                           for name in ("army", "territory", "cities")},
                           elimination_ticks=[None, np.int64(5)], invalid_actions=[0, 0],
                           initial_digest="initial")
     assert result["winner_seat"] == 0 and result["reason"] == "capture"
-    assert result["elimination_ticks"] == [None, 5] and "kills" not in result
+    assert result["elimination_ticks"] == [None, 5] and result["kills"] == [0, 0]
 
 
 @pytest.mark.parametrize("forfeits", [(), [{"seat": 1, "tick": 2}]])
-def test_replay_encoding_is_deterministic_and_preserves_existing_schemas(forfeits):
-    state = generate_map(MapConfig(9, 9, 2, 0, 0), 42)
+def test_replay_encoding_is_deterministic_and_pins_current_rules(forfeits):
+    state = generate_map(MapConfig(25, 25, 2, 0, 0), 42)
     actions, digests = [[[0, 0, 0, 0], [0, 0, 0, 0]]], ["digest"]
     blob = encode_replay(state, actions, digests, forfeits)
     assert blob == encode_replay(state_to_dict(state), actions, digests, forfeits)
     trace = json.loads(gzip.decompress(blob))
-    assert trace == {"schema": 2 if forfeits else 1, "initial": state_to_dict(state),
+    assert trace == {"schema": 3, "rules": RULES_VERSION, "initial": state_to_dict(state),
                      "actions": actions, "digests": digests,
                      **({"forfeits": list(forfeits)} if forfeits else {})}
     with pytest.raises(ValueError, match="same length"):

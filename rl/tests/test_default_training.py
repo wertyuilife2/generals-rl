@@ -19,6 +19,7 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert execute.call_args.args[0] == expected
     assert execute.call_args.kwargs["iterations"] == DEFAULT_ITERATIONS == 224
     assert execute.call_args.kwargs["steps_per_env"] is None
+    assert expected['evaluation']['profile'] is None
     assert 8 * expected["task"]["num_envs"] * expected["runner"]["num_steps_per_env"] * 224 == 939_524_096
     with patch("generals_rl.train.train") as execute:
         main(["--output", "unused-ticks", "--steps-per-env", "64"])

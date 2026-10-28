@@ -273,38 +273,39 @@ def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monke
     assert profile_id(job['profile_path']) == evaluator.profile_id
 
 
-def test_top_k_confirmation_uses_identical_held_out_budget_and_changes_best(tmp_path):
+def confirm_synthetic(evaluator, candidates, score):
+    job = evaluator.confirmation
+    Path(job['report']).parent.mkdir(parents=True, exist_ok=True)
+    Path(job['report']).write_text('{}')
+    job.update(status='completed', report_sha256=sha256(b'{}').hexdigest(), ratings=[
+        dict(policy_id=candidate['policy_id'], elo=score(candidate), elo_ci=None,
+             games=(len(job['profile']['opponents'])+len(candidates)-1)*4)
+        for candidate in candidates])
+
+
+def test_top_k_confirmation_is_one_joint_job_and_changes_best(tmp_path):
     evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, keep_snapshots=1, final_top_k=2),
                                   small_config(), tmp_path / 'run', None)
     for value, elo in ((2, 100), (4, 200), (6, 50)):
         complete(evaluator, enqueue(evaluator, value), elo)
-
-    def drain():
-        for job in list(evaluator.pending):
-            complete(evaluator, job, 300 if job['completed_ppo_updates'] == 2 else 100)
-
-    with patch.object(evaluator, 'drain', drain):
+    def confirm(candidates):
+        confirm_synthetic(evaluator, candidates, lambda job: 300 if job['completed_ppo_updates']==2 else 100)
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_run_confirmation', confirm):
         evaluator.finish()
-    finalists = [job for job in evaluator.jobs if job['stage'] == 'confirmation']
-    assert len(finalists) == 2
-    assert len({job['profile_id'] for job in finalists}) == 1
-    assert finalists[0]['profile_id'] != evaluator.profile_id
-    assert all(job['expected_games'] == expected_games(json.loads(Path(job['profile_path']).read_text())) == 20
-               for job in finalists)
+    final = evaluator.confirmation
+    assert set(final['policies']) == {f'{2:064x}', f'{4:064x}'}
+    assert final['profile_id'] != evaluator.profile_id
+    assert final['expected_games'] == 44  # 2*5 reference pairs + one finalist pair, 2 maps*2 seats.
     assert evaluator.best_completed['completed_ppo_updates'] == 2
     assert evaluator.best_completed['stage'] == 'confirmation'
+    assert evaluator.best_completed['report'] == final['report']
     assert json.loads((evaluator.output / 'best_model.json').read_text())['confirmation_complete']
-    for job in finalists:
-        periodic = next(candidate for candidate in evaluator.jobs
-                        if candidate['stage'] == 'periodic' and candidate['policy_id'] == job['policy_id'])
-        assert job['checkpoint'] == periodic['checkpoint'] and job['bundle'] == periodic['bundle']
-        assert Path(job['checkpoint']).is_file() and Path(job['bundle']).is_dir()
-    discarded = next(job for job in evaluator.jobs if job['completed_ppo_updates'] == 6)
-    assert not Path(discarded['checkpoint']).exists() and not Path(discarded['bundle']).exists()
-    assert Path(discarded['report']).is_file()
-    with patch.object(evaluator, 'drain', drain):
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_run_confirmation') as repeat:
         evaluator.finish()
-    assert len(evaluator.jobs) == 5
+    repeat.assert_not_called()
+    assert len(evaluator.jobs) == 3  # Periodic jobs; confirmation is a single shared report.
+    restored = PeriodicEvaluator(evaluator.settings, small_config(), evaluator.output, None)
+    assert restored.best_completed == evaluator.best_completed
 
 
 @pytest.mark.parametrize('dedicated', [False, True])
@@ -392,7 +393,7 @@ def test_resume_cannot_change_feature_contract_under_the_old_policy_spec(tmp_pat
     config['evaluation']['enabled'] = False
     with redirect_stdout(io.StringIO()):
         train(config, tmp_path / 'first', iterations=1)
-    config['task']['productive_actions'] = not config['task']['productive_actions']
+    config['task']['combat_features'] = not config['task']['combat_features']
     with pytest.raises(ValueError, match='spec|Spec|config|warm.start'):
         train(config, tmp_path / 'incompatible', iterations=1, resume=str(tmp_path / 'first/checkpoint.pt'))
 
@@ -401,17 +402,14 @@ def test_continued_training_rebuilds_confirmation_finalists(tmp_path):
     evaluator = PeriodicEvaluator(TrainingEvalConfig(maps_per_opponent=1, final_top_k=1),
                                   small_config(), tmp_path / 'run', None)
     complete(evaluator, enqueue(evaluator, 2), 100)
-
-    def drain():
-        for job in list(evaluator.pending):
-            complete(evaluator, job, job['completed_ppo_updates'] * 100)
-
-    with patch.object(evaluator, 'drain', drain):
+    def confirm(candidates):
+        confirm_synthetic(evaluator, candidates, lambda job: job['completed_ppo_updates']*100)
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_run_confirmation', confirm):
         evaluator.finish()
     assert evaluator.confirmation['policies'] == [f'{2:064x}']
     complete(evaluator, enqueue(evaluator, 4), 300)
     assert evaluator.confirmation is None
-    with patch.object(evaluator, 'drain', drain):
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_run_confirmation', confirm):
         evaluator.finish()
     assert evaluator.confirmation['policies'] == [f'{4:064x}']
     assert evaluator.best_completed['completed_ppo_updates'] == 4
@@ -436,32 +434,42 @@ def test_resume_from_earlier_checkpoint_excludes_original_future_models(evaluato
     assert not resumed.pending
 
 
-def test_confirmation_recovers_if_interrupted_between_finalist_enqueue_operations(tmp_path):
+def test_confirmation_recovers_one_joint_job_after_interruption(tmp_path):
     settings = TrainingEvalConfig(maps_per_opponent=1, final_top_k=2)
     evaluator = PeriodicEvaluator(settings, small_config(), tmp_path / 'run', None)
     for update in (2, 4):
         complete(evaluator, enqueue(evaluator, update), update * 100)
-    original = evaluator._enqueue
-
-    def interrupt_after_first(*args, **kwargs):
-        original(*args, **kwargs)
-        raise RuntimeError('simulated interruption')
-
-    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_enqueue', interrupt_after_first):
-        with pytest.raises(RuntimeError, match='simulated interruption'):
+    with patch.object(evaluator, 'drain'), patch.object(evaluator, '_run_confirmation', side_effect=RuntimeError('interrupted')):
+        with pytest.raises(RuntimeError, match='interrupted'):
             evaluator.finish()
     evaluator.close()
     resumed = PeriodicEvaluator(settings, small_config(), evaluator.output, None)
-
-    def drain():
-        for job in list(resumed.pending):
-            complete(resumed, job, job['completed_ppo_updates'] * 100)
-
-    with patch.object(resumed, 'drain', drain):
+    def confirm(candidates):
+        confirm_synthetic(resumed, candidates, lambda job: job['completed_ppo_updates']*100)
+    with patch.object(resumed, 'drain'), patch.object(resumed, '_run_confirmation', confirm):
         resumed.finish()
-    finalists = [job for job in resumed.jobs if job['stage'] == 'confirmation']
-    assert len(finalists) == 2 and all(job['status'] == 'completed' for job in finalists)
+    assert resumed.confirmation['status'] == 'completed'
+    assert len(resumed.confirmation['policies']) == 2
     assert resumed.best_completed['stage'] == 'confirmation'
+
+
+def test_real_cpu_training_runs_joint_confirmation_and_resumes(tmp_path):
+    config = small_config()
+    config['evaluation'].update(every_n_updates=1, final_top_k=2)
+    output = tmp_path/'joint_training'
+    with redirect_stdout(io.StringIO()):
+        train(config, iterations=2, output_dir=output)
+    index = json.loads((output/'evaluations/index.json').read_text())
+    report = json.loads(Path(index['confirmation']['report']).read_text())
+    assert index['confirmation']['status'] == 'completed'
+    assert len(report['candidates']) == 2 and report['games'] == 44
+    a, b = [row['entrant_id'] for row in report['candidates']]
+    assert report['win_matrix'][a][b]['games'] == 4
+    assert json.loads((output/'best_model.json').read_text())['confirmation_complete']
+    settings = TrainingEvalConfig(**config['evaluation'])
+    restored = PeriodicEvaluator(settings, config, output, None)
+    assert restored.confirmation['status'] == 'completed'
+    restored.close()
 
 
 def test_worker_group_cleanup_kills_surviving_child(tmp_path):

@@ -42,8 +42,8 @@ class EconomyTests(unittest.TestCase):
                 engine = CoreEngine(state, debug=True)
                 result = engine.step([Action.wait(), Action.wait()])
                 self.assertEqual(result.tick, tick)
-                self.assertEqual(state.army.flat[0], 1 + (tick % 2 == 0))
-                self.assertEqual(state.army.flat[1], 7 + (tick % 2 == 0))
+                self.assertEqual(state.army.flat[0], 1 + (tick % 2 == 0) + (tick % 50 == 0))
+                self.assertEqual(state.army.flat[1], 7 + (tick % 2 == 0) + (tick % 50 == 0))
                 self.assertEqual(state.army.flat[2], int(tick % 50 == 0))
                 self.assertEqual(state.army.flat[3], 17)
                 self.assertEqual(state.army.flat[4], 0)
@@ -61,7 +61,7 @@ class EconomyTests(unittest.TestCase):
         state.army.flat[0] = np.iinfo(np.int64).max
         engine = CoreEngine(state)
         with self.assertRaises(OverflowError):
-            engine.begin_tick()
+            engine.step([Action.wait()] * state.player_count)
         self.assertEqual(state.tick, 1)
         self.assertEqual(state.army.flat[0], np.iinfo(np.int64).max)
 
@@ -87,7 +87,7 @@ class MovementTests(unittest.TestCase):
         self.assertFalse(result.moves[0].captured)
         self.assertTrue(result.moves[0].target_owned)
 
-    def test_zero_army_moves_are_valid_and_preserve_the_board(self):
+    def test_insufficient_army_moves_are_discarded_and_preserve_the_board(self):
         targets = ((EMPTY, 0), (0, 0), (0, 7), (1, 0), (1, 7), (NEUTRAL, 0), (NEUTRAL, 40))
         for count in (0, 1):
             for mode in MoveMode:
@@ -102,11 +102,12 @@ class MovementTests(unittest.TestCase):
                         result = CoreEngine(state, debug=True).step([
                             Action.move(0, Direction.RIGHT, mode), Action.wait()])
                         move = result.moves[0]
-                        self.assertTrue(move.valid)
+                        self.assertFalse(move.valid)
+                        self.assertEqual(move.reason, "NO_ARMY")
                         self.assertEqual((move.source, move.target, move.moved), (0, 1, 0))
                         self.assertFalse(move.captured)
                         self.assertIsNone(move.eliminated)
-                        self.assertEqual(move.target_owned, owner == 0)
+                        self.assertFalse(move.target_owned)
                         self.assertEqual(len(result.moves), 2)
                         for name in ("owner", "army", "structure", "alive", "general_pos"):
                             np.testing.assert_array_equal(getattr(state, name), getattr(before, name))
@@ -115,7 +116,8 @@ class MovementTests(unittest.TestCase):
         state = make_state(1, 2, generals=[0, 1])
         state.army.flat[1] = 0
         result = CoreEngine(state, debug=True).step([Action.move(0, Direction.RIGHT), Action.wait()])
-        self.assertTrue(result.moves[0].valid)
+        self.assertFalse(result.moves[0].valid)
+        self.assertEqual(result.moves[0].reason, "NO_ARMY")
         self.assertEqual(result.moves[0].moved, 0)
         self.assertFalse(result.terminated)
         np.testing.assert_array_equal(state.alive, [True, True])
@@ -146,7 +148,9 @@ class MovementTests(unittest.TestCase):
         self.assertFalse(first.moves[0].captured)
         self.assertEqual((state.owner.flat[1], state.army.flat[1]), (NEUTRAL, 0))
         second = engine.step([Action.move(0, Direction.RIGHT), Action.wait()])
-        self.assertTrue(second.moves[0].captured)
+        self.assertEqual(second.moves[0].reason, "NO_ARMY")
+        third = engine.step([Action.move(0, Direction.RIGHT), Action.wait()])
+        self.assertTrue(third.moves[0].captured)
         self.assertEqual((state.owner.flat[1], state.army.flat[1]), (0, 1))
         self.assertEqual(state.structure.flat[1], Structure.CITY)
 
@@ -184,11 +188,9 @@ class MovementTests(unittest.TestCase):
         state.owner.flat[1] = 0
         state.army.flat[1] = np.iinfo(np.int64).max
         engine = CoreEngine(state)
-        engine.begin_tick()
         with self.assertRaises(OverflowError):
-            engine.apply_action(0, Action.move(0, Direction.RIGHT))
+            engine.step([Action.move(0, Direction.RIGHT), Action.wait()])
         self.assertEqual(state.army.flat[0], 2)
-        self.assertEqual(engine.next_player, 0)
 
 
 class CaptureTests(unittest.TestCase):
@@ -202,12 +204,12 @@ class CaptureTests(unittest.TestCase):
         engine = CoreEngine(state, debug=True)
         result = engine.step([Action.move(0, Direction.RIGHT), Action.move(1, Direction.LEFT)])
         self.assertEqual(result.eliminated, (1,))
-        self.assertEqual(len(result.moves), 1)
+        self.assertEqual(len(result.moves), 2)
         self.assertTrue(result.terminated)
         self.assertEqual(result.winner_id, 0)
         self.assertEqual(state.structure.flat[1], Structure.CITY)
         self.assertEqual(state.army.flat[1], 7)  # Directly captured general is not halved.
-        np.testing.assert_array_equal(state.army.ravel()[2:], [1, 1, 2, 4])
+        np.testing.assert_array_equal(state.army.ravel()[2:], [0, 1, 3, 4])
         np.testing.assert_array_equal(state.owner, np.zeros((2, 3), dtype=np.int16))
         self.assertEqual(result.stats.army[0], 16)
         self.assertEqual(result.stats.territory[0], 6)
@@ -216,7 +218,7 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             engine.step([Action.wait(), Action.wait()])
         with self.assertRaises(RuntimeError):
-            engine.begin_tick()
+            engine.step([Action.wait()] * state.player_count)
         self.assertEqual(state.tick, before.tick)
         np.testing.assert_array_equal(state.army, before.army)
 
@@ -233,9 +235,9 @@ class CaptureTests(unittest.TestCase):
         ])
         self.assertFalse(result.terminated)
         self.assertIsNone(result.winner_id)
-        self.assertEqual([move.player_id for move in result.moves], [0, 2])
+        self.assertEqual([move.player_id for move in result.moves], [0, 1, 2])
         self.assertEqual(state.owner.flat[2], 0)
-        self.assertEqual(state.army.flat[2], 2)
+        self.assertEqual(state.army.flat[2], 3)
         self.assertEqual(state.owner.flat[4], 2)
 
 
@@ -256,7 +258,7 @@ class ContractTests(unittest.TestCase):
     def test_config_validation(self):
         for players in range(2, 9):
             self.assertEqual(MapConfig(players=np.int64(players)).players, players)
-        for kwargs in ({"players": 1}, {"players": 9}, {"width": 0}, {"width": 1, "height": 1}, {"mountain_density": float("nan")}, {"city_density": 0.21}):
+        for kwargs in ({"players": 1}, {"players": 9}, {"width": 0}, {"mountain_density": float("nan")}, {"city_density": 1.01}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 MapConfig(**kwargs)
         for kwargs in ({"seed": -1}, {"max_ticks": 0}, {"visibility": "secret"}):

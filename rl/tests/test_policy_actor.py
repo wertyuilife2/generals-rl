@@ -20,15 +20,14 @@ from generals_rl.optimized_ppo import OptimizedInformationSpatialPPOPolicy
 NETWORK = {"family": "scaled", "backbone": "vit", "model_size": "1m", "head_channels": 128,
            "input_channel_alignment": 4, "amp_bfloat16": True, "spatial_mode": "dense"}
 FEATURES = {"width": 9, "height": 9, "players": 2, "history_length": 4,
-            "max_episode_steps": 800, "productive_actions": True,
-            "combat_features": True, "king_threat_distance": True, "persistent_knowledge": True}
+            "max_episode_steps": 800,             "combat_features": True, "king_threat_distance": True, "persistent_knowledge": True}
 GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
 
 
 def observations(count=3):
     generator = torch.Generator().manual_seed(108)
-    frames = torch.rand(count, 4, 985, generator=generator)
-    maps = frames[..., :972].reshape(count, 4, 12, 9, 9)
+    frames = torch.rand(count, 4, 1147, generator=generator)
+    maps = frames[..., :1134].reshape(count, 4, 14, 9, 9)
     maps[:, :, 4:6].zero_()
     for tick in range(4):
         maps[:, tick, 4:6, tick, tick] = 1
@@ -43,14 +42,14 @@ def observations(count=3):
     if count > 2:
         mask[2, 0] = False
     return TensorDict({"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-                       "critic": torch.rand(count, 985, generator=generator),
+                       "critic": torch.rand(count, 1147, generator=generator),
                        "knowledge": torch.rand(count, 891, generator=generator),
                        "action_mask": mask}, [count])
 
 
 def old_policy(obs, **options):
     return ScaledInformationSpatialPPOPolicy(
-        obs, GROUPS, 649, backbone="vit", model_size="1m",
+        obs, GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m",
         critic_projection_channels=0, compile_forward=False, **options).eval()
 
 
@@ -74,7 +73,7 @@ class PolicyActorTests(unittest.TestCase):
         self.assertTrue(frozen.training)
         self.assertTrue(all(parameter.requires_grad for parameter in frozen.parameters()))
         self.assertFalse(any("critic" in key for key in frozen.state_dict()))
-        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 526_985)
+        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 527_753)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic_training_checkpoint.pt"
             torch.save({"model_state_dict": original.state_dict()}, path)
@@ -100,7 +99,7 @@ class PolicyActorTests(unittest.TestCase):
         for size in ("1m", "10m", "100m"):
             with self.subTest(size=size), torch.device("meta"):
                 original = ScaledInformationSpatialPPOPolicy(
-                    obs, GROUPS, 649, backbone="vit", model_size=size, critic_projection_channels=0)
+                    obs, GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size=size, critic_projection_channels=0)
                 frozen = build_actor(dict(NETWORK, model_size=size), FEATURES)
                 self.assertEqual({key: value.shape for key, value in original.actor.state_dict().items()},
                                  {key: value.shape for key, value in frozen.state_dict().items()})
@@ -125,7 +124,7 @@ class PolicyActorTests(unittest.TestCase):
                 cases.append(("scaled", ScaledInformationSpatialPPOPolicy, options, options, GROUPS))
         for family, policy_class, options, network, groups in cases:
             with self.subTest(family=family, network=network):
-                original = policy_class(obs, groups, 649, **options)
+                original = policy_class(obs, groups, 649, map_width=9, map_height=9, **options)
                 features = dict(FEATURES, persistent_knowledge=family in ("information", "optimized", "scaled"))
                 shared = build_actor(dict(network, family=family), features)
                 self.assertEqual(list(shared.state_dict()), list(original.actor.state_dict()))
@@ -144,7 +143,7 @@ class PolicyActorTests(unittest.TestCase):
                     torch.testing.assert_close(parameter.grad, reference.grad, rtol=0, atol=0, msg=name)
         # The export's generic scaled family uses the training constructor default.
         default_actor = build_actor({"family": "scaled"}, FEATURES)
-        original = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649)
+        original = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9)
         self.assertEqual({key: value.shape for key, value in default_actor.state_dict().items()},
                          {key: value.shape for key, value in original.actor.state_dict().items()})
 
@@ -154,7 +153,7 @@ class PolicyActorTests(unittest.TestCase):
                        {"amp_bfloat16": 1}, {"compile_forward": True}):
             with self.subTest(network=change), self.assertRaises((ValueError, TypeError)):
                 build_actor(dict(NETWORK, **change), FEATURES)
-        for change in ({"players": 4}, {"width": 11}, {"height": 7}, {"history_length": 8},
+        for change in ({"players": 4}, {"width": 0}, {"height": 0}, {"history_length": 8},
                        {"knowledge_channels": 10}, {"persistent_knowledge": False}):
             with self.subTest(features=change), self.assertRaises(ValueError):
                 build_actor(NETWORK, dict(FEATURES, **change))
@@ -184,7 +183,7 @@ class PolicyActorTests(unittest.TestCase):
     def test_layout_geometry_and_empty_batch(self):
         obs = observations()
         layout = ObservationLayout(9, 9, knowledge_channels=11)
-        current = layout.history_maps(obs["policy"])[:, -12:]
+        current = layout.history_maps(obs["policy"])[:, -14:]
         geometry = own_king_coordinates(current)
         torch.testing.assert_close(geometry[0, :, 3, 3], torch.zeros(2), rtol=0, atol=0)
         torch.testing.assert_close(geometry[0, :, 0, 0], torch.tensor([-3 / 8, -3 / 8]), rtol=0, atol=0)

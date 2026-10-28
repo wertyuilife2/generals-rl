@@ -57,7 +57,7 @@ class TestPool:
 
 class SelfPlayTaskTests(unittest.TestCase):
     def task(self, states, **settings):
-        cfg = dict(width=states[0].layout.width, height=states[0].layout.height,
+        cfg = dict(random_maps=False, map_pool_size=0, width=states[0].layout.width, height=states[0].layout.height,
                    players=states[0].player_count, num_envs=len(states), opponent="self_play",
                    history_length=3, max_episode_steps=16, rotate_seats=False)
         cfg.update(settings)
@@ -130,8 +130,8 @@ class SelfPlayTaskTests(unittest.TestCase):
             torch.testing.assert_close(inputs[key][0], inputs[key][1], rtol=0, atol=0)
         self.assertFalse(task.opponent.histories[0].frames.requires_grad)
 
-    def test_multiplayer_infers_only_nonlearner_seats_and_supports_seeded_repeat(self):
-        states = [capture_state(players=3) for _ in range(4)]
+    def test_duel_infers_only_nonlearner_seats_and_supports_seeded_repeat(self):
+        states = [capture_state() for _ in range(4)]
         task = self.task(states, rotate_seats=True)
         pool = TestPool()
         task.opponent.attach(pool, seed=123)
@@ -141,9 +141,9 @@ class SelfPlayTaskTests(unittest.TestCase):
         task.opponent.generator.set_state(rng)
         second = task.opponent.joint_actions(batch, task.player_ids, task.action_space, task.observation_encoder)
         torch.testing.assert_close(first, second, rtol=0, atol=0)
-        self.assertEqual(task.opponent.snapshot_counts(), {0: 8})
-        self.assertEqual(sum(len(obs["single_obs"]) for obs in pool.snapshots[0].model.inputs), 16)
-        for pid in range(3):
+        self.assertEqual(task.opponent.snapshot_counts(), {0: 4})
+        self.assertEqual(sum(len(obs["single_obs"]) for obs in pool.snapshots[0].model.inputs), 8)
+        for pid in range(2):
             legal = task.action_space.mask(batch, torch.full_like(task.player_ids, pid))
             self.assertTrue(legal.gather(1, first[:, pid, None]).all())
         self.assertTrue((first[torch.arange(4), task.player_ids] == 0).all())

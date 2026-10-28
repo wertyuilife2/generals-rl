@@ -15,7 +15,7 @@ def light_policy_config():
     return {"class_name": "generals_rl.spatial_ppo.LightSpatialPPOPolicy",
             "action_distribution": "categorical", "spatial_channels": 16,
             "history_length": 4, "players": 2, "map_width": 9, "map_height": 9,
-            "map_planes": 12, "public_dim": 13,
+            "map_planes": 14, "public_dim": 13,
             "actor_obs_normalization": False, "critic_obs_normalization": False}
 
 
@@ -25,7 +25,7 @@ def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory
     layout = ObservationLayout(width, height, history_length=history_length,
                                knowledge_channels=11 if memory else 0)
     frames = torch.randn(count, history_length, layout.frame_dim)
-    maps = frames[..., :12 * layout.cells].reshape(count, history_length, 12, layout.cells)
+    maps = frames[..., :14 * layout.cells].reshape(count, history_length, 14, layout.cells)
     maps[:, :, 4:6].zero_()
     maps[:, :, 4:6, width + 1] = 1
     values = {"policy": frames.flatten(1), "single_obs": frames[:, -1].clone(),
@@ -38,7 +38,7 @@ def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory
 
 def small_training_config(*, task_overrides=None, runner_overrides=None):
     """Bounded CPU fixture for the supported v32 information-policy lifecycle."""
-    task = dict(width=9, height=9, num_envs=4, max_episode_steps=3,
+    task = dict(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=4, max_episode_steps=3,
                 history_length=4, opponent="self_play", seed=19,
                 mountain_density=0, city_density=0, threads=1,
                 combat_features=True, king_threat_distance=True)

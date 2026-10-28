@@ -20,7 +20,7 @@ from generals_baselines import create_controller
 @pytest.fixture
 def league(tmp_path):
     store = CompetitionStore.create(tmp_path / 'league', LeagueConfig(
-        player_counts=(2, 3), min_side=9, max_side=9, side_cap=9,
+        player_counts=(2, 3), min_side=25, max_side=25, side_cap=25,
         mountain_min=0, mountain_max=0, city_min=0, city_max=0, max_ticks=1))
     entrant = store.register({'name': 'aggressive', 'kind': 'baseline', 'policy': 'aggressive'})
     random = next(entry['entrant_id'] for entry in store.entrants().values() if entry['name'] == 'random')

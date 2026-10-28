@@ -37,9 +37,9 @@ class LightSpatialPPOTests(unittest.TestCase):
         actor_convs=[m for m in policy.actor.trunk if isinstance(m,torch.nn.Conv2d)]
         critic_convs=[m for m in policy.critic.trunk if isinstance(m,torch.nn.Conv2d)]
         self.assertEqual([(m.in_channels,m.out_channels,m.kernel_size,m.groups) for m in actor_convs],
-                         [(48,16,(3,3),1),(16,16,(3,3),1)])
+                         [(56,16,(3,3),1),(16,16,(3,3),1)])
         self.assertEqual([(m.in_channels,m.out_channels,m.kernel_size,m.groups) for m in critic_convs],
-                         [(12,16,(3,3),1),(16,16,(3,3),1)])
+                         [(14,16,(3,3),1),(16,16,(3,3),1)])
         original=policy.action_probabilities(obs).detach().clone()
         changed=obs.clone()
         for key in ('critic','single_obs'):
@@ -107,7 +107,7 @@ class LightSpatialPPOTests(unittest.TestCase):
             self.assertEqual(seed['source'], {'kind': 'random_initial_policy'})
             manifest = json.loads((root / 'cold/history_pool/manifest.json').read_text())
             self.assertEqual(manifest['policy_spec']['encoder_semantics'],
-                             'combat_p2_985_v1_king_threat_distance_v1')
+                             'official_31_4_5_combat_p2_v1_king_threat_distance_v1')
             self.assertIsNone(manifest['resume_source'])
             self.assertEqual(summary['self_play']['pool_ids'], [0, 1, 2])
             self.assertGreaterEqual(summary['self_play']['episode_assignments'], 4)

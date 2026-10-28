@@ -32,7 +32,7 @@ class GeneralsCTSVecEnv(VecEnv):
 
 def runner_config(*, rollout_steps=32, learning_epochs=4, mini_batches=4,
                   spatial_channels=16):
-    """The v32-opt student runner; task inputs use H4 combat history and K11."""
+    """LightCNN student runner for official maps, H4 combat history and K11."""
     return {
         "num_steps_per_env": rollout_steps,
         "save_interval": 2000,
@@ -43,8 +43,8 @@ def runner_config(*, rollout_steps=32, learning_epochs=4, mini_batches=4,
         "policy": {
             "class_name": "generals_rl.optimized_ppo.OptimizedInformationSpatialPPOPolicy",
             "action_distribution": "categorical", "spatial_channels": spatial_channels,
-            "history_length": 4, "players": 2, "map_width": 9, "map_height": 9,
-            "map_planes": 12, "public_dim": 13, "knowledge_channels": 11,
+            "history_length": 4, "players": 2, "map_width": 23, "map_height": 23,
+            "map_planes": 14, "public_dim": 13, "knowledge_channels": 11,
             "actor_obs_normalization": False, "critic_obs_normalization": False,
             "own_king_geometry": True, "wait_move_factorization": True,
             "critic_actor_information": True, "input_channel_alignment": 4,

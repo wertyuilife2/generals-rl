@@ -1,4 +1,5 @@
 """Dual-rating league persistence, scheduling, replays and human privacy."""
+from policy_test_utils import synthetic_placements
 import json
 import gzip
 import threading
@@ -29,7 +30,7 @@ from generals_arena.web.server import make_server
 
 
 def config(**kwargs):
-    return LeagueConfig(**{**dict(player_counts=(2,), min_side=3, max_side=5, max_ticks=8,
+    return LeagueConfig(**{**dict(player_counts=(2,), min_side=25, max_side=27, max_ticks=8,
                                  mountain_min=0, mountain_max=.1, city_min=0, city_max=0,
                                  tick_seconds=.05), **kwargs})
 
@@ -75,7 +76,7 @@ def test_ffa_tick_limit_counts_eliminated_seats_as_losses(tmp_path):
     c = store.register({'name': 'c', 'kind': 'baseline', 'policy': 'expansion'})['entrant_id']
     plan = {'game_id': 'partial_elimination', 'entrant_ids': [a, store.reference, c]}
     store.insert_plans([plan])
-    result = store.complete_result({**plan, 'ticks': 8, 'winner_seat': None,
+    result = store.complete_result({'placements': synthetic_placements([2, None, None]), **plan, 'ticks': 8, 'winner_seat': None,
         'elimination_ticks': [2, None, None], 'final_alive': [False, True, True]}, b'')
     board = store.leaderboard('ffa')
     for row in board['ranking']:
@@ -88,22 +89,23 @@ def test_ffa_tick_limit_counts_eliminated_seats_as_losses(tmp_path):
 
 def test_variable_map_distribution_is_seeded_and_scales_with_players():
     rules = LeagueConfig(player_counts=tuple(range(2, 9)))
-    assert rules.side_range(2) == (15, 20)
-    assert rules.side_range(4) == (22, 29)
-    assert rules.side_range(8) == (30, 35)
+    assert rules.side_range(2) == (18, 23)
+    assert rules.side_range(4) == (20, 26)
+    assert rules.side_range(8) == (25, 33)
     shapes = set()
     for players in range(2, 9):
         for seed in range(5):
             map_config = rules.sample_map(players, seed)
             assert map_config == rules.sample_map(players, seed)
             low, high = rules.side_range(players)
-            assert 15 <= low <= map_config.width <= high <= 35
-            assert low <= map_config.height <= high
-            assert .15 <= map_config.mountain_density <= .22
+            assert map_config.width is map_config.height is None
+            assert map_config.mountain_density == map_config.city_density == .5
             state = generate_map(map_config, seed)
+            assert low <= state.layout.width <= high
+            assert low <= state.layout.height <= high
             state.validate()
             assert state.player_count == players
-            shapes.add((map_config.height, map_config.width))
+            shapes.add((state.layout.height, state.layout.width))
     assert len(shapes) > 15
 
 
@@ -111,11 +113,11 @@ def test_rating_modes_have_distinct_origins_and_multiplayer_ties():
     assert initial_rating('1v1') == 0 and initial_rating('ffa') == 1000
     assert probability('ffa', 1400, 1000) == pytest.approx(10 / 11)
     assert probability('1v1', 0, 0) == .5
-    result = {'entrant_ids': ['random', 'a', 'b', 'c'], 'elimination_ticks': [2, 4, 4, None]}
+    result = {'placements': synthetic_placements([2, 4, 4, None]), 'entrant_ids': ['random', 'a', 'b', 'c'], 'elimination_ticks': [2, 4, 4, None]}
     changes = score({}, result, {})
     assert changes['a']['after'] == changes['b']['after']
     assert sum(value['after'] for value in changes.values()) == pytest.approx(4000)
-    reverse = {'entrant_ids': list(reversed(result['entrant_ids'])),
+    reverse = {'placements': synthetic_placements(list(reversed(result['elimination_ticks']))), 'entrant_ids': list(reversed(result['entrant_ids'])),
                'elimination_ticks': list(reversed(result['elimination_ticks']))}
     assert score({}, reverse, {}) == changes
 
@@ -296,7 +298,7 @@ def test_completion_is_atomic_and_duplicate_safe(tmp_path):
 
 
 def test_human_clock_authorization_fog_and_rated_completion(tmp_path):
-    store = league(tmp_path, max_ticks=4, min_side=8, max_side=8)
+    store = league(tmp_path, max_ticks=4, min_side=25, max_side=25)
     account = store.account('Alice')
     other = store.account('Bob')
     human = store.authenticate(account['token'])
@@ -372,10 +374,12 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     url = f'http://127.0.0.1:{server.server_address[1]}'
+    from urllib.request import build_opener, ProxyHandler
+    direct_open = build_opener(ProxyHandler({})).open
     def request(path, data=None, headers=None):
         request_headers = {'Content-Type':'application/json', **(headers or {})}
         body = None if data is None else json.dumps(data).encode()
-        with urlopen(Request(url + path, data=body, headers=request_headers)) as response:
+        with direct_open(Request(url + path, data=body, headers=request_headers)) as response:
             return response, response.read()
     try:
         response, html = request('/')
@@ -432,13 +436,14 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
 
 
 def test_duplicate_instances_average_cross_policy_scores_only():
-    result = {'entrant_ids':['a','a','random'], 'elimination_ticks':[None,2,1]}
+    result = {'placements': synthetic_placements([None,2,1]), 'entrant_ids':['a','a','random'], 'elimination_ticks':[None,2,1]}
     rated = score({'a':1000, 'random':1000}, result, {})
     assert rated['a']['after'] > 1000 > rated['random']['after']
     assert rated['a']['delta'] == pytest.approx(-rated['random']['delta'])
     result['elimination_ticks'] = [None,1,2]
+    result['placements'] = synthetic_placements(result['elimination_ticks'])
     assert score({'a':1000,'random':1000}, result, {})['a']['after'] == 1000
-    only_self = {'entrant_ids':['a']*8, 'elimination_ticks':[1,2,3,4,5,6,7,None]}
+    only_self = {'placements': synthetic_placements([1,2,3,4,5,6,7,None]), 'entrant_ids':['a']*8, 'elimination_ticks':[1,2,3,4,5,6,7,None]}
     assert score({'a':137}, only_self, {})['a']['after'] == 137
     permutation = [2,0,1]
     permuted = {key:[result[key][i] for i in permutation] for key in result}
@@ -505,7 +510,7 @@ def test_dual_pool_scores_keep_raw_gor_and_global_ffa_mean(tmp_path):
     def complete(key, ids, eliminations):
         plan = dict(game_id=key, entrant_ids=ids)
         store.insert_plans([plan])
-        return store.complete_result({**plan, 'ticks':2, 'elimination_ticks':eliminations,
+        return store.complete_result({'placements': synthetic_placements(eliminations), **plan, 'ticks':2, 'elimination_ticks':eliminations,
                                       'winner_seat':0, 'final_alive':[tick is None for tick in eliminations]}, b'unchanged')
 
     duel = complete('duel', [a,b], [None,2])
@@ -536,7 +541,7 @@ def test_fresh_rating_schema_does_not_silently_read_old_global_pool(tmp_path):
     manifest = {**store.manifest, 'schema':4}
     with store.connect(write=True) as db:
         db.execute("UPDATE meta SET value=? WHERE key='manifest'", (json.dumps(manifest),))
-    with pytest.raises(ValueError, match='archived league schema'):
+    with pytest.raises(ValueError, match='archived rules'):
         CompetitionStore(store.directory)
 
 
@@ -561,26 +566,27 @@ def test_parallel_and_sequential_execution_have_identical_ratings(tmp_path):
 
 
 def test_rating_uses_all_ranks_and_ties_not_just_winner():
-    result = {'entrant_ids':['random','a','b','c'], 'elimination_ticks':[None,30,20,10]}
+    result = {'placements': synthetic_placements([None,30,20,10]), 'entrant_ids':['random','a','b','c'], 'elimination_ticks':[None,30,20,10]}
     changes = score({}, result, {})
     assert ranks(result) == [1,2,3,4]
     assert changes['a']['after'] > 1000 > changes['b']['after'] > changes['c']['after']
     assert changes['a']['rank'] == 2 and changes['a']['expected_rank'] == 2.5
     # The winner stays the same; swapping two losing players swaps their gain.
-    other = {**result, 'elimination_ticks':[None,20,30,10]}
+    other = {**result, 'placements': synthetic_placements([None,20,30,10]), 'elimination_ticks':[None,20,30,10]}
     assert score({},other,{})['a']['after'] == changes['b']['after']
     result['elimination_ticks'] = [None,None,10,10]
+    result['placements'] = synthetic_placements(result['elimination_ticks'])
     assert ranks(result) == [1.5,1.5,3.5,3.5]
 
 
 def test_self_play_does_not_change_ratings_or_age():
-    changes = score({'a':300}, {'entrant_ids':['a']*8, 'elimination_ticks':list(range(8))}, {'a':2})
+    changes = score({'a':300}, {'placements': synthetic_placements(list(range(8))), 'entrant_ids':['a']*8, 'elimination_ticks':list(range(8))}, {'a':2})
     assert changes['a']['after'] == 300 and changes['a']['rated_games'] == 2
 
 
 def test_gor_probability_calibration_has_zero_expected_raw_rating_drift():
-    win = {'entrant_ids':['a','random'],'elimination_ticks':[None,1]}
-    lose = {**win,'elimination_ticks':[1,None]}
+    win = {'placements': synthetic_placements([None,1]), 'entrant_ids':['a','random'],'elimination_ticks':[None,1]}
+    lose = {**win, 'placements': synthetic_placements([1,None]),'elimination_ticks':[1,None]}
     for rating in (-800,-500,0,500,2000):
         dw = score({'a':rating}, win, {'a':100})['a']['delta']
         dl = score({'a':rating}, lose, {'a':100})['a']['delta']
@@ -590,7 +596,7 @@ def test_gor_probability_calibration_has_zero_expected_raw_rating_drift():
 
 def test_human_queue_is_idempotent_ordered_and_clock_driven(tmp_path):
     from generals.core.state import Action, Direction
-    store=league(tmp_path, min_side=8,max_side=8,max_ticks=10,tick_seconds=.1)
+    store=league(tmp_path, min_side=25,max_side=25,max_ticks=10,tick_seconds=.1)
     human=store.account('queue')['entrant']['entrant_id']
     arena=LiveArena(store);view=arena.create_game(human,2);gid=view['game_id']
     value=arena.games[gid];state=value['game'].state

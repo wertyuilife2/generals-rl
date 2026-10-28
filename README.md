@@ -2,6 +2,8 @@
 
 2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`，跨策略/版本的对战与 Elo 排名位于 `arena/`。
 
+当前规则固定为 2026-10-28 核查的官网 **31.4.5 普通 1v1 / FFA**；默认使用官方随机地图。RL 暂限 1v1，训练和评估均默认在 2000 tick 截断。规则变化及验证范围见[实施记录](doc/official_rules_alignment.md)。历史模型、Elo 和性能报告对应旧规则，不能直接沿用到当前版本。
+
 从仓库根目录，在已有 `generals-rl` conda 环境中安装和启动：
 
 ```bash
@@ -46,7 +48,7 @@ generals-arena serve outputs/arena/main --port 8086 --no-worker
 1v1 展示相对 WAIT 的 GoR；FFA 保持全池均值 1000。
 固定尺寸 RL 模型使用兼容的联赛配置；导出的策略包负责特征、记忆和推理，Arena 只管理通用包和比赛。
 Arena 的循环赛、持续联赛和训练评估共用比赛执行、结果、回放与评分基础。
-训练原子保存 checkpoint，自动导出策略包，调用 Arena 的 CPU/GPU 批量评估，记录 Elo/CI 并按固定 profile 的 Elo 选择 best；
+训练原子保存 checkpoint、导出策略包，调用 Arena 的 CPU/GPU 批量评估。当前默认使用官方随机地图上的 baseline＋WAIT 面板；最终候选相互对战后共同评分，并输出胜率矩阵与 best。旧 9×9 校准池不再作为默认，本轮不运行新校准实验；
 部署与共享流程见 [RL 文档](rl/README.md#模型导出与-arena-评估)。公开榜单和训练用相对 Elo 分开报告。
 
 C++ 策略可以直接提交或自由测试，无需手动注册：

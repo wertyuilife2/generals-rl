@@ -228,18 +228,19 @@ def test_timeout_surrenders_scores_and_can_be_committed(setup, tmp_path, monkeyp
         result, blob = store.replay(row['game_id'])
         event = result['forfeits'][0]
         assert event['reason'] == 'decision_timeout' and event['tick'] == 0
-        assert result['elimination_ticks'][event['seat']] == 0
+        assert result['elimination_ticks'][event['seat']] == 1
         assert result['ranks'][event['seat']] == 2
         assert result['winner_seat'] != event['seat']
         assert not result['final_alive'][event['seat']]
-        assert result['kills'] == [0,0]
-        assert len(replay_frames(blob,result)) == 1
+        assert result['kills'][result['winner_seat']] == 1
+        assert len(replay_frames(blob,result)) == 2
         assert result['rating_changes'][entrant['entrant_id']]['delta'] < 0
     assert entrant['entrant_id'] not in store.disabled_policy_ids()
     from generals_arena.competitions.leaderboard import LeaderboardStatistics
     stats = LeaderboardStatistics(store).leaderboard()
     loser = next(p for p in stats['ranking'] if p['entrant_id'] == entrant['entrant_id'])
-    assert loser['survival_index'] == loser['kill_index'] == loser['win_rate'] == 0
+    assert loser['survival_index'] == 1
+    assert loser['kill_index'] == loser['win_rate'] == 0
     monkeypatch.setattr(submissions, 'PUBLICATION_GAMES', 4)
     publication = submissions.commit(slow,league=directory,name='slow',workers=2)
     assert publication['ok'] and publication['completed_games'] == 4
@@ -285,7 +286,7 @@ def test_signal_timeout_recovers_committed_moves_from_shared_journal(setup,tmp_p
     assert sum(frames[-1]['alive']) == 1
 
 
-def test_multiplayer_timeout_restores_survivor_memory_and_neutralizes_land(setup, tmp_path):
+def test_multiplayer_timeout_restores_memory_and_preserves_surrender_grace(setup, tmp_path):
     import gzip
     from generals_arena.matches.replay import verified_replay
     directory, _ = setup
@@ -305,7 +306,7 @@ return 0;''')
     result, blob = store.replay(match['game_id'])
     assert result['ticks'] == 4 and result['elimination_ticks'][0] == 2
     assert result['forfeits'][0]['seat'] == 0 and result['ranks'][0] == 4
-    assert result['capture_ticks'] == [None]*4 and result['kills'] == [0]*4
+    assert result['kills'] == [0]*4
     assert all(move.eliminated is None for _, outcome in verified_replay(blob, result)
                if outcome is not None for move in outcome.moves)
     assert [m['calls'] for m in result['decision_timing']] == [3,4,4]
@@ -316,8 +317,8 @@ return 0;''')
     mask = np.array(frames[1]['owner']) == 0
     for frame in frames[2:]:
         assert not frame['alive'][0]
-        assert (np.array(frame['owner'])[mask] == -2).all()
-        assert (np.array(frame['army'])[mask] == np.array(frames[2]['army'])[mask]).all()
+        assert (np.array(frame['owner'])[mask] == 0).all()
+        assert (np.array(frame['army'])[mask] >= np.array(frames[2]['army'])[mask]).all()
 
 
 def test_native_parallel_and_serial_results_and_ratings_match(setup, tmp_path):

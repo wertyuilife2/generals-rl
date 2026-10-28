@@ -246,7 +246,7 @@ class TrainingControlTests(unittest.TestCase):
                 schedule="fixed", learning_rate=1e-4)
             for filename in ("checkpoint.pt", "best.pt"):
                 with self.subTest(source=filename):
-                    config["task"]["productive_actions"] = filename == "best.pt"
+                    config["task"]["combat_features"] = filename == "best.pt"
                     checkpoint = source / filename
                     expected = torch.load(checkpoint, weights_only=False, map_location="cpu")["model_state_dict"]
                     observed = {}
@@ -275,11 +275,8 @@ class TrainingControlTests(unittest.TestCase):
                     self.assertEqual(observed["pool_ids"], (0,))
                     pool_manifest = json.loads((output / "history_pool/manifest.json").read_text())
                     self.assertIsNone(pool_manifest["resume_source"])
-                    mdp_spec = pool_manifest["policy_spec"]["mdp"]
-                    if config["task"]["productive_actions"]:
-                        self.assertTrue(mdp_spec["productive_actions"])
-                    else:
-                        self.assertNotIn("productive_actions", mdp_spec)
+                    semantics = pool_manifest["policy_spec"]["encoder_semantics"]
+                    self.assertEqual("combat" in semantics, config["task"]["combat_features"])
                     self.assertEqual(summary["warm_start"], {
                         "kind": "warm_start_weights", "path": str(checkpoint.resolve()),
                         "sha256": sha256(checkpoint.read_bytes()).hexdigest()})

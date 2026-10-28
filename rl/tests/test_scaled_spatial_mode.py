@@ -8,8 +8,8 @@ from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
 from test_scaled_ppo import GROUPS, observations
 
 
-COUNTS = {('resnet', '1m'): 1_065_578, ('resnet', '10m'): 10_212_778, ('resnet', '100m'): 98_205_066,
-          ('vit', '1m'): 1_106_090, ('vit', '10m'): 9_996_714, ('vit', '100m'): 99_127_978}
+COUNTS = {('resnet', '1m'): 1_069_034, ('resnet', '10m'): 10_216_810, ('resnet', '100m'): 98_211_114,
+          ('vit', '1m'): 1_109_738, ('vit', '10m'): 10_001_386, ('vit', '100m'): 99_135_978}
 
 
 @pytest.mark.parametrize('family,size', COUNTS)
@@ -17,9 +17,9 @@ def test_pyramid_preserves_every_dense_parameter_and_full_local_resolution(famil
     with torch.device('meta'):
         obs = observations(1).to('meta')
         pyramid = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family, model_size=size,
-                                                    critic_projection_channels=0, spatial_mode='pyramid')
+                                                    critic_projection_channels=0, spatial_mode='pyramid', map_width=9, map_height=9)
         dense = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family, model_size=size,
-                                                  critic_projection_channels=0)
+                                                  critic_projection_channels=0, map_width=9, map_height=9)
         assert pyramid.parameter_counts()['total'] == COUNTS[family, size]
         dense_params, pyramid_params = dict(dense.named_parameters()), dict(pyramid.named_parameters())
         assert all(pyramid_params[key].shape == value.shape for key, value in dense_params.items())
@@ -40,7 +40,7 @@ def test_pyramid_decoder_and_critic_keep_local_information_and_fp32_mask_boundar
     torch.set_num_threads(1)
     obs = observations()
     policy = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family,
-                    critic_projection_channels=0, spatial_mode='pyramid', inference_chunk_size=1)
+                    critic_projection_channels=0, spatial_mode='pyramid', inference_chunk_size=1, map_width=9, map_height=9)
     coarse, local = [], []
     hooks = [policy.actor.projection.register_forward_hook(lambda module, args, output: coarse.append(tuple(output.shape))),
              policy.actor.local_skip.register_forward_hook(lambda module, args, output: local.append(tuple(output.shape)))]
@@ -64,7 +64,7 @@ def test_pyramid_decoder_and_critic_keep_local_information_and_fp32_mask_boundar
     assert probabilities.dtype == values.dtype == torch.float32
     assert probabilities[0, 0] == 1 and probabilities[~obs['action_mask']].count_nonzero() == 0
     loss.backward()
-    assert (obs['policy'].grad.reshape(2, 4, 985).abs().sum((0, 2)) > 0).all()
+    assert (obs['policy'].grad.reshape(2, 4, 1147).abs().sum((0, 2)) > 0).all()
     assert (obs['knowledge'].grad.reshape(2, 11, 81).abs().sum((0, 2)) > 0).all()
     assert obs['critic'].grad.abs().sum() > 0
     assert all(p.dtype == torch.float32 and (p.grad is None or p.grad.dtype == torch.float32 and
@@ -77,4 +77,4 @@ def test_pyramid_decoder_and_critic_keep_local_information_and_fp32_mask_boundar
 @pytest.mark.parametrize('mode', (None, False, 'unknown'))
 def test_invalid_spatial_mode_is_rejected(family, mode):
     with pytest.raises(ValueError, match='spatial_mode'):
-        ScaledInformationSpatialPPOPolicy(observations(), GROUPS, 649, backbone=family, spatial_mode=mode)
+        ScaledInformationSpatialPPOPolicy(observations(), GROUPS, 649, backbone=family, spatial_mode=mode, map_width=9, map_height=9)

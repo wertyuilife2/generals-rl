@@ -52,7 +52,7 @@ class PotentialRewardTests(unittest.TestCase):
             self.assertEqual(RewardConfig(potential_gamma=valid).potential_gamma, valid)
 
     def task(self, state, **overrides):
-        cfg = TaskConfig(width=3, height=3, players=state.player_count, num_envs=1,
+        cfg = TaskConfig(random_maps=False, map_pool_size=0, width=3, height=3, players=state.player_count, num_envs=1,
                          threads=1, history_length=2, rotate_seats=False, opponent="wait",
                          reward=RewardConfig(potential_gamma=.995), **overrides)
         backend = VecEnv.from_states([state], episode_ticks=cfg.max_episode_steps, auto_reset=False, threads=1)
@@ -61,7 +61,7 @@ class PotentialRewardTests(unittest.TestCase):
         return task
 
     def test_real_terminal_elimination_and_timeout_potential(self):
-        for players, seat, action in ((2, 0, Action.move(3, Direction.RIGHT).encode()), (3, 1, 0)):
+        for players, seat, action in ((2, 0, Action.move(3, Direction.RIGHT).encode()), (2, 1, 0)):
             state = capture_state(players)
             task = self.task(state, learner_seat=seat, max_episode_steps=1)
             if seat == 1:

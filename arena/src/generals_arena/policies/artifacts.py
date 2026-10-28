@@ -11,7 +11,7 @@ from .code import load_policy_factory, policy_digest, snapshot_policy_code
 
 
 SCHEMA_VERSION = 1
-RULES_PROTOCOL = "generals-legacy-v1"
+from generals.protocol.rules import RULES_VERSION as RULES_PROTOCOL
 
 
 def _object(value, name, required, optional=()):

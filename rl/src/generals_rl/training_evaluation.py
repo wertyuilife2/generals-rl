@@ -181,6 +181,8 @@ class PeriodicEvaluator:
         if settings.profile is None:
             task = run_config['task']
             map_config = {key: task[key] for key in ('width', 'height', 'players', 'mountain_density', 'city_density') if key in task}
+            if task.get('random_maps', True):
+                map_config.update(width=None, height=None)
             self.profile = make_profile(map_config, max_ticks=settings.max_ticks, seed=settings.seed,
                                         maps_per_opponent=settings.maps_per_opponent)
         else:
@@ -269,6 +271,7 @@ class PeriodicEvaluator:
                 job.update(status='queued', deadline=None, deadline_reason='evaluation_timeout',
                            timeout_seconds=self.settings.worker_timeout_seconds)
                 job.pop('pid', None)
+                _write_json(job['profile_path'], self.profile)
                 self.pending.append(job)
             if job['status'] == 'completed':
                 if not Path(job['report']).is_file() or _hash(job['report']) != job['report_sha256']:
@@ -278,6 +281,22 @@ class PeriodicEvaluator:
         if self.confirmation and not set(self.confirmation['policies']) <= {
                 j['policy_id'] for j in self._candidates()}:
             self.confirmation = None
+        if self.confirmation:
+            self.confirmation['profile'] = {**self.profile, **{key: self.confirmation['profile'][key]
+                                                            for key in ('seed', 'maps_per_opponent')}}
+            for key in ('report', 'worker_log'):
+                relative = Path(self.confirmation[key]).relative_to(recorded_directory)
+                source = index.parent / relative
+                destination = self.directory / relative
+                if imported and source.exists() and not destination.exists():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source, destination)
+                self.confirmation[key] = str(destination)
+            if self.confirmation['status'] == 'completed':
+                if _hash(self.confirmation['report']) != self.confirmation['report_sha256']:
+                    raise ValueError('completed joint confirmation report changed')
+            else:
+                self.confirmation['status'] = 'queued'
         self._select_best()
         if self.on_complete is not None:
             for job in self.jobs:
@@ -419,19 +438,8 @@ class PeriodicEvaluator:
             if job.get('deadline') is not None and perf_counter() >= job['deadline']:
                 self._cancel(job)
                 continue
-            command = [sys.executable, '-u', '-m', 'generals_arena', 'evaluate', '--bundle', job['bundle'],
-                       '--profile', job['profile_path'], '--output', job['report'], '--device', self.settings.device,
-                       '--batch-size', str(self.settings.batch_size), '--backend', self.settings.backend,
-                       '--cpu-threads', str(self.settings.cpu_threads)]
-            environment = os.environ.copy()
-            environment.update(OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1')
-            if torch.device(self.settings.device).type == 'cpu':
-                environment['CUDA_VISIBLE_DEVICES'] = ''
-            elif self.settings.cuda_visible_devices is not None:
-                environment['CUDA_VISIBLE_DEVICES'] = self.settings.cuda_visible_devices
-            elif torch.cuda.is_initialized():
-                torch.cuda.synchronize()
-                torch.cuda.empty_cache()
+            command = self._worker_command('--bundle', job['bundle'], job['profile_path'], job['report'])
+            environment = self._worker_environment()
             if job.get('deadline') is not None and perf_counter() >= job['deadline']:
                 self._cancel(job)
                 continue
@@ -444,6 +452,24 @@ class PeriodicEvaluator:
                 self._save_index()
             except OSError as exc:
                 self._fail(job, exc)
+
+    def _worker_command(self, source_flag, source, profile, output):
+        return [sys.executable, '-u', '-m', 'generals_arena', 'evaluate', source_flag, str(source),
+                '--profile', str(profile), '--output', str(output), '--device', self.settings.device,
+                '--batch-size', str(self.settings.batch_size), '--backend', self.settings.backend,
+                '--cpu-threads', str(self.settings.cpu_threads)]
+
+    def _worker_environment(self):
+        environment = os.environ.copy()
+        environment.update(OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1')
+        if torch.device(self.settings.device).type == 'cpu':
+            environment['CUDA_VISIBLE_DEVICES'] = ''
+        elif self.settings.cuda_visible_devices is not None:
+            environment['CUDA_VISIBLE_DEVICES'] = self.settings.cuda_visible_devices
+        elif torch.cuda.is_initialized():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        return environment
 
     def _complete(self, job):
         from generals_arena.competitions.evaluation import validate_coverage
@@ -497,20 +523,22 @@ class PeriodicEvaluator:
                 and Path(job['checkpoint']).is_file() and Path(job['bundle']).is_dir()]
 
     def _select_best(self):
-        completed = self._candidates()
-        if self.confirmation:
-            finalists = [job for job in self.jobs if job['key'] in self.confirmation['keys']]
-            if len(finalists) == len(self.confirmation['keys']) and all(
-                    j['status'] == 'completed' and Path(j['checkpoint']).is_file() and Path(j['bundle']).is_dir()
-                    for j in finalists):
-                completed = finalists
+        completed = [self._point(job) for job in self._candidates()]
+        if self.confirmation and self.confirmation['status'] == 'completed':
+            confirmation = self.confirmation
+            ratings = {row['policy_id']: row for row in confirmation['ratings']}
+            completed = [{**point, 'stage': 'confirmation', 'report': confirmation['report'],
+                          'profile_id': confirmation['profile_id'], 'elo': ratings[point['policy_id']]['elo'],
+                          'elo_ci': ratings[point['policy_id']]['elo_ci'],
+                          'expected_games': ratings[point['policy_id']]['games']}
+                         for point in completed if point['policy_id'] in ratings]
         if not completed:
             self.best_completed = None
             (self.directory / 'best_model.json').unlink(missing_ok=True)
             (self.output / 'best_model.json').unlink(missing_ok=True)
             return
         best = max(completed, key=lambda job: (job['elo'], -job['completed_ppo_updates'], job['policy_id']))
-        self.best_completed = self._point(best)
+        self.best_completed = best
         document = {'schema_version': 1, **self.best_completed, 'selection_metric': 'elo',
                     'confirmation_complete': bool(self.confirmation and best['stage'] == 'confirmation'),
                     'resume_scope': {'checkpoint': 'model_and_optimizers',
@@ -582,34 +610,81 @@ class PeriodicEvaluator:
             self.poll()
 
     def finish(self):
-        """Drain, then re-evaluate the top K with one common larger held-out budget."""
+        """Drain, then play top K against references and each other in one rating pool."""
         self.drain()
         if self.settings.final_top_k > 0:
             candidates = sorted(self._candidates(),
                                 key=lambda j: (-j['elo'], j['completed_ppo_updates']))[:self.settings.final_top_k]
             if candidates:
                 if self.confirmation is None:
-                    from generals_arena.competitions.evaluation import profile_id
+                    from generals_arena.competitions.evaluation import profile_id, expected_games
                     profile = json.loads(json.dumps(self.profile))
                     profile['seed'] = self.profile['seed'] ^ 0x5A17F03
                     profile['maps_per_opponent'] *= self.settings.final_games_multiplier
-                    key = profile_id(profile)
-                    self.confirmation = {'profile': profile, 'policies': [j['policy_id'] for j in candidates],
-                        'keys': [sha256(f"{j['policy_id']}:{key}".encode()).hexdigest() for j in candidates]}
+                    identity = profile_id(profile)
+                    policies = [j['policy_id'] for j in candidates]
+                    key = sha256(json.dumps([identity, policies]).encode()).hexdigest()
+                    directory = self.directory / 'confirmations' / key
+                    self.confirmation = dict(profile=profile, profile_id=identity, policies=policies,
+                        status='queued', report=str(directory/'report.json'), worker_log=str(directory/'worker.log'),
+                        expected_games=expected_games(profile, len(candidates)))
                     self._save_index()
                 else:
                     profile = self.confirmation['profile']
                     candidates = [j for j in self.jobs if j['stage'] == 'periodic'
                                   and j['policy_id'] in self.confirmation['policies']]
-                for candidate in candidates:
-                    self._enqueue(candidate['bundle'], candidate['checkpoint'], candidate['checkpoint_sha256'],
-                                  candidate['policy_id'], profile, candidate['completed_ppo_updates'],
-                                  candidate['steps_per_environment'], candidate['environment_steps'], stage='confirmation',
-                                  model_name=candidate.get('model_name'))
-                self._save_index()
-                self.drain()
+                if self.confirmation['status'] != 'completed':
+                    self._run_confirmation(candidates)
         self._select_best()
         self._save_index()
+
+    def _run_confirmation(self, candidates):
+        from generals_arena.competitions.evaluation import validate_joint_coverage, validate_coverage
+        job = self.confirmation
+        directory = Path(job['report']).parent
+        _write_json(directory/'profile.json', job['profile'])
+        _write_json(directory/'candidates.json', [candidate['bundle'] for candidate in candidates])
+        command = self._worker_command('--candidates', directory/'candidates.json', directory/'profile.json', job['report'])
+        entered, process = perf_counter(), None
+        try:
+            with Path(job['worker_log']).open('w') as stream:
+                process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT,
+                                           env=self._worker_environment(), start_new_session=True)
+            job.update(status='running', pid=process.pid)
+            self._save_index()
+            code = process.wait(timeout=self.settings.worker_timeout_seconds)
+            if code != 0:
+                raise RuntimeError(f'joint Arena confirmation exited with code {code}; log={job["worker_log"]}')
+            report = json.loads(Path(job['report']).read_text())
+            if (report['status'] != 'completed' or report['errors'] or report['profile_id'] != job['profile_id']
+                    or report['device'] != self.settings.device or report['backend'] != self.settings.backend):
+                raise RuntimeError('joint Arena confirmation differs from its requested profile or execution')
+            if len(candidates) == 1:
+                validate_coverage(report, job['profile'])
+            else:
+                validate_joint_coverage(report, job['profile'], job['policies'])
+            if {row['policy_id'] for row in report['candidates']} != set(job['policies']):
+                raise RuntimeError('joint Arena confirmation contains different candidates')
+            for candidate in candidates:
+                if _hash(candidate['checkpoint']) != candidate['checkpoint_sha256']:
+                    raise RuntimeError('confirmation checkpoint changed')
+            ratings = [{key: row[key] for key in ('policy_id', 'elo', 'elo_ci', 'games')} for row in report['candidates']]
+            if any(isinstance(row['elo'], bool) or not math.isfinite(row['elo']) for row in ratings):
+                raise RuntimeError('joint confirmation requires finite ratings')
+            job.update(status='completed', ratings=ratings, report_sha256=_hash(job['report']))
+            if self.writer is not None:
+                updates = {candidate['policy_id']: candidate['completed_ppo_updates'] for candidate in candidates}
+                for row in ratings:
+                    self.writer.add_scalar('ArenaConfirmation/elo', row['elo'], updates[row['policy_id']])
+                self.writer.flush()
+        except BaseException as error:
+            job.update(status='failed', error=f'{type(error).__name__}: {error}')
+            raise
+        finally:
+            if process is not None:
+                _stop_worker(process)
+            job['worker_seconds'] = perf_counter() - entered
+            self._save_index()
 
     def close(self):
         if self.running is not None:

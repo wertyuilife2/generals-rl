@@ -1,7 +1,7 @@
 """Map configuration shared by independent environment implementations."""
 
 from dataclasses import dataclass
-from math import floor, isfinite
+from math import isfinite
 from numbers import Integral, Real
 
 
@@ -15,27 +15,26 @@ def _integer(name: str, value: object, minimum: int) -> int:
 
 @dataclass(frozen=True)
 class MapConfig:
-    width: int = 25
-    height: int = 25
+    width: int | None = None
+    height: int | None = None
     players: int = 4
-    mountain_density: float = 0.2
-    city_density: float = 0.1
+    mountain_density: float = 0.5
+    city_density: float = 0.5
 
     def __post_init__(self) -> None:
         for name in ("width", "height", "players"):
-            object.__setattr__(self, name, _integer(name, getattr(self, name), 1))
+            value = getattr(self, name)
+            if value is not None or name == "players":
+                object.__setattr__(self, name, _integer(name, value, 1))
         if not 2 <= self.players <= 8:
             raise ValueError("players must be between 2 and 8")
-        for name, maximum in (("mountain_density", 0.4), ("city_density", 0.2)):
+        for name, maximum in (("mountain_density", 1.), ("city_density", 1.)):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, Real):
                 raise TypeError(f"{name} must be a real number")
             if not isfinite(value) or not 0 <= value <= maximum:
                 raise ValueError(f"{name} must be between 0 and {maximum}")
             object.__setattr__(self, name, float(value))
-        cells = self.width * self.height
-        available = cells - floor(cells * self.mountain_density) - floor(cells * self.city_density)
-        if available < self.players:
-            raise ValueError("not enough ordinary cells to place all generals")
+        cells = (self.width or 33) * (self.height or 33)
         if cells > 2**31 - 1:
             raise ValueError("map is too large for int32 cell identifiers")

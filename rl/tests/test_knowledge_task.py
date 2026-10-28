@@ -62,7 +62,7 @@ def memory_planes(task, value):
 
 class KnowledgeTaskTests(unittest.TestCase):
     def task(self, states, **settings):
-        options = dict(width=states[0].layout.width, height=states[0].layout.height,
+        options = dict(random_maps=False, map_pool_size=0, width=states[0].layout.width, height=states[0].layout.height,
                        players=states[0].player_count, num_envs=len(states),
                        opponent="wait", persistent_knowledge=True, history_length=3,
                        max_episode_steps=16, rotate_seats=False)
@@ -76,8 +76,8 @@ class KnowledgeTaskTests(unittest.TestCase):
 
     def test_disabled_mode_has_no_memory_allocations_or_behavior_change(self):
         with self.assertRaises(TypeError):
-            TaskConfig(persistent_knowledge=1)
-        self.assertFalse(TaskConfig().persistent_knowledge)
+            TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, persistent_knowledge=1)
+        self.assertFalse(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0).persistent_knowledge)
         initial_rng = torch.get_rng_state().clone()
         baseline = self.task([example_state(), example_state()], persistent_knowledge=False,
                              opponent="random")
@@ -121,13 +121,13 @@ class KnowledgeTaskTests(unittest.TestCase):
         self.assertEqual(int(task.player_ids[0]), 1)
         terminal = memory_planes(task, result.terminal_observations["knowledge"])
         reset = memory_planes(task, result.observations["knowledge"])
-        enemy = task.knowledge.channels.index("enemy_general_landmark")
+        enemy = task.knowledge.channels.index("last_seen_enemy_general")
         city = task.knowledge.channels.index("last_seen_city")
-        self.assertEqual(float(terminal[0, enemy, 4]), 1)
+        self.assertEqual(float(terminal[0, enemy, 4]), 0)
         self.assertEqual(float(terminal[0, city, 4]), 1)
         self.assertEqual(float(reset[0, enemy, 4]), 0)
         self.assertEqual(float(reset[0, enemy, 3]), 1)
-        self.assertEqual(float(result.metrics["Knowledge/known_enemy_general"][0]), 1)
+        self.assertEqual(float(result.metrics["Knowledge/known_enemy_general"][0]), 0)
         preserved = result.terminal_observations["knowledge"].clone()
         task.step(torch.zeros(1, dtype=torch.long))
         torch.testing.assert_close(result.terminal_observations["knowledge"], preserved, rtol=0, atol=0)
@@ -149,7 +149,9 @@ class KnowledgeTaskTests(unittest.TestCase):
         torch.testing.assert_close(result.terminal_observations["knowledge"], stored, rtol=0, atol=0)
 
     def test_partial_reset_clears_seats_and_preserves_ongoing_task_and_opponent(self):
-        task = self.task([example_state(), example_state()], opponent="self_play", rotate_seats=True)
+        state = example_state()
+        state.army.flat[0] = 3
+        task = self.task([state, state.copy()], opponent="self_play", rotate_seats=True)
         pool = KnowledgePool()
         task.opponent.attach(pool, stochastic=False)
         task.step(torch.tensor([Action.move(0, Direction.RIGHT).encode(), 0]))

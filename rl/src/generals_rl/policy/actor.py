@@ -20,12 +20,12 @@ def build_actor(network, features):
             "knowledge_channels", 11 if features.get("persistent_knowledge", False) else 0))
         layout = ObservationLayout(features["width"], features["height"],
                                    history_length=features.get("history_length", 4),
-                                   map_planes=features.get("map_planes", 12),
+                                   map_planes=features.get("map_planes", 14),
                                    public_dim=features.get("public_dim", 13), knowledge_channels=channels)
     else:
         raise TypeError("features must be a mapping or ObservationLayout")
-    if type(players) is not int or (players, layout.width, layout.height, layout.map_planes, layout.public_dim) != (2, 9, 9, 12, 13):
-        raise ValueError("retained actors require P2 9x9 twelve-plane/public13 features")
+    if type(players) is not int or (players, layout.map_planes, layout.public_dim) != (2, 14, 13):
+        raise ValueError("actors require P2 fourteen-plane/public13 features")
     family = network.get("family")
     common = {"family", "amp_bfloat16", "wait_move_factorization"}
     if "amp_bfloat16" in network and type(network["amp_bfloat16"]) is not bool:
@@ -62,7 +62,7 @@ def build_actor(network, features):
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer")
     actor = SpatialActor(channels, blocks, SpatialTrunk if family == "spatial" else light_trunk,
-                         history_length=layout.history_length)
+                         layout=layout)
     geometry = network.get("own_king_geometry", False)
     if type(geometry) is not bool or family == "spatial" and geometry:
         raise ValueError("invalid own_king_geometry for actor family")

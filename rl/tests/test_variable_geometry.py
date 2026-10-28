@@ -1,5 +1,4 @@
 """Rectangular combat geometry, privacy and legacy numeric contracts."""
-from hashlib import sha256
 import unittest
 
 import numpy as np
@@ -50,9 +49,7 @@ def visible_cells(state, pid):
 
 def combat_reference(state, pid, privileged):
     """Native after-growth troops and explicit cardinal source enumeration."""
-    engine = CoreEngine(state.copy())
-    engine.begin_tick()
-    after = engine.state
+    after = state
     visible = np.ones(after.owner.shape, bool) if privileged else visible_cells(state, pid)
     height, width = after.owner.shape
     risk, margin = np.zeros(after.owner.shape), np.zeros(after.owner.shape)
@@ -97,19 +94,17 @@ class VariableGeometryTests(unittest.TestCase):
                                  if 0 <= yy < height and 0 <= xx < width]
                     expected[:, :, y * width + x] = values[:, :, neighbors].amax(-1)
             torch.testing.assert_close(actual, expected, rtol=0, atol=0)
-        values = torch.arange(2 * 81).reshape(1, 2, 81).float()
-        torch.testing.assert_close(_neighbor_max(values), _neighbor_max(values, 9, 9), rtol=0, atol=0)
 
     def test_rectangular_combat_matches_native_growth_and_manual_neighbors(self):
         for width, height in ((7, 11), (13, 13)):
             states = [geometry_state(width, height, tick) for tick in (0, 1, 49, 50)]
             batch = self.batch(states)
             ids = torch.tensor([0, 1, 0, 1])
-            encoder = make_observation_encoder(TaskConfig(width=width, height=height, combat_features=True))
+            encoder = make_observation_encoder(TaskConfig(random_maps=False, map_pool_size=0, width=width, height=height, combat_features=True))
             cells = width * height
             for privileged in (False, True):
                 encoded = encoder.encode(batch, ids, privileged=privileged)
-                self.assertEqual(tuple(encoded.shape), (4, 12 * cells + 13))
+                self.assertEqual(tuple(encoded.shape), (4, 14 * cells + 13))
                 for lane, state in enumerate(states):
                     expected_risk, expected_margin = combat_reference(state, int(ids[lane]), privileged)
                     torch.testing.assert_close(encoded[lane, 10 * cells:11 * cells],
@@ -132,7 +127,7 @@ class VariableGeometryTests(unittest.TestCase):
             ids = torch.tensor([0, 1])
             diameter = width + height - 2
             for combat in (False, True):
-                encoder = make_observation_encoder(TaskConfig(width=width, height=height,
+                encoder = make_observation_encoder(TaskConfig(random_maps=False, map_pool_size=0, width=width, height=height,
                                    combat_features=combat, king_threat_distance=True))
                 expected = torch.tensor([(diameter - 1) / diameter, 2 / diameter])
                 for privileged in (False, True):
@@ -147,13 +142,10 @@ class VariableGeometryTests(unittest.TestCase):
             for values in (second.owner, second.army, second.structure):
                 values.flat[hidden_target], values.flat[old_general] = values.flat[old_general], values.flat[hidden_target]
             second.general_pos[1] = hidden_target
-            terrain = second.layout.terrain.copy()
-            terrain[0, width - 1] = 1
-            second.layout = MapLayout(terrain)
             second.validate()
             batch = self.batch([first, second])
             ids = torch.zeros(2, dtype=torch.long)
-            encoder = make_observation_encoder(TaskConfig(width=width, height=height,
+            encoder = make_observation_encoder(TaskConfig(random_maps=False, map_pool_size=0, width=width, height=height,
                                           combat_features=True, king_threat_distance=True))
             local = encoder.encode(batch, ids)
             torch.testing.assert_close(local[0], local[1], rtol=0, atol=0)
@@ -163,7 +155,7 @@ class VariableGeometryTests(unittest.TestCase):
 
     def test_variable_task_shapes_and_two_player_guards(self):
         for width, height in ((7, 11), (13, 13)):
-            config = TaskConfig(width=width, height=height, num_envs=1, combat_features=True,
+            config = TaskConfig(random_maps=False, map_pool_size=0, width=width, height=height, num_envs=1, combat_features=True,
                                king_threat_distance=True, persistent_knowledge=True,
                                rotate_seats=False, opponent="wait")
             env = VecEnv.from_states([geometry_state(width, height)], device="cpu",
@@ -172,33 +164,15 @@ class VariableGeometryTests(unittest.TestCase):
             self.addCleanup(task.close)
             result = task.step(torch.zeros(1, dtype=torch.long))
             cells = width * height
-            self.assertEqual(tuple(result.observations["policy"].shape), (1, 4 * (12 * cells + 13)))
-            self.assertEqual(tuple(result.observations["critic"].shape), (1, 12 * cells + 13))
+            self.assertEqual(tuple(result.observations["policy"].shape), (1, 4 * (14 * cells + 13)))
+            self.assertEqual(tuple(result.observations["critic"].shape), (1, 14 * cells + 13))
             self.assertEqual(tuple(result.observations["action_mask"].shape), (1, 1 + 8 * cells))
             self.assertEqual(tuple(result.observations["knowledge"].shape), (1, 11 * cells))
-            self.assertIn("spatial_v1", task.observation_encoder.semantics)
+            self.assertIn("official_31_4_5", task.observation_encoder.semantics)
         for flag in ("combat_features", "king_threat_distance"):
             with self.assertRaises(ValueError):
                 TaskConfig(players=3, **{flag: True})
 
-    def test_legacy_nine_by_nine_outputs_remain_bit_identical(self):
-        # Captured from the original fixed-9x9 encoders before generalization.
-        # These hash complete planes and public features across both seats,
-        # growth phases, local/privileged views and both base feature layouts.
-        expected = {
-            (False, False): "2d596ebc7e227b4549b7f35b88bf555c1784453d858606ca879b3ce986d56941",
-            (False, True): "2d8f84dcd4193e29bf40d701f0afb9427266bf4c1675535e482fc8a6de23c176",
-            (True, False): "bc7d9b060e616ef6f67cbda0613cffa29997dac890ac3a67d2c4865e71c26f23",
-            (True, True): "ee9ff1209cec1bcd1a16c9043626a1583fb61394b5b609424a3d60ec5c02e8af",
-        }
-        batch = self.batch([geometry_state(9, 9, tick) for tick in (0, 1, 49, 50)])
-        ids = torch.tensor([0, 1, 0, 1])
-        for (combat, privileged), digest in expected.items():
-            encoder = make_observation_encoder(TaskConfig(combat_features=combat, king_threat_distance=True))
-            prefix = "combat" if combat else "local"
-            self.assertEqual(encoder.semantics, f"{prefix}_p2_985_v1_king_threat_distance_v1")
-            encoded = encoder.encode(batch, ids, privileged=privileged)
-            self.assertEqual(sha256(encoded.contiguous().numpy().tobytes()).hexdigest(), digest)
 
 
 if __name__ == "__main__":

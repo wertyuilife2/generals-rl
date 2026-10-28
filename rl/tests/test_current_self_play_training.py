@@ -62,7 +62,7 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
             self.assertNotIn("active_snapshot_counts", summary["self_play"])
             self.assertEqual(checkpoint["iter"], 2)
             policy = observed["runner"].alg.policy
-            self.assertEqual(sum(parameter.numel() for parameter in policy.parameters()), 26_074)
+            self.assertEqual(sum(parameter.numel() for parameter in policy.parameters()), 28_666)
             for prefix in ("actor.", "critic."):
                 self.assertTrue(any(not torch.equal(value, observed["initial_model"][name])
                                     for name, value in policy.named_parameters() if name.startswith(prefix)))

@@ -7,23 +7,24 @@ import torch
 from torch import nn
 
 from .actor_critic import CategoricalActorCritic
-from .policy.cnn import (MAP_PLANES, MAP_SIZE, PUBLIC_DIM, FRAME_DIM, NUM_ACTIONS,
-                         _validate_history_length, SpatialTrunk, SpatialActor,
+from .policy.layout import ObservationLayout
+from .policy.cnn import (_validate_history_length, SpatialTrunk, SpatialActor,
                          light_trunk, add_own_king_geometry)
 from .policy.distributions import make_distribution, greedy_actions
 
 class PrivilegedCritic(nn.Module):
     """Its parameters/input are independent of the deployed local actor."""
-    def __init__(self, channels, blocks, trunk_factory=SpatialTrunk):
+    def __init__(self, channels, blocks, trunk_factory=SpatialTrunk, *, layout):
         super().__init__()
-        self.trunk = trunk_factory(MAP_PLANES, channels, blocks)
-        self.context = nn.Sequential(nn.Linear(channels + PUBLIC_DIM, channels), nn.ELU())
+        self.layout = layout
+        self.trunk = trunk_factory(layout.map_planes, channels, blocks)
+        self.context = nn.Sequential(nn.Linear(channels + layout.public_dim, channels), nn.ELU())
         self.value_head = nn.Sequential(nn.Linear(2 * channels, channels), nn.ELU(), nn.Linear(channels, 1))
 
     def forward(self, privileged):
-        maps = privileged[:, :-PUBLIC_DIM].reshape(-1, MAP_PLANES, MAP_SIZE, MAP_SIZE)
+        maps = self.layout.current_maps(privileged)
         pooled = self.trunk(maps).mean(dim=(-2, -1))
-        context = self.context(torch.cat((pooled, privileged[:, -PUBLIC_DIM:]), dim=-1))
+        context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:]), dim=-1))
         return self.value_head(torch.cat((pooled, context), dim=-1))
 
 class SpatialPPOPolicy(CategoricalActorCritic):
@@ -36,8 +37,8 @@ class SpatialPPOPolicy(CategoricalActorCritic):
     trunk_factory = staticmethod(SpatialTrunk)
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=32,
-                 residual_blocks=4, history_length=4, players=2, map_width=9,
-                 map_height=9, map_planes=12, public_dim=13,
+                 residual_blocks=4, history_length=4, players=2, map_width=23,
+                 map_height=23, map_planes=14, public_dim=13,
                  action_distribution="categorical", actor_obs_normalization=False,
                  critic_obs_normalization=False,
                  wait_move_factorization=False, **kwargs):
@@ -46,18 +47,19 @@ class SpatialPPOPolicy(CategoricalActorCritic):
             raise ValueError(f"unsupported spatial policy options: {sorted(kwargs)}")
         if actor_obs_normalization is not False or critic_obs_normalization is not False:
             raise ValueError("spatial policy requires observation normalization disabled")
-        if action_distribution != "categorical" or num_actions != NUM_ACTIONS:
-            raise ValueError("spatial policy requires the 649-action categorical layout")
+        self.layout = ObservationLayout(map_width, map_height, history_length, map_planes, public_dim)
+        if action_distribution != "categorical" or num_actions != self.layout.num_actions:
+            raise ValueError("categorical action vocabulary must match board geometry")
         _validate_history_length(history_length)
         geometry = (players, map_width, map_height, map_planes, public_dim)
-        if any(not isinstance(value, int) or isinstance(value, bool) for value in geometry) or geometry != (2, 9, 9, 12, 13):
-            raise ValueError("spatial policy supports only P2 9x9, 12 map planes and 13 public features")
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in geometry) or (players, map_planes, public_dim) != (2, 14, 13):
+            raise ValueError("spatial policy requires P2, 14 map planes and 13 public features")
         for value in (spatial_channels, residual_blocks):
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError("spatial channels and residual blocks must be positive integers")
         if obs_groups != {"policy": ["policy"], "critic": ["critic"]}:
             raise ValueError("spatial policy requires exact local-policy/privileged-critic groups")
-        for key, size in (("policy", history_length * FRAME_DIM), ("single_obs", FRAME_DIM), ("critic", FRAME_DIM)):
+        for key, size in (("policy", history_length * self.layout.frame_dim), ("single_obs", self.layout.frame_dim), ("critic", self.layout.frame_dim)):
             if key not in obs or obs[key].ndim != 2 or obs[key].shape[-1] != size:
                 raise ValueError(f"spatial policy requires {key} shape [B,{size}]")
         if not isinstance(wait_move_factorization, bool):
@@ -66,13 +68,13 @@ class SpatialPPOPolicy(CategoricalActorCritic):
         self.history_length = history_length
         self.semantics = self.semantics.replace("hist4", f"hist{history_length}")
         self.obs_groups = deepcopy(obs_groups)
-        self.num_actions, self.num_actor_obs, self.num_single_obs = NUM_ACTIONS, history_length * FRAME_DIM, FRAME_DIM
-        self.num_critic_obs = FRAME_DIM
+        self.num_actions, self.num_actor_obs, self.num_single_obs = self.layout.num_actions, history_length * self.layout.frame_dim, self.layout.frame_dim
+        self.num_critic_obs = self.layout.frame_dim
         self.action_distribution, self.state_dependent_std = "categorical", False
         self.actor_obs_normalization = self.critic_obs_normalization = False
         self.actor = SpatialActor(spatial_channels, residual_blocks, self.trunk_factory,
-                                  history_length=history_length)
-        self.critic = PrivilegedCritic(spatial_channels, residual_blocks, self.trunk_factory)
+                                  layout=self.layout)
+        self.critic = PrivilegedCritic(spatial_channels, residual_blocks, self.trunk_factory, layout=self.layout)
         self.distribution = None
 
     def action_probabilities(self, obs, is_teacher=False, *, validate_mask=True):

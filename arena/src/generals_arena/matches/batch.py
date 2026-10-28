@@ -1,10 +1,12 @@
 """Joint-tick batch execution for explicit, independently seeded match plans."""
 from time import perf_counter
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
 
 from generals import Action, MapConfig, VecEnv
+from generals.protocol import MOVE_REASONS
 from generals.core.mapgen import generate_map
 from generals.core.observation import Observation, readonly
 from generals.core.recording import state_digest, state_to_dict
@@ -55,9 +57,12 @@ def _one_observation(batch, lane):
     stats = _numpy(batch["stats"])[lane]
     return Observation(player_id=pid, tick=int(_numpy(state["tick"])[lane]),
         **{name: readonly(_numpy(state[name])[lane].reshape(height, width))
-           for name in ("terrain", "structure", "owner", "army")},
+           for name in ("terrain", "structure", "owner", "army", "fog_obstacles")},
         visible=readonly(_numpy(batch["visible"])[lane].reshape(height, width)),
         alive=readonly(_numpy(state["alive"])[lane]),
+        has_kill=readonly(_numpy(state["has_kill"])[lane]),
+        warn_afk=readonly(_numpy(state["warn_afk"])[lane]),
+        neutralize_in=readonly(_numpy(state["neutralize_in"])[lane]),
         general_pos=int(_numpy(batch["general_pos"])[lane]),
         stats=PlayerStats(*(readonly(stats[:, index]) for index in range(3))),
         visibility="local", terminated=bool(_numpy(state["terminated"])[lane]),
@@ -69,14 +74,16 @@ def _lane_state(host, lane, layout):
     winner = int(host["winner"][lane])
     return GameState(layout, *(host[name][lane].reshape(shape) for name in ("structure", "owner", "army")),
                      host["alive"][lane], host["general_pos"][lane], tick=int(host["tick"][lane]),
-                     terminated=bool(host["terminated"][lane]), winner_id=None if winner < 0 else winner)
+                     terminated=bool(host["terminated"][lane]), winner_id=None if winner < 0 else winner,
+                     **{name: host[name][lane] for name in ('idle_ticks', 'afk_turn', 'end_reason',
+                        'leave_tick', 'death_order', 'kills', 'damage', 'spawn_pos', 'city_known', 'capture_mask', 'warn_afk')})
 
 
 def _move(row, pid, encoded):
     if not row[0]:
         return None
     return MoveResult(player_id=pid, action=Action.decode(int(encoded)), valid=bool(row[1]),
-        reason={1: "WAIT", 2: "MOVED", 3: "OUT_OF_BOUNDS", 4: "NOT_OWNER", 5: "MOUNTAIN"}[int(row[8])],
+        reason=MOVE_REASONS[int(row[8])],
         source=int(row[2]), target=int(row[3]), moved=int(row[4]), captured=bool(row[5]),
         eliminated=None if row[6] < 0 else int(row[6]), target_owned=bool(row[7]))
 
@@ -181,6 +188,7 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
     if backend not in ("cpu", "gpu"):
         raise ValueError("backend must be cpu or gpu")
     states = [generate_map(config, plan["map_seed"]) for plan in plans]
+    config = replace(config, width=states[0].layout.width, height=states[0].layout.height)
     count, players = len(plans), config.players
     rules = MatchConfig(config, max_ticks=max_ticks)
     placement = {"device": device if str(device).startswith("cuda") else "cuda:0"} if backend == "gpu" else {
@@ -189,7 +197,6 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
     groups, baselines, records = [], [], [None] * count
     eliminations = np.full((count, players), -1, dtype=np.int64)
     invalid = np.zeros((count, players), dtype=np.int64)
-    kills = np.zeros((count, players), dtype=np.int64)
     traces = [[] for _ in plans] if record_replays else None
     digests = [[] for _ in plans] if record_replays else None
     initial_digests = [state_digest(state) for state in states]
@@ -245,10 +252,8 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                 timing["transfer_seconds"] += perf_counter() - entered
                 joint_host, moves = host["_joint"], host["_moves"]
                 invalid += (moves[:, :, 0].astype(bool) & ~moves[:, :, 1].astype(bool)) * active[:, None]
-                killed = moves[:, :, 0].astype(bool) & (moves[:, :, 6] >= 0) & active[:, None]
-                killed_lanes, killed_seats = np.nonzero(killed)
-                eliminations[killed_lanes, moves[killed_lanes, killed_seats, 6]] = host["tick"][killed_lanes]
-                kills += killed
+                newly_dead = ~host['alive'] & (eliminations < 0) & active[:, None]
+                eliminations[:] = np.where(newly_dead, host['tick'][:, None], eliminations)
                 for owner, _ in baselines:
                     owner.on_result(moves, joint_host, active)
                 for group in groups:
@@ -264,7 +269,7 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                     record = build_result(plans[lane], state=state,
                         stats={name: host["_stats"][lane, :, index] for index, name in enumerate(("army", "territory", "cities"))},
                         elimination_ticks=[None if value < 0 else int(value) for value in eliminations[lane]],
-                        invalid_actions=invalid[lane].tolist(), initial_digest=initial_digests[lane], kills=kills[lane].tolist())
+                        invalid_actions=invalid[lane].tolist(), initial_digest=initial_digests[lane])
                     record["execution_policy"] = EXECUTION_POLICY
                     blob = encode_replay(state_to_dict(states[lane]), traces[lane], digests[lane]) if record_replays else None
                     records[lane] = record, blob

@@ -1,4 +1,5 @@
 """Leaderboard metrics count games equally and use actual capture attribution."""
+from policy_test_utils import synthetic_placements
 import gzip
 import json
 from unittest.mock import patch
@@ -26,7 +27,7 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     def complete(key, ids, ticks, eliminations, kills, winner):
         plan = {'game_id':key, 'entrant_ids':ids}
         store.insert_plans([plan])
-        store.complete_result({**plan, 'ticks':ticks, 'elimination_ticks':eliminations,
+        store.complete_result({'placements': synthetic_placements(eliminations), **plan, 'ticks':ticks, 'elimination_ticks':eliminations,
                                'kills':kills, 'winner_seat':winner,
                                'final_alive':[tick is None for tick in eliminations]}, b'')
 
@@ -125,9 +126,9 @@ def test_confidence_coverage_and_totals_are_isolated_by_rating_mode(tmp_path):
     c = store.register({'name':'c','kind':'baseline','policy':'expansion'})['entrant_id']
     for index in range(6):
         plan = dict(game_id=f'ffa-{index}', entrant_ids=[a,b,c], map_seed=index,
-                    map={'width':9,'height':9,'players':3})
+                    map={'width':25,'height':25,'players':3})
         store.insert_plans([plan])
-        store.complete_result({**plan, 'ticks':2, 'elimination_ticks':[None,2,1],
+        store.complete_result({'placements': synthetic_placements([None,2,1]), **plan, 'ticks':2, 'elimination_ticks':[None,2,1],
                                'kills':[2,0,0], 'winner_seat':0, 'final_alive':[True,False,False]}, b'')
     ffa = LeaderboardStatistics(store, 'ffa').leaderboard()
     duels = LeaderboardStatistics(store, '1v1').leaderboard()

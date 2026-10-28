@@ -220,7 +220,8 @@ class Observation(C.Structure):
         (key, C.POINTER(kind)) for key, kind in (
             ('terrain', C.c_uint8), ('structure', C.c_uint8), ('owner', C.c_int16),
             ('army', C.c_int64), ('visible', C.c_uint8), ('alive', C.c_uint8),
-            ('total_army', C.c_int64), ('total_land', C.c_int64), ('total_cities', C.c_int64))] + [
+            ('total_army', C.c_int64), ('total_land', C.c_int64), ('total_cities', C.c_int64),
+            ('fog_obstacles', C.c_uint8), ('has_kill', C.c_uint8), ('warn_afk', C.c_uint8), ('neutralize_in', C.c_double))] + [
         ('previous', C.POINTER(Move))]
 
 
@@ -296,7 +297,8 @@ class NativeController:
                   (obs.owner, np.int16, C.c_int16), (obs.army, np.int64, C.c_int64),
                   (obs.visible, np.uint8, C.c_uint8), (obs.alive, np.uint8, C.c_uint8),
                   (obs.stats.army, np.int64, C.c_int64), (obs.stats.territory, np.int64, C.c_int64),
-                  (obs.stats.cities, np.int64, C.c_int64)]
+                  (obs.stats.cities, np.int64, C.c_int64), (obs.fog_obstacles, np.uint8, C.c_uint8),
+                  (obs.has_kill, np.uint8, C.c_uint8), (obs.warn_afk, np.uint8, C.c_uint8), (obs.neutralize_in, np.float64, C.c_double)]
         arrays = [np.ascontiguousarray(value, dtype=dtype) for value, dtype, _ in fields]
         previous = Move(*self.previous) if self.previous is not None else None
         native_obs = Observation(obs.width, obs.height, len(obs.alive), obs.player_id,

@@ -117,15 +117,11 @@ class ControllerTests(unittest.TestCase):
                 for _ in range(25):
                     if state.terminated:
                         break
-                    engine.begin_tick()
                     action = ai.act(observe(state, 0))
-                    result = engine.apply_action(0, action)
+                    result = engine.step([action, Action.wait()]).moves[0]
                     self.assertTrue(result.valid)
                     moved |= action.kind == ActionKind.MOVE
                     ai.on_result(result)
-                    if engine.next_player is not None:
-                        engine.apply_action(1, Action.wait())
-                    engine.finish_tick()
                 self.assertTrue(moved)
                 self.assertGreater(int(np.count_nonzero(state.owner == 0)), 1)
 

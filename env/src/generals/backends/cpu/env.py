@@ -6,12 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
-from generals.protocol import STATE_DTYPES
+from generals.protocol import STATE_DTYPES, state_shape
 from generals.protocol.config import _integer
 from generals.protocol.vector import BatchStep
 from generals.backends._build import build_shared, openmp_flags
-class _Batch(ctypes.Structure):
-    _fields_ = [(name, ctypes.c_void_p) for name in STATE_DTYPES]
+from generals.backends._abi import Batch as _Batch
 
 
 def _pointers(arrays):
@@ -61,8 +60,7 @@ class CPUEnv:
             raise ValueError("episode_ticks must fit int64")
         self.initial = {}
         for name, dtype in STATE_DTYPES.items():
-            shape = ((self.batch_size, n) if name in ("terrain", "structure", "owner", "army") else
-                     (self.batch_size, self.players) if name in ("alive", "general_pos") else (self.batch_size,))
+            shape = state_shape(name, self.batch_size, n, self.players)
             value = initial[name]
             if not isinstance(value, np.ndarray) or value.shape != shape or value.dtype != np.dtype(dtype):
                 raise ValueError(f"{name} must be {dtype} {shape}")
@@ -136,6 +134,12 @@ class CPUEnv:
         if self._closed:
             raise RuntimeError("CPU environment is closed")
         self._cache_valid.fill(False)
+
+    def surrender(self, player_id, mask=None):
+        if self._closed:
+            raise RuntimeError("CPU environment is closed")
+        from generals.core.lifecycle import surrender_batch
+        surrender_batch(self, player_id, mask)
 
     def reset(self, mask=None):
         if self._closed:

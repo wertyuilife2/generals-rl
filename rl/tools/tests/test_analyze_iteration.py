@@ -213,3 +213,27 @@ def test_moving_run_preserves_reports_and_checkpoint_resolution(tmp_path):
     Path(evaluations[0]['report']).unlink()
     with pytest.raises(FileNotFoundError):
         analyze.read_run(moved)
+
+
+def test_joint_confirmation_is_plotted_and_replays_the_same_candidate_matches(tmp_path):
+    from contextlib import redirect_stdout
+    import io
+    from generals_rl.train import train
+    from rl_test_utils import small_training_config
+    config = small_training_config(runner_overrides={'learning_epochs': 1})
+    config['evaluation'] = dict(enabled=True, every_n_updates=1, maps_per_opponent=1,
+                                max_ticks=3, batch_size=0, final_top_k=2)
+    run, output = tmp_path/'run', tmp_path/'analysis'
+    output.mkdir()
+    with redirect_stdout(io.StringIO()):
+        train(config, run, iterations=2)
+    evaluations, _ = analyze.read_run(run)
+    assert len(evaluations) == 4
+    best = analyze.select_best(run, evaluations)
+    assert best['stage'] == 'confirmation'
+    original = json.loads(Path(best['report']).read_text())
+    analyze.demos(analyze.checkpoint_for(best), best['data'], output)
+    recorded = json.loads((output/'recorded_evaluation.json').read_text())
+    assert recorded['win_matrix'] == original['win_matrix']
+    assert recorded['games'] == 44
+    assert all(game.get('replay') for game in recorded['results'])

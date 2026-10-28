@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from generals.protocol.rules import RULES_VERSION
 from generals_arena.policies.code import policy_digest
 from generals_arena.util import file_digest
 
@@ -42,7 +43,7 @@ def create_controller(*, weights, config_path, device='cpu', player_id=0, seed=0
 '''
 
 
-def make_bundle(directory, *, name='opaque-policy', width=9, height=9, players=(2,)):
+def make_bundle(directory, *, name='opaque-policy', width=25, height=25, players=(2,)):
     root = Path(directory)
     root.mkdir(parents=True)
     code = root/'policy'
@@ -51,7 +52,7 @@ def make_bundle(directory, *, name='opaque-policy', width=9, height=9, players=(
     (code/'policy.py').write_text(SOURCE)
     (root/'actor.pt').write_bytes(b'weights are opaque to Arena')
     (root/'model_config.json').write_bytes(b'also opaque, not even JSON')
-    manifest = {'schema_version': 1, 'name': name, 'rules': 'generals-legacy-v1',
+    manifest = {'schema_version': 1, 'name': name, 'rules': RULES_VERSION,
                 'capabilities': {'maps': {'shapes': [[width, height]]}, 'player_counts': list(players)},
                 'entrypoint': 'policy:create_controller', 'artifacts': {
                     'weights': {'path': 'actor.pt', 'sha256': file_digest(root/'actor.pt')},
@@ -59,3 +60,9 @@ def make_bundle(directory, *, name='opaque-policy', width=9, height=9, players=(
                     'code': {'path': 'policy', 'sha256': policy_digest(code)}}}
     (root/'manifest.json').write_text(json.dumps(manifest))
     return root
+
+
+def synthetic_placements(eliminations):
+    """Explicit outcome data for isolated rating tests (no match simulation)."""
+    values=[float('inf') if tick is None else tick for tick in eliminations]
+    return [1+sum(other>value for other in values)+(sum(other==value for other in values)-1)/2 for value in values]

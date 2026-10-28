@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from generals import MapConfig
+from generals.protocol.rules import RULES_VERSION
 from generals_arena.matches.replay import replay_frames
 from generals_arena.competitions.config import LeagueConfig
 from generals_arena.competitions.rating import POLICY
@@ -73,7 +74,7 @@ def test_registered_rl_blocks_incompatible_resize_and_stale_registration(tmp_pat
 def test_capability_coverage_is_generic_and_covers_rectangular_combinations(monkeypatch):
     capabilities = {'maps': {'width': [7, 10], 'height': [7, 10]}, 'player_counts': [2, 4]}
     monkeypatch.setattr('generals_arena.policies.artifacts.validate_bundle',
-                        lambda *args, **kwargs: {'manifest': {'rules': 'generals-legacy-v1', 'capabilities': capabilities}})
+                        lambda *args, **kwargs: {'manifest': {'rules': RULES_VERSION, 'capabilities': capabilities}})
     entrant = {'kind': 'package', 'factory_kwargs': {'bundle': 'synthetic'}}
     # P2 uses side 7 and P4 side 10: no policy geometry is hard-coded here.
     CompetitionStore._validate_package_profile(entrant, fixed_rules(player_counts=(2, 4), min_side=7,

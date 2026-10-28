@@ -14,7 +14,7 @@ from policy_test_utils import make_bundle
 
 
 def profile(*, maps=2, players=2, ticks=18):
-    return make_profile(MapConfig(9, 9, players, .1, .05), max_ticks=ticks,
+    return make_profile(MapConfig(25, 25, players, .5, .5), max_ticks=ticks,
                         opponents=[{'name':'random','kind':'baseline','policy':'random'}],
                         maps_per_opponent=maps, seed=912)
 
@@ -68,7 +68,7 @@ def test_fixed_schedule_uses_shared_gor_and_independent_maps(tmp_path):
     candidate = next(row for row in report['ranking'] if row['entrant_id'] != report['anchor'] and row['name'] == 'opaque-policy')
     assert candidate['ci_blocks'] == 12  # Six independent maps against each fixed policy.
     assert report['elo_ci']['lower'] < report['elo'] < report['elo_ci']['upper']
-    assert report['rating_policy'] == 'gor-relative-codeforces-v9'
+    assert report['rating_policy'] == 'gor-relative-codeforces-official-31.4.5-v10'
     assert report['rating_mode'] == '1v1' and report['reference'] == 'WAIT'
     assert next(row for row in report['ranking'] if row['name'] == 'WAIT')['elo'] == 0.
     assert 'opponent_ratings' not in report
@@ -118,7 +118,7 @@ def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(tmp_pat
                     np.ones(3,dtype=np.bool_),np.array([0,1,80],dtype=np.int32))
     monkeypatch.setattr('generals_arena.matches.batch.generate_map',lambda *args: state.copy())
     bundle=make_bundle(tmp_path/'bundle',players=(3,))
-    settings=make_profile(MapConfig(9,9,3,0,0),max_ticks=1,maps_per_opponent=1,
+    settings=make_profile(MapConfig(25, 25,3,0,0),max_ticks=1,maps_per_opponent=1,
         opponents=[{'name':'aggressive','kind':'baseline','policy':'aggressive'}])
     report=evaluate(bundle,settings,batch_size=0)
     eliminated=next(row for row in report['results'] if row['candidate_seat']==1)
@@ -132,7 +132,7 @@ def test_neural_opponents_have_independent_streams_that_follow_seat_rotations(tm
     from generals_arena.matches import batch as batch_execution
     candidate = make_bundle(tmp_path/'candidate', name='candidate', players=(3,))
     opponent = make_bundle(tmp_path/'opponent', name='opponent', players=(3,))
-    settings = make_profile(MapConfig(9, 9, 3, 0, 0), maps_per_opponent=2, max_ticks=2,
+    settings = make_profile(MapConfig(25, 25, 3, 0, 0), maps_per_opponent=2, max_ticks=2,
         opponents=[{'name':'opponent', 'kind':'package', 'bundle':str(opponent)}])
     resets = []
     original = batch_execution._PolicyGroup.__init__
@@ -170,7 +170,7 @@ def test_profile_identity_follows_relocated_schedule_and_rating_sources(monkeypa
 def test_profile_relative_opponent_paths_are_independent_of_cwd(tmp_path, monkeypatch):
     directory = tmp_path / 'profiles'
     make_bundle(directory / 'opponent', name='opponent')
-    settings = make_profile(MapConfig(9, 9, 2, 0, 0), max_ticks=2, maps_per_opponent=1,
+    settings = make_profile(MapConfig(25, 25, 2, 0, 0), max_ticks=2, maps_per_opponent=1,
         opponents=[{'name': 'opponent', 'kind': 'package', 'bundle': 'opponent'}])
     path = directory / 'profile.json'
     path.write_text(json.dumps(settings))

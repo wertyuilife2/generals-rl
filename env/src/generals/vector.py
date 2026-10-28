@@ -36,6 +36,7 @@ class VecEnv:
     """
     step: Callable[[Any], BatchStep]
     reset: Callable[..., Any]
+    surrender: Callable[..., None]
     synchronize: Callable[[], None]
     check_errors: Callable[[], None]
     invalidate_cache: Callable[[], None]
@@ -49,7 +50,7 @@ class VecEnv:
     def _bind(self, backend):
         self.unwrapped = backend
         self.device = getattr(backend, "device", "cpu")
-        for name in ("step", "reset", "synchronize", "check_errors", "invalidate_cache",
+        for name in ("step", "reset", "surrender", "synchronize", "check_errors", "invalidate_cache",
                      "to_states", "close"):
             setattr(self, name, getattr(backend, name))
 

@@ -1,6 +1,8 @@
 # Generals PPO self-play
 
-默认训练使用 F03 消融选出的 **ViT 1M dense、H4/K11、recent8 历史对手池与 gamma 课程**，配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。直接运行训练入口即可使用，不需要 F03 调度工具。训练规则由 `env/` 提供，四个基础 AI 只参与评估。
+默认训练沿用 F03 消融选出的 **ViT 1M dense、H4/K11、recent8 历史对手池与 gamma 课程**，并迁移到官网 31.4.5 规则及随机 1v1 地图。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前代码只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。
+
+新输入与地图尚未进行大规模效果／吞吐实验，不能把旧 F03 的胜率和最优 batch 结论当作新默认的验证。旧模型需用对应冻结源码与旧规则运行，不提供静默兼容转换。
 
 正式结果见 [H200 scaling：22 项训练](../doc/h200_scaling.md) 和 [F03 顺序消融](../doc/f03_ablation.md)；研究历史见 [Auto research 记录](../doc/auto_research.md)。
 
@@ -20,7 +22,7 @@ python -m generals_rl.train
 
 默认从头初始化，训练 **224 轮 PPO**，输出写入新的 `outputs/rl/<时间戳>/`。`--output PATH` 可指定新目录；`--iterations` 或 `--steps-per-env` 可覆盖预算，二者互斥。单卡执行沿用每 rank 配置，环境总数和全局 minibatch 小于八卡实验。
 
-按正式实验的八卡规模运行：
+八卡启动方式（采样预算沿用旧实验，23×23 输入的显存与最优 batch 尚未重新调优）：
 
 ```bash
 torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/rl/f03-selected
@@ -30,7 +32,7 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 
 | 项目 | 默认值 |
 | --- | --- |
-| 游戏与输入 | 9×9、2 人，局部 H4 combat 历史＋K11 持久知识；独立特权 critic |
+| 游戏与输入 | 官方随机 18–23 格长方形、2 人；RL 填充到 23×23，14 通道局部 H4 combat 历史＋K11；独立特权 critic |
 | 模型 | ViT 1M dense，actor/critic 参数独立 |
 | 采样 | 每 rank 16,384 个环境，全局 N=131,072；T=32 |
 | PPO | E=4，每 epoch 64 个逻辑 minibatch；全局 B=65,536，每 rank B=8,192 |
@@ -44,6 +46,8 @@ iteration 从 0 起算。每次 PPO 轮包含一次采样、GAE 和完整 E4；�
 
 Actor 只接收该座位的局部观测、历史、知识和公开统计；critic 的完整棋盘不传给 actor。H4 是四帧近期输入，recent8 是八个历史对手，二者不同。知识和历史按座位及 episode 隔离，初始随机对手随候选池更新淘汰，进行中对局继续使用其原对手。
 默认 actor/critic 的运行统计 observation normalization 均关闭；各字段的固定缩放由 `policy/` 中的特征构造实现。
+
+14 个棋盘通道包含有效地图区域和迷雾障碍提示；填充格不进入行动掩码，统计按真实地图面积缩放。combat 使用行动前的当前兵力，0/1 兵来源不可行动。K11 记录曾经看见的信息及年龄，不把将军身份当作永久属性：将军转换／交换后会根据新观测更新。训练与导出共用这些构造器；部署包将原始地图填充后推理，再将动作还原为真实宽度的格点编码。CPU/CUDA 都有多尺寸逐 tick 的训练／部署输入与动作一致性测试。
 
 ## 配置覆盖与恢复
 
@@ -97,8 +101,8 @@ python -m generals_rl.train --config cpu.json --iterations 1 --output outputs/rl
 
 1. 启动训练时把 `generals_rl/policy/` 和部署配置快照到 run 目录，checkpoint 记录其内容哈希。
 2. 按 `runner.save_interval` 配置的周期原子保存 checkpoint；按 `evaluation.every_n_updates` 配置的周期保存、导出 actor 策略包并入队 Arena。最后一轮始终保存，启用评估时必评。
-3. Arena 按固定地图配置、对手版本、预算和种子批量对战，从相同初始分开始逐局评分，返回 Elo、CI、胜平负及耗时。
-4. 训练结束排空队列，再用共同的新种子和加大预算确认周期 Elo 最高的候选，写出 `best_model.json`；候选数和预算倍数分别由 `evaluation.final_top_k`（默认3）与 `final_games_multiplier`（默认2）控制。
+3. Arena 按固定地图分布、对手版本、预算和种子批量对战，拟合当前模型的 GoR，返回 Elo、条件 CI、胜平负及耗时。显式选择已校准 profile 时使用其固定参考分数；当前默认生成新规则下的未校准 baseline＋WAIT 面板。
+4. 训练结束排空队列，周期 Elo 最高的候选用共同的新地图挑战参考池，并相互进行循环赛；整批结果在同一固定参考尺度上联合评分，写出 `best_model.json`。候选数和每对策略的地图预算倍数分别由 `evaluation.final_top_k`（默认3）与 `final_games_multiplier`（默认2）控制。
 5. 共享 best 指向的完整 `bundle/`，合作者直接 `generals-arena commit 目录` 或 `run`。
 
 默认关闭基于 Elo 的平台期早停（`training_control.plateau_evaluations=null`），
@@ -106,7 +110,7 @@ python -m generals_rl.train --config cpu.json --iterations 1 --output outputs/rl
 该开关与 `evaluation.enabled` 独立。
 
 `evaluations/index.json` 保存持久队列；`evaluations/candidates/` 保存候选的完整可恢复 checkpoint、
-训练配置和 actor-only bundle；`evaluations/jobs/` 保存每个任务的 profile、Arena 报告和 worker 日志。
+训练配置和 actor-only bundle；`evaluations/jobs/` 保存周期任务；`evaluations/confirmations/` 保存一次共同复评的 profile、候选清单、Arena 报告和 worker 日志。报告附带 `report.win_matrix.csv`，每格为行策略对列策略的胜／平／负；JSON 同时保存胜率和含半分平局的得分率。
 best 指针不复制权重，包含模型代号、已完成更新数、
 `policy_id/profile_id`、Elo/CI、报告和可恢复 checkpoint 路径。best 恢复模型/optimizer，
 对局和随机流重置；candidate 不另存历史对手池，只恢复原 run 中仍可获得的池内容。
@@ -121,8 +125,8 @@ best 指针不复制权重，包含模型代号、已完成更新数、
 ```bash
 python -m generals_rl.export outputs/rl/my-run/checkpoint.pt \
   --output outputs/models/nova-224 --codename nova-ViT1M
-# 默认模型只支持9×9、1v1；首次创建与它兼容的联赛
-python -m generals_arena league init outputs/arena/models --config arena/configs/leagues/legacy_9x9_1v1.json
+# 默认模型支持官方18–23格随机1v1；首次创建匹配的联赛
+python -m generals_arena league init outputs/arena/models --config arena/configs/leagues/official_1v1.json
 python -m generals_arena commit outputs/models/nova-224 --league outputs/arena/models --device cuda:0 --workers 1
 ```
 
@@ -135,14 +139,7 @@ Arena 仅解析通用 manifest；features/history/knowledge/mask、网络和动�
 不需要安装 RL、RSL 或 TensorDict。显式配置的 AMP、matmul/TF32/cuDNN 设置随包保存，
 执行后恢复进程全局设置，以免不同包相互影响。权重和 `outputs/` 不纳入 Git，直接共享整个目录即可。
 
-旧 checkpoint 需提供与当前导出器兼容的权重、原配方及完成轮数；不能仅凭路径或命名判断兼容。
-例如已验证可导出的历史 S4 final U224（不是同 run 的 best U196），保留原 stochastic 评估模式：
-
-```bash
-python -m generals_rl.export /path/to/S4/final.pt \
-  --config /path/to/S4/run_config.json --updates 224 \
-  --codename v0.0.1-ViT1M --mode stochastic --output outputs/models/v0.0.1-ViT1M-224
-```
+导出包声明当前规则与支持的地图尺寸／人数；不能仅凭 checkpoint 的文件名判断兼容。历史 S4/F03 的 9×9 权重对应旧输入和旧规则，应使用当时的导出器与运行环境，不应包装成当前官方规则模型。
 
 默认 `inference.mode="stochastic"` 保留训练配方的采样评估；可显式设为 `greedy`，该选择属于模型包身份。
 新 run 的代号来自 `model.codename`，未设置时自动用 `run_id-输出目录名`，resume 继承原代号。同代号下 `completed_ppo_updates` 是一基完成次数，
@@ -157,7 +154,7 @@ python -m generals_rl.export /path/to/S4/final.pt \
 import json
 from generals import MapConfig
 from generals_arena.competitions.evaluation import make_profile
-profile = make_profile(MapConfig(9, 9, 2, .1, .05), maps_per_opponent=100, max_ticks=2000)
+profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2000)
 # 可配置其他 package / baseline 对手；1v1 自动加入 WAIT 对照。
 # 独立 C++ 策略包只支持 CPU 隔离执行，不能用于下方 GPU 批评估。
 with open("profile.json", "w") as f:
@@ -169,11 +166,13 @@ python -m generals_arena evaluate --bundle outputs/models/nova-224 --profile pro
   --output outputs/eval/nova.json --backend gpu --device cuda:0 --batch-size 256
 ```
 
-训练评估固定对手策略版本、初始条件和赛程，逐局使用与公开联赛相同的 `gor-relative-codeforces-v9`，所有参赛策略的原始分数正常更新。
-1v1 从原始分 0 开始，实际安排 WAIT 对局，展示时减去 WAIT 原始分；3–8 人 FFA 从 1000 开始，独立保持全池均分 1000。
-置信区间按独立地图和模式对应的概率模型计算。profile 内的最终分数受阵容、赛程和预算影响，不能直接等同公开池的分数；
-best 仅比较相同 profile 和固定部署条件，profile 本身不绑定候选设备/batch。评分更改后的 schema 2 profile 应用于新 run；旧 run 用冻结源码继续。
-当前赛程按对手分组，Elo 对分组顺序与 WAIT 对局结果敏感；基础AI面板的最高 Elo 只是该评估协议的最优候选，不能保证在RL模型直接对战中更强。需要同时查看各对手胜平负和确认评估的近似区间。
+默认 `evaluation.profile=null`，根据当前任务生成官方随机 1v1 地图、四个 baseline 和 WAIT 面板。周期评估默认每对手 100 张地图、交换座位，共 1000 局。可通过 `evaluation.profile` 指定外部校准配置文件；更换规则后必须重新校准参考分数，旧 F03 9×9 的分数不沿用。新规则的校准留待后续实验。
+
+1v1 采用 `gor-batch-fit-v1`：使用现有 GoR 胜率函数，对整批胜平负联合拟合，计分不依赖结果顺序。每个实际交手的策略对加入一局虚拟平局，避免全胜／全负导致无穷估计；换座对局各计半份信息。未校准面板固定 WAIT 原始分为 0；显式校准后可固定参考分数，只估计候选。公开联赛的逐局 GoR 更新及 FFA 的 Codeforces 评分仍独立，不能与训练面板分数直接混用。
+
+CI 是给定固定参考分数后的局部 Fisher 近似，不包含参考校准误差、训练随机性或对手选择偏差。校准原始区间保存在 profile 中。胜率矩阵用于检查策略克制，最终 Elo 最高也不保证面对每个对手都更强。未校准的自定义 1v1 profile 会以 WAIT 为零联合拟合该次面板；3–8 人 FFA 周期评估仍使用原 Codeforces 规则，共同候选复评当前要求 1v1（FFA 可设置 `final_top_k=0`）。
+
+profile schema 为 3，内容绑定规则、地图、预算和对手身份；已有 run 保留原始报告和冻结源码。策略包和权重通过本地文件共享，仓库不跟踪权重；`policy_id` 校验完整内容。缺少显式指定的对手包会报错，不会替换为其他策略。
 Arena 将训练评估、固定 round-robin 和持久 league 作为不同赛程模式，共用比赛执行、结果、录像和评分规则。
 RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续调用 `generals_arena.competitions.evaluation`；通用比赛入口见 [Arena 文档](../arena/README.md)。
 `--record-replays` 保存可由 Arena 逐 tick 验证的录像；
@@ -182,9 +181,9 @@ RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续
 训练默认与训练卡共用 `cuda:0`，在 PPO 更新间同步批评估；CPU 或显式独立单卡评估可异步。
 设置 `evaluation.cuda_visible_devices="7"` 时训练须通过 `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6` 排除该卡，
 worker 中仍用 `cuda:0`。当前批评估只使用一个 device，不保留旧多卡分片执行器；可增大单卡 batch。
-`evaluation.profile` 可指向 JSON 文件或配置对象，`every_n_updates/maps_per_opponent/backend/batch_size`
+`evaluation.profile` 可指定新规则的 JSON 文件或配置对象，`every_n_updates/maps_per_opponent/backend/batch_size`
 控制频率、预算及执行；显式 `profile` 内的地图／对手／局数覆盖默认 profile 的生成参数。推理模式由顶层 `inference.mode` 指定。
-`batch_size=0` 表示按当前兼容赛程组全量并行，不自动探测显存或搜索最优 batch。profile 中的 package 对手须各自设置推理 `device`，否则使用 CPU。
+`batch_size=0` 表示按当前兼容赛程组全量并行，不自动探测显存或搜索最优 batch。评估中的候选和 package 对手统一使用评估的 `device`。
 随机推理的 lane RNG 绑定 seed 和计数，
 与分批、重排及其他局结束无关。GPU 不同 batch 的矩阵乘法可能造成微小浮点差异，不能保证整局动作逐位一致。
 

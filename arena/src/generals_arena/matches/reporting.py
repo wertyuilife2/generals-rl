@@ -1,5 +1,6 @@
 """File sinks for any schedule mode; the persistent league uses a SQLite sink."""
 from pathlib import Path
+import csv
 
 from generals_arena.util import write_json
 
@@ -32,3 +33,12 @@ def write_report(output, report):
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
         write_json(output, report)
+        if report.get('win_matrix'):
+            rows = report['ranking']
+            with output.with_name(output.stem + '.win_matrix.csv').open('w', newline='') as stream:
+                writer = csv.writer(stream)
+                writer.writerow(['wins/draws/losses', *(row['name'] for row in rows)])
+                for row in rows:
+                    values = report['win_matrix'].get(row['entrant_id'], {})
+                    writer.writerow([row['name'], *(f"{cell['wins']}/{cell['draws']}/{cell['losses']}" if cell else ''
+                        for cell in (values.get(other['entrant_id']) for other in rows))])

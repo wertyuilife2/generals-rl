@@ -12,11 +12,13 @@ from tensordict import TensorDict
 from generals_rl.information_ppo import InformationSpatialPPOPolicy
 import generals_rl.optimized_ppo as optimized
 from generals_rl.optimized_ppo import OptimizedInformationSpatialPPOPolicy
-from generals_rl.policy.cnn import FRAME_DIM, MAP_PLANES, MAP_SIZE, PUBLIC_DIM
+from generals_rl.policy.layout import ObservationLayout
+TEST_LAYOUT = ObservationLayout(9, 9)
+FRAME_DIM, MAP_PLANES, MAP_SIZE, PUBLIC_DIM = TEST_LAYOUT.frame_dim, TEST_LAYOUT.map_planes, 9, TEST_LAYOUT.public_dim
 
 
 def observations(count=4, history_length=4, knowledge_channels=11):
-    generator = torch.Generator().manual_seed(72)
+    generator = torch.Generator().manual_seed(84)
     frames = torch.rand(count, history_length, FRAME_DIM, generator=generator)
     maps = frames[..., :-PUBLIC_DIM].reshape(count, history_length, MAP_PLANES, MAP_SIZE, MAP_SIZE)
     maps[:, :, 4:6].zero_()
@@ -45,7 +47,7 @@ def groups(knowledge_channels=11, critic_information=True):
 
 
 def policy_options(history_length=4, knowledge_channels=11, **overrides):
-    values = {"spatial_channels": 16, "history_length": history_length, "knowledge_channels": knowledge_channels,
+    values = {"map_width": 9, "map_height": 9, "spatial_channels": 16, "history_length": history_length, "knowledge_channels": knowledge_channels,
               "critic_actor_information": True, "own_king_geometry": True, "wait_move_factorization": True}
     values.update(overrides)
     return values
@@ -95,8 +97,8 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         learned_weights(baseline)
         policy.load_state_dict(baseline.state_dict(), strict=True)
         baseline.load_state_dict(policy.state_dict(), strict=True)
-        self.assertEqual((policy.actor.trunk[1].in_channels, policy.actor.trunk[1].compute_in_channels), (61, 64))
-        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (71, 72))
+        self.assertEqual((policy.actor.trunk[1].in_channels, policy.actor.trunk[1].compute_in_channels), (69, 72))
+        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (81, 84))
 
     def test_learned_fp32_logits_masks_values_and_parameter_gradients_are_equivalent(self):
         # Disable the CPU backend's lower-precision/reordered kernels so this
@@ -132,7 +134,7 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
                         torch.testing.assert_close(actual, parameter.grad, rtol=3e-6, atol=3e-7, msg=name)
                     first_actor = baseline.actor.trunk[int(geometry)].weight.grad
                     self.assertGreater(float(first_actor[:, history_length * MAP_PLANES:history_length * MAP_PLANES + 11].abs().sum()), 0)
-                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 12:].abs().sum()), 0)
+                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 14:].abs().sum()), 0)
 
     def test_learned_fp32_input_gradients_cover_each_history_and_knowledge_plane(self):
         obs = observations(history_length=8)
@@ -178,19 +180,19 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         finally:
             for hook in hooks:
                 hook.remove()
-        local = obs["policy"].reshape(4, 4, FRAME_DIM)[..., :-PUBLIC_DIM].reshape(4, 48, 9, 9)
+        local = obs["policy"].reshape(4, 4, FRAME_DIM)[..., :-PUBLIC_DIM].reshape(4, 56, 9, 9)
         memory = obs["knowledge"].reshape(4, 11, 9, 9)
-        self.assertEqual(tuple(captured["actor"].shape), (4, 64, 9, 9))
-        self.assertEqual(tuple(captured["critic"].shape), (4, 72, 9, 9))
-        torch.testing.assert_close(captured["actor"][:, :48], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["actor"][:, 48:59], memory, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 12:60], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 60:71], memory, rtol=0, atol=0)
-        self.assertEqual(float(captured["actor"][:, 61:].abs().sum()), 0)
-        self.assertEqual(float(captured["critic"][:, 71:].abs().sum()), 0)
-        torch.testing.assert_close(captured["actor"][0, 59], ((torch.arange(9.) - 3) / 8)[None, :].expand(9, 9))
-        torch.testing.assert_close(captured["actor"][0, 60], ((torch.arange(9.) - 3) / 8)[:, None].expand(9, 9))
-        self.assertEqual(float(captured["actor"][-1, 59:61].abs().sum()), 0)
+        self.assertEqual(tuple(captured["actor"].shape), (4, 72, 9, 9))
+        self.assertEqual(tuple(captured["critic"].shape), (4, 84, 9, 9))
+        torch.testing.assert_close(captured["actor"][:, :56], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["actor"][:, 56:67], memory, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 14:70], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 70:81], memory, rtol=0, atol=0)
+        self.assertEqual(float(captured["actor"][:, 69:].abs().sum()), 0)
+        self.assertEqual(float(captured["critic"][:, 81:].abs().sum()), 0)
+        torch.testing.assert_close(captured["actor"][0, 67], ((torch.arange(9.) - 3) / 8)[None, :].expand(9, 9))
+        torch.testing.assert_close(captured["actor"][0, 68], ((torch.arange(9.) - 3) / 8)[:, None].expand(9, 9))
+        self.assertEqual(float(captured["actor"][-1, 67:69].abs().sum()), 0)
 
     def test_history_handoff_is_single_use_and_never_reuses_mutated_history(self):
         obs = observations()
@@ -316,9 +318,9 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         policy = self.make_policy(obs)
         changed = obs.clone()
         changed["policy"] = changed["policy"][:, :FRAME_DIM]
-        with self.assertRaisesRegex(ValueError, "actor history"):
+        with self.assertRaisesRegex(ValueError, "policy history"):
             policy.action_probabilities(changed)
-        with self.assertRaisesRegex(ValueError, "critic history"):
+        with self.assertRaisesRegex(ValueError, "policy history"):
             policy.evaluate(changed)
         changed = obs.exclude("knowledge")
         with self.assertRaisesRegex(ValueError, "knowledge"):

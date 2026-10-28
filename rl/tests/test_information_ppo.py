@@ -19,11 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def sample(n=4, memory=False, history_length=4):
     g = torch.Generator().manual_seed(27)
-    frame = torch.rand(n, 985, generator=g)
-    maps = frame[:, :972].reshape(n, 12, 81)
+    frame = torch.rand(n, 1147, generator=g)
+    maps = frame[:, :1134].reshape(n, 14, 81)
     maps[:, 4].zero_(); maps[:, 5].zero_()
     maps[:, 4, 40] = 1; maps[:, 5, 40] = 1
-    values = {"policy": frame[:, None].expand(-1, history_length, -1).reshape(n, history_length * 985).clone(),
+    values = {"policy": frame[:, None].expand(-1, history_length, -1).reshape(n, history_length * 1147).clone(),
               "single_obs": frame.clone(), "critic": frame.clone(),
               "action_mask": torch.ones(n, 649, dtype=torch.bool)}
     if memory:
@@ -32,7 +32,7 @@ def sample(n=4, memory=False, history_length=4):
 
 
 def options():
-    return {"own_king_geometry": True, "wait_move_factorization": True}
+    return {"map_width": 9, "map_height": 9, "own_king_geometry": True, "wait_move_factorization": True}
 
 
 def groups(memory=False, critic=False):
@@ -82,10 +82,10 @@ class InformationPolicyTests(unittest.TestCase):
         policy.action_probabilities(obs.exclude("critic", "single_obs"))
         policy.evaluate(obs).sum().backward()
         self.assertTrue(all(p.grad is None for p in policy.actor.parameters()))
-        self.assertGreater(float(policy.critic.trunk[0].weight.grad[:, 12:].abs().sum()), 0)
+        self.assertGreater(float(policy.critic.trunk[0].weight.grad[:, 14:].abs().sum()), 0)
         self.assertGreater(float(policy.critic.context[0].weight.grad[:, -13:].abs().sum()), 0)
         with torch.no_grad():
-            policy.critic.trunk[0].weight[:, 12:].fill_(0.01)
+            policy.critic.trunk[0].weight[:, 14:].fill_(0.01)
         changed = obs.clone(); changed["policy"] *= 2
         self.assertFalse(torch.equal(policy.evaluate(obs), policy.evaluate(changed)))
 
@@ -96,11 +96,11 @@ class InformationPolicyTests(unittest.TestCase):
         torch.manual_seed(145)
         policy = InformationSpatialPPOPolicy(obs, groups(memory=True, critic=True), 649,
                     knowledge_channels=11, critic_actor_information=True, **options())
-        self.assertEqual(policy.actor.trunk[1].in_channels, 61)
-        self.assertEqual(policy.critic.trunk[0].in_channels, 71)
+        self.assertEqual(policy.actor.trunk[1].in_channels, 69)
+        self.assertEqual(policy.critic.trunk[0].in_channels, 81)
         torch.testing.assert_close(policy.action_probabilities(obs), baseline.action_probabilities(obs), rtol=1e-6, atol=1e-6)
         policy.actor(obs["policy"], obs["knowledge"]).sum().backward()
-        self.assertGreater(float(policy.actor.trunk[1].weight.grad[:, 48:59].abs().sum()), 0)
+        self.assertGreater(float(policy.actor.trunk[1].weight.grad[:, 56:67].abs().sum()), 0)
         self.assertTrue(all(p.grad is None for p in policy.critic.parameters()))
         policy.zero_grad(set_to_none=True)
         policy.evaluate(obs).sum().backward()
@@ -117,14 +117,14 @@ class InformationPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "obs_groups"):
             InformationSpatialPPOPolicy(obs, groups(), 649, critic_actor_information=True)
         with self.assertRaisesRegex(ValueError, "knowledge"):
-            InformationSpatialPPOPolicy(obs, groups(memory=True), 649, knowledge_channels=11)
+            InformationSpatialPPOPolicy(obs, groups(memory=True), 649, knowledge_channels=11, **options())
         with self.assertRaises(TypeError):
             InformationSpatialPPOPolicy(obs, groups(), 649, critic_actor_information=1)
 
     def test_h8_latest_public_geometry_context_and_critic_share_history(self):
         obs = sample(n=2, memory=True, history_length=8)
-        frames = obs["policy"].reshape(2, 8, 985)
-        maps = frames[..., :972].reshape(2, 8, 12, 9, 9)
+        frames = obs["policy"].reshape(2, 8, 1147)
+        maps = frames[..., :1134].reshape(2, 8, 14, 9, 9)
         # Old generals deliberately disagree with the newest local marker.
         maps[:, :, 4:6].zero_()
         for index in range(8):
@@ -134,9 +134,9 @@ class InformationPolicyTests(unittest.TestCase):
         policy = InformationSpatialPPOPolicy(obs, groups(memory=True, critic=True), 649,
                     history_length=8, knowledge_channels=11, critic_actor_information=True,
                     **options())
-        self.assertEqual(policy.actor.trunk[1].in_channels, 109)
-        self.assertEqual(policy.critic.trunk[0].in_channels, 119)
-        self.assertEqual((policy.num_actor_obs, policy.num_critic_obs), (8771, 9756))
+        self.assertEqual(policy.actor.trunk[1].in_channels, 125)
+        self.assertEqual(policy.critic.trunk[0].in_channels, 137)
+        self.assertEqual((policy.num_actor_obs, policy.num_critic_obs), (10067, 11214))
         self.assertIn("hist8", policy.semantics)
         captured = {}
         hooks = [
@@ -157,19 +157,19 @@ class InformationPolicyTests(unittest.TestCase):
         finally:
             for hook in hooks:
                 hook.remove()
-        local = maps.reshape(2, 96, 9, 9)
+        local = maps.reshape(2, 112, 9, 9)
         memory = obs["knowledge"].reshape(2, 11, 9, 9)
-        torch.testing.assert_close(captured["actor_maps"][:, :96], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["actor_maps"][:, 96:107], memory, rtol=0, atol=0)
+        torch.testing.assert_close(captured["actor_maps"][:, :112], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["actor_maps"][:, 112:123], memory, rtol=0, atol=0)
         xy = (torch.arange(9.) - 7) / 8
         torch.testing.assert_close(captured["actor_maps"][:, -2], xy[None, None].expand(2, 9, 9), rtol=0, atol=0)
         torch.testing.assert_close(captured["actor_maps"][:, -1], xy[None, :, None].expand(2, 9, 9), rtol=0, atol=0)
         torch.testing.assert_close(captured["actor_context"][:, -13:], frames[:, -1, -13:], rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic_maps"][:, 12:108], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic_maps"][:, 14:126], local, rtol=0, atol=0)
         torch.testing.assert_close(captured["critic_maps"][:, -11:], memory, rtol=0, atol=0)
         torch.testing.assert_close(captured["critic_context"][:, -13:], frames[:, -1, -13:], rtol=0, atol=0)
         changed = obs.clone()
-        changed["policy"].reshape(2, 8, 985)[:, :-1, -13:] += 100
+        changed["policy"].reshape(2, 8, 1147)[:, :-1, -13:] += 100
         changed["critic"] += 1000
         changed["single_obs"] += 1000
         torch.testing.assert_close(policy.action_probabilities(changed), probabilities, rtol=0, atol=0)
@@ -182,15 +182,15 @@ class InformationPolicyTests(unittest.TestCase):
         policy = InformationSpatialPPOPolicy(obs, groups(memory=True, critic=True), 649,
                     history_length=8, knowledge_channels=11, critic_actor_information=True, **options())
         policy.actor(obs["policy"], obs["knowledge"]).square().mean().backward()
-        gradients = obs["policy"].grad.reshape(4, 8, 985)
-        self.assertTrue(bool((gradients[..., :972].abs().sum((0, 2)) > 0).all()))
-        self.assertGreater(float(policy.actor.trunk[1].weight.grad[:, 96:107].abs().sum()), 0)
+        gradients = obs["policy"].grad.reshape(4, 8, 1147)
+        self.assertTrue(bool((gradients[..., :1134].abs().sum((0, 2)) > 0).all()))
+        self.assertGreater(float(policy.actor.trunk[1].weight.grad[:, 112:123].abs().sum()), 0)
         self.assertIsNone(obs["critic"].grad)
         self.assertTrue(all(p.grad is None for p in policy.critic.parameters()))
         policy.zero_grad(set_to_none=True)
         obs["policy"].grad = None
         policy.evaluate(obs).square().mean().backward()
-        critic_inputs = policy.critic.trunk[0].weight.grad[:, 12:108].reshape(16, 8, 12, 3, 3)
+        critic_inputs = policy.critic.trunk[0].weight.grad[:, 14:126].reshape(16, 8, 14, 3, 3)
         self.assertTrue(bool((critic_inputs.abs().sum((0, 2, 3, 4)) > 0).all()))
         self.assertGreater(float(policy.critic.trunk[0].weight.grad[:, -11:].abs().sum()), 0)
         self.assertGreater(float(policy.critic.context[0].weight.grad[:, -13:].abs().sum()), 0)
@@ -198,27 +198,25 @@ class InformationPolicyTests(unittest.TestCase):
         # Information extensions start at zero, but learned history weights must
         # subsequently make every frame part of the critic's input graph.
         with torch.no_grad():
-            policy.critic.trunk[0].weight[:, 12:108].fill_(.001)
+            policy.critic.trunk[0].weight[:, 14:126].fill_(.001)
         obs["policy"].grad = None
         policy.evaluate(obs).sum().backward()
-        self.assertTrue(bool((obs["policy"].grad.reshape(4, 8, 985)[..., :972].abs().sum((0, 2)) > 0).all()))
+        self.assertTrue(bool((obs["policy"].grad.reshape(4, 8, 1147)[..., :1134].abs().sum((0, 2)) > 0).all()))
 
     def test_history_lengths_and_runtime_shapes_fail_explicitly(self):
         for invalid in (True, 0, -1, 4.0):
             with self.subTest(history_length=invalid), self.assertRaisesRegex(ValueError, "history_length"):
                 InformationSpatialPPOPolicy(sample(), groups(), 649, history_length=invalid)
         with self.assertRaisesRegex(ValueError, "policy shape"):
-            InformationSpatialPPOPolicy(sample(), groups(), 649, history_length=8)
+            InformationSpatialPPOPolicy(sample(), groups(), 649, history_length=8, **options())
         obs = sample(memory=True, history_length=8)
         policy = InformationSpatialPPOPolicy(obs, groups(memory=True, critic=True), 649,
                     history_length=8, knowledge_channels=11, critic_actor_information=True, **options())
         changed = obs.clone(); changed["policy"] = sample(memory=True)["policy"]
-        with self.assertRaisesRegex(ValueError, "actor history"):
+        with self.assertRaisesRegex(ValueError, "policy history"):
             policy.action_probabilities(changed)
         with self.assertRaisesRegex(ValueError, "critic history"):
             policy.evaluate(changed)
-        with self.assertRaisesRegex(ValueError, "own-king geometry"):
-            policy.actor.trunk[0](torch.zeros(4, 61, 9, 9))
         changed = obs.clone(); changed["knowledge"] = torch.zeros(4, 8 * 891)
         with self.assertRaisesRegex(ValueError, "knowledge"):
             policy.action_probabilities(changed)
@@ -246,10 +244,10 @@ class InformationPolicyTests(unittest.TestCase):
         self.assertEqual(summary["teacher_envs"], 0)
         self.assertEqual(config["runner"]["storage_obs_keys"], ["policy", "critic", "action_mask", "knowledge"])
         weights = trained["model_state_dict"]
-        self.assertEqual(weights["actor.trunk.1.weight"].shape[1], 109)
-        self.assertEqual(weights["critic.trunk.0.weight"].shape[1], 119)
-        self.assertGreater(float(weights["actor.trunk.1.weight"][:, 96:107].abs().sum()), 0)
-        self.assertGreater(float(weights["critic.trunk.0.weight"][:, 12:108].abs().sum()), 0)
+        self.assertEqual(weights["actor.trunk.1.weight"].shape[1], 125)
+        self.assertEqual(weights["critic.trunk.0.weight"].shape[1], 137)
+        self.assertGreater(float(weights["actor.trunk.1.weight"][:, 112:123].abs().sum()), 0)
+        self.assertGreater(float(weights["critic.trunk.0.weight"][:, 14:126].abs().sum()), 0)
         self.assertTrue(all(torch.isfinite(torch.tensor(v)) for v in summary["last_losses"].values()))
 
 

@@ -179,16 +179,15 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual(mask.shape, (25, 4, 2))
         self.assertFalse(mask[12, Direction.UP].any())
         self.assertTrue(mask[12, Direction.RIGHT].all())  # Cannot win, but legal.
-        self.assertTrue(mask[0, Direction.RIGHT].all())  # Zero-army transfer is legal.
-        self.assertTrue(mask[0, Direction.DOWN].all())
+        self.assertFalse(mask[0, Direction.RIGHT].any())  # Source must have at least two.
+        self.assertFalse(mask[0, Direction.DOWN].any())
         self.assertFalse(mask[0, Direction.UP].any())
         self.assertFalse(mask[0, Direction.LEFT].any())
         for source in range(state.layout.size):
             for direction in Direction:
                 for mode in MoveMode:
                     engine = CoreEngine(state.copy())
-                    engine.begin_tick()  # tick 1: no growth changes legality.
-                    result = engine.apply_action(0, Action.move(source, direction, mode))
+                    result = engine.step([Action.move(source, direction, mode), Action.wait()]).moves[0]
                     self.assertEqual(bool(mask[source, direction, mode]), result.valid)
 
     def test_no_legal_actions_after_elimination_or_termination(self):

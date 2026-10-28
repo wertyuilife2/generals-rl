@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from .observations import LocalObservationEncoder
 
 
-def _neighbor_max(values, width=9, height=9):
+def _neighbor_max(values, width, height):
     grid = values.reshape(-1, 2, height, width)
     padded = F.pad(grid, (1, 1, 1, 1))
     vertical = torch.maximum(padded[..., :-2, 1:-1], padded[..., 2:, 1:-1])
@@ -16,16 +16,16 @@ def _neighbor_max(values, width=9, height=9):
 class CombatObservationEncoder(LocalObservationEncoder):
     """Replace duplicate P2 identity planes with risk and signed combat margin.
 
-    Risk is the best visible hostile four-neighbor ALL_BUT_ONE move after public
-    growth. Own margin is garrison + best single reinforcement - risk; other
-    margin is best friendly attack - current visible defender after growth.
+    Risk uses current visible four-neighbor ALL_BUT_ONE armies. Own margin is
+    garrison + best single reinforcement - risk; other margin is best friendly
+    attack - the current visible defender.
     These are potential choices, not a prediction of joint actions or seat order.
 
-    Float32 troop arithmetic is exact for after-growth armies <=2**23. Native
+    Float32 troop arithmetic is exact for the intermediate sums <=2**24. Native
     rules/debug boundaries own exceptional int64 overflow checks, avoiding host
     synchronization in every GPU encode.
     """
-    semantics = "combat_p2_985_v1"
+    semantics = "official_31_4_5_combat_p2_v1"
     channels = LocalObservationEncoder.channels + ("enemy_attack_risk", "combat_margin")
 
     def encode(self, batch, player_ids, **visibility_options):
@@ -36,12 +36,9 @@ class CombatObservationEncoder(LocalObservationEncoder):
         planes = result[:, :12 * cells].reshape(batch.num_envs, 12, cells)
         visible = planes[:, 0].bool()
         own, enemy = planes[:, 5].bool(), planes[:, 6].bool()
-        structured = (planes[:, 3] + planes[:, 4]).bool()
-        next_tick = batch.state["tick"][:, None] + 1
-        grows = (own | enemy) & (((next_tick % 2 == 0) & structured) | (next_tick % 50 == 0))
         # Existing visible planes supply ownership/structures/terrain. Mask army
         # before arithmetic; hidden changes cannot enter growth, max or log.
-        available = torch.where(visible, batch.state["army"], 0).float() + grows.float()
+        available = torch.where(visible, batch.state["army"], 0).float()
         movable = (available - 1).clamp_min(0)
         incoming = _neighbor_max(movable[:, None] * planes[:, 5:7], batch.width, batch.height)
         friendly, risk = incoming[:, 0], incoming[:, 1]

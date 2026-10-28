@@ -281,7 +281,7 @@ def prepare_historical_benchmark(task, runner, config, output, distributed, *, f
 
 def resolve_config(args, context):
     overrides = json.loads(args.config.read_text())
-    config = merge_config({"task": asdict(TaskConfig(opponent="current_self_play", productive_actions=True,
+    config = merge_config({"task": asdict(TaskConfig(opponent="current_self_play",
                                                           combat_features=True, king_threat_distance=True,
                                                           persistent_knowledge=True)),
                            "runner": runner_config(), "torch_threads": 1}, overrides)

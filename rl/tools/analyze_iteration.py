@@ -41,6 +41,18 @@ def read_run(directory):
                             "checkpoint_sha256": metadata["checkpoint_sha256"],
                             "bundle": metadata.get("bundle"),
                             "steps_per_environment": metadata.get("steps_per_environment")})
+    confirmation = saved.get('confirmation')
+    if confirmation and confirmation['status'] == 'completed':
+        path = (index.parent / Path(confirmation['report']).relative_to(recorded)).resolve()
+        if sha256(path.read_bytes()).hexdigest() != confirmation['report_sha256']:
+            raise ValueError('joint confirmation report changed after training accepted it')
+        report = read_json(path)
+        periodic = {entry['data']['policy_id']: entry for entry in evaluations if entry['stage'] == 'periodic'}
+        bundles = [periodic[policy]['bundle'] for policy in confirmation['policies']]
+        for row in report['candidates']:
+            metadata = periodic[row['policy_id']]
+            evaluations.append({**metadata, 'report': str(path), 'stage': 'confirmation',
+                                'data': {**report, **row, 'candidate_bundles': bundles}})
     evaluations.sort(key=lambda entry: (entry["completed_ppo_updates"] or 0, entry["stage"]))
     events = EventAccumulator(str(directory), size_guidance={"scalars": 0})
     events.Reload()
@@ -128,6 +140,7 @@ def _match_evidence(game):
 def demos(checkpoint, report, output, *, render=False):
     """Use Arena for re-evaluation and its verified replay for presentation."""
     from generals_arena.competitions.evaluation import evaluate
+    from generals_arena.matches.results import seat_outcome
     from generals_arena.policies.artifacts import validate_bundle
     from generals_rl.export import export_policy
     from recordings import replay_arena_game
@@ -137,15 +150,24 @@ def demos(checkpoint, report, output, *, render=False):
         raise ValueError("demo checkpoint does not identify the evaluated policy")
     games = report["results"]
     if not all(game.get("replay") and Path(game["replay"]).is_file() for game in games):
-        recorded = evaluate(bundle, report["profile"], output / "recorded_evaluation.json",
+        joint = 'candidate_bundles' in report
+        recorded = evaluate(report['candidate_bundles'] if joint else bundle,
+                            report["profile"], output / "recorded_evaluation.json",
                             device=report["device"], backend=report["backend"],
                             batch_size=report["batch_size"], cpu_threads=report["cpu_threads"],
                             record_replays=True)
-        if (recorded["policy_id"] != report["policy_id"] or recorded["profile_id"] != report["profile_id"]
+        if ((not joint and recorded["policy_id"] != report["policy_id"]) or recorded["profile_id"] != report["profile_id"]
                 or [_match_evidence(game) for game in recorded["results"]]
                 != [_match_evidence(game) for game in games]):
             raise RuntimeError("Arena re-evaluation did not reproduce the evaluated games; retain the new report separately")
         games = recorded["results"]
+    if 'candidate_bundles' in report:
+        candidate = next(row['entrant_id'] for row in report['candidates'] if row['policy_id'] == report['policy_id'])
+        names = {row['entrant_id']: row['name'] for row in report['ranking']}
+        games = [{**game, 'candidate_seat': game['entrant_ids'].index(candidate),
+                  'opponent': names[next(key for key in game['entrant_ids'] if key != candidate)],
+                  'outcome': seat_outcome(game, game['entrant_ids'].index(candidate))}
+                 for game in games if candidate in game['entrant_ids']]
     chosen = []
     for opponent in sorted({game["opponent"] for game in games}):
         for outcome in ("loss", "win"):

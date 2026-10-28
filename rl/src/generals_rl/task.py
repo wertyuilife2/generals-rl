@@ -1,9 +1,10 @@
 """Algorithm-neutral MDP composition over the existing CPU/CUDA game backend."""
 from dataclasses import asdict, dataclass, field
 
+import numpy as np
 import torch
 
-from generals import MapConfig, make_env
+from generals import MapConfig, VecEnv
 
 from .mdp import ActionMetrics, GameBatch, RewardConfig, ShapedReward, make_observation_encoder
 from .policy.actions import make_action_space
@@ -14,31 +15,35 @@ from .opponents import make_opponent
 
 @dataclass(frozen=True)
 class TaskConfig:
-    width: int = 9
-    height: int = 9
+    width: int = 23
+    height: int = 23
     players: int = 2
     num_envs: int = 64
     backend: str = "cpu"
     device: str = "cpu"
-    max_episode_steps: int = 512
+    max_episode_steps: int = 2000
     history_length: int = 4
     seed: int = 42
     threads: int = 1
     learner_seat: int = 0
     rotate_seats: bool = True
     opponent: str = "random"
-    mountain_density: float = 0.1
-    city_density: float = 0.05
-    productive_actions: bool = False
+    mountain_density: float = 0.5
+    city_density: float = 0.5
     combat_features: bool = False
     king_threat_distance: bool = False
     critic_potential: bool = False
     persistent_knowledge: bool = False
-    map_pool_size: int = 0
+    map_pool_size: int = 256
+    random_maps: bool = True
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
         MapConfig(self.width, self.height, self.players, self.mountain_density, self.city_density)
+        if self.players != 2:
+            raise ValueError("RL training currently supports 1v1 only")
+        if self.random_maps and (self.width < 23 or self.height < 23):
+            raise ValueError("official random maps require a canvas of at least 23x23")
         if self.num_envs < 1 or self.max_episode_steps < 1 or self.history_length < 1:
             raise ValueError("num_envs, episode steps, and history must be positive")
         if self.backend not in ("cpu", "gpu"):
@@ -49,8 +54,6 @@ class TaskConfig:
             raise ValueError("learner seat is out of range")
         if self.opponent == "current_self_play" and self.players != 2:
             raise ValueError("current self-play requires two players")
-        if not isinstance(self.productive_actions, bool):
-            raise TypeError("productive_actions must be boolean")
         if not isinstance(self.combat_features, bool):
             raise TypeError("combat_features must be boolean")
         if self.critic_potential is not False:
@@ -80,7 +83,7 @@ class TaskStep:
 class GeneralsTask:
     """One learner per lane, replaceable opponent and MDP components.
 
-    All decisions use the pre-growth joint tick boundary. Reset is explicitly
+    All decisions precede ordered combat and subsequent growth. Reset is explicitly
     owned here so terminal rewards and next observations precede reset.
     """
 
@@ -91,11 +94,23 @@ class GeneralsTask:
         self.num_envs = config.num_envs
         sim_device = "cpu" if config.backend == "cpu" else config.device
         options = {"threads": config.threads} if config.backend == "cpu" else {"kernel_backend": "cuda"}
-        self.backend = backend if backend is not None else make_env(
-            MapConfig(config.width, config.height, config.players,
-                      config.mountain_density, config.city_density),
-            batch_size=config.num_envs, device=sim_device, backend=config.backend,
-            seed=config.seed, auto_reset=False, episode_ticks=config.max_episode_steps, **options)
+        from .map_sampling import pad_state
+        from generals.core.mapgen import generate_map
+        map_config = MapConfig(None if config.random_maps else config.width,
+                               None if config.random_maps else config.height, config.players,
+                               config.mountain_density, config.city_density)
+        if backend is None:
+            count = 1 if config.map_pool_size else config.num_envs
+            seeds = np.random.SeedSequence(config.seed).generate_state(count, dtype=np.uint64)
+            initial, valid = zip(*(pad_state(generate_map(map_config, int(seed)), config.width, config.height)
+                                   for seed in seeds))
+            self._valid = torch.as_tensor(np.stack(valid), device=self.device).expand(config.num_envs, -1)
+            self.backend = VecEnv.from_states(
+                list(initial) * (config.num_envs if config.map_pool_size else 1), device=sim_device, backend=config.backend,
+                seed=config.seed, auto_reset=False, episode_ticks=config.max_episode_steps, **options)
+        else:
+            self.backend = backend
+            self._valid = torch.ones((config.num_envs, config.width * config.height), dtype=torch.bool, device=self.device)
         if (self.backend.batch_size, self.backend.players, self.backend.width, self.backend.height) != (
                 config.num_envs, config.players, config.width, config.height):
             raise ValueError("injected backend dimensions do not match TaskConfig")
@@ -104,10 +119,7 @@ class GeneralsTask:
         self.map_sampler = None
         if config.map_pool_size:
             from .map_sampling import MapSampler
-            self.map_sampler = MapSampler(
-                self.backend, MapConfig(config.width, config.height, config.players,
-                                        config.mountain_density, config.city_density),
-                config.map_pool_size, seed=config.seed)
+            self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed)
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
@@ -141,7 +153,8 @@ class GeneralsTask:
         self.observations = self._observations()
 
     def batch(self):
-        return GameBatch.from_backend(self.backend, self.device)
+        valid = self.map_sampler.valid if self.map_sampler is not None else self._valid
+        return GameBatch.from_backend(self.backend, self.device, valid)
 
     def _observations(self):
         batch = self.batch()
@@ -236,7 +249,7 @@ class GeneralsTask:
         if self.knowledge is not None:
             planes = terminal_obs["knowledge"].reshape(self.num_envs, len(self.knowledge.channels), -1)
             metrics["Knowledge/explored_fraction"] = planes[:, 0].mean(1)
-            enemy_index = self.knowledge.channels.index("enemy_general_landmark")
+            enemy_index = self.knowledge.channels.index("last_seen_enemy_general")
             metrics["Knowledge/known_enemy_general"] = planes[:, enemy_index].any(1).float()
         metrics.update({"Episode/return": self.episode_return[done].clone(),
                         "Episode/length": self.episode_length_buf[done].float().clone(),

@@ -26,7 +26,7 @@ from rl_test_utils import GROUPS, spatial_observations as observations
 
 
 def construct(obs, **options):
-    return LightSpatialPPOPolicy(obs, GROUPS, 649, own_king_geometry=True, **options)
+    return LightSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9, own_king_geometry=True, **options)
 
 
 class FixedLogits(nn.Module):
@@ -126,7 +126,7 @@ class WaitMoveFactorizationTests(unittest.TestCase):
     def test_actual_two_update_light_PPO_pool_signature_and_fresh_CPU_eval(self):
         cfg = small_training_config(task_overrides={"width": 9, "height": 9, "players": 2,
                 "history_length": 4, "combat_features": True, "king_threat_distance": True,
-                "productive_actions": True, "critic_potential": False, "map_pool_size": 0})
+                "critic_potential": False, "map_pool_size": 0})
         cfg["runner"]["policy"] = light_policy_config()
         cfg["runner"]["policy"]["class_name"] = "generals_rl.information_ppo.InformationSpatialPPOPolicy"
         cfg["runner"]["policy"].update(own_king_geometry=True, wait_move_factorization=True)
