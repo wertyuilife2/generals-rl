@@ -22,8 +22,8 @@ _FAMILIES = {
     'OptimizedInformationSpatialPPOPolicy': 'optimized',
     'ScaledInformationSpatialPPOPolicy': 'scaled',
 }
-_FEATURES = dict(width=9, height=9, players=2, max_episode_steps=512, history_length=4,
-                 productive_actions=False, combat_features=False,
+_FEATURES = dict(width=23, height=23, players=2, max_episode_steps=2000, history_length=4, random_maps=True,
+                 combat_features=False,
                  king_threat_distance=False, persistent_knowledge=False)
 
 
@@ -157,7 +157,8 @@ def export_policy(checkpoint, output, *, run_config=None, source=None,
         snapshot_policy_code(source, staged/'policy')
         manifest = {'schema_version': 1, 'name': name, 'rules': RULES_PROTOCOL,
                     'entrypoint': 'runtime:create_controller',
-                    'capabilities': {'maps': {'shapes': [[spec['features']['width'], spec['features']['height']]]},
+                    'capabilities': {'maps': ({'width': [18, 23], 'height': [18, 23]} if spec['features']['random_maps'] else
+                                             {'shapes': [[spec['features']['width'], spec['features']['height']]]}),
                                      'player_counts': [spec['features']['players']]},
                     'artifacts': {
                         'weights': {'path': 'actor.pt', 'sha256': file_digest(staged/'actor.pt')},

@@ -5,6 +5,7 @@ lifetimes and emits the same completed result/replay pair for either executor.
 """
 import json
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 from generals import MapConfig
@@ -31,7 +32,15 @@ def _verify_implementations(entries):
 
 def build_controllers(entries, plan):
     """Create independent seat controllers against the planned map contract."""
-    rules = SimpleNamespace(map=MapConfig(**plan["map"]), visibility="local")
+    config = MapConfig(**plan["map"])
+    if config.width is None or config.height is None:
+        from generals.core.mapgen import generate_map
+        geometry = plan.get('geometry')
+        if geometry is None:
+            layout = generate_map(config, plan['map_seed']).layout
+            geometry = (layout.width, layout.height)
+        config = replace(config, width=geometry[0], height=geometry[1])
+    rules = SimpleNamespace(map=config, visibility="local")
     controllers = []
     try:
         _verify_implementations(entries[key] for key in set(plan["entrant_ids"]))
@@ -52,7 +61,7 @@ def build_controllers(entries, plan):
 
 def _batch_key(plan):
     """Rotation groups share instances even when their seat positions change."""
-    return (json.dumps(plan["map"], sort_keys=True),
+    return (json.dumps(plan["map"], sort_keys=True), tuple(plan.get('geometry', ())),
             tuple(sorted(zip(plan["instance_ids"], plan["entrant_ids"]))))
 
 
@@ -99,6 +108,8 @@ class MatchRunner:
         for plan in plans:
             integer("map seed", plan["map_seed"])
             config = MapConfig(**plan["map"])
+            if 'geometry' in plan:
+                config = replace(config, width=plan['geometry'][0], height=plan['geometry'][1])
             if (len(plan["entrant_ids"]) != config.players or len(plan["instance_ids"]) != config.players
                     or len(set(plan["instance_ids"])) != config.players
                     or len(plan["controller_seeds"]) != config.players):
@@ -175,12 +186,31 @@ class MatchRunner:
         retain their existing whole-match watchdog boundary.
         """
         plans = list(plans)
+        from generals.core.mapgen import generate_map
+        geometries = {}
+        plans = [dict(plan) for plan in plans]
+        for plan in plans:
+            config = MapConfig(**plan['map'])
+            if config.width is None or config.height is None:
+                key = (config, plan['map_seed'])
+                if key not in geometries:
+                    state = generate_map(config, plan['map_seed'])
+                    geometries[key] = [state.layout.width, state.layout.height]
+                plan['geometry'] = geometries[key]
         used = self._validate(plans)
         results, timing = [], {}
+        ready = {}
         offset = 0
         while offset < len(plans):
             if stop is not None and stop.is_set():
                 break
+            if offset in ready:
+                value, blob = ready.pop(offset)
+                if on_result is not None:
+                    on_result(value, blob)
+                results.append(value)
+                offset += 1
+                continue
             isolated = self.execution == "isolated" or any(
                 self.entries[key]["kind"] == "cpp" for key in plans[offset]["entrant_ids"])
             if isolated:
@@ -196,17 +226,17 @@ class MatchRunner:
                 self.execution_modes.add("scalar_reference" if self.scalar else "policy_batch")
                 from generals_arena.matches.batch import execute_batch
                 key = _batch_key(plans[offset])
-                end = offset + 1
                 limit = self.batch_size or len(plans)
-                while end < len(plans) and end - offset < limit and _batch_key(plans[end]) == key:
-                    end += 1
-                records, elapsed = execute_batch(self.entries, plans[offset:end],
+                indices = [index for index in range(offset, len(plans))
+                           if index not in ready and _batch_key(plans[index]) == key][:limit]
+                records, elapsed = execute_batch(self.entries, [plans[index] for index in indices],
                     max_ticks=self.max_ticks, device=self.device, backend=self.backend,
                     cpu_threads=self.cpu_threads, record_replays=self.record_replays,
                     scalar=self.scalar, runtime_cache=self.runtime_cache)
                 for name, seconds in elapsed.items():
                     timing[name] = timing.get(name, 0.) + seconds
-                offset = end
+                ready.update(zip(indices, records, strict=True))
+                continue
             for value, blob in records:
                 if on_result is not None:
                     on_result(value, blob)

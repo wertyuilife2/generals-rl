@@ -16,7 +16,7 @@ from generals_rl.task import GeneralsTask, TaskConfig
 
 
 class MapSamplingTests(unittest.TestCase):
-    config = MapConfig(5, 5, 2, .1, .05)
+    config = MapConfig(18, 18, 2, .1, .05)
 
     def env(self):
         env = make_env(self.config, batch_size=4, threads=1, auto_reset=False, episode_ticks=2)
@@ -25,7 +25,7 @@ class MapSamplingTests(unittest.TestCase):
 
     def test_option_disabled_allocates_no_pool_and_unsupported_caches_fail_before_generation(self):
         with patch("generals_rl.map_sampling._build_bank") as build:
-            with GeneralsTask(TaskConfig(num_envs=4, opponent="wait")) as task:
+            with GeneralsTask(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=4, opponent="wait")) as task:
                 self.assertIsNone(task.map_sampler)
             build.assert_not_called()
             env = self.env()
@@ -40,7 +40,7 @@ class MapSamplingTests(unittest.TestCase):
             build.assert_not_called()
         for invalid in (-1, True, 1.5):
             with self.subTest(size=invalid), self.assertRaises(ValueError):
-                TaskConfig(map_pool_size=invalid)
+                TaskConfig(width=9, height=9, random_maps=False, map_pool_size=invalid)
 
     def test_cpu_ended_lanes_preserve_native_bindings_and_next_tick_matches_core(self):
         env = self.env()
@@ -87,7 +87,7 @@ class MapSamplingTests(unittest.TestCase):
     def test_tensor_reset_preserves_other_lanes_and_uint32_rng_bits(self):
         cpu = self.env().unwrapped
         native = GPUEnv.__new__(GPUEnv)  # No CUDA construction/launch.
-        native.width, native.height, native.players, native.batch_size = 5, 5, 2, 4
+        native.width, native.height, native.players, native.batch_size = 18, 18, 2, 4
         native.device, native.auto_reset, native._closed, native._step_kernel = torch.device("cpu"), False, False, None
         native.initial = {name: torch.from_numpy(value.copy()) for name, value in cpu.initial.items()}
         native.state = {name: value.clone() for name, value in native.initial.items()}
@@ -106,7 +106,7 @@ class MapSamplingTests(unittest.TestCase):
         np.testing.assert_array_equal(native.rng_state.numpy()[mask.numpy()], [0xffffffff, 0xffffffff])
 
     def test_task_initial_history_and_partial_terminal_reset_use_sampled_maps(self):
-        settings = TaskConfig(width=5, height=5, num_envs=4, max_episode_steps=2,
+        settings = TaskConfig(random_maps=False, width=18, height=18, num_envs=4, max_episode_steps=2,
                               history_length=3, opponent="wait", map_pool_size=64, seed=19)
         with GeneralsTask(settings) as task:
             initial = task.get_observations()["single_obs"]

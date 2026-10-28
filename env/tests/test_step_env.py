@@ -17,7 +17,7 @@ from test_gpu_env import make_state
 class NativeStepTests(unittest.TestCase):
     def test_cpu_matches_independent_python_rules(self):
         for players in (2, 4, 8):
-            states = [generate_map(MapConfig(9, 7, players), seed) for seed in (21, 47, 56)]
+            states = [generate_map(MapConfig(25, 25, players), seed) for seed in (21, 47, 56)]
             for state in states:
                 state.army.ravel()[state.general_pos] = 57
             env = CPUEnv.from_states(states, threads=2)
@@ -61,7 +61,8 @@ class NativeStepTests(unittest.TestCase):
                 self.assertEqual(env.state['terminated'][lane], state.terminated)
             if tick == 0:
                 self.assertEqual(env.last_moves[0, 0, 4], 0)
-                self.assertTrue(env.last_moves[0, 0, 1])
+                self.assertFalse(env.last_moves[0, 0, 1])
+                self.assertEqual(env.last_moves[0, 0, 8], 6)
 
     def test_external_edits_invalidate_persistent_cache_and_reset(self):
         env=CPUEnv.from_states([make_state()],auto_reset=True,episode_ticks=3)
@@ -90,7 +91,7 @@ class NativeStepTests(unittest.TestCase):
         self.assertEqual(calls,[('step',4),('complete',),('step',9),('complete',)])
 
     def test_step_benchmark_exact_trajectory_across_repeats(self):
-        case = BenchmarkCase(MapConfig(9, 7, 4), batch_size=4, threads=2, episode_ticks=17)
+        case = BenchmarkCase(MapConfig(25, 25, 4), batch_size=4, threads=2, episode_ticks=17)
         result = measure_step_case(case, backend='cpu', steps=61, warmup=2, repeats=2)
         self.assertEqual(result['samples'][0]['counters'], result['samples'][1]['counters'])
         self.assertEqual(len(result['samples'][0]['step_latency_ns']), 61)
@@ -128,7 +129,7 @@ class NativeStepTests(unittest.TestCase):
         env.invalidate_cache()
         for _ in range(2):
             env.step(actions)
-            self.assertEqual(env.errors.tolist(), [3, 2, 1, 4, 0])
+            self.assertEqual(env.errors.tolist(), [3, 3, 1, 4, 0])
         env.reset()
         exported = env.to_states()
         exported[0].army.flat[0] = 123

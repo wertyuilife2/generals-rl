@@ -42,7 +42,7 @@ class ProbePolicy(torch.nn.Module):
 
 class CurrentSelfPlayTests(unittest.TestCase):
     def task(self, states, **settings):
-        options = dict(width=states[0].layout.width, height=states[0].layout.height,
+        options = dict(random_maps=False, map_pool_size=0, width=states[0].layout.width, height=states[0].layout.height,
                        players=states[0].player_count, num_envs=len(states),
                        opponent="current_self_play", history_length=3,
                        max_episode_steps=16, rotate_seats=False)
@@ -65,9 +65,11 @@ class CurrentSelfPlayTests(unittest.TestCase):
                                            task.observation_encoder)
 
     def test_binding_contract_and_live_weights(self):
-        with self.assertRaisesRegex(ValueError, "two players"):
-            TaskConfig(players=3, opponent="current_self_play")
-        task = self.task([capture_state()])
+        with self.assertRaisesRegex(ValueError, "1v1"):
+            TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, players=3, opponent="current_self_play")
+        state = capture_state()
+        state.army.flat[4] = 3
+        task = self.task([state])
         with self.assertRaisesRegex(RuntimeError, "attach"):
             task.step(torch.zeros(1, dtype=torch.long))
         self.assertEqual(task.batch().state["tick"].item(), 0)

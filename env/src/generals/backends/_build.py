@@ -3,6 +3,7 @@ import ctypes
 from hashlib import sha256
 from importlib.util import find_spec
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -11,6 +12,18 @@ import sys
 import tempfile
 
 _openmp_runtime = None
+
+
+def source_bytes(source, seen=None):
+    """Include local headers in build identities (also handles profiling includes)."""
+    source = Path(source).resolve()
+    seen = set() if seen is None else seen
+    if source in seen:
+        return b""
+    seen.add(source)
+    data = source.read_bytes()
+    return data + b"".join(source_bytes(source.parent / name.decode(), seen)
+                           for name in re.findall(rb'^\s*#include\s+"([^"]+)"', data, re.M))
 
 
 def openmp_flags():
@@ -51,7 +64,7 @@ def build_shared(source, *, name, flags=None):
             raise RuntimeError('native execution supports Linux and macOS')
         flags = ['-dynamiclib'] if sys.platform == 'darwin' else ['-fPIC', '-shared']
     flags = ['-std=c++17', '-O3', '-ffp-contract=off', *flags]
-    key = sha256(source.read_bytes()+repr((compiler, version, flags)).encode()).hexdigest()
+    key = sha256(source_bytes(source)+repr((compiler, version, flags)).encode()).hexdigest()
     root = Path(tempfile.gettempdir())/f'generals-{name}-{os.getuid()}'
     root.mkdir(mode=0o700, exist_ok=True)
     info = root.lstat()

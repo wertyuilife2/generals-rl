@@ -8,11 +8,11 @@ class FeatureConfig:
     players: int
     max_episode_steps: int
     history_length: int
-    productive_actions: bool
     combat_features: bool
     king_threat_distance: bool
     persistent_knowledge: bool
-    knowledge_age_scale: int = 1024
+    knowledge_age_scale: int = 2000
+    random_maps: bool = True
 
     def __post_init__(self):
         for name in ("width", "height", "players", "max_episode_steps", "history_length", "knowledge_age_scale"):
@@ -21,7 +21,7 @@ class FeatureConfig:
                 raise ValueError(f"features.{name} must be a positive integer")
         if not 2 <= self.players <= 8:
             raise ValueError("features.players must be between 2 and 8")
-        for name in ("productive_actions", "combat_features", "king_threat_distance", "persistent_knowledge"):
+        for name in ("random_maps", "combat_features", "king_threat_distance", "persistent_knowledge"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"features.{name} must be boolean")
         if (self.combat_features or self.king_threat_distance) and self.players != 2:

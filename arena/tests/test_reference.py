@@ -1,4 +1,5 @@
 """WAIT is rated normally and only defines the displayed 1v1 origin."""
+from policy_test_utils import synthetic_placements
 import pytest
 from generals_arena.competitions.config import LeagueConfig
 from generals_arena.competitions.jobs import eligible_schedule
@@ -53,7 +54,7 @@ def test_wait_display_is_zero_while_raw_rating_and_display_offset_move(tmp_path)
     def complete(key, ids):
         plan = {'game_id':key, 'entrant_ids':ids, 'rating_policy':POLICY}
         store.insert_plans([plan])
-        store.complete_result({**plan, 'ticks':10, 'elimination_ticks':[None,10],
+        store.complete_result({'placements': synthetic_placements([None,10]), **plan, 'ticks':10, 'elimination_ticks':[None,10],
                                'winner_seat':0, 'final_alive':[True, False], 'kills':[1,0]}, b'')
     complete('initial', [idle, random])
     before = {r['entrant_id']:r['raw_elo'] for r in store.leaderboard()['ranking']}

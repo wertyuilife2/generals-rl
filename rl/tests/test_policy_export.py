@@ -50,7 +50,7 @@ def test_source_drift_and_changed_resume_features_are_rejected(tmp_path):
     checkpoint, config = make_checkpoint(tmp_path, family='scaled')
     deployment = prepare_policy_source(config, tmp_path)
     modified = deepcopy(config)
-    modified['task']['productive_actions'] = not config['task']['productive_actions']
+    modified['task']['combat_features'] = not config['task']['combat_features']
     with pytest.raises(ValueError, match='specification changed'):
         prepare_policy_source(modified, tmp_path/'resume', policy_spec=deployment['policy_spec'])
     saved = torch.load(checkpoint, weights_only=True)

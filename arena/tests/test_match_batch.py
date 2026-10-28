@@ -28,7 +28,7 @@ def entrants_and_plans(tmp_path, lineup, *, maps=2):
             entry = prepare_entrant({'name':name,'kind':'baseline','policy':name})
         entries[entry['entrant_id']] = entry
         ids.append(entry['entrant_id'])
-    config = asdict(MapConfig(9,9,players,.1,.05))
+    config = asdict(MapConfig(25, 25,players,.5,.5))
     plans = []
     for index in range(maps):
         for rotation in range(players):
@@ -164,7 +164,7 @@ def test_multiplayer_eliminated_seat_receives_no_active_feedback(monkeypatch,tmp
     records,_ = execute_batch(entries,[plans[0]],max_ticks=3)
     assert records[0][0]['final_alive'] == [True,False,True]
     dead = [row for row in feedback if row['player_ids'][0] == 1]
-    assert len(dead) == 3 and all(not row['active'][0] for row in dead)
+    assert len(dead) == 3 and dead[0]['active'][0] and all(not row['active'][0] for row in dead[1:])
     alive = [row for row in feedback if row['player_ids'][0] != 1]
     assert all(row['active'][0] for row in alive)
 
@@ -219,9 +219,9 @@ def test_cache_isolates_complete_map_context_and_reuses_matching_chunks(monkeypa
 
     monkeypatch.setattr(batch,'load_controller',load)
     entry,cache = {'entrant_id':'multi-map-policy'},{}
-    original = MatchConfig(MapConfig(9,9,2,.1,.05))
-    contexts = [original,MatchConfig(MapConfig(11,7,2,.1,.05)),
-                MatchConfig(MapConfig(9,9,2,.15,.05))]
+    original = MatchConfig(MapConfig(25, 25,2,.1,.05))
+    contexts = [original,MatchConfig(MapConfig(23,25,2,.1,.05)),
+                MatchConfig(MapConfig(25, 25,2,.15,.05))]
     groups = [batch._PolicyGroup(entry,rules,[0],[11],cache=cache,slot=0) for rules in contexts]
     repeated = batch._PolicyGroup(entry,original,[1],[23],cache=cache,slot=0)
     assert len(created) == len(cache) == 3

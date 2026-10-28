@@ -10,7 +10,7 @@ from generals.benchmarks.profiling import parse_cuda_trace, union_us, profile_ca
 
 class StepProfileTests(unittest.TestCase):
     def test_cpu_samples_real_step_and_preserves_every_output(self):
-        result = profile_case(BenchmarkCase(MapConfig(9,7,4), batch_size=13, threads=3, episode_ticks=17),
+        result = profile_case(BenchmarkCase(MapConfig(25,25,4), batch_size=13, threads=3, episode_ticks=17),
                               backend='cpu', steps=61, warmup=2, repeats=1, cpu_sample_stride=3)
         profile = result['profile']
         self.assertTrue(profile['verification']['state_statistics_counters_match'])

@@ -37,8 +37,8 @@ class KingThreatDistanceTests(unittest.TestCase):
 
     def test_default_distance_growth_privileged_and_guards(self):
         for combat in (False,True):
-            default=make_observation_encoder(TaskConfig(combat_features=combat))
-            enabled=make_observation_encoder(TaskConfig(combat_features=combat,king_threat_distance=True))
+            default=make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=combat))
+            enabled=make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=combat,king_threat_distance=True))
             self.assertIsInstance(enabled,KingThreatDistanceEncoder)
             self.assertIs(type(enabled.base),type(default))
             states=[distance_state(),distance_state(army_count=1),distance_state(1,1,True),distance_state(49,1)]
@@ -47,8 +47,8 @@ class KingThreatDistanceTests(unittest.TestCase):
             original=default.encode(batch,ids)
             actual=enabled.encode(batch,ids)
             torch.testing.assert_close(actual[:,:-1],original[:,:-1],rtol=0,atol=0)
-            torch.testing.assert_close(actual[:,-1],torch.tensor([3/16,1,3/16,3/16]),rtol=0,atol=0)
-            self.assertEqual(tuple(actual.shape),(4,985))
+            torch.testing.assert_close(actual[:,-1],torch.tensor([3/16,1,1,1]),rtol=0,atol=0)
+            self.assertEqual(tuple(actual.shape),(4,1147))
             self.assertTrue(enabled.semantics.endswith('_king_threat_distance_v1'))
             # Seat1 uses its own King80; hostile own0 cell29 is visible from its cell30.
             ids.fill_(1)
@@ -63,12 +63,12 @@ class KingThreatDistanceTests(unittest.TestCase):
             self.assertEqual(enabled.encode(batch,ids,privileged=True)[2,-1].item(),1)
             batch.state['alive'][3,0]=False
             self.assertEqual(enabled.encode(batch,ids,privileged=True)[3,-1].item(),1)
-        self.assertIs(type(make_observation_encoder(TaskConfig())),LocalObservationEncoder)
+        self.assertIs(type(make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0))),LocalObservationEncoder)
         for updates in ({'players':3},):
             with self.assertRaises(ValueError):
                 TaskConfig(king_threat_distance=True,**updates)
         with self.assertRaises(TypeError):
-            TaskConfig(king_threat_distance=1)
+            TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, king_threat_distance=1)
 
     def test_hidden_army_and_enemy_general_position_cannot_affect_local(self):
         first=distance_state()
@@ -80,7 +80,7 @@ class KingThreatDistanceTests(unittest.TestCase):
         second.validate()
         batch=self.batch([first,second])
         ids=torch.zeros(2,dtype=torch.long)
-        encoder=make_observation_encoder(TaskConfig(combat_features=True,king_threat_distance=True))
+        encoder=make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=True,king_threat_distance=True))
         local=encoder.encode(batch,ids)
         torch.testing.assert_close(local[0],local[1],rtol=0,atol=0)
         privileged=encoder.encode(batch,ids,privileged=True)

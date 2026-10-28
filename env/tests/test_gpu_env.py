@@ -95,15 +95,15 @@ class GPUEnvParityTests(unittest.TestCase):
         self.assert_matches(env, states)
 
     def test_device_protocol_and_roundtrip_are_exact(self):
-        states = [generate_map(MapConfig(width=9, height=5, players=3), seed)
+        states = [generate_map(MapConfig(width=25, height=25, players=3), seed)
                   for seed in (11, 37, 54)]
         env = self.GPUEnv.from_states(states)
         self.assert_matches(env, states)
         for name, dtype, shape in (
-            ("terrain", torch.uint8, (3, 45)),
-            ("structure", torch.uint8, (3, 45)),
-            ("owner", torch.int16, (3, 45)),
-            ("army", torch.int64, (3, 45)),
+            ("terrain", torch.uint8, (3, 625)),
+            ("structure", torch.uint8, (3, 625)),
+            ("owner", torch.int16, (3, 625)),
+            ("army", torch.int64, (3, 625)),
             ("alive", torch.bool, (3, 3)),
             ("general_pos", torch.int32, (3, 3)),
             ("tick", torch.int64, (3,)),
@@ -135,7 +135,7 @@ class GPUEnvParityTests(unittest.TestCase):
         env = self.GPUEnv.from_states(states)
         self.step_both(env, states, [[Action.wait(), Action.wait()] for _ in states])
         for state in states:
-            self.assertEqual(state.army.flat[1], 7 + (state.tick % 2 == 0))
+            self.assertEqual(state.army.flat[1], 7 + (state.tick % 2 == 0) + (state.tick % 50 == 0))
             self.assertEqual(state.army.flat[2], int(state.tick % 50 == 0))
             self.assertEqual(state.army.flat[3], 17)
 
@@ -202,7 +202,7 @@ class GPUEnvParityTests(unittest.TestCase):
         ])
         self.assertTrue(winning.terminated)
         self.assertEqual(winning.winner_id, 0)
-        np.testing.assert_array_equal(winning.army.ravel()[2:], [1, 1, 2, 4])
+        np.testing.assert_array_equal(winning.army.ravel()[2:], [0, 1, 3, 4])
         frozen = winning.copy()
         for _ in range(3):
             self.step_both(env, states, [[Action.wait(), Action.wait()] for _ in states])
@@ -222,16 +222,16 @@ class GPUEnvParityTests(unittest.TestCase):
             Action.move(0, Direction.RIGHT), Action.move(1, Direction.RIGHT),
             Action.move(4, Direction.UP), Action.move(5, Direction.LEFT),
         ]])
-        np.testing.assert_array_equal(state.alive, [False, False, True, True])
-        self.assertEqual(state.owner.flat[2], 2)
-        self.assertEqual(state.army.flat[2], 1)
+        np.testing.assert_array_equal(state.alive, [False, True, True, True])
+        self.assertEqual(state.owner.flat[2], 1)
+        self.assertEqual(state.army.flat[2], 5)
         self.step_both(env, states, [[Action.wait()] * 4])
 
     def test_random_external_actions_match_for_two_to_eight_players(self):
         rng = np.random.default_rng(731)
         for players in range(2, 9):
             with self.subTest(players=players):
-                states = [generate_map(MapConfig(width=9, height=5, players=players), seed)
+                states = [generate_map(MapConfig(width=25, height=25, players=players), seed)
                           for seed in (10, 11, 12)]
                 for lane, state in enumerate(states):
                     state.tick = (0, 47, 98)[lane]
@@ -263,6 +263,7 @@ class GPUEnvParityTests(unittest.TestCase):
         terminal.structure.flat[0] = Structure.CITY
         terminal.owner[terminal.owner == 0] = 1
         terminal.alive[0] = False
+        terminal.general_pos[0] = -1
         terminal.terminated, terminal.winner_id = True, 1
         states = [active, terminal]
         env = self.GPUEnv.from_states(states)
@@ -285,7 +286,7 @@ class GPUEnvParityTests(unittest.TestCase):
                                                           getattr(expected.stats, name))
 
     def test_reset_selects_lanes_and_restores_cached_initial_state(self):
-        states = [generate_map(MapConfig(width=7, height=5, players=3), seed)
+        states = [generate_map(MapConfig(width=25, height=25, players=3), seed)
                   for seed in (3, 17, 24)]
         initial = [state.copy() for state in states]
         env = self.GPUEnv.from_states(states)
@@ -310,6 +311,7 @@ class GPUEnvParityTests(unittest.TestCase):
             terminal.structure.flat[0] = Structure.CITY
             terminal.owner[terminal.owner == 0] = 1
             terminal.alive[0] = False
+            terminal.general_pos[0] = -1
             terminal.terminated, terminal.winner_id = True, 1
             states = [active, terminal]
             env = self.GPUEnv.from_states(states)
@@ -324,8 +326,8 @@ class GPUEnvParityTests(unittest.TestCase):
                         np.testing.assert_array_equal(moves[lane].cpu().numpy(), expected_moves)
                         self.assertEqual(wait[lane].item(), expected_wait)
             moves, _ = env.legal_action_mask(0)
-            self.assertTrue(moves[0, 0].any().item(), "a general with one soldier may move zero")
-            self.assertTrue(moves[0, 1].any().item(), "owned zero-army cells may move zero")
+            self.assertFalse(moves[0, 0].any().item())
+            self.assertFalse(moves[0, 1].any().item())
 
     def test_large_armies_preserve_int64_precision(self):
         states = []

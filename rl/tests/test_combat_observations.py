@@ -66,7 +66,7 @@ class CombatObservationTests(unittest.TestCase):
         return env
 
     def task(self,*,combat,opponent="wait",episode_ticks=8):
-        cfg=TaskConfig(num_envs=2,max_episode_steps=episode_ticks,history_length=4,
+        cfg=TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=2,max_episode_steps=episode_ticks,history_length=4,
                        opponent=opponent,combat_features=combat,
                        mountain_density=0,city_density=0)
         task=GeneralsTask(cfg,backend=self.backend([combat_state(),combat_state()],episode_ticks))
@@ -74,15 +74,15 @@ class CombatObservationTests(unittest.TestCase):
         return task
 
     def test_factory_defaults_and_geometry_validation(self):
-        original=make_observation_encoder(TaskConfig())
+        original=make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0))
         self.assertIs(type(original),LocalObservationEncoder)
-        self.assertIs(type(make_observation_encoder(TaskConfig(combat_features=True))),
+        self.assertIs(type(make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=True))),
                       CombatObservationEncoder)
         for updates in ({"players":3},):
             with self.assertRaises(ValueError):
                 TaskConfig(combat_features=True,**updates)
         with self.assertRaises(TypeError):
-            TaskConfig(combat_features=1)
+            TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=1)
         batch=GameBatch.from_backend(self.backend([combat_state()]),"cpu")
         ids=torch.tensor([0])
         torch.testing.assert_close(original.encode(batch,ids),
@@ -92,11 +92,9 @@ class CombatObservationTests(unittest.TestCase):
         states=[combat_state(tick) for tick in (1,49,184)]
         batch=GameBatch.from_backend(self.backend(states),"cpu")
         encoded=CombatObservationEncoder(1024).encode(batch,torch.zeros(3,dtype=torch.long))
-        self.assertEqual(tuple(encoded.shape),(3,985))
+        self.assertEqual(tuple(encoded.shape),(3,1147))
         for lane,state in enumerate(states):
-            engine=CoreEngine(state.copy())
-            engine.begin_tick()
-            army=engine.state.army.ravel()
+            army=state.army.ravel()
             risk=max(0,int(army[28])-1)
             attack=max(0,int(army[29])-1)-int(army[28])
             own_margin=int(army[27])-risk
@@ -123,7 +121,9 @@ class CombatObservationTests(unittest.TestCase):
         ids=torch.tensor([0,0])
         encoder=CombatObservationEncoder(1024)
         local=encoder.encode(batch,ids)
-        torch.testing.assert_close(local[0],local[1],rtol=0,atol=0)
+        torch.testing.assert_close(local[0,:13*81],local[1,:13*81],rtol=0,atol=0)
+        torch.testing.assert_close(local[0,-13:],local[1,-13:],rtol=0,atol=0)
+        self.assertFalse(torch.equal(local[0,13*81:14*81],local[1,13*81:14*81]))
         privileged=encoder.encode(batch,ids,privileged=True)
         self.assertFalse(torch.equal(privileged[0],privileged[1]))
         torch.testing.assert_close(encoder.encode(batch,ids),local,rtol=0,atol=0)
@@ -136,7 +136,7 @@ class CombatObservationTests(unittest.TestCase):
             before=original.step(torch.zeros(2,dtype=torch.long))
             after=combat.step(torch.zeros(2,dtype=torch.long))
             torch.testing.assert_close(before.reward,after.reward,rtol=0,atol=0)
-            self.assertEqual(tuple(after.observations["policy"].shape),(2,3940))
+            self.assertEqual(tuple(after.observations["policy"].shape),(2,4588))
             self.assertEqual(tuple(after.observations["action_mask"].shape),(2,649))
         continuing=combat.history.frames[1].clone()
         combat.reset(torch.tensor([True,False]),rotate=True)
@@ -158,7 +158,7 @@ class CombatObservationTests(unittest.TestCase):
                 prepare_self_play(combat,runner,config,root/"rejected",resume=old_checkpoint)
             session=prepare_self_play(combat,runner,config,root/"combat")
             self.assertNotEqual(old.pool.policy_spec["encoder"],session.pool.policy_spec["encoder"])
-            self.assertNotIn("encoder_semantics",old.pool.policy_spec)
+            self.assertEqual(old.pool.policy_spec["encoder_semantics"], LocalObservationEncoder.semantics)
             self.assertEqual(session.pool.policy_spec["encoder_semantics"],CombatObservationEncoder.semantics)
             for pid,history in enumerate(combat.opponent.histories):
                 expected=combat.observation_encoder.encode(combat.batch(),torch.full_like(combat.player_ids,pid))

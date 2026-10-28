@@ -4,6 +4,7 @@ import math
 import random
 
 import pytest
+from policy_test_utils import synthetic_placements
 
 from generals_arena.competitions.rating import GO_MAX
 from generals_arena.competitions.rating import GO_MIN
@@ -13,7 +14,7 @@ from generals_arena.competitions.rating import score
 
 
 def result(ids,ticks,**extra):
-    return dict(entrant_ids=ids,elimination_ticks=ticks,rating_policy=POLICY,**extra)
+    return dict(entrant_ids=ids,elimination_ticks=ticks,placements=synthetic_placements(ticks),rating_policy=POLICY,**extra)
 
 
 def test_gor_rates_wait_normally_and_has_no_late_game_freeze():

@@ -1,21 +1,20 @@
 {
   "task": {
-    "width": 9,
-    "height": 9,
+    "width": 23,
+    "height": 23,
     "players": 2,
     "num_envs": 16384,
     "backend": "gpu",
     "device": "cuda:0",
-    "max_episode_steps": 1024,
+    "max_episode_steps": 2000,
     "history_length": 4,
     "seed": 20261013,
     "threads": 1,
     "learner_seat": 0,
     "rotate_seats": true,
     "opponent": "self_play",
-    "mountain_density": 0.1,
-    "city_density": 0.05,
-    "productive_actions": true,
+    "mountain_density": 0.5,
+    "city_density": 0.5,
     "combat_features": true,
     "king_threat_distance": true,
     "critic_potential": false,
@@ -29,7 +28,8 @@
       "tick": -0.001,
       "potential_gamma": 0.995
     },
-    "persistent_knowledge": true
+    "persistent_knowledge": true,
+    "random_maps": true
   },
   "runner": {
     "num_steps_per_env": 32,
@@ -55,9 +55,9 @@
       "spatial_channels": 16,
       "history_length": 4,
       "players": 2,
-      "map_width": 9,
-      "map_height": 9,
-      "map_planes": 12,
+      "map_width": 23,
+      "map_height": 23,
+      "map_planes": 14,
       "public_dim": 13,
       "actor_obs_normalization": false,
       "critic_obs_normalization": false,
@@ -105,7 +105,8 @@
     "cpu_threads": 1,
     "keep_snapshots": 3,
     "every_n_updates": 100,
-    "maps_per_opponent": 200
+    "maps_per_opponent": 200,
+    "profile": null
   },
   "torch_threads": 1,
   "run_id": "v32",

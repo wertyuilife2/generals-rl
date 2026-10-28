@@ -226,11 +226,11 @@ class StudentMicrobatchTests(unittest.TestCase):
         torch.manual_seed(928)
         obs = map_observations(7)
         if kind == "map":
-            models = [ScaledInformationSpatialPPOPolicy(obs, MAP_GROUPS, 649, backbone="vit", model_size="1m", knowledge_channels=11)
+            models = [ScaledInformationSpatialPPOPolicy(obs, MAP_GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m", knowledge_channels=11)
                       for _ in range(2)]
         else:
             groups = {"policy": ["policy"], "critic": ["critic"]}
-            models = [LightSpatialPPOPolicy(obs, groups, 649, spatial_channels=4, wait_move_factorization=True)
+            models = [LightSpatialPPOPolicy(obs, groups, 649, map_width=9, map_height=9, spatial_channels=4, wait_move_factorization=True)
                       for _ in range(2)]
         models[1].load_state_dict(models[0].state_dict())
         # Reference follows the original per-physical public validation path.

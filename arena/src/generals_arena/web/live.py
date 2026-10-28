@@ -4,8 +4,8 @@ import threading
 import time
 import uuid
 
-from generals.core.observation import snapshot
-from generals.core.state import Action, Structure, Terrain
+from generals.core.observation import legal_action_mask, observe
+from generals.core.state import Action
 from generals_arena.util import integer, process_lock
 from generals_arena.matches.game import RecordedGame, close_game, failure as execution_failure, mark_forfeits
 from generals_arena.matches.runner import build_controllers
@@ -135,7 +135,7 @@ class LiveArena:
         command_id = command.get("id")
         integer("command id", command_id, 1)
         op = command.get("op")
-        if op not in ("append", "clear", "undo"):
+        if op not in ("append", "clear", "undo", "surrender"):
             raise ValueError("unknown queue operation")
         with self.changed:
             value = self._owned(game_id, human)
@@ -146,7 +146,7 @@ class LiveArena:
             if command_id != value["last_command_id"] + 1:
                 raise ValueError("commands must arrive in order")
             game, seat = value["game"], value["seat"]
-            if value["finished"] or not game.state.alive[seat]:
+            if value["finished"] or not game.state.alive[seat] or game.state.leave_tick[seat] >= 0:
                 raise ValueError("player is no longer active")
             queue = value["queue"]
             if op == "append":
@@ -160,6 +160,14 @@ class LiveArena:
                 # Ownership and obstacles are checked by the engine at execution;
                 # accepting intent reveals nothing about hidden terrain.
                 queue.append({"id": command_id, "action": encoded})
+            elif op == "surrender":
+                queue.clear()
+                game.surrender(seat)
+                value['board'] = None
+                if game.done:
+                    self.store.complete(game)
+                    value['finished'] = time.monotonic()
+                    close_game(game)
             elif op == "clear":
                 queue.clear()
             elif queue:
@@ -189,7 +197,14 @@ class LiveArena:
                     try:
                         if not value["game"].state.alive[value["seat"]]:
                             value["queue"].clear()
-                        action = (Action.decode(value["queue"].popleft()["action"]) if value["queue"] else Action.wait())
+                        action = Action.wait()
+                        if value['queue']:
+                            legal, _ = legal_action_mask(observe(value['game'].state, value['seat']))
+                            while value['queue']:
+                                encoded = value['queue'].popleft()['action']
+                                if encoded == 0 or legal.ravel()[encoded - 1]:
+                                    action = Action.decode(encoded)
+                                    break
                         value["game"].advance({value["seat"]: action})
                         value["board"] = None
                         value["revision"] += 1
@@ -227,11 +242,4 @@ class LiveArena:
 
 
 def human_board(state, seat):
-    observation = snapshot(state, seat)
-    board = board_view(observation)
-    # Cities and mountains have one indistinguishable public fog marker.
-    # Their actual terrain/structure/owner/army remain masked by snapshot().
-    # Generals are deliberately not obstacles, so their positions stay hidden.
-    obstacles = (state.layout.terrain == Terrain.MOUNTAIN) | (state.structure == Structure.CITY)
-    board["fog_obstacles"] = (~observation.visible & obstacles).tolist()
-    return board
+    return board_view(state, seat)

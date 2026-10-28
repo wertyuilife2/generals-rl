@@ -28,7 +28,7 @@ def roster():
 
 
 def test_round_robin_coverage_and_instance_streams():
-    plans = list(round_robin(['a','b','c','d'], MapConfig(9,9,3,.1,.05), maps_per_group=2, seed=5))
+    plans = list(round_robin(['a','b','c','d'], MapConfig(25, 25,3,.5,.5), maps_per_group=2, seed=5))
     assert len(plans) == comb(4,3)*2*3
     assert len({p['game_id'] for p in plans}) == len(plans)
     for offset in range(0,len(plans),3):
@@ -41,7 +41,7 @@ def test_round_robin_coverage_and_instance_streams():
 
 
 def test_tournament_uses_common_execution_and_verified_replays(tmp_path):
-    rules = MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=12)
+    rules = MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=12)
     report = tournament(roster(),rules,tmp_path/'rr',maps_per_group=2,record_replays=True,batch_size=0)
     assert report['games'] == report['expected_games'] == 24
     assert report['mode'] == 'tournament'
@@ -57,7 +57,7 @@ def test_tournament_uses_common_execution_and_verified_replays(tmp_path):
 
 def test_training_evaluation_uses_same_manager_and_coverage_protocol(tmp_path):
     bundle = make_bundle(tmp_path/'policy')
-    profile = make_profile(MapConfig(9,9,2,.1,.05),max_ticks=8,maps_per_opponent=2,
+    profile = make_profile(MapConfig(25, 25,2,.1,.05),max_ticks=8,maps_per_opponent=2,
                            opponents=[roster()[0]])
     report = evaluate(bundle,profile,batch_size=0)
     validate_coverage(report,profile)
@@ -77,23 +77,23 @@ def test_training_evaluation_uses_same_manager_and_coverage_protocol(tmp_path):
 def test_common_admission_accepts_package_and_baseline_tournament(tmp_path):
     bundle = make_bundle(tmp_path/'policy',players=(3,))
     entries = roster()[:2] + [{'name':'opaque-policy','kind':'package','bundle':str(bundle)}]
-    report = tournament(entries,MatchConfig(MapConfig(9,9,3,.1,.05),max_ticks=8))
+    report = tournament(entries,MatchConfig(MapConfig(25, 25,3,.5,.5),max_ticks=8))
     assert report['games'] == 3
     assert len(report['ranking']) == 3
     with pytest.raises(ValueError,match='does not support'):
-        tournament(entries,MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=8),tmp_path/'invalid')
+        tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=8),tmp_path/'invalid')
     assert not (tmp_path/'invalid'/'report.json').exists()
 
 
 def test_cli_round_robin_and_training_evaluation(tmp_path,capsys):
     root=tmp_path
     (root/'roster.json').write_text(json.dumps(roster()[:2]))
-    (root/'rules.json').write_text(json.dumps({'map':{'width':9,'height':9,'players':2,'mountain_density':.1,'city_density':.05},'max_ticks':3}))
+    (root/'rules.json').write_text(json.dumps({'map':{'width':25,'height':25,'players':2,'mountain_density':.1,'city_density':.05},'max_ticks':3}))
     assert main(['tournament','--entrants',str(root/'roster.json'),'--config',str(root/'rules.json'),
                  '--output',str(root/'rr')]) == 0
     report=json.loads((root/'rr'/'report.json').read_text())
     assert report['games'] == 6
-    profile=make_profile(MapConfig(9,9,2,.1,.05),max_ticks=3,maps_per_opponent=1,opponents=roster()[:1])
+    profile=make_profile(MapConfig(25, 25,2,.1,.05),max_ticks=3,maps_per_opponent=1,opponents=roster()[:1])
     (root/'profile.json').write_text(json.dumps(profile))
     bundle=make_bundle(root/'bundle')
     assert main(['evaluate','--bundle',str(bundle),'--profile',str(root/'profile.json'),
@@ -112,7 +112,7 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
     bundle=tmp_path/'wait.zip'
     build_bundle(source,bundle)
     entries=[{'name':'cpp-wait','kind':'cpp','bundle':str(bundle)},roster()[0]]
-    report=tournament(entries,MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=3),
+    report=tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),
                       tmp_path/'cpp',record_replays=True)
     assert report['games']==6 and report['execution']=='mixed'
     assert set(report['execution_modes'])=={'isolated','policy_batch'}
@@ -126,15 +126,15 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
         assert len(list(verified_replay(Path(game['replay']).read_bytes(),game)))==4
     assert native_games == 4
     with pytest.raises(ValueError,match='CPU'):
-        tournament(entries,MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=3),backend='gpu',device='cuda:0')
+        tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),backend='gpu',device='cuda:0')
 
 
 def test_duel_reference_name_cannot_be_reassigned_to_another_policy():
     renamed = {'name':'WAIT','kind':'baseline','policy':'aggressive'}
     with pytest.raises(ValueError, match='reserved'):
-        make_profile(MapConfig(9,9,2,.1,.05), opponents=[renamed])
+        make_profile(MapConfig(25, 25,2,.1,.05), opponents=[renamed])
     with pytest.raises(ValueError, match='reserved'):
-        tournament([renamed,roster()[0]], MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=3))
+        tournament([renamed,roster()[0]], MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3))
 
 
 def test_evaluation_cli_resolves_custom_artifacts_relative_to_entrant_file(tmp_path,monkeypatch):
@@ -160,7 +160,7 @@ def test_evaluation_cli_resolves_custom_artifacts_relative_to_entrant_file(tmp_p
     spec={'name':'relative-policy','kind':'custom','version':'test-v1',
           'factory':'relative_artifact_policy:create_controller','artifacts':{'data':'data.txt'}}
     (spec_dir/'entrant.json').write_text(json.dumps(spec))
-    profile=make_profile(MapConfig(9,9,2,.1,.05),max_ticks=2,maps_per_opponent=1,opponents=roster()[:1])
+    profile=make_profile(MapConfig(25, 25,2,.1,.05),max_ticks=2,maps_per_opponent=1,opponents=roster()[:1])
     (tmp_path/'profile.json').write_text(json.dumps(profile))
     assert main(['evaluate','--entrant',str(spec_dir/'entrant.json'),'--profile',str(tmp_path/'profile.json'),
                  '--output',str(tmp_path/'result')])==0
@@ -178,7 +178,7 @@ def test_tournament_applies_inference_device_default_and_honors_per_policy_overr
             super().__init__(entries,**options)
     monkeypatch.setattr(modes,'MatchRunner',Capture)
     policy={'name':'opaque-policy','kind':'package','bundle':str(bundle)}
-    rules=MatchConfig(MapConfig(9,9,2,.1,.05),max_ticks=2)
+    rules=MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=2)
     modes.tournament([policy,roster()[0]],rules,device='cuda:0')
     modes.tournament([dict(policy,device='cpu'),roster()[0]],rules,device='cuda:0')
     assert devices==['cuda:0','cpu']

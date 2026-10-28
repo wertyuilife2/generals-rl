@@ -6,28 +6,28 @@ and its RNG stream are retained, and the new features can learn immediately.
 No old checkpoint or optimizer is loaded.
 """
 from copy import deepcopy
+from dataclasses import replace
 
 import torch
 from torch import nn
 
-from .policy.cnn import (FRAME_DIM, HISTORY, MAP_PLANES, MAP_SIZE, PUBLIC_DIM,
-                         _extend_conv, _validate_history_length, add_actor_knowledge)
+from .policy.cnn import _extend_conv, add_actor_knowledge
 from .spatial_ppo import LightSpatialPPOPolicy
 
 
 class HistoryStateCritic(nn.Module):
     """Fuse privileged maps, local history and optional player memory per cell."""
-    def __init__(self, baseline, knowledge_channels, *, history_length=HISTORY):
+    def __init__(self, baseline, knowledge_channels):
         super().__init__()
-        _validate_history_length(history_length)
-        self.history_length = history_length
+        self.layout = baseline.layout
+        self.history_length = self.layout.history_length
         self.knowledge_channels = knowledge_channels
         self.trunk = baseline.trunk
-        self.trunk[0] = _extend_conv(self.trunk[0], history_length * MAP_PLANES + knowledge_channels)
+        self.trunk[0] = _extend_conv(self.trunk[0], self.history_length * self.layout.map_planes + knowledge_channels)
         old = baseline.context[0]
         devices = [old.weight.device.index] if old.weight.is_cuda else []
         with torch.random.fork_rng(devices=devices):
-            new = nn.Linear(old.in_features + PUBLIC_DIM, old.out_features,
+            new = nn.Linear(old.in_features + self.layout.public_dim, old.out_features,
                             bias=old.bias is not None, device=old.weight.device,
                             dtype=old.weight.dtype)
         with torch.no_grad():
@@ -39,21 +39,21 @@ class HistoryStateCritic(nn.Module):
         self.value_head = baseline.value_head
 
     def forward(self, privileged, history, knowledge=None):
-        if history.ndim != 2 or history.shape[-1] != self.history_length * FRAME_DIM:
+        if history.ndim != 2 or history.shape[-1] != self.history_length * self.layout.frame_dim:
             raise ValueError("critic history shape does not match history_length")
-        if privileged.shape != (history.shape[0], FRAME_DIM):
+        if privileged.shape != (history.shape[0], self.layout.frame_dim):
             raise ValueError("critic privileged observation shape does not match history batch")
-        frames = history.reshape(-1, self.history_length, FRAME_DIM)
-        maps = privileged[:, :-PUBLIC_DIM].reshape(-1, MAP_PLANES, MAP_SIZE, MAP_SIZE)
-        local = frames[..., :-PUBLIC_DIM].reshape(-1, self.history_length * MAP_PLANES, MAP_SIZE, MAP_SIZE)
+        frames = history.reshape(-1, self.history_length, self.layout.frame_dim)
+        maps = privileged[:, :-self.layout.public_dim].reshape(-1, self.layout.map_planes, self.layout.height, self.layout.width)
+        local = frames[..., :-self.layout.public_dim].reshape(-1, self.history_length * self.layout.map_planes, self.layout.height, self.layout.width)
         inputs = [maps, local]
         if self.knowledge_channels:
-            if knowledge is None or knowledge.shape != (history.shape[0], self.knowledge_channels * MAP_SIZE * MAP_SIZE):
+            if knowledge is None or knowledge.shape != (history.shape[0], self.knowledge_channels * self.layout.cells):
                 raise ValueError("critic requires the actor's configured knowledge planes")
-            inputs.append(knowledge.reshape(-1, self.knowledge_channels, MAP_SIZE, MAP_SIZE))
+            inputs.append(knowledge.reshape(-1, self.knowledge_channels, self.layout.height, self.layout.width))
         pooled = self.trunk(torch.cat(inputs, 1)).mean(dim=(-2, -1))
-        context = self.context(torch.cat((pooled, privileged[:, -PUBLIC_DIM:],
-                                          frames[:, -1, -PUBLIC_DIM:]), -1))
+        context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:],
+                                          frames[:, -1, -self.layout.public_dim:]), -1))
         return self.value_head(torch.cat((pooled, context), -1))
 
 
@@ -70,20 +70,20 @@ class InformationSpatialPPOPolicy(LightSpatialPPOPolicy):
         expected = {"policy": actor_keys, "critic": critic_keys}
         if obs_groups != expected:
             raise ValueError(f"information policy requires obs_groups={expected}")
-        if knowledge_channels and ("knowledge" not in obs or obs["knowledge"].shape != (
-                obs.batch_size[0], knowledge_channels * MAP_SIZE * MAP_SIZE)):
-            raise ValueError("knowledge observation shape does not match knowledge_channels")
-        # Complete the v17 construction first, including own-king geometry.
-        # Critic-only changes cannot perturb the actor's initial weights/RNG.
         super().__init__(obs, {"policy": ["policy"], "critic": ["critic"]}, num_actions, **kwargs)
+        if knowledge_channels and ("knowledge" not in obs or obs["knowledge"].shape != (
+                obs.batch_size[0], knowledge_channels * self.layout.cells)):
+            raise ValueError("knowledge observation shape does not match knowledge_channels")
+        self.layout = replace(self.layout, knowledge_channels=knowledge_channels)
+        self.actor.layout = self.critic.layout = self.layout
         self.obs_groups = deepcopy(obs_groups)
         self.critic_actor_information = critic_actor_information
         add_actor_knowledge(self.actor, knowledge_channels)
         if knowledge_channels:
-            self.num_actor_obs += knowledge_channels * MAP_SIZE * MAP_SIZE
+            self.num_actor_obs += knowledge_channels * self.layout.cells
         if critic_actor_information:
-            self.critic = HistoryStateCritic(self.critic, knowledge_channels, history_length=self.history_length)
-            self.num_critic_obs += self.history_length * FRAME_DIM + knowledge_channels * MAP_SIZE * MAP_SIZE
+            self.critic = HistoryStateCritic(self.critic, knowledge_channels)
+            self.num_critic_obs += self.history_length * self.layout.frame_dim + knowledge_channels * self.layout.cells
         self.semantics += f"_knowledge{knowledge_channels}_critic_actor_info{int(critic_actor_information)}_v1"
 
     def evaluate(self, obs, is_teacher=False, **kwargs):

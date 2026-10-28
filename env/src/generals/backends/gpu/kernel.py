@@ -19,18 +19,19 @@ import tempfile
 import torch
 
 from generals.protocol.config import _integer
+from generals.backends._abi import Batch
+from generals.backends._build import source_bytes
+from generals.protocol import STATE_DTYPES
 
 
 _POINTERS = (
-    "terrain", "structure", "owner", "army", "alive", "tick", "terminated", "winner",
-    "initial_structure", "initial_owner", "initial_army", "initial_alive",
-    "initial_tick", "initial_terminated", "initial_winner", "actions", "counters",
-    "stats", "moves", "errors", "done",
+    "actions", "counters", "stats", "moves", "errors", "done",
 )
 
 
 class _Arguments(ctypes.Structure):
-    _fields_ = ([(name, ctypes.c_void_p) for name in _POINTERS]
+    _fields_ = ([("state", Batch), ("initial", Batch)]
+                + [(name, ctypes.c_void_p) for name in _POINTERS]
                 + [("batch", ctypes.c_int32), ("horizon", ctypes.c_int64),
                    ("auto_reset", ctypes.c_int32)]
                 + [(name, ctypes.c_void_p) for name in (
@@ -63,7 +64,7 @@ def _library(capability, nvcc, group_threads, envs_per_block, shape, packed_meta
     for path in libraries:
         if path.is_dir():
             flags += [f"-L{path}", f"-Xlinker=-rpath,{path}"]
-    digest = sha256(source.read_bytes() + json.dumps([nvcc, version, flags]).encode()).hexdigest()
+    digest = sha256(source_bytes(source) + json.dumps([nvcc, version, flags]).encode()).hexdigest()
     root = Path(tempfile.gettempdir()) / f"generals-cuda-{os.getuid()}"
     root.mkdir(mode=0o700, exist_ok=True)
     info = root.lstat()
@@ -130,15 +131,14 @@ class StepKernel:
         self.cache_valid = torch.zeros(env.batch_size, dtype=torch.bool, device=env.device)
         self.owned_structures = torch.empty((env.batch_size, env.players), dtype=torch.int32, device=env.device)
         self.dirty = False
-        arrays = {**{name: env.state[name] for name in _POINTERS[:8]},
-                  **{f"initial_{name}": env.initial[name] for name in (
-                      "structure", "owner", "army", "alive", "tick", "terminated", "winner")},
-                  "actions": env._wait_actions, "counters": env.counters, "stats": env.stats,
+        arrays = {"actions": env._wait_actions, "counters": env.counters, "stats": env.stats,
                   "moves": env.last_moves, "errors": env.errors,
                   "done": env.done, "cache_stats": self.cache_stats,
                   "growth_cells": self.growth_cells, "growth_count": self.growth_count,
                   "cache_valid": self.cache_valid, "owned_structures": self.owned_structures}
         self.args = _Arguments()
+        self.args.state = Batch(*(env.state[name].data_ptr() for name in STATE_DTYPES))
+        self.args.initial = Batch(*(env.initial[name].data_ptr() for name in STATE_DTYPES))
         for name, value in arrays.items():
             setattr(self.args, name, value.data_ptr())
         self.args.batch = env.batch_size

@@ -66,15 +66,25 @@ def match_mode_command(args):
                             maps_per_group=args.maps_per_group, seed=args.seed,
                             paired_seats=not args.single_seat,
                             base_dir=args.entrants.resolve().parent,
+                            fit_ratings=args.calibrate_profile is not None,
                             **_execution_options(args))
+        if args.calibrate_profile is not None:
+            from generals_arena.competitions.evaluation import make_calibrated_profile
+            from generals_arena.util import write_json
+            profile = make_calibrated_profile(report, roster, maps_per_opponent=args.evaluation_maps,
+                                               base_dir=args.entrants.resolve().parent)
+            args.calibrate_profile.parent.mkdir(parents=True, exist_ok=True)
+            write_json(args.calibrate_profile, profile)
         print(json.dumps({key: report[key] for key in ("run_id", "rating_mode", "rating_model", "games", "ranking")}, indent=2))
     else:
         from generals_arena.competitions.evaluation import evaluate
-        candidate = args.bundle if args.bundle else json.loads(args.entrant.read_text())
-        report = evaluate(candidate, args.profile, args.output,
-                          base_dir=args.entrant.resolve().parent if args.entrant else Path("."),
+        source_path = args.candidates or args.entrant
+        candidates = json.loads(args.candidates.read_text()) if args.candidates else [
+            args.bundle if args.bundle else json.loads(args.entrant.read_text())]
+        report = evaluate(candidates, args.profile, args.output,
+                          base_dir=source_path.resolve().parent if source_path else Path("."),
                           **_execution_options(args))
-        print(json.dumps({key: report[key] for key in ("policy_id", "profile_id", "rating_mode", "rating_model", "elo", "elo_ci", "games")}, indent=2))
+        print(json.dumps({key: report[key] for key in ("profile_id", "rating_mode", "rating_model", "candidates", "games")}, indent=2))
     return 0
 
 
@@ -133,11 +143,14 @@ def main(argv=None):
     tournament.add_argument("--maps-per-group", type=int, default=1)
     tournament.add_argument("--seed", type=int, default=42)
     tournament.add_argument("--single-seat", action="store_true", help="skip cyclic seat rotations")
+    tournament.add_argument('--calibrate-profile', type=Path, help='fit GoR jointly and save a fixed-reference evaluation profile')
+    tournament.add_argument('--evaluation-maps', type=int, default=100, help='maps per opponent in the saved evaluation profile')
     _add_execution_options(tournament)
     evaluation = commands.add_parser("evaluate", help="fixed-opponent training-evaluation schedule mode")
     source = evaluation.add_mutually_exclusive_group(required=True)
     source.add_argument("--bundle", type=Path)
     source.add_argument("--entrant", type=Path, help="ordinary Arena entrant JSON")
+    source.add_argument('--candidates', type=Path, help='JSON list of candidate bundles or entrant specs; include their round robin')
     evaluation.add_argument("--profile", type=Path, required=True)
     _add_execution_options(evaluation)
     args = parser.parse_args(argv)

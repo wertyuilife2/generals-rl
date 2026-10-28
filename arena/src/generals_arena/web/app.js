@@ -176,6 +176,7 @@ function showDialog(mode) {
   pauseReplay(); dialogMode = mode;
   $('board-dialog').classList.toggle('human-game', mode === 'live');
   $('board-error').textContent = '';
+  $('surrender').hidden = mode !== 'live';
   $('live-controls').hidden = mode !== 'live'; $('replay-controls').hidden = mode !== 'replay';
   $('board-mode').textContent = mode === 'live' ? 'LIVE / RANKED' : 'MATCH ARCHIVE';
   if (!$('board-dialog').open) $('board-dialog').showModal();
@@ -200,9 +201,11 @@ function renderGamePlayers(entries) {
     });
     $('game-players').replaceChildren(...playerNodes.map(p=>p.row));
   }
-  const order=entries.map((_,seat)=>seat).sort((a,b)=>board.stats.army[b]-board.stats.army[a] || board.stats.territory[b]-board.stats.territory[a] || a-b);
+  const order=board.ranking || entries.map((_,seat)=>seat);
   for(const [place,seat] of order.entries()) {
-    const {row,stats}=playerNodes[seat],text=`${board.forfeited?.includes(seat)?'超时投降 · ':board.alive[seat]?'':'已淘汰 · '}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
+    const warning=board.warn_afk?.[seat]?'挂机警告 · ':'';
+    const grace=board.neutralize_in?.[seat]>=0?`离场宽限期 ${Math.round(board.neutralize_in[seat]*100)}% · `:'';
+    const {row,stats}=playerNodes[seat],text=`${warning}${board.forfeited?.includes(seat)?'已弃权 · ':board.alive[seat]?'':'已淘汰 · '}${grace}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
     if(stats.textContent!==text)stats.textContent=text;
     row.classList.toggle('eliminated',!board.alive[seat]);
     row.classList.toggle('forfeited',!!board.forfeited?.includes(seat));
@@ -216,8 +219,9 @@ function updateLive(value, force=false) {
   live=value;
   if(dialogMode!=='live'||!$('board-dialog').open)return;
   board=live.board;
+  $('surrender').disabled=live.done || !board.alive[board.player_id] || board.forfeited?.includes(board.player_id);
   $('board-title').textContent=`${live.entrants.length} 人排位 · ${board.width} × ${board.height}`;
-  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 榜单`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
+  $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到评估时限':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 榜单`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
   draw();renderGamePlayers(live.entrants);
   if(live.done)renderPlayer();
 }
@@ -269,13 +273,15 @@ async function openReplay(id) {
   replay = data; frame = 0;
   showDialog('replay'); $('timeline').max = data.frames.length - 1;
   $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-  $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'surrender' ? '投降结算' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
+  const reasons={surrender:'弃权结算',capture:'将军被占领',afk:'未扩张自动弃权',idle_limit:'长时间无有效行动',game_limit:'官方对局时限',tick_limit:'达到评估时限'};
+  const initial=data.frames[0];
+  $('board-status').textContent = `${initial.width} × ${initial.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : reasons[data.result.reason] || data.result.reason} · 已校验全部已执行动作与状态`;
   seek(0); notice();
 }
 function applyFrame(next) {
   const f = replay.frames[next];
   for (const [cell,owner,army,structure] of f.cells) { const y=Math.floor(cell/board.width),x=cell%board.width;board.owner[y][x]=owner;board.army[y][x]=army;board.structure[y][x]=structure; }
-  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;board.forfeited=f.forfeited;
+  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;board.ranking=f.ranking;board.has_kill=f.has_kill;board.forfeited=f.forfeited;board.warn_afk=f.warn_afk;board.neutralize_in=f.neutralize_in;
 }
 function seek(next) {
   next=Math.max(0,Math.min(replay.frames.length-1,next));
@@ -305,6 +311,7 @@ $('zoom-out').addEventListener('click',()=>battlefield.adjustZoom(1/1.2));
 $('zoom-reset').addEventListener('click',()=>battlefield.reset());
 $('half').addEventListener('change',()=>{input.half=$('half').checked;draw();});
 $('clear-moves').addEventListener('click',()=>input.clear());
+$('surrender').addEventListener('click',()=>{input.issue('surrender');$('surrender').disabled=true;});
 $('undo-move').addEventListener('click',()=>input.undo());
 $('board-dialog').addEventListener('keydown',event=>{
   if(dialogMode!=='live'||!live||live.done||event.ctrlKey||event.metaKey||event.altKey)return;

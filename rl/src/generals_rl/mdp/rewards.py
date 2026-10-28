@@ -59,7 +59,7 @@ class ShapedReward:
             "cities": cfg.cities * delta[:, 2],
             "army": cfg.army * delta[:, 0],
             "terminal": (terminated & (winner == player_ids)).float() * cfg.win
-                        + (~learner_alive).float() * cfg.loss,
+                        + (~learner_alive & (winner != player_ids)).float() * cfg.loss,
             "tick": torch.full_like(delta[:, 0], cfg.tick),
         }
         # A timeout is a truncated trajectory, never an artificial defeat.

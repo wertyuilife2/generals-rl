@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-// ABI 1. All arrays are read-only row-major views, valid only during arena_act.
+// ABI 2. All arrays are read-only row-major views, valid only during arena_act.
 // Unknown: terrain/structure=255, owner=-3, army=-1. Empty owner=-1,
 // neutral city owner=-2. Terrain: plain=0, mountain=1.
 // Structure: ordinary=0, city=1, general=2.
@@ -19,6 +19,10 @@ struct ArenaObservation {
     const std::int64_t *army;
     const std::uint8_t *visible, *alive;
     const std::int64_t *total_army, *total_land, *total_cities;
+    // A hidden mountain or city shares one indistinguishable obstacle hint.
+    const std::uint8_t *fog_obstacles, *has_kill, *warn_afk;
+    // Departure grace progress in [0,1], or -1 when no grace period is active.
+    const double *neutralize_in;
     // Previous result is delivered inside the timed decision, never via an
     // untimed policy callback. Null before the first decision.
     const ArenaMoveResult *previous;

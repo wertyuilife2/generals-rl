@@ -1,7 +1,7 @@
 """Player information boundary. All published arrays are isolated copies."""
 from dataclasses import dataclass
 import numpy as np
-from generals.core.state import GameState, PlayerStats, Terrain, UNKNOWN, UNKNOWN_OWNER, compute_stats
+from generals.core.state import GameState, PlayerStats, Terrain, Structure, UNKNOWN, UNKNOWN_OWNER, compute_stats
 
 
 def readonly(value):
@@ -30,6 +30,10 @@ class Observation:
     alive: np.ndarray
     general_pos: int
     stats: PlayerStats
+    fog_obstacles: np.ndarray
+    has_kill: np.ndarray
+    warn_afk: np.ndarray
+    neutralize_in: np.ndarray
     visibility: str = "local"
     terminated: bool = False
     winner_id: int | None = None
@@ -54,14 +58,19 @@ def visibility_mask(owner: np.ndarray, player_id: int) -> np.ndarray:
 
 
 def _build(state, pid, mode, stats=None):
-    visible = (np.ones(state.owner.shape, dtype=bool) if mode == "full"
+    visible = (np.ones(state.owner.shape, dtype=bool) if mode == "full" or state.terminated
                else visibility_mask(state.owner, pid))
     stats = compute_stats(state) if stats is None else stats
     cities = stats.cities
-    if mode == "local":
+    if mode == "local" and not state.terminated:
         cities = np.full_like(stats.cities, -1)
         cities[pid] = stats.cities[pid]
     stats = PlayerStats(stats.army, stats.territory, cities)
+    obstacles = (state.layout.terrain == Terrain.MOUNTAIN) | (state.structure == Structure.CITY)
+    if mode == "local":
+        for slot, spawn in enumerate(state.spawn_pos):
+            if spawn >= 0 and state.general_pos[slot] < 0 and not (state.city_known[pid] & (1 << slot)):
+                obstacles.flat[spawn] = False
     arrays = {
         "terrain": np.where(visible, state.layout.terrain, np.uint8(UNKNOWN)),
         "structure": np.where(visible, state.structure, np.uint8(UNKNOWN)),
@@ -69,6 +78,11 @@ def _build(state, pid, mode, stats=None):
         "army": np.where(visible, state.army, np.int64(-1)),
         "visible": visible,
         "alive": state.alive.copy(),
+        "fog_obstacles": obstacles & ~visible,
+        "has_kill": state.kills > 0,
+        "warn_afk": state.warn_afk.astype(bool),
+        "neutralize_in": np.where((state.leave_tick >= 0) & (state.general_pos >= 0),
+                                  np.clip((state.tick - state.leave_tick) / 50., 0, 1), -1.),
     }
     for array in arrays.values():
         array.flags.writeable = False
@@ -100,12 +114,12 @@ def snapshot(state: GameState, player_id: int | None = None, mode: str = "local"
 
 
 def legal_action_mask(obs: Observation):
-    """Return [N, direction, mode] and WAIT; zero-army and losing moves are legal."""
+    """Return executable source moves; losing attacks remain available."""
     mask = np.zeros((obs.size, 4, 2), dtype=bool)
     pid = obs.player_id
     if pid < 0 or not obs.alive[pid] or obs.terminated:
         return mask, False
-    sources = np.flatnonzero(obs.owner == pid)
+    sources = np.flatnonzero((obs.owner == pid) & (obs.army > 1))
     terrain = obs.terrain.ravel()
     h, w = obs.height, obs.width
     for source in sources:

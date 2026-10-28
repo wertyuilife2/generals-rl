@@ -28,7 +28,7 @@ def assert_same(actual, expected):
 
 @pytest.mark.parametrize('players', [2, 4, 8])
 def test_observations_match_at_every_tick_and_remain_isolated(players):
-    state = generate_map(MapConfig(width=15, height=17, players=players), players)
+    state = generate_map(MapConfig(width=25, height=25, players=players), players)
     engine = CoreEngine(state)
     controllers = make_controllers(['random', 'aggressive', 'expansion', 'defensive'][:players]
                                    if players < 8 else ['aggressive'] * 8, seed=17)

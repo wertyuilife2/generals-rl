@@ -73,6 +73,17 @@ class GameState:
     tick: int = 0
     terminated: bool = False
     winner_id: int | None = None
+    idle_ticks: int = 0
+    afk_turn: int = 0
+    end_reason: int = 0
+    leave_tick: np.ndarray | None = None
+    death_order: np.ndarray | None = None
+    kills: np.ndarray | None = None
+    damage: np.ndarray | None = None
+    spawn_pos: np.ndarray | None = None
+    city_known: np.ndarray | None = None
+    capture_mask: np.ndarray | None = None
+    warn_afk: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.layout, MapLayout):
@@ -88,6 +99,20 @@ class GameState:
         self.tick = _as_int(self.tick, "tick")
         if self.winner_id is not None:
             self.winner_id = _as_int(self.winner_id, "winner_id")
+        for name in ("idle_ticks", "afk_turn", "end_reason"):
+            setattr(self, name, _as_int(getattr(self, name), name))
+        p = self.player_count
+        defaults = {"leave_tick": (np.int64, np.full(p, -1)),
+                    "death_order": (np.int32, np.full(p, -1)),
+                    "kills": (np.int32, np.zeros(p, dtype=int)),
+                    "damage": (np.int64, np.zeros((p, p), dtype=int)),
+                    "spawn_pos": (np.int32, self.general_pos),
+                    "city_known": (np.uint8, np.zeros(p, dtype=int)),
+                    "capture_mask": (np.uint8, np.zeros(p, dtype=int)),
+                    "warn_afk": (np.uint8, np.zeros(p, dtype=int))}
+        for name, (dtype, default) in defaults.items():
+            value = getattr(self, name)
+            setattr(self, name, _integer_array(default if value is None else value, dtype, name))
 
     @property
     def player_count(self) -> int:
@@ -97,13 +122,23 @@ class GameState:
         """Deep-copy dynamic arrays while sharing the immutable topology."""
         return GameState(self.layout, self.structure, self.owner, self.army,
                          self.alive, self.general_pos, self.tick,
-                         self.terminated, self.winner_id)
+                         self.terminated, self.winner_id, self.idle_ticks, self.afk_turn,
+                         self.end_reason, self.leave_tick, self.death_order, self.kills,
+                         self.damage, self.spawn_pos, self.city_known, self.capture_mask, self.warn_afk)
 
     def validate(self) -> None:
         shape = self.layout.terrain.shape
         expected = (("structure", np.uint8, shape), ("owner", np.int16, shape),
                     ("army", np.int64, shape), ("alive", np.bool_, (self.player_count,)),
-                    ("general_pos", np.int32, (self.player_count,)))
+                    ("general_pos", np.int32, (self.player_count,)),
+                    ("leave_tick", np.int64, (self.player_count,)),
+                    ("death_order", np.int32, (self.player_count,)),
+                    ("kills", np.int32, (self.player_count,)),
+                    ("damage", np.int64, (self.player_count, self.player_count)),
+                    ("spawn_pos", np.int32, (self.player_count,)),
+                    ("city_known", np.uint8, (self.player_count,)),
+                    ("capture_mask", np.uint8, (self.player_count,)),
+                    ("warn_afk", np.uint8, (self.player_count,)))
         for name, dtype, array_shape in expected:
             value = getattr(self, name)
             if value.shape != array_shape or value.dtype != dtype or not value.flags.c_contiguous:
@@ -122,30 +157,33 @@ class GameState:
         empty = self.owner == EMPTY
         if np.any(self.structure[empty] != Structure.NONE) or np.any(self.army[empty] != 0):
             raise ValueError("empty cells cannot contain structures or armies")
-        neutral = self.owner == NEUTRAL
-        if np.any(self.structure[neutral] != Structure.CITY) or np.any(self.army[neutral] > 40):
-            raise ValueError("neutral ownership is reserved for cities with 0–40 troops")
-        if np.any(self.general_pos < 0) or np.any(self.general_pos >= self.layout.size) or np.unique(self.general_pos).size != self.player_count:
-            raise ValueError("general_pos must contain unique in-bounds positions")
+        if np.any((self.owner == NEUTRAL) & (self.structure == Structure.GENERAL)):
+            raise ValueError("a neutral general must be converted to a city")
+        positions = self.general_pos[self.general_pos >= 0]
+        if (np.any(self.general_pos < -1) or np.any(positions >= self.layout.size)
+                or np.unique(positions).size != positions.size):
+            raise ValueError("general_pos must be -1 or a unique in-bounds position")
+        if np.any(self.spawn_pos < -1) or np.any(self.spawn_pos >= self.layout.size):
+            raise ValueError("spawn_pos must be -1 or an in-bounds position")
         live_ids = np.flatnonzero(self.alive)
-        if not live_ids.size:
-            raise ValueError("a game cannot have zero surviving players")
         owner = self.owner.ravel()
         structures = self.structure.ravel()
         general_cells = np.flatnonzero(structures == Structure.GENERAL)
-        if set(general_cells.tolist()) != set(self.general_pos[live_ids].tolist()):
-            raise ValueError("every surviving player must have exactly one general")
+        if set(general_cells.tolist()) != set(positions.tolist()):
+            raise ValueError("general positions must identify all current generals")
         for pid in range(self.player_count):
             if self.alive[pid]:
-                if owner[self.general_pos[pid]] != pid:
+                if self.general_pos[pid] < 0 or owner[self.general_pos[pid]] != pid:
                     raise ValueError("surviving player's general must remain their own")
-            elif np.any(owner == pid):
-                raise ValueError("an eliminated player cannot retain territory")
-        if bool(self.terminated) != (live_ids.size == 1):
+            elif np.any(owner == pid) and self.leave_tick[pid] < 0 and not self.terminated:
+                raise ValueError("only departed players may retain land during the capture grace period")
+        if bool(self.terminated) != (live_ids.size <= 1):
             raise ValueError("terminated must agree with the surviving player count")
-        expected_winner = int(live_ids[0]) if self.terminated else None
-        if self.winner_id != expected_winner:
+        expected_winner = int(live_ids[0]) if live_ids.size == 1 else None
+        if live_ids.size and self.winner_id != expected_winner:
             raise ValueError("winner_id does not agree with termination")
+        if self.winner_id is not None and not 0 <= self.winner_id < self.player_count:
+            raise ValueError("winner_id is outside the player range")
 
 
 @dataclass(frozen=True, eq=False)
@@ -182,6 +220,17 @@ def compute_stats(state: GameState) -> PlayerStats:
     city_owners = state.owner[(state.structure == Structure.CITY) & owned]
     cities = np.bincount(city_owners, minlength=state.player_count).astype(np.int64)
     return PlayerStats(army, territory, cities)
+
+
+def rank_players(state: GameState, stats=None) -> list[int]:
+    """Official scoreboard order; a kill means participation, not kill count."""
+    stats = compute_stats(state) if stats is None else stats
+    army = stats['army'] if isinstance(stats, dict) else stats.army
+    land = stats['territory'] if isinstance(stats, dict) else stats.territory
+    return sorted(range(state.player_count), key=lambda p: (
+        -int(state.kills[p] > 0), not bool(state.alive[p]),
+        -int(army[p]) if state.alive[p] else -int(state.death_order[p]),
+        -int(land[p]) if state.alive[p] else 0, p))
 
 
 @dataclass(frozen=True)

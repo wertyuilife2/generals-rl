@@ -51,7 +51,7 @@ class DesktopTests(unittest.TestCase):
 
     def setUp(self):
         self.root = tk.Tk()
-        self.app = App(self.root, MapConfig(width=15, height=15, players=4,
+        self.app = App(self.root, MapConfig(width=25, height=25, players=4,
                                          mountain_density=0, city_density=0), seed=41)
         self.root.update()
 
@@ -93,7 +93,7 @@ class DesktopTests(unittest.TestCase):
         self.app.human_buttons[0].invoke()  # general
         self.assertEqual(self.app.human.selected, source)
 
-    def test_zero_army_mouse_and_keyboard_orders_finish_and_advance_selection(self):
+    def test_one_army_mouse_and_keyboard_orders_are_discarded_without_waiting(self):
         for control in ("mouse", "keyboard"):
             for half in (False, True):
                 with self.subTest(control=control, half=half):
@@ -119,12 +119,12 @@ class DesktopTests(unittest.TestCase):
                     self.assertEqual(self.app.board.itemcget(self.app.board._arrows[0], "state"), "normal")
                     self.app.single_step()
                     move = self.app.runner.last_result.moves[0]
-                    self.assertTrue(move.valid)
+                    self.assertEqual(move.reason, "WAIT")
                     self.assertEqual(move.moved, 0)
                     np.testing.assert_array_equal(state.army, before)
                     self.assertFalse(self.app.human.queue)
                     self.assertEqual((self.app.human.selected, self.app.human.anchor,
-                                      self.app.human.cursor), (target, target, target))
+                                      self.app.human.cursor), (source, source, source))
                     self.assertEqual(self.app.board.itemcget(self.app.board._arrows[0], "state"), "hidden")
 
     def test_hit_testing_and_stable_items_survive_pan_zoom(self):
@@ -173,7 +173,7 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(self.root.grab_current(), self.app._settings_window)
         self.app._settings_window.destroy()
         for players in range(2, 9):
-            self.app.config = MapConfig(width=15, height=15, players=players)
+            self.app.config = MapConfig(width=25, height=25, players=players)
             self.app.kinds = ["random"] * players
             self.app._create_initial()
             self.app._load_initial()

@@ -1,9 +1,8 @@
 """Single-match state, controller lifecycle and incremental play/recovery."""
-import numpy as np
 from generals.core.mapgen import generate_map
-from generals.core.observation import observe, snapshot
-from generals.core.recording import state_digest, state_from_dict, state_to_dict
-from generals.core.state import Action, NEUTRAL, Structure, compute_stats, GameState, MapLayout
+from generals.core.observation import observe
+from generals.core.recording import state_digest, state_to_dict
+from generals.core.state import Action, compute_stats
 from generals import MapConfig, make_engine
 
 from generals_arena.matches.observation import board_view
@@ -12,44 +11,20 @@ from generals_arena.matches.results import build_result
 
 
 def apply_forfeits(engine, events):
-    """Arena lifecycle event; movement/combat/growth still use env's CPU kernel.
-
-    Abandoned troops are neutral, stop growing and can be captured normally.
-    This extends Arena's neutral cells beyond mapgen's starting neutral cities.
-    Never reconstruct the engine from a mid-game Arena state: initialize from
-    the original map and replay events, keeping env/RL's initial-state contract.
-    """
+    """Translate match departures into the environment's official surrender rule."""
     state = engine.state
     changed = False
     for event in events:
         seat = event['seat']
         if event['tick'] == state.tick and state.alive[seat]:
-            state.owner[state.owner == seat] = NEUTRAL
-            state.structure.ravel()[state.general_pos[seat]] = Structure.CITY
-            state.alive[seat] = False
+            engine.surrender(seat)
             changed = True
-    if changed:
-        survivors = np.flatnonzero(state.alive)
-        state.terminated = len(survivors) <= 1
-        state.winner_id = int(survivors[0]) if len(survivors) == 1 else None
-        engine.invalidate_cache()
     return changed
 
-
-def state_from_snapshot(value, forfeits):
-    if not forfeits:
-        return state_from_dict(value)
-    # Trusted match-process snapshot, which may contain abandoned neutral land.
-    return GameState(MapLayout(np.asarray(value['terrain'])),
-                     *(np.asarray(value[key]) for key in
-                       ('structure', 'owner', 'army', 'alive', 'general_pos')),
-                     value['tick'], value['terminated'], value['winner_id'])
 
 
 def mark_forfeits(board, forfeits):
     board['forfeited'] = [e['seat'] for e in forfeits if e['tick'] <= board['tick']]
-    for seat in board['forfeited']:
-        board['alive'][seat] = False
     return board
 
 
@@ -115,7 +90,6 @@ class RecordedGame:
         self.actions, self.digests = [], []
         self.eliminations = [None] * count
         self.invalid = [0] * count
-        self.kills = [0] * count
         self.forfeits = list(forfeits)
         for seat, controller in enumerate(controllers):
             if controller is not None:
@@ -137,9 +111,8 @@ class RecordedGame:
         if not all(isinstance(action, Action) for action in actions):
             raise TypeError("controller must return an Action")
         result = self.engine.step(actions)
-        for move in result.moves:
-            if move.eliminated is not None:
-                self.kills[move.player_id] += 1
+        for pid in result.eliminated:
+            self.eliminations[pid] = self.state.tick
         self.stats = result.stats
         self.actions.append([[int(a.kind), a.source, int(a.direction), int(a.mode)] for a in actions])
         self.digests.append(state_digest(self.state))
@@ -148,15 +121,25 @@ class RecordedGame:
             controller = self.controllers[move.player_id]
             if controller is not None:
                 controller.on_result(move)
-            if move.eliminated is not None:
-                self.eliminations[move.eliminated] = self.state.tick
-                eliminate = getattr(self.controllers[move.eliminated], "eliminate", None)
-                if eliminate is not None:
-                    eliminate()
+        for pid in result.eliminated:
+            eliminate = getattr(self.controllers[pid], "eliminate", None)
+            if eliminate is not None:
+                eliminate()
 
     def _apply_forfeits(self):
+        before = self.state.alive.copy()
         if apply_forfeits(self.engine, self.forfeits):
             self.stats = compute_stats(self.state)
+            for seat in range(self.state.player_count):
+                if before[seat] and not self.state.alive[seat]:
+                    self.eliminations[seat] = self.state.tick
+                    eliminate = getattr(self.controllers[seat], 'eliminate', None)
+                    if eliminate is not None:
+                        eliminate()
+
+    def surrender(self, seat):
+        self.forfeits.append({'seat': seat, 'tick': self.state.tick, 'reason': 'surrender'})
+        self._apply_forfeits()
 
     def advance(self, human_actions=None):
         actions = dict(human_actions or {})
@@ -188,17 +171,10 @@ class RecordedGame:
             raise ValueError("cannot score an unfinished game")
         value = build_result(self.plan, state=self.state, stats=self.stats,
                              elimination_ticks=self.eliminations, invalid_actions=self.invalid,
-                             initial_digest=self.initial_digest, kills=self.kills)
+                             initial_digest=self.initial_digest)
         value["execution_policy"] = EXECUTION_POLICY
         if self.forfeits:
-            eliminated = self.eliminations.copy()
-            for event in self.forfeits:
-                seat, tick = event['seat'], event['tick']
-                eliminated[seat] = tick if eliminated[seat] is None else min(eliminated[seat], tick)
-            value.update(forfeits=self.forfeits, capture_ticks=self.eliminations.copy(),
-                         elimination_ticks=eliminated)
-            if any(e['tick'] == self.state.tick for e in self.forfeits) and self.state.terminated:
-                value['reason'] = 'surrender'
+            value['forfeits'] = self.forfeits
         metrics = timing(self)
         if metrics:
             value['decision_timing'] = metrics
@@ -209,4 +185,4 @@ class RecordedGame:
         return encode_replay(self.initial, self.actions, self.digests, self.forfeits)
 
     def view(self, seat=None):
-        return board_view(snapshot(self.state, seat))
+        return board_view(self.state, seat)

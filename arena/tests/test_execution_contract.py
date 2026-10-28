@@ -77,7 +77,7 @@ def test_joint_pre_growth_decisions_and_capture_at_tick_limit(game_factory):
     assert wait.observations[0].army.flat[1] == 2
     assert attack.observations[0].stats.cities[1] == -1
     assert not attack.observations[0].owner.flags.writeable
-    assert len(attack.moves) == 1 and not wait.moves
+    assert len(attack.moves) == len(wait.moves) == 1
     assert state.tick == 0 and state.army.flat[0] == 10
     assert len(list(verified_replay(game.replay_blob(), result))) == 2
 
@@ -121,4 +121,4 @@ def test_multiplayer_limit_preserves_elimination_order_for_current_rank_rating(g
     assert result['reason'] == 'tick_limit'
     assert result['final_alive'] == [True, False, False, True]
     assert result['elimination_ticks'] == [None, 2, 1, None]
-    assert ranks(result) == [1.5, 3, 4, 1.5]
+    assert ranks(result) == [2, 3, 4, 1]

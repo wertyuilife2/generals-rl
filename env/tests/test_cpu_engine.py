@@ -25,7 +25,7 @@ def compare_tick(core, native, actions):
 
 @pytest.mark.parametrize('players', [2, 4, 8])
 def test_move_results_stats_and_states_for_valid_and_invalid_actions(players):
-    state = generate_map(MapConfig(15, 17, players), 17)
+    state = generate_map(MapConfig(25, 25, players), 17)
     state.army.ravel()[state.general_pos] = 57
     core, native = CoreEngine(state), CPUEngine(state.copy())
     rng = np.random.default_rng(17)
@@ -63,7 +63,7 @@ def test_capture_elimination_order_inheritance_wait_and_large_integer_stats():
     try:
         first = compare_tick(core, native, [Action.move(0, Direction.RIGHT), Action.move(1, Direction.RIGHT), Action.wait()])
         assert first.eliminated == (1,)
-        assert [move.player_id for move in first.moves] == [0, 2]
+        assert [move.player_id for move in first.moves] == [0, 1, 2]
         compare_tick(core, native, [Action.wait(), Action.wait(), Action.move(4, Direction.LEFT, MoveMode.HALF)])
         compare_tick(core, native, [Action.wait(), Action.wait(), Action.move(3, Direction.LEFT)])
         compare_tick(core, native, [Action.wait(), Action.wait(), Action.move(2, Direction.LEFT)])

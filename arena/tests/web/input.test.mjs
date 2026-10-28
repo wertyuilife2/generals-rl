@@ -44,3 +44,11 @@ test('a mountain-shaped fog marker may be a city, so movement into it remains po
   board.terrain[2][3]=255;board.fog_obstacles=Array.from({length:5},()=>Array(5).fill(false));board.fog_obstacles[2][3]=true;
   assert.equal(input.move(1),true);assert.equal(sent.length,1);
 });
+
+test('surrender clears pending moves and prevents further commands',()=>{
+  const {input,sent,board}=fixture();input.move(1);input.issue('surrender');
+  assert.equal(input.queue.length,0);input.issue('append',0);
+  assert.deepEqual(sent.map(c=>c.op),['append','surrender']);
+  board.forfeited=[0];input.observe({board,revision:1,last_command_id:2,queue:[]});
+  input.issue('append',0);assert.equal(sent.length,2);
+});

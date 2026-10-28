@@ -7,7 +7,8 @@ import numpy as np
 from generals import Action, make_engine
 from generals.core.observation import snapshot
 from generals.core.recording import state_digest, state_from_dict, state_to_dict
-from generals.core.state import compute_stats
+from generals.core.state import rank_players
+from generals.protocol.rules import RULES_VERSION
 
 from .game import apply_forfeits, mark_forfeits
 from .observation import board_view
@@ -18,7 +19,7 @@ def encode_replay(initial, actions, digests, forfeits=()):
     if len(actions) != len(digests):
         raise ValueError("replay actions and digests must have the same length")
     initial = initial if isinstance(initial, dict) else state_to_dict(initial)
-    value = {"schema": 2 if forfeits else 1, "initial": initial,
+    value = {"schema": 3, "rules": RULES_VERSION, "initial": initial,
              "actions": actions, "digests": digests}
     if forfeits:
         value["forfeits"] = list(forfeits)
@@ -28,7 +29,7 @@ def encode_replay(initial, actions, digests, forfeits=()):
 def verified_replay(blob, value):
     """Execute actions and lifecycle events; verify every committed state."""
     trace = json.loads(gzip.decompress(blob))
-    if (trace['schema'] not in (1, 2) or len(trace['actions']) != value['ticks'] or
+    if (trace['schema'] != 3 or trace['rules'] != RULES_VERSION or len(trace['actions']) != value['ticks'] or
             len(trace['digests']) != len(trace['actions'])):
         raise ValueError('invalid replay length or schema')
     events = trace.get('forfeits', [])
@@ -60,12 +61,15 @@ def replay_frames(blob, value, stride=1, compact=False):
             current = np.stack([state.owner.ravel(), state.army.ravel(), state.structure.ravel()], axis=1)
             if compact and frames:
                 changed = np.flatnonzero(np.any(current != previous, axis=1))
-                stats = compute_stats(state)
+                observation = snapshot(state)
+                stats = observation.stats
                 frame = {'tick':state.tick, 'cells':[[int(i), *current[i].tolist()] for i in changed],
-                         'alive':state.alive.tolist(), 'stats':{key:getattr(stats,key).tolist()
+                         'alive':state.alive.tolist(), 'ranking':rank_players(state, stats),
+                         **{key:getattr(observation,key).tolist() for key in ('warn_afk','neutralize_in','has_kill')},
+                         'stats':{key:getattr(stats,key).tolist()
                          for key in ('army','territory','cities')}}
             else:
-                frame = board_view(snapshot(state))
+                frame = board_view(state)
             frames.append(mark_forfeits(frame, value.get('forfeits', [])))
             previous = current.copy()
     return frames

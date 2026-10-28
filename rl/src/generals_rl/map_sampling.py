@@ -3,7 +3,9 @@ import numpy as np
 import torch
 
 from generals.core.mapgen import generate_map
-from generals.protocol import STATE_DTYPES
+from generals.protocol import STATE_DTYPES, state_shape
+from generals.core.batch import pack_states
+from generals.core.state import MapLayout
 
 
 def _replace_initial(backend, rows=None, arrays=None, stats=None, rng=None):
@@ -15,8 +17,8 @@ def _replace_initial(backend, rows=None, arrays=None, stats=None, rng=None):
     """
     required = ("initial", "_initial_stats", "_initial_rng")
     if arrays is None:
-        expected = {"terrain", "structure", "owner", "army", "alive", "general_pos", "tick", "terminated", "winner"}
-        if set(STATE_DTYPES) != expected or set(backend.state) != expected:
+        expected = set(STATE_DTYPES)
+        if set(backend.state) != expected:
             raise RuntimeError("map sampling does not support this backend state schema")
         if any(not hasattr(backend, name) for name in required):
             raise RuntimeError("map sampling needs backend initial/_initial_stats/_initial_rng reset caches")
@@ -57,22 +59,35 @@ def _replace_initial(backend, rows=None, arrays=None, stats=None, rng=None):
         backend._initial_rng[rows] = rng
 
 
-def _build_bank(config, size, seed):
-    cells, players = config.width * config.height, config.players
-    arrays = {}
-    for name, dtype in STATE_DTYPES.items():
-        shape = (size, cells) if name in ("terrain", "structure", "owner", "army") else (
-            (size, players) if name in ("alive", "general_pos") else (size,))
-        arrays[name] = np.empty(shape, dtype=dtype)
+def pad_state(state, width, height):
+    """Pad only RL storage; no padding semantics enter the environment protocol."""
+    h, w = state.owner.shape
+    if h > height or w > width:
+        raise ValueError("sampled map exceeds the policy canvas")
+    valid = np.zeros((height, width), dtype=bool)
+    valid[:h, :w] = True
+    padding = ((0, height - h), (0, width - w))
+    result = state.copy()
+    result.layout = MapLayout(np.pad(state.layout.terrain, padding, constant_values=1))
+    for name, fill in (("structure", 0), ("owner", -1), ("army", 0)):
+        setattr(result, name, np.pad(getattr(state, name), padding, constant_values=fill))
+    for name in ("general_pos", "spawn_pos"):
+        old = getattr(state, name)
+        setattr(result, name, np.where(old >= 0, old // w * width + old % w, -1).astype(np.int32))
+    return result, valid.ravel()
+
+
+def _build_bank(config, size, seed, *, width, height):
+    cells, players = width * height, config.players
+    arrays = {name: np.empty(state_shape(name, size, cells, players), dtype=dtype)
+              for name, dtype in STATE_DTYPES.items()}
+    valid = np.empty((size, cells), dtype=bool)
     seeds = np.random.SeedSequence([seed, 0x4D4150]).generate_state(size, dtype=np.uint64)
     for index, map_seed in enumerate(seeds):
-        state = generate_map(config, int(map_seed))
-        for name in ("structure", "owner", "army", "alive", "general_pos"):
-            arrays[name][index] = getattr(state, name).ravel()
-        arrays["terrain"][index] = state.layout.terrain.ravel()
-    arrays["tick"].fill(0)
-    arrays["terminated"].fill(False)
-    arrays["winner"].fill(-1)
+        state, valid[index] = pad_state(generate_map(config, int(map_seed)), width, height)
+        packed, _, _ = pack_states([state])
+        for name in arrays:
+            arrays[name][index] = packed[name][0]
     stats = np.empty((size, players, 3), dtype=np.int64)
     for pid in range(players):
         owned = arrays["owner"] == pid
@@ -81,7 +96,7 @@ def _build_bank(config, size, seed):
         stats[:, pid, 2] = (owned & (arrays["structure"] == 1)).sum(axis=1)
     rng = np.random.SeedSequence([seed, 0x524E47]).generate_state(size, dtype=np.uint32)
     rng[rng == 0] = 1
-    return arrays, stats, rng
+    return arrays, stats, rng, valid
 
 
 class MapSampler:
@@ -96,16 +111,20 @@ class MapSampler:
             raise ValueError("map bank size must be a positive integer")
         if self.backend.auto_reset:
             raise ValueError("map sampling requires auto_reset=False")
-        if (self.backend.width, self.backend.height, self.backend.players) != (config.width, config.height, config.players):
-            raise ValueError("map bank and backend dimensions must match")
+        if self.backend.players != config.players:
+            raise ValueError("map bank and backend player counts must match")
         _replace_initial(self.backend)
         self.size = size
         self.tensor = isinstance(self.backend.state["army"], torch.Tensor)
-        self.arrays, self.stats, self.rng = _build_bank(config, size, seed)
+        self.arrays, self.stats, self.rng, self.bank_valid = _build_bank(
+            config, size, seed, width=self.backend.width, height=self.backend.height)
+        self.valid = np.ones((self.backend.batch_size, self.backend.width * self.backend.height), dtype=bool)
         if self.tensor:
             self.device = self.backend.state["army"].device
             self.arrays = {name: torch.from_numpy(value).to(self.device, copy=True)
                            for name, value in self.arrays.items()}
+            self.bank_valid = torch.from_numpy(self.bank_valid).to(self.device)
+            self.valid = torch.from_numpy(self.valid).to(self.device)
             self.stats = torch.from_numpy(self.stats).to(self.device, copy=True)
             self.rng = torch.from_numpy(self.rng.view(np.int32)).to(self.device, copy=True)
             stream_seed = int(np.random.SeedSequence([seed, 0x53414D]).generate_state(1, dtype=np.uint64)[0])
@@ -135,5 +154,6 @@ class MapSampler:
             selected = self.generator.integers(self.size, size=len(rows))
             arrays = {name: value[selected] for name, value in self.arrays.items()}
             stats, rng = self.stats[selected], self.rng[selected]
+        self.valid[rows] = self.bank_valid[selected]
         _replace_initial(backend, rows, arrays, stats, rng)
         return backend.reset(mask)

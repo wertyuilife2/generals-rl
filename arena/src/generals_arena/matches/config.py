@@ -7,8 +7,8 @@ from generals_arena.util import integer
 
 @dataclass(frozen=True)
 class MatchConfig:
-    map: MapConfig = field(default_factory=lambda: MapConfig(9, 9, 2, 0.1, 0.05))
-    max_ticks: int = 2000
+    map: MapConfig = field(default_factory=lambda: MapConfig(players=2))
+    max_ticks: int = 50002
     visibility: str = "local"
 
     def __post_init__(self):

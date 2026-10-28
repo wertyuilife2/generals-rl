@@ -17,8 +17,8 @@ def report(mode='1v1',ids=('wait','a','b'),raw=None,offset=0,anchor='wait'):
 def add_maps(model,ids,seeds,rotations=1):
     for seed in seeds:
         for rotation in range(rotations):
-            game=dict(game_id=f'{seed}-{rotation}-'+','.join(ids),entrant_ids=ids,map_seed=seed,map={'width':9,'height':9},
-                      elimination_ticks=[None]*len(ids),rating_policy=POLICY,rating_group_size=rotations)
+            game=dict(game_id=f'{seed}-{rotation}-'+','.join(ids),entrant_ids=ids,map_seed=seed,map={'width':25,'height':25},
+                      elimination_ticks=[None]*len(ids),placements=[(len(ids)+1)/2]*len(ids),rating_policy=POLICY,rating_group_size=rotations)
             model.add(game,'job')
             model.add(game,'job')
 

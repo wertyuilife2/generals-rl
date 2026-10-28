@@ -12,33 +12,33 @@ import torch
 from torch import nn
 
 from .information_ppo import InformationSpatialPPOPolicy
-from .policy.cnn import (FRAME_DIM, MAP_PLANES, MAP_SIZE, PUBLIC_DIM,
-                         AlignedInputConv2d, _unpack_history, _knowledge_maps,
+from .policy.cnn import (AlignedInputConv2d, _unpack_history, _knowledge_maps,
                          _padding_part, _PackedSpatialActor)
 
 
 class _PackedHistoryCritic(nn.Module):
     def __init__(self, baseline, alignment):
         super().__init__()
+        self.layout = baseline.layout
         self.history_length = baseline.history_length
         self.knowledge_channels = baseline.knowledge_channels
         self.trunk, self.context, self.value_head = baseline.trunk, baseline.context, baseline.value_head
         old = self.trunk[0]
         first = AlignedInputConv2d.from_conv(old, alignment)
         self.trunk[0] = first
-        self.register_buffer("_input_zero_padding", old.weight.new_zeros(1, first.input_padding, MAP_SIZE, MAP_SIZE),
+        self.register_buffer("_input_zero_padding", old.weight.new_zeros(1, first.input_padding, self.layout.height, self.layout.width),
                              persistent=False)
 
     def forward(self, privileged, history, knowledge=None, *, unpacked=None):
-        frames, local = unpacked if unpacked is not None else _unpack_history(history, self.history_length, "critic")
+        frames, local = unpacked if unpacked is not None else _unpack_history(history, self.layout)
         count = history.shape[0]
-        if privileged.shape != (count, FRAME_DIM):
+        if privileged.shape != (count, self.layout.frame_dim):
             raise ValueError("critic privileged observation shape does not match history batch")
-        memory = [_knowledge_maps(knowledge, self.knowledge_channels, count, "critic")] if self.knowledge_channels else []
-        maps = privileged[:, :-PUBLIC_DIM].reshape(count, MAP_PLANES, MAP_SIZE, MAP_SIZE)
+        memory = [_knowledge_maps(knowledge, self.knowledge_channels, count, "critic", self.layout)] if self.knowledge_channels else []
+        maps = privileged[:, :-self.layout.public_dim].reshape(count, self.layout.map_planes, self.layout.height, self.layout.width)
         inputs = torch.cat((maps, local, *memory, *_padding_part(self, "_input_zero_padding", count)), 1)
         pooled = self.trunk(inputs).mean(dim=(-2, -1))
-        context = self.context(torch.cat((pooled, privileged[:, -PUBLIC_DIM:], frames[:, -1, -PUBLIC_DIM:]), -1))
+        context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:], frames[:, -1, -self.layout.public_dim:]), -1))
         return self.value_head(torch.cat((pooled, context), -1))
 
 
@@ -118,7 +118,7 @@ class OptimizedInformationSpatialPPOPolicy(InformationSpatialPPOPolicy):
                 and pending.version == self._history_version(history)
                 and pending.grad_enabled == torch.is_grad_enabled()
                 and pending.inference_mode == torch.is_inference_mode_enabled()):
-            frames = history.reshape(history.shape[0], self.history_length, FRAME_DIM)
+            frames = history.reshape(history.shape[0], self.history_length, self.layout.frame_dim)
             return frames, pending.maps
         return None
 
@@ -126,7 +126,7 @@ class OptimizedInformationSpatialPPOPolicy(InformationSpatialPPOPolicy):
         self.clear_input_cache()
         if is_teacher:
             raise ValueError("spatial student policy has no teacher inference branch")
-        unpacked = _unpack_history(obs["policy"], self.history_length, "actor")
+        unpacked = _unpack_history(obs["policy"], self.layout)
         try:
             logits = self.actor(obs["policy"], obs.get("knowledge"), unpacked=unpacked)
             probabilities = self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)

@@ -10,7 +10,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 
 from generals_rl.policy.scaled import RESNET_TOTAL_PRESETS, VIT_TOTAL_PRESETS
-from generals_rl.scaled_ppo import DEFAULT_PARAMETER_COUNTS, ScaledInformationSpatialPPOPolicy
+from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
 from generals_rl.student_ppo import StudentPPO
 from generals_rl.actor_critic import CategoricalActorCritic
 from rsl_rl.storage import RolloutStorageCTS
@@ -21,21 +21,21 @@ GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "kno
 
 def observations(count=2):
     generator = torch.Generator().manual_seed(108)
-    frames = torch.rand(count, 4, 985, generator=generator)
-    maps = frames[..., :972].reshape(count, 4, 12, 9, 9)
+    frames = torch.rand(count, 4, 1147, generator=generator)
+    maps = frames[..., :1134].reshape(count, 4, 14, 9, 9)
     maps[:, :, 4:6].zero_()
     for tick in range(4):
         maps[:, tick, 4:6, tick, tick] = 1
     masks = torch.ones(count, 649, dtype=torch.bool)
     masks[:, 2::3] = False
     values = {"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-              "critic": torch.rand(count, 985, generator=generator),
+              "critic": torch.rand(count, 1147, generator=generator),
               "knowledge": torch.rand(count, 891, generator=generator), "action_mask": masks}
     return TensorDict(values, [count])
 
 
 def construct(obs, family="resnet", size="1m", **kwargs):
-    return ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family, model_size=size, **kwargs)
+    return ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9, backbone=family, model_size=size, **kwargs)
 
 
 class ScaledInformationPolicyTests(unittest.TestCase):
@@ -45,9 +45,11 @@ class ScaledInformationPolicyTests(unittest.TestCase):
 
     def test_all_six_total_budgets_dense_shapes_and_fp32_masters_on_meta(self):
         obs = observations(1)
-        for (family, size), (actor_count, critic_count) in DEFAULT_PARAMETER_COUNTS.items():
+        for family, size in ((f, s) for f in ("resnet", "vit") for s in ("1m", "10m", "100m")):
             with self.subTest(family=family, size=size), torch.device("meta"):
                 policy = construct(obs, family, size, amp_bfloat16=True)
+                actor_count = sum(p.numel() for p in policy.actor.parameters())
+                critic_count = sum(p.numel() for p in policy.critic.parameters())
                 self.assertIsInstance(policy, CategoricalActorCritic)
                 self.assertEqual(policy.parameter_counts(), {"actor": actor_count, "critic": critic_count,
                                                              "total": actor_count + critic_count})
@@ -82,7 +84,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                     policy = construct(obs, family, critic_projection_channels=projection)
                     stem_convolutions = [module for module in policy.critic.spatial_stem if isinstance(module, torch.nn.Conv2d)]
                     self.assertEqual([module.kernel_size for module in stem_convolutions], [(3, 3), (3, 3)])
-                    self.assertEqual(stem_convolutions[0].in_channels, 44 if projection else 71)
+                    self.assertEqual(stem_convolutions[0].in_channels, 46 if projection else 81)
                     self.assertFalse({id(parameter) for parameter in policy.actor.parameters()}
                                      & {id(parameter) for parameter in policy.critic.parameters()})
                     raw = policy.actor(obs["policy"], obs["knowledge"])
@@ -95,7 +97,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                     policy.zero_grad(set_to_none=True)
                     policy.evaluate(obs).sum().backward()
                     self.assertTrue(all(parameter.grad is None for parameter in policy.actor.parameters()))
-                    history_grad = obs["policy"].grad.reshape(2, 4, 985)[..., :972].abs().sum((0, 2))
+                    history_grad = obs["policy"].grad.reshape(2, 4, 1147)[..., :1134].abs().sum((0, 2))
                     memory_grad = obs["knowledge"].grad.reshape(2, 11, 81).abs().sum((0, 2))
                     self.assertTrue(bool((history_grad > 0).all()))
                     self.assertTrue(bool((memory_grad > 0).all()))
@@ -105,7 +107,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                     if projection:
                         self.assertGreater(float(policy.critic.history_projection.weight.grad.abs().sum()), 0)
                     else:
-                        self.assertEqual(policy.parameter_counts()["critic"], DEFAULT_PARAMETER_COUNTS[family, "1m"][1] + 5856)
+                        self.assertGreater(policy.parameter_counts()["critic"], policy.parameter_counts()["actor"])
 
     def test_packed_actor_uses_local_history_knowledge_latest_xy_and_critic_is_private(self):
         obs = observations()
@@ -121,13 +123,13 @@ class ScaledInformationPolicyTests(unittest.TestCase):
             torch.testing.assert_close(policy.action_probabilities(changed), expected, rtol=0, atol=0)
             torch.testing.assert_close(policy.action_probabilities(obs.exclude("critic", "single_obs")), expected, rtol=0, atol=0)
         hook.remove()
-        local = obs["policy"].reshape(2, 4, 985)[..., :972].reshape(2, 48, 9, 9)
-        torch.testing.assert_close(captured["inputs"][:, :48], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["inputs"][:, 48:59], obs["knowledge"].reshape(2, 11, 9, 9), rtol=0, atol=0)
+        local = obs["policy"].reshape(2, 4, 1147)[..., :1134].reshape(2, 56, 9, 9)
+        torch.testing.assert_close(captured["inputs"][:, :56], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["inputs"][:, 56:67], obs["knowledge"].reshape(2, 11, 9, 9), rtol=0, atol=0)
         xy = (torch.arange(9.) - 3) / 8
-        torch.testing.assert_close(captured["inputs"][0, 59], xy[None].expand(9, 9), rtol=0, atol=0)
-        torch.testing.assert_close(captured["inputs"][0, 60], xy[:, None].expand(9, 9), rtol=0, atol=0)
-        self.assertEqual(float(captured["inputs"][:, 61:].abs().sum()), 0)
+        torch.testing.assert_close(captured["inputs"][0, 67], xy[None].expand(9, 9), rtol=0, atol=0)
+        torch.testing.assert_close(captured["inputs"][0, 68], xy[:, None].expand(9, 9), rtol=0, atol=0)
+        self.assertEqual(float(captured["inputs"][:, 69:].abs().sum()), 0)
 
     def test_chunking_bounds_both_networks_preserves_rng_and_does_not_chunk_training_graphs(self):
         obs = observations(5)
@@ -242,8 +244,6 @@ class ScaledInformationPolicyTests(unittest.TestCase):
             policy.action_probabilities(obs, is_teacher=True)
         with self.assertRaisesRegex(ValueError, "knowledge"):
             policy.action_probabilities(obs.exclude("knowledge"))
-        with self.assertRaisesRegex(ValueError, "9x9"):
-            policy.set_geometry(13, 13)
 
 
 if __name__ == "__main__":

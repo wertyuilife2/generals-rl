@@ -1,20 +1,7 @@
-"""Balanced total actor+critic budgets for the H4/K11 v32 information task.
+"""Independent spatial actor and critic with nominal 1M/10M/100M budgets.
 
-The six targets reuse pinned timm ResNetV2/DeiT-III blocks and established
-cell-preserving adapters. Budgets count BOTH independently trainable branches,
-including observation projections and heads. Default projection32 counts:
-
-             actor       critic       total
-ResNet 1m      514,537      536,737    1,051,274
-ResNet 10m   5,079,049    5,098,945   10,177,994
-ResNet 100m 49,046,457   49,058,289   98,104,746
-ViT 1m         526,985      548,417    1,075,402
-ViT 10m      4,957,961    4,975,297    9,933,258
-ViT 100m    49,477,001   49,481,025   98,958,026
-
-Projection0 retains all raw history/knowledge and adds 5,856 critic parameters.
-Rollout chunks bound hidden activation memory; PPO training uses StudentPPO's
-physical_minibatch_size to backward/release each graph before the next chunk.
+Actual parameter counts include the configured board geometry and feature schema;
+``parameter_counts()`` reports the instantiated model rather than historical totals.
 """
 from __future__ import annotations
 
@@ -31,26 +18,6 @@ from .spatial_ppo import SpatialPPOPolicy
 from .policy.layout import ObservationLayout
 from .policy.cnn import AlignedInputConv2d
 from .policy.scaled import (_build_total_backbone, _ScaledInformationActor, RESNET_TOTAL_PRESETS)
-
-
-# Each preset applies equally to the actor and the independent critic. ResNet
-# uses the unchanged 16-bottleneck [3,4,6,3] stage pattern at every capacity.
-DEFAULT_PARAMETER_COUNTS = {
-    ("resnet", "1m"): (514_537, 536_737),
-    ("resnet", "10m"): (5_079_049, 5_098_945),
-    ("resnet", "100m"): (49_046_457, 49_058_289),
-    ("vit", "1m"): (526_985, 548_417),
-    ("vit", "10m"): (4_957_961, 4_975_297),
-    ("vit", "100m"): (49_477_001, 49_481_025),
-}
-
-
-
-
-
-
-
-
 
 
 class _ScaledInformationCritic(nn.Module):
@@ -72,7 +39,7 @@ class _ScaledInformationCritic(nn.Module):
         # Both spatial layers survive the projection ablation for either family;
         # the entire ResNet/ViT then adds capacity to the independent critic.
         self.spatial_stem = nn.Sequential(first, nn.SiLU(), nn.Conv2d(32, 32, 3, padding=1), nn.SiLU())
-        self.backbone = _build_total_backbone(kind, size, 32, spatial_mode)
+        self.backbone = _build_total_backbone(kind, size, 32, spatial_mode, (layout.height, layout.width))
         self.projection = nn.Conv2d(self.backbone.out_channels, head_channels, 1)
         self.context = nn.Sequential(nn.Linear(head_channels + 2 * layout.public_dim, head_channels), nn.SiLU())
         self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
@@ -144,11 +111,11 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     Master parameters remain float32; CUDA bf16 autocasts only network forwards,
     then logits/probabilities/log-probabilities and values return to float32.
     """
-    semantics = "scaled_v32_p2_9x9_hist4_knowledge11_independent_critic_v1"
+    semantics = "official_p2_hist4_knowledge11_independent_critic_v2"
 
     def __init__(self, obs, obs_groups, num_actions, *, backbone="resnet", model_size="1m",
-                 map_width=9, map_height=9, history_length=4, players=2,
-                 map_planes=12, public_dim=13, knowledge_channels=11,
+                 map_width=23, map_height=23, history_length=4, players=2,
+                 map_planes=14, public_dim=13, knowledge_channels=11,
                  critic_actor_information=True, own_king_geometry=True,
                  critic_projection_channels=32, input_channel_alignment=4,
                  head_channels=128, action_distribution="categorical",
@@ -166,8 +133,9 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.backbone_kind, self.model_size = backbone, model_size.lower()
         schema = (players, map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
         if (any(isinstance(value, bool) or not isinstance(value, int) for value in schema)
-                or schema != (2, 9, 9, 4, 12, 13, 11)):
-            raise ValueError("scaled policy requires the v32 P2 9x9 H4/K11 twelve-plane/public13 schema")
+                or (players, history_length, map_planes, public_dim, knowledge_channels) != (2, 4, 14, 13, 11)
+                or min(map_width, map_height) < 1):
+            raise ValueError("scaled policy requires P2 H4/K11 fourteen-plane/public13 features")
         if action_distribution != "categorical" or actor_obs_normalization is not False or critic_obs_normalization is not False:
             raise ValueError("scaled policy uses categorical actions and unnormalized explicit features")
         for name, value in (("critic_actor_information", critic_actor_information), ("own_king_geometry", own_king_geometry),
@@ -296,10 +264,6 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         # Explicitly keep masking/gating and Categorical normalization in FP32.
         with torch.autocast(logits.device.type, enabled=False):
             return self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)
-
-    def set_geometry(self, width, height):
-        if (width, height) != (9, 9):
-            raise ValueError("scaled v32 policy requires 9x9 maps")
 
     def __getstate__(self):
         state = super().__getstate__().copy()

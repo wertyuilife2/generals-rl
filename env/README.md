@@ -2,6 +2,9 @@
 
 游戏环境子项目，源码包名为 `generals`，发行包名为 `generals-env`。支持 CPU/CUDA 批量模拟及 Tk 桌面游玩。
 
+当前规则固定为 2026-10-28 核查的官网 **31.4.5 普通 1v1 / FFA**，默认按官方尺寸与公平性规则随机生成地图。
+CPU、CUDA、桌面 GUI 和 Arena 使用相同动作时序、迷雾及结算语义；版本证据与验证边界见[实施记录](../doc/official_rules_alignment.md)。
+
 从仓库根目录安装和启动：
 
 ```bash

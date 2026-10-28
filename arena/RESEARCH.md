@@ -219,9 +219,9 @@ Arena 不导入训练框架，不读取 PPO、网络、特征或动作版本配�
 {
   "schema_version": 1,
   "name": "nova-ViT1M-224",
-  "rules": "generals-legacy-v1",
+  "rules": "generals.io-31.4.5-classic-v1",
   "entrypoint": "runtime:create_controller",
-  "capabilities": {"maps": {"shapes": [[9, 9]]}, "player_counts": [2]},
+  "capabilities": {"maps": {"width": [18, 23], "height": [18, 23]}, "player_counts": [2]},
   "artifacts": {
     "weights": {"path": "actor.pt", "sha256": "<SHA256>"},
     "config": {"path": "model_config.json", "sha256": "<SHA256>"},
@@ -239,10 +239,10 @@ Arena 不导入训练框架，不读取 PPO、网络、特征或动作版本配�
 
 ```bash
 python -m generals_arena league init outputs/arena/models \
-  --config arena/configs/leagues/legacy_9x9_1v1.json
+  --config arena/configs/leagues/official_1v1.json
 python -m generals_arena commit /path/to/bundle --league outputs/arena/models --workers 1
 python -m generals_arena run --player @nova-ViT1M-224 --player baseline/aggressive \
-  --league outputs/arena/models --size 9x9 --games 100
+  --league outputs/arena/models --size auto --games 100
 ```
 
 执行该包需要 env/Arena 及包自身依赖，当前 RL 导出的包需要 PyTorch、NumPy、timm，
@@ -257,11 +257,11 @@ python -m generals_arena run --player @nova-ViT1M-224 --player baseline/aggressi
 
 能力协议支持矩形、多尺寸与 2–8 人：`maps.shapes` 为 `[width,height]` 列表，
 或 `maps={"width":[min,max],"height":[min,max]}`。所有声明尺寸适用于全部声明人数。
-Arena 检查完整联赛分布及私有比赛尺寸；当前默认 F03 模型导出为9×9／2人，其他模型按其训练与导出声明验证，
+Arena 检查完整联赛分布及私有比赛尺寸；当前默认模型导出为18–23格随机长方形／2人，其他模型按其训练与导出声明验证，
 不能仅改 JSON 扩大能力。比赛预设只是 `league init` 的配置，不属于策略包。
 
 训练自动导出及固定对手批评估见 [RL 使用说明](../rl/README.md#模型导出与-arena-评估)。
-训练用批评估固定 profile 的策略和赛程，逐局应用与公开联赛相同的 GoR/Codeforces 评分。2 人评估加入真实 WAIT 对照，FFA 无固定锚点；不同赛程及对手集合的分数不直接混用。
+训练用批评估固定 profile 的策略和赛程，1v1 使用 GoR 胜率函数作整批拟合，FFA 使用 Codeforces 评分。2 人评估加入真实 WAIT 对照，FFA 无固定锚点；公开联赛的逐局评分与训练面板分数分开报告，不同赛程及对手集合的分数不直接混用。
 Git 忽略 `.pt/.pth` 与 `outputs/`；共享完整目录即可，无需 GitHub Release。
 
 

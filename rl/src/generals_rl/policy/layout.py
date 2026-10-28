@@ -9,7 +9,7 @@ class ObservationLayout:
     width: int
     height: int
     history_length: int = 4
-    map_planes: int = 12
+    map_planes: int = 14
     public_dim: int = 13
     knowledge_channels: int = 0
 

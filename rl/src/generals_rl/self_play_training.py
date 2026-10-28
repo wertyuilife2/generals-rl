@@ -93,8 +93,6 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         "encoder": f"{type(task.observation_encoder).__module__}.{type(task.observation_encoder).__qualname__}",
         "action_space": f"{type(task.action_space).__module__}.{type(task.action_space).__qualname__}",
     }
-    if task.config.productive_actions:
-        signature["mdp"]["productive_actions"] = True
     if task.config.persistent_knowledge:
         signature["mdp"]["persistent_knowledge"] = True
         signature["knowledge_semantics"] = task.knowledge.semantics

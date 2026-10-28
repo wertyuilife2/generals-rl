@@ -58,17 +58,30 @@ class PolicyRuntime:
         self.reset(player_id, seed)
 
     def validate_rules(self, map_config, visibility):
-        if (map_config.width, map_config.height, map_config.players) != (
-                self.features.width, self.features.height, self.features.players):
-            raise ValueError("arena board shape/player count does not match the policy")
+        self._check_geometry(map_config.width, map_config.height, map_config.players)
         if visibility != "local":
             raise ValueError("policy requires local visibility")
+
+    def _check_geometry(self, width, height, players):
+        if players != self.features.players:
+            raise ValueError('observation player count does not match policy')
+        if self.features.random_maps:
+            if any(side is not None and not 18 <= side <= 23 for side in (width, height)):
+                raise ValueError('this policy supports official 18–23-cell 1v1 maps')
+        elif (width, height) != (self.features.width, self.features.height):
+            raise ValueError('observation shape does not match policy')
+
+    def _board_actions(self, encoded, widths):
+        value = (encoded - 1).clamp_min(0)
+        source = value // 8
+        board_source = (source // self.features.width) * widths + source % self.features.width
+        return torch.where(encoded > 0, 1 + board_source * 8 + value % 8, 0)
 
     def _grow(self, capacity):
         if capacity <= self.capacity:
             return
         old = self.capacity
-        frame_dim = (10 + self.features.players) * self.features.width * self.features.height + 5 * self.features.players + 3
+        frame_dim = (12 + self.features.players) * self.features.width * self.features.height + 5 * self.features.players + 3
         frames = torch.zeros(capacity, self.features.history_length, frame_dim, device=self.device)
         if old:
             frames[:old] = self.history.frames
@@ -200,9 +213,9 @@ class PolicyRuntime:
             if observations.get("visibility", "local") != "local":
                 raise ValueError("policy requires local visibility")
             batch = GameBatch.from_raw(observations, self.device)
-            if (batch.width, batch.height, batch.players) != (
-                    self.features.width, self.features.height, self.features.players):
-                raise ValueError("observation shape/player count does not match policy")
+            self._check_geometry(batch.width, batch.height, batch.players)
+            real_width = batch.width
+            batch = batch.padded(self.features.width, self.features.height)
             if not batch.num_envs:
                 return torch.empty(0, dtype=torch.long, device=self.device)
             rows = self._rows(batch.num_envs, lane_ids)
@@ -215,19 +228,21 @@ class PolicyRuntime:
                     raise ValueError("observation belongs to another player")
             active = observations.get("active")
             active = None if active is None else torch.as_tensor(active, dtype=torch.bool, device=self.device)
-            return self._act_batch(batch, rows, active)
+            return self._board_actions(self._act_batch(batch, rows, active), real_width)
         observations = list(observations)
         if not observations:
             return []
         for observation in observations:
-            if observation.visibility != "local" or (observation.width, observation.height, len(observation.alive)) != (
-                    self.features.width, self.features.height, self.features.players):
+            if observation.visibility != "local":
                 raise ValueError("observation does not match the local policy contract")
+            self._check_geometry(observation.width, observation.height, len(observation.alive))
         rows = self._rows(len(observations), lane_ids)
         expected = self.player_ids if rows is None else self.player_ids[rows]
         if expected.tolist() != [observation.player_id for observation in observations]:
             raise ValueError("observation belongs to another player")
-        encoded = self._act_batch(GameBatch.from_observations(observations, self.device), rows)
+        batch = GameBatch.from_observations(observations, self.device, width=self.features.width, height=self.features.height)
+        widths = torch.tensor([obs.width for obs in observations], device=self.device)
+        encoded = self._board_actions(self._act_batch(batch, rows), widths)
         return [Action.decode(value) for value in encoded.tolist()]
 
     def act(self, observation):

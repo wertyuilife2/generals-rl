@@ -9,7 +9,7 @@ import math
 
 from generals_arena.util import integer
 
-POLICY = 'gor-relative-codeforces-v9'
+POLICY = 'gor-relative-codeforces-official-31.4.5-v10'
 MODES = ('1v1', 'ffa')
 PROVISIONAL_GAMES = 6
 
@@ -28,8 +28,8 @@ def rating_mode(result):
 
 
 def scores(result):
-    """Survivors outrank eliminated players; same-tick eliminations tie."""
-    return [float('inf') if tick is None else tick for tick in result['elimination_ticks']]
+    """The environment supplies official placements, independent of Elo math."""
+    return [-rank for rank in result['placements']]
 
 
 def ranks(result):

@@ -25,7 +25,7 @@ from generals_arena.matches.game import close_game
 from generals_arena.matches.game import timing
 from generals_arena.matches.game import failure
 from generals_arena.policies.native import decision_timeout
-from generals_arena.matches.game import state_from_snapshot
+from generals.core.recording import state_from_dict
 
 
 _process_lifecycle = threading.RLock()
@@ -151,6 +151,8 @@ def child_loop(connection):
                 elif op == 'advance' and not game.done:
                     game.advance({int(k):Action.decode(v) for k,v in request['actions'].items()})
                     journal.record(game)
+                elif op == 'surrender' and not game.done:
+                    game.surrender(request['seat'])
                 response = {'snapshot':snapshot(game)}
                 if op in ('run','replay') or game.done:
                     response['blob'] = game.replay_blob()
@@ -272,6 +274,7 @@ class MatchWorker:
         while True:
             response = self._exchange(request)
             if 'decision_timeout' not in response:
+                self.forfeits = response['snapshot']['forfeits']
                 return response
             details = response['decision_timeout']
             seat = details['player']
@@ -334,7 +337,7 @@ class HumanCppGame:
     def _receive(self, response):
         value = response['snapshot']
         self.forfeits = value.get('forfeits', [])
-        self.state = state_from_snapshot(value['state'], self.forfeits)
+        self.state = state_from_dict(value['state'])
         self.initial_digest, self.done = value['initial_digest'], value['done']
         records = {m['seat']:m for m in value['timing']}
         self.controllers = [SimpleNamespace(decision_metrics=records[i]) if i in records else None
@@ -348,6 +351,9 @@ class HumanCppGame:
     def advance(self, actions=None):
         self._receive(self.worker.call({'op':'advance',
             'actions':{k:v.encode() for k,v in (actions or {}).items()}}))
+
+    def surrender(self, seat):
+        self._receive(self.worker.call({'op': 'surrender', 'seat': seat}))
 
     def result(self):
         return self._result

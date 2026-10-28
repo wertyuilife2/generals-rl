@@ -74,7 +74,7 @@ def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(t
         Path(__file__).resolve().parents[1] / 'examples/cpp_wait/policy.cpp'))
     entries = {entry['entrant_id']: entry for entry in (native, package)}
     plan = dict(game_id='mixed', entrant_ids=list(entries), instance_ids=[0, 1],
-                controller_seeds=[2, 3], map_seed=42, map=asdict(MapConfig(9, 9, 2, .1, .05)))
+                controller_seeds=[2, 3], map_seed=42, map=asdict(MapConfig(25, 25, 2, .1, .05)))
     # Twenty .6s decisions exceed the former 11.2s match budget.
     with MatchRunner(entries, max_ticks=20) as runner:
         results, _ = runner.run([plan])

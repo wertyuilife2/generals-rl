@@ -25,8 +25,7 @@ def config():
     cfg = small_training_config(
         task_overrides={"width": 9, "height": 9, "history_length": 4,
                         "seed": 20261013, "combat_features": True,
-                        "king_threat_distance": True, "productive_actions": True,
-                        "map_pool_size": 8, "reward": RewardConfig(potential_gamma=.995)},
+                        "king_threat_distance": True,                         "map_pool_size": 8, "reward": RewardConfig(potential_gamma=.995)},
         runner_overrides={"learning_epochs": 1})
     cfg["runner"]["policy"] = light_policy_config()
     cfg["runner"]["policy"]["own_king_geometry"] = True
@@ -93,7 +92,7 @@ class StorageObsKeysTests(unittest.TestCase):
                         assert_nested_equal(self, actual[key], reference[key])
                 expected_keys = FULL_KEYS if selected is None else set(STORAGE_KEYS)
                 self.assertEqual(actual["storage_keys"], expected_keys)
-                saved_bytes = 0 if selected is None else 4 * 4 * 985 * 4
+                saved_bytes = 0 if selected is None else 4 * 4 * 1147 * 4
                 self.assertEqual(reference["payload"] - actual["payload"], saved_bytes)
 
     def test_invalid_storage_keys_rejected(self):
