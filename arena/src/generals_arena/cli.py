@@ -1,6 +1,8 @@
 """Commit C++ / RL policies, run private games, and manage the local Arena."""
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 import sys
 import time
@@ -20,6 +22,12 @@ def league_command(args):
         print(f"League initialized: {store.directory} ({'; '.join(labels[mode] for mode in store.rating_modes())})")
         return
     store = CompetitionStore(args.directory)
+    if args.action in ("retire", "restore"):
+        result = store.set_retired(args.entrant, args.action == "retire", reason=args.reason)
+        from generals_arena.competitions.submission import refresh_publications
+        refresh_publications(store)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     if args.action == "resize":
         ranges = store.resize_maps(args.min_side, args.max_side, args.side_cap)
         print(f"Map ranges updated for future games: {json.dumps(ranges)}. Existing results and ratings retained.")
@@ -41,7 +49,7 @@ def league_command(args):
         refresh_publications(store)
         print("Ratings rebuilt from completed matches.")
     else:
-        reports = {args.mode: store.leaderboard(args.mode)} if args.mode else store.leaderboards()
+        reports = {args.mode: store.leaderboard(args.mode, include_retired=args.all)} if args.mode else store.leaderboards(include_retired=args.all)
         if args.json:
             print(json.dumps(reports, ensure_ascii=False, indent=2))
         else:
@@ -88,6 +96,73 @@ def match_mode_command(args):
     return 0
 
 
+def online_command(args):
+    from generals.backends.online.credentials import initialize_account, load_account
+    from generals.backends.online.endpoints import resolve_endpoint
+    if args.command == 'online-account':
+        result = initialize_account(args.account, args.username, directory=args.account_dir,
+                                    site=args.site, timeout=args.timeout)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.account:
+        account = load_account(args.account, args.account_dir)
+        endpoint = resolve_endpoint(server=account['server'])
+        if args.site is not None and args.site != endpoint.site:
+            raise ValueError('saved account belongs to a different site')
+        user_id = account['user_id']
+    else:
+        endpoint = resolve_endpoint(site=args.site or 'bot')
+        variable = args.user_id_env or ('GENERALS_MAIN_USER_ID' if endpoint.site == 'main' else 'GENERALS_BOT_USER_ID')
+        user_id = os.environ.get(variable)
+        if not user_id:
+            raise ValueError(f'credential environment variable {variable} is empty')
+    options = dict(user_id=user_id, server=endpoint.server, queue=args.queue, room=args.room,
+                   force_start=args.force_start, start_timeout=args.start_timeout,
+                   update_timeout=args.update_timeout)
+    from generals_arena.policies.artifacts import select_policy
+    from generals_arena.matches.online import play_online
+    entries = None
+    if args.policy.startswith('@'):
+        from generals_arena.competitions.store import CompetitionStore
+        entries = CompetitionStore(args.league).entrants()
+    parameters = json.loads(args.params.read_text()) if args.params else None
+    with tempfile.TemporaryDirectory(prefix='generals-online-policy-') as scratch:
+        directory = args.league if args.policy.startswith(('@', 'policy/')) else scratch
+        spec = select_policy(directory, args.policy, parameters, device=args.device, entries=entries)
+        report = play_online(spec, options, games=args.games, output=args.output,
+                             seed=args.seed, max_decisions=args.max_decisions)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report['status'] == 'completed' else 1
+
+
+def add_online_commands(commands):
+    account = commands.add_parser('online-account', help='register a dedicated official-site account')
+    account.add_argument('--account', required=True)
+    account.add_argument('--username', required=True)
+    account.add_argument('--account-dir', type=Path)
+    account.add_argument('--site', choices=('bot', 'main'), default='bot')
+    account.add_argument('--timeout', type=float, default=15.)
+    play = commands.add_parser('online', help='play official-server games with an Arena policy package')
+    play.add_argument('policy', help='source directory, package directory, @alias, or policy/hash')
+    play.add_argument('--params', type=Path)
+    play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    play.add_argument('--device', default='cpu')
+    play.add_argument('--site', choices=('bot', 'main'))
+    identity = play.add_mutually_exclusive_group()
+    identity.add_argument('--account')
+    identity.add_argument('--user-id-env')
+    play.add_argument('--account-dir', type=Path)
+    play.add_argument('--queue', choices=('custom', '1v1', 'ffa'), default='custom')
+    play.add_argument('--room')
+    play.add_argument('--force-start', action='store_true')
+    play.add_argument('--start-timeout', type=float, default=120.)
+    play.add_argument('--update-timeout', type=float, default=15.)
+    play.add_argument('--games', type=int, default=1)
+    play.add_argument('--seed', type=int, default=42)
+    play.add_argument('--max-decisions', type=int)
+    play.add_argument('--output', type=Path, help='new directory for reports and incoming packet traces')
+
+
 def _execution_options(args):
     return {"backend": args.backend, "device": args.device, "batch_size": args.batch_size,
             "cpu_threads": args.cpu_threads, "record_replays": args.record_replays}
@@ -106,6 +181,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     add_submission_commands(commands)
+    add_online_commands(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
     init = actions.add_parser("init", help="create independent GoR 1v1 and Codeforces FFA rating pools")
@@ -124,6 +200,12 @@ def main(argv=None):
     ranking = actions.add_parser("leaderboard")
     ranking.add_argument("directory", type=Path)
     ranking.add_argument("--json", action="store_true")
+    ranking.add_argument("--all", action="store_true", help="include retired entrants")
+    for action in ("retire", "restore"):
+        roster = actions.add_parser(action)
+        roster.add_argument("directory", type=Path)
+        roster.add_argument("entrant", help="name, @alias, or immutable entrant ID")
+        roster.add_argument("--reason")
     ranking.add_argument("--mode", choices=MODES, help="one rating pool; default shows every enabled pool")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
@@ -155,6 +237,8 @@ def main(argv=None):
     _add_execution_options(evaluation)
     args = parser.parse_args(argv)
     try:
+        if args.command in ('online', 'online-account'):
+            return online_command(args)
         if args.command in ('commit', 'run', 'status'):
             return submission_command(args)
         if args.command in ("tournament", "evaluate"):

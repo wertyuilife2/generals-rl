@@ -6,12 +6,12 @@ import threading
 
 
 from generals_arena.competitions.uncertainty import RatingUncertainty
-from generals_arena.competitions.rating import validate_mode
+from generals_arena.competitions.rating import validate_mode, ranks
 
 
 def match_statistics(result, kills):
     """Each strategy has one sample per game, regardless of its seat count."""
-    ids, ticks = result['entrant_ids'], result['ticks']
+    ids = result['entrant_ids']
     if (len(kills) != len(ids) or
             any(type(k) is not int or not 0 <= k < len(ids) for k in kills) or
             sum(kills) != sum(t is not None for t in result.get('capture_ticks', result['elimination_ticks']))):
@@ -20,8 +20,8 @@ def match_statistics(result, kills):
     for seat, entrant in enumerate(ids):
         seats[entrant].append(seat)
     winner = result['winner_seat']
-    survival = [1. if tick is None else tick / ticks if ticks else 0.
-                for tick in result['elimination_ticks']]
+    # Use the environment's official placements, including kill priority and ties.
+    survival = [(len(ids) - rank) / (len(ids) - 1) for rank in ranks(result)]
     return {entrant: {
         'win_rate': float(winner in group),
         'survival_index': sum(survival[seat] for seat in group) / len(group),
@@ -60,7 +60,7 @@ class LeaderboardStatistics:
 
     def leaderboard(self, progress=None):
         with self.lock:
-            report = self.store.leaderboard(self.mode)
+            report = self.store.leaderboard(self.mode, include_retired=True)
             count = report['completed_games']
             with self.store.connect() as db:
                 row = db.execute("SELECT value FROM meta WHERE key='rating_revision'").fetchone()
@@ -96,4 +96,5 @@ class LeaderboardStatistics:
                     row[key] = total[key] / total['games'] if total else None
             version_deltas(report['ranking'])
             self.uncertainty.annotate(report)
+            report["ranking"] = [row for row in report["ranking"] if not row.get("retired")]
             return report

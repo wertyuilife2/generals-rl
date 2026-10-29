@@ -24,7 +24,10 @@ def worker_count(value):
 
 
 def eligible_schedule(store, job, *, coverage=None, **options):
-    disabled = store.disabled_policy_ids()
+    retired = store.retired_entrant_ids()
+    if job["entrant_id"] in retired:
+        raise ValueError("entrant is retired; restore it before scheduling")
+    disabled = store.disabled_policy_ids() | retired
     if job['entrant_id'] in disabled:
         raise ValueError('C++ policy is disqualified after a recorded violation')
     if not options.get('human') and options.get('players') is None:

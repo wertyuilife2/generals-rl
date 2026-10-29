@@ -32,7 +32,7 @@ def test_native_sources_are_part_of_registered_version_identity(tmp_path, monkey
     assert before != util.source_digest('policy')
 
 
-@pytest.mark.parametrize('filename', ['native.py', 'worker.py'])
+@pytest.mark.parametrize('filename', ['native.py', 'worker.py', 'host.cpp'])
 def test_native_runtime_changes_invalidate_registered_execution(tmp_path, monkeypatch, filename):
     from generals_arena.policies import native
     from generals_arena.policies.artifacts import snapshot_policy

@@ -34,7 +34,7 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     complete('four', [a,a,b,b], 10, [2,None,8,6], [0,3,0,0], 1)
     first = stats.leaderboard()
     first_a = next(r for r in first['ranking'] if r['entrant_id'] == a)
-    assert first_a['survival_index'] == pytest.approx(.6)
+    assert first_a['survival_index'] == pytest.approx(.5)
     assert first_a['kill_index'] == pytest.approx(.5)
     assert first_a['win_rate'] == 1  # Winner was the second duplicate seat.
 
@@ -46,10 +46,10 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     report = stats.leaderboard()
     rows = {r['entrant_id']: r for r in report['ranking']}
     assert report['completed_games'] == 1
-    assert rows[a]['survival_index'] == pytest.approx(.6)
+    assert rows[a]['survival_index'] == pytest.approx(.5)
     assert rows[a]['kill_index'] == pytest.approx(.5)
     assert rows[a]['win_rate'] == 1
-    assert rows[b]['survival_index'] == pytest.approx(.7)
+    assert rows[b]['survival_index'] == pytest.approx(.5)
     assert rows[b]['kill_index'] == 0
     assert all(rows[idle][key] is None for key in ('win_rate','survival_index','kill_index'))
     assert stats.leaderboard() == report
@@ -57,7 +57,7 @@ def test_multiplayer_metrics_average_seats_then_games_and_include_timeouts(tmp_p
     duels = LeaderboardStatistics(store, '1v1').leaderboard()
     duel_rows = {row['entrant_id']:row for row in duels['ranking']}
     assert duels['completed_games'] == 2
-    assert duel_rows[a]['survival_index'] == 1 and duel_rows[a]['kill_index'] == 0
+    assert duel_rows[a]['survival_index'] == .25 and duel_rows[a]['kill_index'] == 0
     assert duel_rows[b]['kill_index'] == .5 and duel_rows[b]['win_rate'] == .5
 
 
@@ -83,7 +83,7 @@ def test_native_kills_do_not_transfer_and_statistics_use_recorded_counts(tmp_pat
         assert list(verified_replay(blob, result))[-1][0].tick == 2
         samples = match_statistics(result, result['kills'])
         assert samples[a]['kill_index'] == samples[b]['kill_index'] == .5
-        assert samples[store.reference]['survival_index'] == .5
+        assert samples[store.reference]['survival_index'] == 0
         trace = json.loads(gzip.decompress(blob))
         trace['digests'][0] = 'corrupt'
         with pytest.raises(ValueError, match='diverged at tick 1'):
@@ -136,3 +136,11 @@ def test_confidence_coverage_and_totals_are_isolated_by_rating_mode(tmp_path):
     assert all(row['ci_blocks'] == 6 and row['elo_ci'] is not None for row in ffa['ranking'])
     assert all(row['ci_blocks'] == 0 and row['win_rate'] is None for row in duels['ranking'])
     assert all(row['elo_ci'] is None for row in duels['ranking'] if not row['anchor'])
+
+
+def test_survival_uses_official_placement_instead_of_elimination_tick():
+    result = dict(entrant_ids=['a', 'b', 'c'], ticks=50, winner_seat=2,
+                  elimination_ticks=[2, 30, None], placements=[2, 3, 1])
+    # A's kill can place it above B despite its earlier elimination.
+    values = match_statistics(result, [1, 0, 1])
+    assert [values[k]['survival_index'] for k in ('a', 'b', 'c')] == [.5, 0, 1]
