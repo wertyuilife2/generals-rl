@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Generals Arena</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body>
+<header><a class="brand" href="/" aria-label="Arena 首页"><span class="brand-icon">♜</span><span>GENERALS <b>ARENA</b></span></a><nav aria-label="主导航"><button class="tab active" data-tab="ranking">排行榜</button><button class="tab" data-tab="history">对局记录</button><button class="tab" data-tab="play">人类对局</button></nav><span class="connection" id="connection">正在连接</span></header>
+<main>
+<div id="notice" role="status" hidden></div>
+<div class="workspace">
+<section class="panel" id="ranking-panel"><div class="panel-heading"><div><h2>实力榜单</h2><p class="muted" id="pool-caption">正在读取联赛</p></div><label for="rating-mode">评分池<select id="rating-mode" aria-label="选择独立评分池"></select></label></div><div class="table-scroll"><table><thead><tr><th scope="col">排名 / 选手</th><th scope="col" title="评分 ± 95% 估计区间半宽；按独立地图合并重复席位和换位">评分</th><th scope="col" aria-label="本评分池相对上一版本的变化" title="本评分池当前分数减去同名系列上一版本分数（按 -vN 排序）">▲</th><th scope="col" title="夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜，超时计入分母">胜率</th><th scope="col" title="存活时长 ÷ 对局时长；存活到结束记为 100%">存活指数</th><th scope="col" title="亲自击杀的席位数 ÷ 其余席位数（含同策略席位）">击杀指数</th></tr></thead><tbody id="ranking"></tbody></table></div></section>
+<section class="panel" id="history-panel" hidden>
+<form class="history-filters" id="history-filter" role="search" aria-label="筛选对局">
+  <label for="history-entrant">选手<select id="history-entrant"><option value="">全部选手</option></select></label>
+  <label for="history-opponent">对手<select id="history-opponent" title="选择相同策略可筛选同策略多个席位的对局"><option value="">不限对手</option></select></label>
+  <label for="pool">人数<select id="pool" aria-label="筛选对局人数"></select></label>
+  <button class="subtle" id="clear-history-filters" type="button" disabled>清除筛选</button>
+</form>
+<div id="history" aria-live="polite"></div><div class="pagination"><button class="subtle" id="prev-page">← 上一页</button><span id="page-info"></span><button class="subtle" id="next-page">下一页 →</button></div></section>
+<section class="panel" id="play-panel" hidden>
+<div class="panel-heading"><div><h2 id="play-title">以你的名字上榜</h2><p class="muted">与算法使用同一评分体系，随机匹配对手与出生位置。</p></div><span class="chip">RANKED</span></div>
+<div id="signup"><form id="signup-form"><label for="player-name">玩家名称</label><div class="input-row"><input id="player-name" required maxlength="48" placeholder="输入你的名字" autocomplete="nickname"><button class="primary" type="submit">创建玩家</button></div></form><p class="footnote">身份凭证保存在当前浏览器。请保留凭证，以便在其他浏览器继续累计分数。</p></div>
+<div id="player-lobby" hidden><div class="player-card"><span class="avatar">♜</span><div><strong id="player-label"></strong><p class="muted" id="player-rating"></p></div></div><p class="muted">点击自己的领地选择起点，用方向键 / WASD 或点击相邻格移动。移动可连续排队；再次点击选中格、Z 或 Shift 使用半兵。Q 清空队列，E 撤销，空格取消选择。</p><div class="input-row"><select id="play-players" aria-label="真人对局人数"></select><button class="primary" id="start-game">匹配并开始</button><button class="subtle" id="copy-token">复制身份凭证</button></div><p class="footnote" id="turn-description">每 0.5 秒提交至多一步（可配置）。关闭页面后对局继续，按最终结果计分。</p></div>
+<details class="recover"><summary>已有身份凭证？</summary><form id="recover-form" class="input-row"><input id="recover-token" type="password" placeholder="粘贴身份凭证" aria-label="身份凭证" required><button class="subtle">恢复玩家</button></form></details>
+</section>
+<aside><section class="side-card"><p class="eyebrow">THE BATTLEFIELD</p><h3>不重复的战场</h3><div class="mini-map" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p id="map-description" class="muted"></p><div class="rule-line"><span>战争迷雾</span><b>局部视野</b></div><div class="rule-line"><span>评分参照</span><b id="rating-reference">WAIT</b></div><div class="rule-line"><span>2–8 人对战</span><b>1v1 / FFA 分池</b></div></section><section class="side-card"><div class="side-heading"><h3>评测队列</h3><span id="job-count" class="chip">0</span></div><div id="jobs"></div></section></aside>
+</div>
+</main>
+<dialog id="board-dialog" aria-label="Generals 对局棋盘">
+  <canvas id="board" tabindex="0" aria-label="棋盘：拖动平移，滚轮缩放，点击选择己方格，方向键移动"></canvas>
+  <div class="game-header control-section"><div><p class="eyebrow" id="board-mode">REPLAY</p><h2 id="board-title">对局回放</h2></div><button id="close-board" aria-label="关闭棋盘">返回 ×</button></div>
+  <div class="game-info-panel"><div class="leaderboard-header"><span>玩家 / 实例</span><span>排名 · 兵力 · 领地</span></div><div id="game-players"></div><div class="turn-counter-panel"><span class="turn-label">Tick</span><strong id="turn-counter">0</strong></div><p class="muted" id="board-status"></p><p id="board-error" role="status"></p><button id="surrender" hidden>弃权</button></div>
+  <div class="zoom-controls"><button id="zoom-in" aria-label="放大">+</button><button id="zoom-out" aria-label="缩小">−</button><button id="zoom-reset" aria-label="地图居中">⟲</button></div>
+  <div class="bottom-controls"><div class="control-section">
+    <div id="live-controls" hidden><div class="game-controls"><span class="control-help">WASD / 方向键排队 · Q 清空 · E 撤销 · 空格取消选择 · G 主城</span><div class="dpad"><button data-dir="0" aria-label="向上">↑</button><button data-dir="3" aria-label="向左">←</button><button data-dir="2" aria-label="向下">↓</button><button data-dir="1" aria-label="向右">→</button></div><label class="half-label"><input type="checkbox" id="half">半兵 / Shift</label><button id="clear-moves">清空 Q</button><button id="undo-move">撤销 E</button><span id="action-status"></span></div></div>
+    <div id="replay-controls"><div class="replay-buttons"><button class="primary" id="toggle-replay">播放</button><label>速度 <select id="replay-speed"><option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option><option value="10">10×</option><option value="25">25×</option></select></label><span id="replay-tick"></span></div><input type="range" id="timeline" min="0" value="0" aria-label="回放进度"></div>
+  </div></div>
+</dialog>
+</body></html>

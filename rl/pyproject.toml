@@ -5,17 +5,20 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "generals-rl"
 version = "0.1.0"
-description = "Modular Generals MDP and vendored MoE CTS baseline"
+description = "Vectorized Generals MDP, PPO self-play and policy evaluation"
 requires-python = ">=3.11"
-dependencies = ["generals-env", "rsl-rl-lib==3.3.0", "torch>=2.6", "tensordict>=0.7", "tensorboard", "PyYAML"]
+dependencies = ["generals-env", "generals-baselines", "generals-arena", "rsl-rl-lib==3.3.0", "torch>=2.6", "tensordict>=0.7", "tensorboard", "PyYAML"]
 
 [project.optional-dependencies]
 video = ["Pillow>=10"]
 
 [project.scripts]
 generals-train = "generals_rl.train:main"
-generals-evaluate = "generals_rl.evaluate_builtin:main"
+generals-export = "generals_rl.export:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["generals_rl*"]
+
+[tool.setuptools.package-data]
+generals_rl = ["default.json"]

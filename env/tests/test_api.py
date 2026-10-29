@@ -119,7 +119,7 @@ assert 'tkinter' not in sys.modules
         with self.assertRaises(RuntimeError):
             env.step(action)
 
-    @unittest.skipUnless(sys.platform == 'linux', 'native OpenMP backend is Linux-only')
+    @unittest.skipUnless(sys.platform in ('linux', 'darwin'), 'native OpenMP backend needs Linux/macOS')
     def test_cpu_vector_contract_and_lifecycle(self):
         self.exercise_vector('cpu')
 

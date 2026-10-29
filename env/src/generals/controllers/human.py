@@ -6,7 +6,7 @@ from collections import deque
 
 from generals.core.observation import Observation
 from generals.core.state import Action, Direction, MoveMode, MoveResult, Terrain
-from generals.controllers.base import adjacent, direction_between
+from generals.core.grid import adjacent, direction_between
 
 
 class HumanController:
@@ -144,20 +144,19 @@ class HumanController:
             if self.anchor is not None and not self._anchor_owned():
                 self.selected = self.anchor = self.cursor = None
             return Action.wait()
-        action = self.queue[0]
-        source = int(action.source)
-        if not 0 <= source < obs.size or obs.owner.ravel()[source] != self.player_id:
-            self.clear_queue()
-            self.selected = self.anchor = self.cursor = None
-            self.message = "Source lost; queued path cleared."
-            return Action.wait()
-        target = adjacent(source, int(action.direction), obs.height, obs.width)
-        if target is None or obs.terrain.ravel()[target] == Terrain.MOUNTAIN:
-            self.clear_queue()
-            self.message = "Path blocked; queued path cleared."
-            return Action.wait()
-        self._pending = action
-        return action
+        while self.queue:
+            action = self.queue[0]
+            source = int(action.source)
+            target = adjacent(source, int(action.direction), obs.height, obs.width)
+            if (0 <= source < obs.size and obs.owner.flat[source] == self.player_id
+                    and obs.army.flat[source] > 1 and target is not None
+                    and obs.terrain.flat[target] != Terrain.MOUNTAIN):
+                self._pending = action
+                return action
+            self.queue.popleft()
+        self.clear_queue()
+        self.message = "Invalid queued moves skipped."
+        return Action.wait()
 
     def on_result(self, result: MoveResult) -> None:
         if result.player_id != self.player_id or self._pending is None or result.action != self._pending:
@@ -174,10 +173,9 @@ class HumanController:
                 self.cursor = self.anchor
             self.message = f"Move completed; {len(self.queue)} queued."
         else:
-            self.queue.clear()
             self.anchor = int(result.source) if result.valid else None
             self._confirmed_anchor = self.anchor
             self.cursor = self.anchor
             if self.selected is not None:
                 self.selected = self.anchor
-            self.message = "Attack did not capture the target; path cleared." if result.valid else f"Move rejected: {result.reason}; path cleared."
+            self.message = "Attack completed." if result.valid else f"Move skipped: {result.reason}."

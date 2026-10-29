@@ -1,49 +1,34 @@
-"""Shared discrete action vocabulary for PPO, inference, and future search."""
+"""Training-only action outcome metrics."""
 import torch
 
-from .state import GameBatch
+class ActionMetrics:
+    """Per-lane native action outcomes; rates use joint decision ticks.
 
+    A backtrack reverses two positive moves on adjacent ticks. WAIT, rejected
+    moves, zero-army moves, and episode resets break that adjacency.
+    """
 
-class EncodedActionSpace:
-    """WAIT=0; MOVE=1 + source*8 + direction*2 + mode (engine encoding)."""
+    names = ("wait_rate", "zero_moved_rate", "backtrack_rate", "moved_army")
 
-    def __init__(self, width: int, height: int):
-        self.width, self.height = width, height
-        self.size = 1 + width * height * 8
-        self._tables = {}
+    def __init__(self, num_envs, device):
+        self.previous_move = torch.full((num_envs, 2), -1, dtype=torch.long, device=device)
 
-    def destinations(self, device):
-        key = str(device)
-        if key not in self._tables:
-            cells = torch.arange(self.width * self.height, device=device)
-            y, x = cells // self.width, cells % self.width
-            targets = torch.stack((cells - self.width, cells + 1,
-                                   cells + self.width, cells - 1), -1)
-            in_bounds = torch.stack((y > 0, x < self.width - 1,
-                                     y < self.height - 1, x > 0), -1)
-            self._tables[key] = targets.clamp(0, len(cells) - 1), in_bounds
-        return self._tables[key]
+    def reset(self, mask=None):
+        if mask is None:
+            self.previous_move.fill_(-1)
+        else:
+            self.previous_move[mask] = -1
 
-    def mask(self, batch: GameBatch, player_ids: torch.Tensor) -> torch.Tensor:
-        targets, in_bounds = self.destinations(batch.device)
-        state = batch.state
-        owned = state["owner"] == player_ids[:, None]
-        active = state["alive"].gather(1, player_ids[:, None]).squeeze(1) & ~state["terminated"]
-        moves = (owned[:, :, None] & in_bounds[None] &
-                 (state["terrain"][:, targets] != 1) & active[:, None, None])
-        moves = moves[..., None].expand(-1, -1, -1, 2).reshape(batch.num_envs, -1)
-        # A terminal or eliminated player's observation still needs a valid
-        # distribution. WAIT is its absorbing action; active masks match core.
-        return torch.cat((torch.ones_like(active[:, None]), moves), -1)
-
-    def validate(self, actions: torch.Tensor, mask: torch.Tensor):
-        if actions.shape not in ((len(mask),), (len(mask), 1)):
-            raise ValueError("actions must be [num_envs] or [num_envs, 1]")
-        if actions.dtype not in (torch.int32, torch.int64):
-            raise TypeError("encoded actions must be integer tensors")
-        encoded = actions.reshape(-1).long()
-        if bool(((encoded < 0) | (encoded >= self.size)).any()):
-            raise ValueError("encoded action is out of range")
-        if not bool(mask.gather(1, encoded[:, None]).all()):
-            raise ValueError("action was masked at the joint decision boundary")
-        return encoded
+    def update(self, moves):
+        executed = moves[:, 0].bool() & moves[:, 1].bool()
+        moved = executed & (moves[:, 8] == 2)
+        positive = moved & (moves[:, 4] > 0)
+        reverse = (positive & (moves[:, 2] == self.previous_move[:, 1])
+                   & (moves[:, 3] == self.previous_move[:, 0]))
+        self.previous_move.copy_(torch.where(positive[:, None], moves[:, 2:4], -1))
+        return {
+            "wait_rate": (executed & (moves[:, 8] == 1)).float(),
+            "zero_moved_rate": (moved & (moves[:, 4] == 0)).float(),
+            "backtrack_rate": reverse.float(),
+            "moved_army": torch.where(positive, moves[:, 4], 0).float(),
+        }

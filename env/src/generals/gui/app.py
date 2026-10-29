@@ -11,6 +11,7 @@ from generals.core.config import MapConfig
 from generals.controllers import make_controllers
 from generals.core.mapgen import generate_map
 from generals.core.observation import snapshot
+from generals.core.state import rank_players
 from generals.runtime.runner import Runner
 from generals.gui.board import Board, PLAYER_COLORS
 from generals.gui.input import InputBindings
@@ -174,6 +175,8 @@ class App:
                 self.half_button = button
         ttk.Label(side, text=self.tr("鼠标选格 → 点击相邻格排队\n右键 / 中键拖动 · 滚轮缩放\nWASD / 方向键移动 · P 暂停", "Select tile, then adjacent tiles\nRight / middle drag; wheel zoom\nWASD / arrows move; P pauses"), style="Muted.TLabel", wraplength=285, justify="left").pack(anchor="w", pady=(12, 10))
         self.spectate_button = ttk.Button(side, text=self.tr("继续观战", "Continue spectating"), style="Accent.TButton", command=self.continue_spectating)
+        self.surrender_button = ttk.Button(side, text=self.tr("弃权", "Surrender"), command=self.surrender)
+        self.surrender_button.pack(fill="x", pady=4)
         self.detail_var = tk.StringVar()
         ttk.Label(side, textvariable=self.detail_var, style="Muted.TLabel", wraplength=285, justify="left").pack(anchor="w", pady=(6, 0))
         bottom = ttk.Frame(self.root, padding=(12, 10))
@@ -230,7 +233,7 @@ class App:
         self._rate_count = 0
         self.actual_rate = 0.0
         self._notice = self.tr("点击开始；暂停时也可规划行动。", "Press Start. You can plan moves while paused.")
-        self.board.reset(self.config.width, self.config.height)
+        self.board.reset(self.initial.layout.width, self.initial.layout.height)
         self.spectate_button.pack_forget()
         self._refresh()
         self.board.focus_set()
@@ -299,7 +302,7 @@ class App:
             self.human.eliminate()
             self.session = "PAUSED"
             self.clock.reset()
-            self._notice = self.tr("你的主城已失守。可继续观战或重新开始。", "Your general was captured. Continue spectating or restart.")
+            self._notice = self.tr("你已被淘汰。可继续观战或重新开始。", "You were eliminated. Continue spectating or restart.")
             self.spectate_button.pack(fill="x", pady=8, before=self.clock_label)
 
     def continue_spectating(self):
@@ -309,6 +312,18 @@ class App:
             self.session = "RUNNING" if not self.runner.stopped else "FINISHED"
             self.clock.reset()
             self._notice = self.tr("全图观战中", "Spectating the full map")
+            self._refresh()
+
+    def surrender(self):
+        if self.human_active and not self.runner.stopped:
+            self.runner.surrender(self.human_seat)
+            if self.runner.engine.state.tick == 0:
+                self._advance_tick()
+            self.session = "FINISHED" if self.runner.stopped else "PAUSED"
+            self.clock.reset()
+            self._notice = self.tr("你已弃权。领土将在宽限期后转为中立。", "You surrendered. Your land remains capturable during the grace period.")
+            if not self.runner.stopped:
+                self.spectate_button.pack(fill="x", pady=8, before=self.clock_label)
             self._refresh()
 
     def _speed_changed(self, _event=None):
@@ -356,13 +371,16 @@ class App:
         for item in self.scoreboard.get_children():
             if item not in wanted:
                 self.scoreboard.delete(item)
-        order = sorted(range(count), key=lambda player: (not bool(view.alive[player]), -int(view.stats.army[player]), player))
+        state = self.runner.engine.state
+        order = rank_players(state, view.stats)
         names_cn = {"aggressive": "进攻", "expansion": "扩张", "defensive": "防御", "random": "随机", "human": "你"}
         names_en = {"aggressive": "Attack", "expansion": "Expand", "defensive": "Defend", "random": "Random", "human": "You"}
         for position, player in enumerate(order):
             alive = bool(view.alive[player])
             name = (names_cn if self.chinese else names_en)[self.kinds[player]]
             label = f"P{player + 1}  {name}"
+            if view.warn_afk[player]:
+                label += self.tr(" · 挂机警告", " · AFK warning")
             if not alive:
                 label += self.tr(" · 淘汰", " · out")
             values = label, f"{int(view.stats.territory[player]):,}", f"{int(view.stats.army[player]):,}"
@@ -381,9 +399,10 @@ class App:
         lag = self.tr(f" · 滞后 {debt:.0f} tick", f" · {debt:.0f} ticks behind") if debt >= 2 else ""
         self.clock_var.set(f"Tick {tick:,}  ·  {self.actual_rate:.1f} tick/s{lag}")
         viewpoint = self.tr("全图", "Full map") if self.spectating or self.visibility == "full" else self.tr(f"玩家 {self.human_seat + 1} 视野", f"Player {self.human_seat + 1} view")
-        self.header_var.set(f"{self.config.width} × {self.config.height}  ·  {viewpoint}  ·  Seed {self.seed}")
+        self.header_var.set(f"{self.initial.layout.width} × {self.initial.layout.height}  ·  {viewpoint}  ·  Seed {self.seed}")
         self.run_button.configure(text=self.tr("暂停", "Pause") if self.session == "RUNNING" else self.tr("开始", "Start") if self.session == "PREVIEW" else self.tr("继续", "Resume"))
         defeated = self.human is not None and not bool(self.runner.engine.state.alive[self.human_seat])
+        self.surrender_button.configure(state="normal" if self.human_active and not self.runner.stopped else "disabled")
         self.run_button.configure(state="disabled" if self.session == "FINISHED" or defeated else "normal")
         self.step_button.configure(state="normal" if self.session in {"PREVIEW", "PAUSED"} and not defeated else "disabled")
         self.settings_button.configure(state="normal" if self.session == "PREVIEW" else "disabled")
@@ -392,7 +411,7 @@ class App:
         human = self.human
         if human is not None:
             cursor = human.cursor if human.selected is not None else None
-            coord = "—" if cursor is None else f"({int(cursor) // self.config.width + 1}, {int(cursor) % self.config.width + 1})"
+            coord = "—" if cursor is None else f"({int(cursor) // self.initial.layout.width + 1}, {int(cursor) % self.initial.layout.width + 1})"
             self.selection_var.set(self.tr(f"规划位置 {coord}  ·  队列 {len(human.queue)}/64", f"Cursor {coord}  ·  Queue {len(human.queue)}/64"))
             self.half_button.configure(text=self.tr("半兵 50% ✓", "Half 50% ✓") if human.half else self.tr("半兵 Z", "Half army Z"))
         else:
@@ -401,7 +420,7 @@ class App:
         structures = self.initial.structure
         mountains = float((terrain == 1).sum()) / self.initial.layout.size
         cities = float((structures == 1).sum()) / self.initial.layout.size
-        self.detail_var.set(self.tr(f"山脉 {mountains:.1%}（目标 {self.config.mountain_density:.0%}）\n城市 {cities:.1%}（目标 {self.config.city_density:.0%}）\n主城 / 城市每 2 tick +1\n普通领土每 50 tick +1\n攻占主城即可淘汰对手", f"Mountains {mountains:.1%} (target {self.config.mountain_density:.0%})\nCities {cities:.1%} (target {self.config.city_density:.0%})\nGenerals / cities: +1 / 2 ticks\nPlain land: +1 / 50 ticks\nCapture enemy generals to win"))
+        self.detail_var.set(self.tr(f"山脉 {mountains:.1%}（密度设置 {self.config.mountain_density:.0%}）\n城市 {cities:.1%}（密度设置 {self.config.city_density:.0%}）\n主城 / 城市每 2 tick +1\n全部领土每 50 tick 额外 +1\n攻占主城即可淘汰对手", f"Mountains {mountains:.1%} (density {self.config.mountain_density:.0%})\nCities {cities:.1%} (density {self.config.city_density:.0%})\nGenerals / cities: +1 / 2 ticks\nAll land: additional +1 / 50 ticks\nCapture enemy generals to win"))
         controller_message = human.message if human is not None else ""
         self.message_var.set(self._notice or controller_message or self.tr("暂停时可规划，移动每 tick 执行一步。", "Plan while paused. One move executes per tick."))
 
@@ -445,7 +464,7 @@ class App:
         variables = {
             "mode": tk.StringVar(value=self.mode),
             "players": tk.IntVar(value=self.config.players),
-            "size": tk.IntVar(value=self.config.width),
+            "size": tk.IntVar(value=self.config.width or 0),
             "mountain": tk.IntVar(value=round(self.config.mountain_density * 100)),
             "city": tk.IntVar(value=round(self.config.city_density * 100)),
             "seed": tk.StringVar(value=str(self.seed)),
@@ -455,9 +474,9 @@ class App:
         fields = [
             ("模式", "Mode", "mode", ("play", "watch")),
             ("玩家数量", "Players", "players", tuple(range(2, 9))),
-            ("地图边长", "Map size", "size", tuple(sorted({15, 25, 35, self.config.width}))),
-            ("山脉比例 %", "Mountains %", "mountain", tuple(range(0, 41, 5))),
-            ("城市比例 %", "Cities %", "city", tuple(range(0, 21, 5))),
+            ("边长（0=官方随机）", "Size (0=official random)", "size", tuple(sorted({0, 18, 23, 25, 35, self.initial.layout.width}))),
+            ("山脉密度设置 %", "Mountains %", "mountain", tuple(range(0, 101, 5))),
+            ("城市密度设置 %", "Cities %", "city", tuple(range(0, 101, 5))),
             ("人类席位", "Human seat", "human", tuple(range(1, self.config.players + 1))),
         ]
         widgets = {}
@@ -506,7 +525,7 @@ class App:
                 dialog.destroy()
                 return
             try:
-                config = MapConfig(width=variables["size"].get(), height=variables["size"].get(), players=variables["players"].get(), mountain_density=variables["mountain"].get() / 100, city_density=variables["city"].get() / 100)
+                config = MapConfig(width=variables["size"].get() or None, height=variables["size"].get() or None, players=variables["players"].get(), mountain_density=variables["mountain"].get() / 100, city_density=variables["city"].get() / 100)
                 seed = int(variables["seed"].get())
                 if seed < 0:
                     raise ValueError(self.tr("随机种子必须非负", "Seed must be non-negative"))
@@ -532,8 +551,8 @@ class App:
     def show_help(self):
         self.pause()
         messagebox.showinfo(self.tr("规则与操作", "Rules and controls"), self.tr(
-            "目标：攻占其他玩家的主城，成为最后的幸存者。\n图例：王冠为主城，城堡为城市，三角为山脉。\n\n主城与城市每 2 tick 增加 1 兵；普通领土每 50 tick 增加 1 兵。中立城市有 40 兵。只能上下左右移动，不能进入山脉。普通移动留下 1 兵；半兵向下取整。交战兵力按 1:1 抵消，进攻兵力严格大于守军才占领。主城失守则淘汰，剩余领土及减半驻军转交胜方。\n\n左键选择己方格，再点击相邻格规划路线。再次点同一格切换半兵。Shift + 点击强制切换来源。WASD / 方向键移动，Z 半兵，Q 清空队列，E 撤销末步，空格取消选择（保留队列），H 选主城，P 暂停。所有基础行动均有鼠标按钮。\n\n右键 / 中键拖动；滚轮缩放；Home 适应窗口。人类视野为己方领地及周围八格；深色为未知区域。顶部显示种子，设置只在开局预览可修改。单步推进所有玩家的一整个 tick。",
-            "Capture enemy generals to become the last surviving player.\nLegend: crown = general, castle = city, triangle = mountain.\n\nGenerals and cities gain 1 army every 2 ticks; plain owned land gains 1 every 50 ticks. Neutral cities start with 40. Move orthogonally; mountains block movement. Normal moves leave 1 army, half moves send floor(army/2). Combat subtracts armies 1:1; attackers must strictly outnumber defenders to capture. Losing a general eliminates that player and transfers their remaining land with halved armies.\n\nSelect tile, then adjacent tiles to queue a path. Click the current tile again for half army. Shift + click forces a new source. WASD / arrows: move. Z: half. Q: clear queue. E: undo last. Space: deselect (keeps queue). H: general. P: pause. Buttons support mouse-only play.\n\nRight / middle drag to pan; wheel to zoom; Home fits the map. Local vision covers owned land and the eight surrounding tiles. Dark cells are fog. Settings are editable in the opening preview. Step advances one complete tick for all players."), parent=self.root)
+            "目标：攻占其他玩家的主城，成为最后的幸存者。\n图例：王冠为主城，城堡为城市，三角为山脉。\n\n主城与城市每 2 tick 增加 1 兵；全部己方领土每 50 tick 额外增加 1 兵。中立城市有 40–50 兵。只能上下左右移动，不能进入山脉。普通移动留下 1 兵；半兵向下取整。交战兵力按 1:1 抵消，进攻兵力严格大于守军才占领。主城失守则淘汰，剩余领土及向上取整的半数驻军转交胜方。同时互吃将军时双方存活并交换领土。\n\n左键选择己方格，再点击相邻格规划路线。再次点同一格切换半兵。Shift + 点击强制切换来源。WASD / 方向键移动，Z 半兵，Q 清空队列，E 撤销末步，空格取消选择（保留队列），H 选主城，P 暂停。所有基础行动均有鼠标按钮。\n\n右键 / 中键拖动；滚轮缩放；Home 适应窗口。人类视野为己方领地及周围八格；深色为未知区域，迷雾障碍提示不区分山脉与城市。弃权后领土保留 50 tick，可继续被占领。顶部显示种子，设置只在开局预览可修改。单步推进所有玩家的一整个 tick。",
+            "Capture enemy generals to become the last surviving player.\nLegend: crown = general, castle = city, triangle = mountain.\n\nGenerals and cities gain 1 army every 2 ticks; all owned land gains an additional 1 every 50 ticks. Neutral cities start with 40–50. Move orthogonally; mountains block movement. Normal moves leave 1 army, half moves send floor(army/2). Combat subtracts armies 1:1; attackers must strictly outnumber defenders to capture. Losing a general eliminates that player and transfers their remaining land with halved armies rounded up. Mutual general captures exchange territory and keep both players alive.\n\nSelect tile, then adjacent tiles to queue a path. Click the current tile again for half army. Shift + click forces a new source. WASD / arrows: move. Z: half. Q: clear queue. E: undo last. Space: deselect (keeps queue). H: general. P: pause. Buttons support mouse-only play.\n\nRight / middle drag to pan; wheel to zoom; Home fits the map. Local vision covers owned land and the eight surrounding tiles. Dark cells are fog; fog obstacles do not distinguish mountains from cities. Surrendered land remains capturable for 50 ticks. Settings are editable in the opening preview. Step advances one complete tick for all players."), parent=self.root)
 
     def close(self):
         if self.closed:
@@ -541,6 +560,8 @@ class App:
         self.closed = True
         if self._callback is not None:
             self.root.after_cancel(self._callback)
+        if self.session != "PREVIEW" and self.human_active and not self.runner.stopped:
+            self.runner.surrender(self.human_seat)
         self.runner.stop("user_stop")
         self.root.destroy()
 

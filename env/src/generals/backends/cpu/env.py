@@ -1,22 +1,16 @@
 """Native, synchronous, batched env.step(actions) with NumPy-owned storage."""
 import ctypes
 from functools import lru_cache
-from hashlib import sha256
 import os
 from pathlib import Path
-import shutil
-import stat
-import sys
-import subprocess
-import tempfile
 
 import numpy as np
 
-from generals.protocol import STATE_DTYPES
+from generals.protocol import STATE_DTYPES, state_shape
 from generals.protocol.config import _integer
 from generals.protocol.vector import BatchStep
-class _Batch(ctypes.Structure):
-    _fields_ = [(name, ctypes.c_void_p) for name in STATE_DTYPES]
+from generals.backends._build import build_shared, openmp_flags
+from generals.backends._abi import Batch as _Batch
 
 
 def _pointers(arrays):
@@ -31,38 +25,14 @@ class _Outputs(ctypes.Structure):
 
 @lru_cache(maxsize=1)
 def _library():
-    if sys.platform != "linux":
-        raise RuntimeError("CPUEnv native OpenMP loader currently supports Linux")
-    compiler = shutil.which(os.environ.get("CXX", "c++"))
-    if compiler is None:
-        raise RuntimeError("CPUEnv requires a C++ compiler with OpenMP")
-    version = subprocess.run([compiler, "--version"], check=True, capture_output=True,
-                             text=True, timeout=15).stdout.splitlines()[0]
-    source = Path(__file__).with_name("step.cpp")
-    flags = ["-std=c++17", "-O3", "-march=native", "-fopenmp", "-fPIC", "-shared"]
-    digest = sha256(source.read_bytes() + repr((compiler, version, flags)).encode()).hexdigest()
-    root = Path(tempfile.gettempdir()) / f"generals-cpu-step-{os.getuid()}"
-    root.mkdir(mode=0o700, exist_ok=True)
-    info = root.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise RuntimeError("CPU compilation cache must be a private owned directory")
-    target = root / f"{digest}.so"
-    if not target.exists():
-        with tempfile.TemporaryDirectory(dir=root) as scratch:
-            output = Path(scratch) / "step.so"
-            result = subprocess.run([compiler, *flags, str(source), "-o", str(output)],
-                                    capture_output=True, text=True, timeout=120)
-            if result.returncode:
-                raise RuntimeError(f"CPU step compilation failed:\n{result.stderr}")
-            os.replace(output, target)
-    lib = ctypes.CDLL(str(target))
+    lib, metadata = build_shared(Path(__file__).with_name("step.cpp"),
+                                 name="cpu-step", flags=openmp_flags())
     lib.generals_step.argtypes = [ctypes.POINTER(_Batch), ctypes.POINTER(_Batch),
         ctypes.POINTER(_Outputs), ctypes.c_void_p, *([ctypes.c_int] * 6), ctypes.c_int64]
     lib.generals_step.restype = None
     lib.omp_get_num_procs.argtypes = []
     lib.omp_get_num_procs.restype = ctypes.c_int
-    return lib, {"compiler": version, "compiler_flags": flags,
-                 "source_sha256": sha256(source.read_bytes()).hexdigest()}
+    return lib, metadata
 
 
 class CPUEnv:
@@ -90,8 +60,7 @@ class CPUEnv:
             raise ValueError("episode_ticks must fit int64")
         self.initial = {}
         for name, dtype in STATE_DTYPES.items():
-            shape = ((self.batch_size, n) if name in ("terrain", "structure", "owner", "army") else
-                     (self.batch_size, self.players) if name in ("alive", "general_pos") else (self.batch_size,))
+            shape = state_shape(name, self.batch_size, n, self.players)
             value = initial[name]
             if not isinstance(value, np.ndarray) or value.shape != shape or value.dtype != np.dtype(dtype):
                 raise ValueError(f"{name} must be {dtype} {shape}")
@@ -165,6 +134,12 @@ class CPUEnv:
         if self._closed:
             raise RuntimeError("CPU environment is closed")
         self._cache_valid.fill(False)
+
+    def surrender(self, player_id, mask=None):
+        if self._closed:
+            raise RuntimeError("CPU environment is closed")
+        from generals.core.lifecycle import surrender_batch
+        surrender_batch(self, player_id, mask)
 
     def reset(self, mask=None):
         if self._closed:
