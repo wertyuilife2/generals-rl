@@ -6,6 +6,7 @@ the match process contains crashes/hangs but is not an OS security sandbox.
 from functools import lru_cache
 from hashlib import sha256
 import io
+import fcntl
 import ctypes as C
 import json
 import os
@@ -41,6 +42,7 @@ def execution_fingerprint():
     """Bind the binary controller to its Python ABI and recovery process host."""
     root = Path(__file__).resolve().parents[1]
     return digest({'native_sha256': file_digest(Path(__file__)),
+                   'host_sha256': file_digest(Path(__file__).with_name('host.cpp')),
                    'worker_sha256': file_digest(root/'matches'/'worker.py')})
 
 
@@ -168,13 +170,34 @@ def bundle_info(bundle):
     return metadata
 
 
-@lru_cache(maxsize=128)
 def _unpack(bundle, expected):
+    # The OS may purge its temporary directory while a long-running Arena
+    # process is still alive.  Re-check the extracted artifact on every new
+    # controller instead of caching a Path that may no longer exist.
     if file_digest(bundle) != expected:
         raise ValueError('policy bundle changed')
     metadata = bundle_info(bundle)
-    target = _private_cache()/expected
-    if not target.exists():
+    parent = _private_cache()
+    target = parent/expected
+
+    def valid():
+        try:
+            return (target.is_dir() and not target.is_symlink()
+                    and file_digest(target/'policy.so') == metadata['library_sha256']
+                    and (target/'params.json').read_text() == canonical(metadata['parameters']))
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    # Cache eviction can leave an empty directory behind. Serialize validation
+    # and replacement so several match workers never consume a partial repair.
+    with (parent/f'.{expected}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if valid():
+            return target
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.exists():
+            shutil.rmtree(target)
         with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
             root = Path(temporary)/'artifact'
             root.mkdir(mode=0o700)
@@ -199,30 +222,15 @@ def _unpack(bundle, expected):
             except OSError:
                 if not target.is_dir():
                     raise
-    if file_digest(target/'policy.so') != metadata['library_sha256']:
-        raise ValueError('cached policy executable changed')
+        if not valid():
+            raise ValueError('cached policy artifact changed')
     return target
+
 
 
 # Set only inside Arena's single match process. No policy runs in the web server.
 DIAGNOSTICS = None
 METRIC_FIELDS = ('calls', 'total_ns', 'max_ns', 'max_tick', 'timeouts', 'errors', 'last_ns', 'status')
-
-
-class Move(C.Structure):
-    _fields_ = [(key, C.c_int64) for key in
-                ('player', 'action', 'valid', 'source', 'target', 'moved', 'captured', 'eliminated', 'target_owned')]
-
-
-class Observation(C.Structure):
-    _fields_ = [(key, C.c_int) for key in ('width', 'height', 'players', 'player')] + [
-        ('tick', C.c_int64), ('general_pos', C.c_int)] + [
-        (key, C.POINTER(kind)) for key, kind in (
-            ('terrain', C.c_uint8), ('structure', C.c_uint8), ('owner', C.c_int16),
-            ('army', C.c_int64), ('visible', C.c_uint8), ('alive', C.c_uint8),
-            ('total_army', C.c_int64), ('total_land', C.c_int64), ('total_cities', C.c_int64),
-            ('fog_obstacles', C.c_uint8), ('has_kill', C.c_uint8), ('warn_afk', C.c_uint8), ('neutralize_in', C.c_double))] + [
-        ('previous', C.POINTER(Move))]
 
 
 @lru_cache(maxsize=128)
@@ -231,11 +239,17 @@ def _library(path):
     metric = C.POINTER(C.c_int64)
     lib.arena_host_create.argtypes = [C.c_int, C.c_uint64, C.c_char_p, metric]
     lib.arena_host_create.restype = C.c_void_p
-    lib.arena_host_act.argtypes = [C.c_void_p, C.POINTER(Observation), metric]
+    lib.arena_host_act.argtypes = [C.c_void_p, C.c_void_p, metric]
     lib.arena_host_act.restype = C.c_int64
     lib.arena_host_destroy.argtypes = [C.c_void_p, metric]
     lib.arena_host_destroy.restype = None
     return lib
+
+
+@lru_cache(maxsize=1)
+def _host():
+    from generals.backends._build import build_extension
+    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_arena_host')[0]
 
 
 def metrics(values):
@@ -281,6 +295,8 @@ class NativeController:
         self.values[:] = 0
         self._activate(1)
         self.lib = _library(self.root/'policy.so')
+        self._native_act = _host().act
+        self._act_address = C.cast(self.lib.arena_host_act, C.c_void_p).value
         self.instance = self.lib.arena_host_create(self.player_id, int(seed),
             (self.root/'params.json').read_bytes(), self.values.ctypes.data_as(C.POINTER(C.c_int64)))
         self._idle()
@@ -293,22 +309,11 @@ class NativeController:
     def act(self, obs):
         if self.instance is None:
             raise RuntimeError('policy must be reset before acting')
-        fields = [(obs.terrain, np.uint8, C.c_uint8), (obs.structure, np.uint8, C.c_uint8),
-                  (obs.owner, np.int16, C.c_int16), (obs.army, np.int64, C.c_int64),
-                  (obs.visible, np.uint8, C.c_uint8), (obs.alive, np.uint8, C.c_uint8),
-                  (obs.stats.army, np.int64, C.c_int64), (obs.stats.territory, np.int64, C.c_int64),
-                  (obs.stats.cities, np.int64, C.c_int64), (obs.fog_obstacles, np.uint8, C.c_uint8),
-                  (obs.has_kill, np.uint8, C.c_uint8), (obs.warn_afk, np.uint8, C.c_uint8), (obs.neutralize_in, np.float64, C.c_double)]
-        arrays = [np.ascontiguousarray(value, dtype=dtype) for value, dtype, _ in fields]
-        previous = Move(*self.previous) if self.previous is not None else None
-        native_obs = Observation(obs.width, obs.height, len(obs.alive), obs.player_id,
-            obs.tick, obs.general_pos,
-            *(array.ctypes.data_as(C.POINTER(kind)) for array, (_, _, kind) in zip(arrays, fields)),
-            C.pointer(previous) if previous is not None else None)
         self._activate(2, obs.tick)
-        encoded = self.lib.arena_host_act(self.instance, C.byref(native_obs),
-                                         self.values.ctypes.data_as(C.POINTER(C.c_int64)))
-        self._idle()
+        try:
+            encoded = self._native_act(self.instance, self._act_address, obs, self.previous, self.values)
+        finally:
+            self._idle()
         self._check(obs.tick, 'decision')
         if not 0 <= encoded <= obs.size*8:
             self.values[5] += 1

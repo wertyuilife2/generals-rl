@@ -157,6 +157,65 @@ class CompetitionStore:
         with self.connect() as db:
             return {r["id"]: json.loads(r["data"]) for r in db.execute("SELECT * FROM entrants ORDER BY name")}
 
+    def retired_entrants(self):
+        """Return immutable entrant IDs that are hidden from the active roster."""
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def retired_entrant_ids(self):
+        return set(self.retired_entrants())
+
+    def set_retired(self, entrant, retired=True, *, reason=None):
+        """Retire or restore an entrant without deleting results or artifacts.
+
+        Retirement is deliberately restricted to entrants with no scheduled or
+        live games. This makes the boundary auditable: every existing plan runs
+        under the roster that selected it, and all later plans use the new one.
+        """
+        if not isinstance(entrant, str) or not entrant.strip():
+            raise ValueError("entrant must be a name or entrant ID")
+        selector = entrant.strip()
+        if selector.startswith('@'):
+            selector = selector[1:]
+        if reason is not None and (not isinstance(reason, str) or len(reason) > 500):
+            raise ValueError("retirement reason must be a string of at most 500 characters")
+        with self.connect(write=True) as db:
+            row = db.execute("SELECT id,name,kind FROM entrants WHERE id=? OR name=?",
+                             (selector, selector)).fetchone()
+            if row is None:
+                raise ValueError(f"entrant not found: {entrant}")
+            key = row['id']
+            current_row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+            current = json.loads(current_row[0]) if current_row else {}
+            history_row = db.execute("SELECT value FROM meta WHERE key='entrant_status_history'").fetchone()
+            history = json.loads(history_row[0]) if history_row else []
+            if retired:
+                if key == self.reference:
+                    raise ValueError("the rating anchor/reference cannot be retired")
+                if key in current:
+                    return {'entrant_id': key, 'name': row['name'], 'retired': True, **current[key]}
+                active = db.execute("""SELECT 1 FROM games,json_each(games.plan,'$.entrant_ids') participant
+                    WHERE games.status IN ('pending','live') AND participant.value=? LIMIT 1""", (key,)).fetchone()
+                queued = db.execute("SELECT 1 FROM jobs WHERE entrant_id=? AND status IN ('queued','running') LIMIT 1", (key,)).fetchone()
+                if active or queued:
+                    raise ValueError("entrant has queued jobs or pending/live games; finish them before retirement")
+                record = {'retired_at': time.time(), 'reason': reason.strip() if reason else None}
+                current[key] = record
+            else:
+                if key not in current:
+                    return {'entrant_id': key, 'name': row['name'], 'retired': False}
+                record = current.pop(key)
+            history.append({'entrant_id': key, 'name': row['name'],
+                            'action': 'retire' if retired else 'restore',
+                            'at': time.time(), 'reason': reason.strip() if reason else None})
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('retired_entrants',?)", (canonical(current),))
+            db.execute("INSERT OR REPLACE INTO meta VALUES ('entrant_status_history',?)", (canonical(history),))
+        result = {'entrant_id': key, 'name': row['name'], 'retired': bool(retired)}
+        if retired:
+            result.update(record)
+        return result
+
     @staticmethod
     def _validate_package_profile(entrant, config):
         """Require the complete league map distribution to fit the policy."""
@@ -267,17 +326,21 @@ class CompetitionStore:
 
     def retry(self, job_id=None):
         with self.connect(write=True) as db:
-            jobs = db.execute("SELECT j.id,e.kind FROM jobs j JOIN entrants e ON e.id=j.entrant_id "
+            row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+            retired = set(json.loads(row[0])) if row else set()
+            jobs = db.execute("SELECT j.id,j.entrant_id,e.kind FROM jobs j JOIN entrants e ON e.id=j.entrant_id "
                               "WHERE j.status='failed'").fetchall()
             for job in jobs:
-                if job_id is not None and job['id'] != job_id:
+                if job['entrant_id'] in retired or (job_id is not None and job['id'] != job_id):
                     continue
                 failed = db.execute("SELECT g.plan,g.result FROM games g WHERE g.job_id=? AND g.status='failed' "
                                     "AND NOT EXISTS (SELECT 1 FROM games r WHERE json_extract(r.plan,'$.retry_of')=g.id)",
                                     (job['id'],)).fetchall()
+                if any(retired.intersection(json.loads(row['plan'])['entrant_ids']) for row in failed):
+                    continue
                 failures = [json.loads(row['result'] or '{}') for row in failed]
                 if job['kind'] != 'cpp' or (failures and all(
-                        decision_timeout(r.get('error_detail', {})) for r in failures)):
+                        r.get('error_detail', {}).get('player') is None or decision_timeout(r.get('error_detail', {})) for r in failures)):
                     db.execute("UPDATE jobs SET status='queued',error=NULL WHERE id=?", (job['id'],))
                     for row in failed:
                         # Keep the failed attempt and its replay as evidence.
@@ -293,7 +356,11 @@ class CompetitionStore:
 
     def insert_plans(self, plans, job_id=None, status="pending"):
         with self.connect(write=True) as db:
+            row = db.execute("SELECT value FROM meta WHERE key='retired_entrants'").fetchone()
+            retired = set(json.loads(row[0])) if row else set()
             for plan in plans:
+                if retired.intersection(plan['entrant_ids']):
+                    raise ValueError('entrant was retired before scheduling; restore it or regenerate the schedule')
                 db.execute("INSERT INTO games(id,job_id,status,plan,created) VALUES (?,?,?,?,?)",
                            (plan["game_id"], job_id, status, canonical(plan), time.time()))
 
@@ -403,7 +470,7 @@ class CompetitionStore:
             else:
                 db.execute("UPDATE games SET status='aborted',finished=? WHERE status='live' AND id=?", (time.time(), game_id))
 
-    def leaderboard(self, mode=None):
+    def leaderboard(self, mode=None, *, include_retired=False):
         mode = validate_mode(mode or self.default_mode())
         with self.connect() as db:
             rows = [dict(row) for row in db.execute("""SELECT e.id entrant_id,e.name,e.kind,
@@ -411,17 +478,22 @@ class CompetitionStore:
                 COALESCE(r.wins,0) wins,COALESCE(r.losses,0) losses,COALESCE(r.draws,0) draws FROM entrants e
                 LEFT JOIN ratings r ON r.entrant_id=e.id AND r.mode=? ORDER BY raw_elo DESC,e.name""", (initial_rating(mode), mode))]
             completed = db.execute("SELECT count(*) FROM games WHERE status='complete' AND " + self._mode_predicate(mode)).fetchone()[0]
+        retired = self.retired_entrants()
         reference = self.reference
         offset = next(row['raw_elo'] for row in rows if row['entrant_id'] == reference) if mode == '1v1' else 0.
         disabled = self.disabled_policy_ids()
         for row in rows:
             row['elo'] = row['raw_elo'] - offset
+            if row['entrant_id'] in retired:
+                row['retired'] = True
             row['elo_ci'] = None
             row['ci_blocks'] = 0
             row["anchor"] = mode == '1v1' and row["entrant_id"] == reference
             row["provisional"] = row["rated_games"] < PROVISIONAL_GAMES
             if row['entrant_id'] in disabled:
                 row['disqualified'] = True
+        if not include_retired:
+            rows = [row for row in rows if not row.get("retired")]
         return {"mode": mode, "rating_mode": mode,
                 "player_counts": tuple(p for p in self.config.player_counts if (p == 2) == (mode == '1v1')),
                 "ranking": rows, "anchor": reference if mode == '1v1' else None,
@@ -429,8 +501,8 @@ class CompetitionStore:
                 "rating_offset": offset, "rating_mean": FFA_MEAN if mode == 'ffa' else None,
                 "scale": CF_SCALE if mode == 'ffa' else None, "completed_games": completed}
 
-    def leaderboards(self):
-        return {mode: self.leaderboard(mode) for mode in self.rating_modes()}
+    def leaderboards(self, *, include_retired=False):
+        return {mode: self.leaderboard(mode, include_retired=include_retired) for mode in self.rating_modes()}
 
     def matches(self, limit=50, offset=0, players=None, entrant=None, opponent=None, mode=None):
         integer("limit", limit, 1)

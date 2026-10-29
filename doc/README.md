@@ -1,6 +1,7 @@
 # Generals 环境开发与使用说明
 
 更新日期：2026-10-28。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应旧规则下的实验环境。训练、策略导出见 [RL README](../rl/README.md)，统一比赛管理见 [Arena README](../arena/README.md)。
+`neko-dev` 新增功能的选择性集成范围与验证见[集成记录](neko_integration.md)。
 
 项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则固定为本次核查时官网部署的 **31.4.5 普通 1v1 / FFA**，协议 ID 为 `generals.io-31.4.5-classic-v1`，不含团队、modifier 和活动模式。官方版本、真实回放及边界验证范围见[实施记录](official_rules_alignment.md)。随机数算法和种子协议属于本项目，不承诺与官网用同一数字种子生成逐格相同的地图。
 

@@ -18,6 +18,7 @@ where = ["src"]
 include = ["generals", "generals.*"]
 
 [project.optional-dependencies]
+online = ["python-socketio[client]>=5.11,<6"]
 gpu = ["torch>=2.6"]
 play = ["generals-baselines"]
 
@@ -26,3 +27,5 @@ play = ["generals-baselines"]
 "generals.backends.cpu" = ["step.cpp"]
 "generals.benchmarks" = ["native.cpp"]
 "generals.backends.gpu" = ["kernel.cu", "host.cpp"]
+
+"generals.backends.online" = ["README.md"]

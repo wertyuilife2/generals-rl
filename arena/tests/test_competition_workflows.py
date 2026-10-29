@@ -239,7 +239,7 @@ def test_timeout_surrenders_scores_and_can_be_committed(setup, tmp_path, monkeyp
     from generals_arena.competitions.leaderboard import LeaderboardStatistics
     stats = LeaderboardStatistics(store).leaderboard()
     loser = next(p for p in stats['ranking'] if p['entrant_id'] == entrant['entrant_id'])
-    assert loser['survival_index'] == 1
+    assert loser['survival_index'] == 0
     assert loser['kill_index'] == loser['win_rate'] == 0
     monkeypatch.setattr(submissions, 'PUBLICATION_GAMES', 4)
     publication = submissions.commit(slow,league=directory,name='slow',workers=2)

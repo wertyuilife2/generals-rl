@@ -1,6 +1,5 @@
 """Local web UI and JSON API. No web framework or build tool is required."""
 from dataclasses import asdict
-from functools import lru_cache
 import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -8,7 +7,7 @@ from pathlib import Path
 import sys
 from urllib.parse import parse_qs, urlsplit
 
-from generals_arena.matches.replay import replay_frames
+from generals_arena.web.replays import ReplayResponses
 from generals_arena.web.live import LiveArena
 from generals_arena.util import process_lock
 from generals_arena.competitions.store import CompetitionStore
@@ -25,10 +24,7 @@ def make_server(store, host="127.0.0.1", port=8086):
     for stats in statistics.values():
         stats.leaderboard()
 
-    @lru_cache(maxsize=3)
-    def replay_response(game_id):
-        result, blob = store.replay(game_id)
-        return {"result": result, "frames": replay_frames(blob, result, compact=True)}
+    replays = ReplayResponses(store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "GeneralsArena/1"
@@ -39,17 +35,21 @@ def make_server(store, host="127.0.0.1", port=8086):
         def log_error(self, message, *args):
             print(message % args, file=sys.stderr)
 
-        def respond(self, value, status=200, content_type="application/json; charset=utf-8"):
+        def respond(self, value, status=200, content_type="application/json; charset=utf-8", *, compressed=False):
             data = value if isinstance(value, bytes) else json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
-            if len(data) > 2048 and "gzip" in self.headers.get("Accept-Encoding", ""):
-                data = gzip.compress(data, compresslevel=3)
-                self.send_header("Content-Encoding", "gzip")
+            accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
+            if compressed or len(data) > 2048:
                 self.send_header("Vary", "Accept-Encoding")
+                if accepts_gzip:
+                    data = data if compressed else gzip.compress(data, compresslevel=3)
+                    self.send_header("Content-Encoding", "gzip")
+                elif compressed:
+                    data = gzip.decompress(data)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             try:
@@ -118,7 +118,7 @@ def make_server(store, host="127.0.0.1", port=8086):
                                                entrant=query.get('entrant', [None])[0],
                                                opponent=query.get('opponent', [None])[0]))
                 elif path.startswith("/api/replay/"):
-                    self.respond(replay_response(path.split("/")[-1]))
+                    self.respond(replays.get(path.split("/")[-1]), compressed=True)
                 elif path == "/api/me":
                     self.respond(store.entrants()[self.human()])
                 elif path == "/api/play/active":
