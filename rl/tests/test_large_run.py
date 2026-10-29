@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import torch
 
-from rsl_rl.algorithms import MoECTS
+from generals_rl.student_ppo import StudentPPO
 
 from generals_rl.train import train
 from rl_test_utils import small_training_config
@@ -19,7 +19,7 @@ class ExactBudgetTests(unittest.TestCase):
     def run_budget(self, *, steps_per_env=None, iterations=None):
         config = small_training_config(task_overrides={"max_episode_steps": 8, "opponent": "random"})
         update_lengths = []
-        original_update = MoECTS.update
+        original_update = StudentPPO.update
 
         def update(algorithm):
             self.assertEqual(algorithm.storage.step, algorithm.storage.num_transitions_per_env)
@@ -28,16 +28,17 @@ class ExactBudgetTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "run"
-            with patch.object(MoECTS, "update", update), \
+            with patch.object(StudentPPO, "update", update), \
                  contextlib.redirect_stdout(io.StringIO()):
                 summary = train(config, output, iterations=iterations, steps_per_env=steps_per_env)
             checkpoint = torch.load(output / "checkpoint.pt", map_location="cpu", weights_only=False)
-        # Two epochs and two minibatches advance both Adam optimizers four times
+        # Two epochs and two minibatches advance Adam four times
         # per update, including a shorter final rollout.
-        for name in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+        for name in ("optimizer_state_dict",):
             states = checkpoint[name]["state"]
             self.assertTrue(states)
             self.assertEqual({int(state["step"]) for state in states.values()}, {4 * len(update_lengths)})
+        self.assertIsNone(checkpoint["optimizer_stu_enc_state_dict"])
         self.assertEqual(checkpoint["iter"], len(update_lengths) - 1)
         for key in ("environment_transitions_per_second", "wall_environment_transitions_per_second"):
             value = summary["performance"][key]

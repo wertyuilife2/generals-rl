@@ -48,31 +48,47 @@ class PolicySnapshot:
 
 
 class HistoricalPolicyPool:
-    """Uniform candidate pool with an immutable seed and bounded disk storage.
+    """Uniform candidate pool with bounded disk storage and frozen opponents.
 
     ``policy_spec`` describes the architecture/MDP dimensions and must match on
     reload. ``resume_from`` copies validated snapshots into a new destination;
     ``resume_iteration`` excludes models newer than the resumed checkpoint.
     Active handles may temporarily keep pruned models in memory until their
     episodes finish. They are never sampled again after pruning.
+    ``retain_seed=False`` (the default) keeps the most recent ``max_size``
+    publications once the pool fills, allowing the initial policy to expire.
+    Setting it to true preserves the original seed plus the newest policies.
     """
 
     def __init__(self, directory, *, policy_factory: Callable[[], nn.Module],
                  policy_spec: Mapping[str, Any], device="cpu", max_size=8,
-                 resume_from=None, resume_iteration=None):
+                 resume_from=None, resume_iteration=None, read_only=False,
+                 retain_seed=False):
         if not isinstance(max_size, int) or isinstance(max_size, bool) or max_size < 2:
-            raise ValueError("max_size must be at least 2 to retain seed and newest policy")
+            raise ValueError("max_size must be at least 2")
         if resume_iteration is not None and resume_from is None:
             raise ValueError("resume_iteration requires resume_from")
+        if not isinstance(read_only, bool):
+            raise TypeError("read_only must be boolean")
+        if not isinstance(retain_seed, bool):
+            raise TypeError("retain_seed must be boolean")
+        if read_only and resume_from is not None:
+            raise ValueError("read-only pools open the writer's destination; only the writer resumes")
         self.directory = Path(directory).resolve()
         self.policy_factory = policy_factory
         self.policy_spec = _json_copy(dict(policy_spec))
         self.policy_spec_sha256 = _json_hash(self.policy_spec)
         self.device = torch.device(device)
         self.max_size = max_size
+        self.read_only = read_only
+        self.retain_seed = retain_seed
         self._snapshots: dict[int, PolicySnapshot] = {}
         self._next_id = 0
         self._resume_source = None
+
+        if read_only:
+            self.refresh()
+            return
 
         manifest_path = self.directory / "manifest.json"
         if resume_from is not None:
@@ -88,10 +104,10 @@ class HistoricalPolicyPool:
             manifest, snapshots = self._read_pool(source)
             if resume_iteration is not None:
                 snapshots = [s for s in snapshots if s.metadata["iteration"] <= resume_iteration]
-                if snapshots and not snapshots[0].metadata["seed"]:
+                if self.retain_seed and snapshots and not snapshots[0].metadata["seed"]:
                     raise ValueError("resumed pool must retain its original seed snapshot")
                 if manifest["snapshots"] and not snapshots:
-                    raise ValueError("resume_iteration predates the pool seed snapshot")
+                    raise ValueError("resume_iteration predates the available pool snapshots")
             snapshots = self._bounded(snapshots)
             self.directory.mkdir(parents=True, exist_ok=True)
             for snapshot in snapshots:
@@ -130,6 +146,24 @@ class HistoricalPolicyPool:
     def get(self, snapshot_id):
         return self._snapshots[int(snapshot_id)]
 
+    def refresh(self):
+        """Read a completed publication, retaining unchanged frozen handles.
+
+        Distributed callers synchronize with the writer before refreshing, so
+        checkpoint pruning cannot race these reads. Active episodes keep their
+        own references to handles no longer present in the candidate manifest.
+        """
+        if not self.read_only:
+            raise RuntimeError("refresh requires a read-only pool")
+        manifest, snapshots = self._read_pool(self.directory, reuse=self._snapshots)
+        capacity = manifest.get("max_size")
+        if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 2:
+            raise ValueError("invalid shared historical pool capacity")
+        self._snapshots = {snapshot.snapshot_id: snapshot for snapshot in snapshots}
+        self.max_size = capacity
+        self._next_id = manifest["next_id"]
+        self._resume_source = manifest.get("resume_source")
+
     def sample(self, count, *, generator: torch.Generator):
         """Return shared immutable handles; sampling only happens on reset."""
         if count < 0:
@@ -147,9 +181,11 @@ class HistoricalPolicyPool:
                 seed=False):
         """Freeze and persist weights, then make the new snapshot selectable.
 
-        The first snapshot is always the retained seed. ``source`` is arbitrary
+        The first snapshot is marked as the bootstrap seed. ``source`` is arbitrary
         JSON provenance, for example the checkpoint path and SHA256.
         """
+        if self.read_only:
+            raise PermissionError("cannot publish to a read-only historical pool")
         if not isinstance(iteration, int) or isinstance(iteration, bool) or iteration < -1:
             raise ValueError("iteration must be an integer >= -1")
         if seed and self._snapshots:
@@ -205,6 +241,8 @@ class HistoricalPolicyPool:
 
     def _bounded(self, snapshots):
         snapshots = list(snapshots)
+        if not self.retain_seed:
+            return snapshots[-self.max_size:]
         while len(snapshots) > self.max_size:
             index = next(i for i, value in enumerate(snapshots) if not value.metadata["seed"])
             del snapshots[index]
@@ -231,7 +269,7 @@ class HistoricalPolicyPool:
     def _manifest(self):
         return {"schema_version": SCHEMA_VERSION, "format": "torch_state_dict",
                 "policy_spec": self.policy_spec, "policy_spec_sha256": self.policy_spec_sha256,
-                "max_size": self.max_size, "next_id": self._next_id,
+                "max_size": self.max_size, "retain_seed": self.retain_seed, "next_id": self._next_id,
                 "resume_source": self._resume_source,
                 "snapshots": [dict(value.metadata) for value in self._snapshots.values()]}
 
@@ -243,10 +281,14 @@ class HistoricalPolicyPool:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _read_pool(self, directory):
+    def _read_pool(self, directory, *, reuse=None):
         manifest = json.loads((directory / "manifest.json").read_text())
         if manifest.get("schema_version") != SCHEMA_VERSION or manifest.get("format") != "torch_state_dict":
             raise ValueError("unsupported historical pool version or format")
+        # Old manifests predate this option and always retained their seed.
+        retain_seed = manifest.get("retain_seed", True)
+        if not isinstance(retain_seed, bool) or retain_seed != self.retain_seed:
+            raise ValueError("historical pool retain_seed differs from current retention mode")
         if (manifest.get("policy_spec_sha256") != self.policy_spec_sha256
                 or _json_hash(manifest.get("policy_spec")) != self.policy_spec_sha256):
             raise ValueError("historical pool policy_spec differs from current architecture/MDP")
@@ -261,11 +303,19 @@ class HistoricalPolicyPool:
             filename = metadata.get("filename")
             if (not isinstance(snapshot_id, int) or snapshot_id < 0 or snapshot_id in seen
                     or snapshot_id >= next_id or filename != f"snapshot_{snapshot_id:08d}.pt"
-                    or bool(metadata.get("seed")) != (index == 0)):
+                    or not isinstance(metadata.get("seed"), bool)
+                    or metadata["seed"] != (snapshot_id == 0)
+                    or self.retain_seed and index == 0 and not metadata["seed"]):
                 raise ValueError("invalid historical snapshot identity/seed")
             if seen and snapshot_id <= max(seen):
                 raise ValueError("snapshot IDs must be strictly increasing")
             seen.add(snapshot_id)
+            cached = None if reuse is None else reuse.get(snapshot_id)
+            if cached is not None:
+                if dict(cached.metadata) != metadata:
+                    raise ValueError("published historical snapshot metadata changed")
+                snapshots.append(cached)
+                continue
             path = directory / filename
             if _file_hash(path) != metadata.get("sha256"):
                 raise ValueError(f"historical snapshot SHA256 mismatch: {filename}")

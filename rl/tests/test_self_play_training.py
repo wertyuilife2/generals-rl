@@ -1,4 +1,4 @@
-"""Real CTS training, historical opponents, and checkpoint continuation."""
+"""Supported StudentPPO training, historical opponents and checkpoint continuation."""
 import contextlib
 from copy import deepcopy
 from hashlib import sha256
@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
-from generals_rl.self_play_training import prepare_self_play
+from generals_rl.self_play_training import SelfPlayConfig, prepare_self_play
 from generals_rl.train import train
 from rl_test_utils import assert_nested_equal, small_training_config
 
@@ -21,7 +21,8 @@ from rl_test_utils import assert_nested_equal, small_training_config
 def self_play_config():
     cfg = small_training_config()
     cfg["self_play"] = {"pool_size": 3, "snapshot_interval": 1,
-                        "stochastic": True, "seed": 10019, "sampling": "uniform"}
+                        "stochastic": True, "seed": 10019, "sampling": "uniform",
+                        "retain_seed": True}
     cfg["runner"]["save_interval"] = 1
     return cfg
 
@@ -45,7 +46,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
             observed["starting_episode_lengths"] = task.episode_length_buf.clone()
             observed["starting_optimizers"] = {
                 name: deepcopy(getattr(runner.alg, name).state_dict())
-                for name in ("optimizer", "optimizer_stu_enc")}
+                for name in ("optimizer",)}
             session = prepare_self_play(task, runner, *args, **kwargs)
             observed["session"] = session
             original_log = runner.logger.log
@@ -78,7 +79,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
             self.assertEqual(json.loads((output / "summary.json").read_text()), summary)
             policy = observed["runner"].alg.policy
             self.assertTrue(all(bool(torch.isfinite(value).all()) for value in policy.parameters()))
-            for prefix in ("teacher_encoder.", "student_moe_encoder.", "actor.", "critic."):
+            for prefix in ("actor.", "critic."):
                 self.assertTrue(any(not torch.equal(value, observed["starting_model"][name])
                                     for name, value in policy.named_parameters() if name.startswith(prefix)))
             observed["runner"].eval_mode()
@@ -100,13 +101,13 @@ class SelfPlayTrainingTests(unittest.TestCase):
             self.assertGreater(len(observed_opponents), 1)
             self.assertEqual(checkpoint["iter"], 3)
             self.assertEqual({path.name for path in output.glob("*.pt")},
-                             {"model_0.pt", "model_1.pt", "model_2.pt", "checkpoint.pt"})
+                             {"model_1.pt", "model_2.pt", "model_3.pt", "checkpoint.pt"})
 
             session = observed["session"]
             self.assertEqual(session.pool.ids, (0, 3, 4))
             self.assertEqual(len(list((output / "history_pool").glob("snapshot_*.pt"))), 3)
             learner_ids = {id(parameter) for parameter in session.policy.parameters()}
-            optimizer_ids = {id(parameter) for name in ("optimizer", "optimizer_stu_enc")
+            optimizer_ids = {id(parameter) for name in ("optimizer",)
                              for group in getattr(observed["runner"].alg, name).param_groups
                              for parameter in group["params"]}
             self.assertLessEqual(optimizer_ids, learner_ids)
@@ -120,28 +121,27 @@ class SelfPlayTrainingTests(unittest.TestCase):
             seed_state = session.pool.get(0).model.state_dict()
             self.assertTrue(any(not torch.equal(value, checkpoint["model_state_dict"][name])
                                 for name, value in seed_state.items()))
-            for name in ("optimizer_state_dict", "optimizer_stu_enc_state_dict"):
+            for name in ("optimizer_state_dict",):
                 self.assertEqual({int(state["step"]) for state in checkpoint[name]["state"].values()}, {16})
 
-    def test_resume_copies_pool_restores_both_optimizers_and_respects_checkpoint_cutoff(self):
+    def test_resume_copies_pool_restores_optimizer_and_respects_checkpoint_cutoff(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source"
             config = self_play_config()
             # Distinct checkpoint LRs expose accidental reuse of configuration
             # defaults; a fixed schedule keeps the resumed update unambiguous.
             config["runner"]["algorithm"]["schedule"] = "fixed"
-            main_lr, student_lr = 1e-5, 2e-5
+            main_lr = 1e-5
             self.run_training(config, source, iterations=4)
-            for filename in ("checkpoint.pt", "model_0.pt"):
+            for filename in ("checkpoint.pt", "model_1.pt"):
                 path = source / filename
                 selected = torch.load(path, map_location="cpu", weights_only=False)
-                for key, lr in (("optimizer_state_dict", main_lr),
-                                ("optimizer_stu_enc_state_dict", student_lr)):
+                for key, lr in (("optimizer_state_dict", main_lr),):
                     for group in selected[key]["param_groups"]:
                         group["lr"] = lr
                 torch.save(selected, path)
             source_hashes = directory_hashes(source)
-            for filename, expected_iteration in (("checkpoint.pt", 3), ("model_0.pt", 0)):
+            for filename, expected_iteration in (("checkpoint.pt", 3), ("model_1.pt", 0)):
                 with self.subTest(checkpoint=filename):
                     selected = torch.load(source / filename, map_location="cpu", weights_only=False)
                     target = Path(directory) / filename.removesuffix(".pt")
@@ -151,8 +151,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
                     self.assertEqual(checkpoint["iter"], expected_iteration + 1)
                     self.assertEqual(records[0]["iteration"], expected_iteration + 1)
                     assert_nested_equal(self, observed["starting_model"], selected["model_state_dict"])
-                    for live, stored, lr in (("optimizer", "optimizer_state_dict", main_lr),
-                                             ("optimizer_stu_enc", "optimizer_stu_enc_state_dict", student_lr)):
+                    for live, stored, lr in (("optimizer", "optimizer_state_dict", main_lr),):
                         assert_nested_equal(self, observed["starting_optimizers"][live], selected[stored])
                         before_steps = {int(value["step"]) for value in selected[stored]["state"].values()}
                         after_steps = {int(value["step"]) for value in checkpoint[stored]["state"].values()}
@@ -188,9 +187,29 @@ class SelfPlayTrainingTests(unittest.TestCase):
             self.assertEqual([s["iteration"] for s in pool["snapshots"]], [-1, 1, 2])
             assert_nested_equal(self, observed["session"].pool.get(2).model.state_dict(), checkpoint["model_state_dict"])
 
+    def test_default_history_training_and_resume_expire_the_initial_random_policy(self):
+        config = self_play_config()
+        config["self_play"].pop("retain_seed")
+        self.assertFalse(SelfPlayConfig().retain_seed)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            summary, checkpoint, records, observed = self.run_training(config, output, iterations=4)
+            self.assertEqual([record["self_play_pool_ids"] for record in records],
+                             [[0, 1], [0, 1, 2], [1, 2, 3], [2, 3, 4]])
+            session = observed["session"]
+            self.assertEqual(session.pool.ids, (2, 3, 4))
+            self.assertFalse(any(session.pool.get(value).metadata["seed"] for value in session.pool.ids))
+            assert_nested_equal(self, session.pool.get(4).model.state_dict(), checkpoint["model_state_dict"])
+            before = directory_hashes(output)
+            _, resumed, _, continued = self.run_training(
+                config, Path(directory) / "continued", iterations=1, resume=str(output / "checkpoint.pt"))
+            self.assertEqual(continued["session"].pool.ids, (4, 5, 6))
+            self.assertEqual(resumed["iter"], 4)
+            self.assertEqual(directory_hashes(output), before)
+
     def test_invalid_self_play_settings_fail_before_creating_run_output(self):
         cases = ({"pool_size": 1}, {"pool_size": True}, {"snapshot_interval": 0},
-                 {"seed": -1}, {"stochastic": "yes"}, {"sampling": "pfsp"})
+                 {"seed": -1}, {"stochastic": "yes"}, {"sampling": "pfsp"}, {"retain_seed": 1})
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "run"
             for settings in cases:

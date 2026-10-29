@@ -1,7 +1,7 @@
 """Independent device-resident batched environment with explicit host boundaries.
 
-The CUDA rules live in kernel.cu. No CPU engine, policy, runner, or
-GUI is imported here. CPU map loading/export is confined to the interop module.
+The CUDA tick kernel shares rules.h with native CPU execution. No CPU engine,
+policy, runner or GUI is imported here. Map loading/export is an explicit boundary.
 """
 from collections.abc import Mapping
 
@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from generals.protocol import STATE_DTYPES, STATS_FIELDS, COUNTER_FIELDS, MOVE_FIELDS
+from generals.protocol import STATE_DTYPES, COUNTER_FIELDS, MOVE_FIELDS, state_shape
 from generals.protocol.config import _integer
 from generals.protocol.vector import BatchStep
 
@@ -51,9 +51,7 @@ class GPUEnv:
         self.initial = {}
         for name, dtype in STATE_DTYPES.items():
             tensor = initial[name]
-            shape = ((self.batch_size, size) if name in ("terrain", "structure", "owner", "army")
-                     else (self.batch_size, self.players) if name in ("alive", "general_pos")
-                     else (self.batch_size,))
+            shape = state_shape(name, self.batch_size, size, self.players)
             if not isinstance(tensor, torch.Tensor) or tensor.shape != shape or tensor.dtype != getattr(torch, dtype):
                 raise ValueError(f"{name} must have shape {shape} and dtype {dtype}")
             self.initial[name] = tensor.to(self.device).contiguous().clone()
@@ -80,22 +78,24 @@ class GPUEnv:
         bad = ((terrain > 1) | (structure > 2) | (owner < -2) | (owner >= self.players) | (army < 0)).any()
         bad |= ((terrain == 1) & ((structure != 0) | (owner != -1) | (army != 0))).any()
         bad |= ((owner == -1) & ((structure != 0) | (army != 0))).any()
-        bad |= ((owner == -2) & ((structure != 1) | (army > 40))).any()
-        bad |= ((s["general_pos"] < 0) | (s["general_pos"] >= n)).any()
+        bad |= ((owner == -2) & (structure == 2)).any()
+        bad |= ((s["general_pos"] < -1) | (s["general_pos"] >= n)).any()
         sorted_pos = s["general_pos"].sort(dim=1).values
-        bad |= (sorted_pos[:, 1:] == sorted_pos[:, :-1]).any()
+        bad |= ((sorted_pos[:, 1:] == sorted_pos[:, :-1]) & (sorted_pos[:, 1:] >= 0)).any()
         live_count = s["alive"].sum(dim=1)
-        bad |= ((live_count < 1) | (s["tick"] < 0) | (s["terminated"] != (live_count == 1))).any()
+        bad |= ((s["tick"] < 0) | (s["terminated"] != (live_count <= 1))).any()
         winner = torch.where(live_count == 1, s["alive"].to(torch.int32).argmax(dim=1), -1)
         bad |= (s["winner"] != winner).any()
         indices = torch.arange(n, device=self.device)[None, :]
         expected_general = torch.zeros_like(structure, dtype=torch.bool)
         for pid in range(self.players):
             owned = owner == pid
-            expected = (indices == s["general_pos"][:, pid:pid + 1]) & s["alive"][:, pid:pid + 1]
+            expected = indices == s["general_pos"][:, pid:pid + 1]
             expected_general |= expected
             bad |= (expected & (~owned | (structure != 2))).any()
-            bad |= (owned & ~s["alive"][:, pid:pid + 1]).any()
+            bad |= (s["alive"][:, pid] & (s["general_pos"][:, pid] < 0)).any()
+            bad |= (owned & ~s["alive"][:, pid:pid + 1] & (s["leave_tick"][:, pid:pid + 1] < 0)
+                    & ~s["terminated"][:, None]).any()
         bad |= ((structure == 2) != expected_general).any()
         if bool(bad):
             raise ValueError("initial GPU state violates the shared game-state invariants")
@@ -176,6 +176,11 @@ class GPUEnv:
             kernel = self._step_kernel
         return kernel.native_step(kernel, actions)
 
+    def surrender(self, player_id, mask=None):
+        self._require_open()
+        from generals.core.lifecycle import surrender_batch
+        surrender_batch(self, player_id, mask)
+
     def reset(self, mask=None):
         """Restore initial state/RNG and clear diagnostics, for selected lanes."""
         self._require_open()
@@ -217,21 +222,30 @@ class GPUEnv:
         owned = (state["owner"] == player_id).reshape(shape)
         visible = (torch.ones_like(owned) if mode == "full" else
                    F.max_pool2d(owned[:, None].float(), 3, stride=1, padding=1)[:, 0].bool())
+        visible |= state["terminated"][:, None, None]
         stats = self._compute_stats()
         cities = stats[:, :, 2].clone()
         if mode == "local":
             cities.fill_(-1)
             cities[:, player_id] = stats[:, player_id, 2]
+            cities = torch.where(state["terminated"][:, None], stats[:, :, 2], cities)
         result = {name: torch.where(visible, state[name].reshape(shape), unknown)
                   for name, unknown in (("terrain", 255), ("structure", 255), ("owner", -3), ("army", -1))}
         result.update(visible=visible, alive=state["alive"].clone(),
                       general_pos=state["general_pos"][:, player_id].clone(), tick=state["tick"].clone(),
                       terminated=state["terminated"].clone(), winner=state["winner"].clone(),
                       stats_army=stats[:, :, 0].clone(), stats_territory=stats[:, :, 1].clone(), stats_cities=cities)
+        from generals.core.batch_observation import public_obstacles
+        ids = torch.full((self.batch_size,), player_id, device=self.device, dtype=torch.long)
+        result['fog_obstacles'] = public_obstacles(state, ids).reshape(shape) & ~visible
+        result['has_kill'] = state['kills'] > 0
+        result['warn_afk'] = state['warn_afk'].bool()
+        result['neutralize_in'] = torch.where((state['leave_tick'] >= 0) & (state['general_pos'] >= 0),
+            ((state['tick'][:, None] - state['leave_tick']) / 50.).clamp(0, 1), -1.)
         return result
 
     def legal_action_mask(self, player_id):
-        """Return bool [B,N,4,2] moves and [B] WAIT, including zero-army moves."""
+        """Return bool [B,N,4,2] moves and [B] WAIT at the decision boundary."""
         self._require_open()
         player_id = _integer("player_id", player_id, 0)
         if player_id >= self.players:
@@ -242,7 +256,7 @@ class GPUEnv:
         targets = torch.stack((padded[:, :-2, 1:-1], padded[:, 1:-1, 2:],
                                padded[:, 2:, 1:-1], padded[:, 1:-1, :-2]), dim=-1)
         active = state["alive"][:, player_id] & ~state["terminated"] & (self.errors == 0)
-        source = ((state["owner"] == player_id) & active[:, None]).reshape(self.batch_size, self.height, self.width)
+        source = ((state["owner"] == player_id) & (state['army'] > 1) & active[:, None]).reshape(self.batch_size, self.height, self.width)
         legal = (source[..., None] & (targets != 1)).reshape(self.batch_size, -1, 4)
         return legal[..., None].expand(-1, -1, -1, 2).clone(), active.clone()
 

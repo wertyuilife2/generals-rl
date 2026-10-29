@@ -132,6 +132,7 @@ class Board(tk.Canvas):
         owner = np.asarray(observation.owner).reshape(-1)
         army = np.asarray(observation.army).reshape(-1)
         visible = np.asarray(observation.visible).reshape(-1)
+        obstacles = np.asarray(observation.fog_obstacles).reshape(-1)
         self._known_terrain[visible] = terrain[visible]
         for cell, items in enumerate(self._cells):
             is_visible = bool(visible[cell])
@@ -139,13 +140,13 @@ class Board(tk.Canvas):
             building = int(structure[cell]) if is_visible else 0
             player = int(owner[cell]) if is_visible else -3
             count = int(army[cell]) if is_visible else 0
-            signature = is_visible, ground, building, player, count
+            signature = is_visible, ground, building, player, count, bool(obstacles[cell])
             if signature == self._cache[cell]:
                 continue
             self._cache[cell] = signature
             background, mountain, city, general, number = items
             if not is_visible:
-                color = "#202b38" if ground != 255 else "#141e2a"
+                color = "#34404d" if obstacles[cell] else "#202b38" if ground != 255 else "#141e2a"
             elif player >= 0:
                 color = PLAYER_COLORS[player % len(PLAYER_COLORS)]
             elif ground == 1:

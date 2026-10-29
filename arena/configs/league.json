@@ -1,0 +1,10 @@
+{
+  "player_counts": [2, 3, 4, 5, 6, 7, 8],
+  "mountain_min": 0.5,
+  "mountain_max": 0.5,
+  "city_min": 0.5,
+  "city_max": 0.5,
+  "max_ticks": 50002,
+  "seed": 1000042,
+  "tick_seconds": 0.5
+}

@@ -16,6 +16,7 @@ class SelfPlayConfig:
     stochastic: bool = True
     seed: int = 1000042
     sampling: str = "uniform"
+    retain_seed: bool = False
 
     def __post_init__(self):
         for name, minimum in (("pool_size", 2), ("snapshot_interval", 1), ("seed", 0)):
@@ -24,6 +25,8 @@ class SelfPlayConfig:
                 raise ValueError(f"self_play.{name} must be an integer >= {minimum}")
         if not isinstance(self.stochastic, bool):
             raise TypeError("self_play.stochastic must be boolean")
+        if not isinstance(self.retain_seed, bool):
+            raise TypeError("self_play.retain_seed must be boolean")
         if self.sampling != "uniform":
             raise ValueError("only uniform historical sampling is implemented")
 
@@ -49,15 +52,20 @@ class SelfPlaySession:
         if (iteration + 1) % self.config.snapshot_interval == 0:
             return self.publish(iteration, source={"kind": "learner_update"})
 
-def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_iteration=-1):
+def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_iteration=-1,
+                      initial_source=None, read_only=False, opponent_seed=None):
     """Bind a pool after policy loading, before the first game tick.
 
     The original policy constructor is used only for feature shapes; snapshot
-    inference receives local policy/single_obs/action_mask and never critic.
+    inference receives local policy/single_obs/action_mask, optional knowledge,
+    and never critic. Actor-information critic inputs are independently chosen
+    by obs_groups; enabling memory does not require an information critic.
     Resume copies the old pool and excludes snapshots newer than the selected
     learner checkpoint. Environment and opponent RNG streams start afresh.
+    A weights-only warm start supplies initial_source without restoring a pool.
+    Read-only ranks open the writer's completed destination after synchronization.
     """
-    if task.config.opponent != "self_play":
+    if task.config.opponent not in ("self_play", "current_self_play"):
         return None
     settings = SelfPlayConfig(**config.get("self_play", {}))
     policy = runner.alg.policy
@@ -85,9 +93,15 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         "encoder": f"{type(task.observation_encoder).__module__}.{type(task.observation_encoder).__qualname__}",
         "action_space": f"{type(task.action_space).__module__}.{type(task.action_space).__qualname__}",
     }
+    if task.config.persistent_knowledge:
+        signature["mdp"]["persistent_knowledge"] = True
+        signature["knowledge_semantics"] = task.knowledge.semantics
+        signature["knowledge_channels"] = list(task.knowledge.channels)
+    if hasattr(task.observation_encoder, "semantics"):
+        signature["encoder_semantics"] = task.observation_encoder.semantics
     resume_pool = None
-    provenance = {"kind": "random_initial_policy"}
-    if resume:
+    provenance = dict(initial_source) if initial_source is not None else {"kind": "random_initial_policy"}
+    if resume and not read_only:
         checkpoint = Path(resume).resolve()
         provenance = {"kind": "learner_checkpoint", "path": str(checkpoint),
                       "sha256": sha256(checkpoint.read_bytes()).hexdigest()}
@@ -99,9 +113,17 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         policy_spec=signature, device=task.device, max_size=settings.pool_size,
         resume_from=resume_pool,
         resume_iteration=initial_iteration if resume_pool is not None else None,
+        read_only=read_only, retain_seed=settings.retain_seed,
     )
     session = SelfPlaySession(pool, task.opponent, policy, settings)
     # Even when an old pool is restored, make the resumed learner selectable.
-    session.publish(initial_iteration, source=provenance)
-    task.opponent.attach(pool, stochastic=settings.stochastic, seed=settings.seed)
+    if not read_only:
+        session.publish(initial_iteration, source=provenance)
+    seed = settings.seed if opponent_seed is None else opponent_seed
+    if task.config.opponent == "current_self_play":
+        # Snapshots are evaluation/export artifacts only. Every training
+        # opponent uses the live learner, which changes between PPO updates.
+        task.opponent.attach_policy(policy, stochastic=settings.stochastic, seed=seed)
+    else:
+        task.opponent.attach(pool, stochastic=settings.stochastic, seed=seed)
     return session

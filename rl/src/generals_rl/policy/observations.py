@@ -1,0 +1,125 @@
+"""Shared visibility-masked features and episode-local history."""
+import torch
+import torch.nn.functional as F
+
+from .state import GameBatch
+
+
+class LocalObservationEncoder:
+    semantics = "official_31_4_5_local_v1"
+    channels = ("visible", "plain", "mountain", "city", "general", "self",
+                "enemy", "empty", "neutral", "log_army")
+
+    def __init__(self, episode_ticks: int):
+        self.episode_ticks = episode_ticks
+
+    def visibility(self, batch: GameBatch, player_ids: torch.Tensor):
+        owned = (batch.state["owner"] == player_ids[:, None]).float()
+        visible = F.max_pool2d(owned.reshape(-1, 1, batch.height, batch.width),
+                            kernel_size=3, stride=1, padding=1).reshape(batch.num_envs, -1).bool()
+        return (visible | batch.state["terminated"][:, None]) & batch.valid_cells
+
+    def encode(self, batch: GameBatch, player_ids: torch.Tensor, *, visible=None, hide_enemy_cities=True):
+        s, stats = batch.state, batch.stats
+        visible = self.visibility(batch, player_ids) if visible is None else visible & batch.valid_cells
+        owner, terrain, structure = s["owner"], s["terrain"], s["structure"]
+        own = owner == player_ids[:, None]
+        # Hidden ownership/army/type remain unknown; only the official combined
+        # obstacle hint and the public board extent are available through fog.
+        maps = torch.stack((visible, visible & (terrain == 0), visible & (terrain == 1),
+                            visible & (structure == 1), visible & (structure == 2),
+                            visible & own, visible & (owner >= 0) & ~own,
+                            visible & (owner == -1), visible & (owner == -2)), 1).float()
+        army = torch.log1p(s["army"].float()) / 10.0 * visible
+        order = (player_ids[:, None] + torch.arange(batch.players, device=batch.device)) % batch.players
+        # Relative identity channels retain the owner of visible enemy cells,
+        # including in multiplayer games. Hidden identities stay zero.
+        identities = (owner[:, None] == order[:, :, None]) & visible[:, None]
+        maps = torch.cat((maps, army[:, None], identities.float(),
+                          batch.valid_cells[:, None].float(),
+                          batch.fog_obstacles(player_ids, visible)[:, None].float()), 1).flatten(1)
+        # Relative player order starts at the learner; all army/territory/alive
+        # totals are public. Opponent city counts are unknown in local mode.
+        relative = stats.gather(1, order[..., None].expand(-1, -1, 3)).float()
+        cells = batch.valid_cells.sum(1).clamp_min(1)[:, None]
+        city = relative[..., 2] / cells
+        if hide_enemy_cities:
+            city = torch.cat((city[:, :1], torch.where(s['terminated'][:, None], city[:, 1:],
+                                                      -torch.ones_like(city[:, 1:]))), 1)
+        alive = s["alive"].gather(1, order).float()
+        public = torch.stack((torch.log1p(relative[..., 0]) / 10.0,
+                              relative[..., 1] / cells, city, alive), -1).flatten(1)
+        tick = s["tick"].float()
+        clock = torch.stack((tick / self.episode_ticks, (tick % 2) / 2, (tick % 50) / 50), -1)
+        # Seat and clock expose the alternating base tie-break priority.
+        seat = F.one_hot(player_ids, num_classes=batch.players).float()
+        return torch.cat((maps, public, clock, seat), -1)
+
+
+def make_observation_encoder(config, *, local_encoder=LocalObservationEncoder, combat_encoder=None, king_encoder=None):
+    """Use one configured feature layout for learner, opponents and evaluation."""
+    if config.combat_features:
+        from .combat import CombatObservationEncoder
+        encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps)
+    else:
+        encoder = local_encoder(config.max_episode_steps)
+    return (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
+
+
+class KingThreatDistanceEncoder:
+    """Replace redundant seat-P1 with normalized nearest mobile enemy distance.
+
+    Use current source armies at the decision boundary. This is geometric
+    potential only: ignores walls, routes, joint moves and absolute seat order.
+    Missing/dead/ambiguous own general and no mobile enemy use distance=1.
+    """
+    def __init__(self, base):
+        self.base = base
+        self.channels = base.channels
+        self.semantics = base.semantics + "_king_threat_distance_v1"
+
+    def visibility(self, batch, player_ids):
+        return self.base.visibility(batch, player_ids)
+
+    def encode(self, batch, player_ids, **visibility_options):
+        if batch.players != 2:
+            raise ValueError("king threat distance requires two players")
+        result = self.base.encode(batch, player_ids, **visibility_options)
+        cells_count = batch.width * batch.height
+        planes = result[:, :12 * cells_count].reshape(batch.num_envs, 12, cells_count)
+        visible, own, enemy = (planes[:, index].bool() for index in (0, 5, 6))
+        own_general = planes[:, 4].bool() & own
+        king = own_general.long().argmax(1)
+        valid = own_general.sum(1).eq(1) & batch.state["alive"].gather(1, player_ids[:, None]).squeeze(1)
+        # Mask raw hidden army before comparisons, and avoid int64 addition.
+        army = torch.where(visible, batch.state["army"], 0)
+        mobile = enemy & (army > 1)
+        mobile &= batch.state["alive"].gather(1, (1 - player_ids)[:, None])
+        cells = torch.arange(cells_count, device=batch.device)
+        distance = ((cells[None] // batch.width - king[:, None] // batch.width).abs()
+                    + (cells[None] % batch.width - king[:, None] % batch.width).abs()).float() / max(
+                        1, batch.width + batch.height - 2)
+        nearest = distance.masked_fill(~mobile, 1).amin(1)
+        result[:, -1] = torch.where(valid, nearest, 1)
+        return result
+
+
+class ObservationHistory:
+    def __init__(self, length: int):
+        if length < 1:
+            raise ValueError("history length must be positive")
+        self.length = length
+        self.frames = None
+
+    def reset(self, current, mask=None):
+        repeated = current[:, None].expand(-1, self.length, -1)
+        if self.frames is None or mask is None:
+            self.frames = repeated.clone()
+        else:
+            self.frames[mask] = repeated[mask]
+
+    def push(self, current):
+        self.frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)
+
+    def flattened(self):
+        return self.frames.flatten(1).clone()

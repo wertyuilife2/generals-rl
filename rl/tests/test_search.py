@@ -98,14 +98,14 @@ class JointTickSimulatorTests(unittest.TestCase):
         state.owner.flat[3] = -2
         state.structure.flat[3] = Structure.CITY
         state.army.flat[3] = 17
-        # On tick 2, the general's growth occurs before this preselected move.
+        # On tick 2, the general's growth follows selection, so this one-army move is discarded.
         sequence = [[0, 0], [Action.move(0, Direction.DOWN), 0]]
         sequence.extend([[0, 0]] * 49)
         self.assert_native_parity(state, sequence)
         second, _ = JointTickSimulator().advance(state, [0, 0])
         second, _ = JointTickSimulator().advance(second, sequence[1])
-        self.assertEqual(second.army.flat[4], 1)
-        self.assertEqual(second.owner.flat[4], 0)
+        self.assertEqual(second.army.flat[4], 0)
+        self.assertEqual(second.owner.flat[4], -1)
 
     def test_ordered_capture_inheritance_and_dead_slots_match_cpu(self):
         state = make_state(generals=(0, 1, 11))
@@ -123,8 +123,8 @@ class JointTickSimulatorTests(unittest.TestCase):
         child, info = JointTickSimulator().advance(state, sequence[0])
         self.assertFalse(info.done)
         self.assertEqual(info.result.eliminated, (1,))
-        self.assertEqual([move.player_id for move in info.result.moves], [0, 2])
-        self.assertEqual(child.army.flat[2], 2)
+        self.assertEqual([move.player_id for move in info.result.moves], [0, 1, 2])
+        self.assertEqual(child.army.flat[2], 3)
         self.assertEqual(child.owner.flat[2], 0)
 
     def test_natural_terminal_freeze_and_terminal_precedence_match_cpu(self):

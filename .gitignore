@@ -6,4 +6,15 @@ dist/
 .venv/
 .pytest_cache/
 outputs/
-doc/
+*.pt
+*.pth
+doc/*
+!doc/README.md
+!doc/auto_research.md
+!doc/averagejoe_paper_comparison.md
+!doc/h200_scaling.md
+!doc/f03_ablation.md
+!doc/official_rules_alignment.md
+!doc/assets/
+doc/assets/*
+!doc/assets/f03_ablation/

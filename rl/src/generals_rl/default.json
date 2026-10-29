@@ -1,0 +1,150 @@
+{
+  "task": {
+    "width": 23,
+    "height": 23,
+    "players": 2,
+    "num_envs": 16384,
+    "backend": "gpu",
+    "device": "cuda:0",
+    "max_episode_steps": 2000,
+    "history_length": 4,
+    "seed": 20261013,
+    "threads": 1,
+    "learner_seat": 0,
+    "rotate_seats": true,
+    "opponent": "self_play",
+    "mountain_density": 0.5,
+    "city_density": 0.5,
+    "combat_features": true,
+    "king_threat_distance": true,
+    "critic_potential": false,
+    "persistent_knowledge": true,
+    "map_pool_size": 65536,
+    "reward": {
+      "territory": 0.05,
+      "cities": 0.2,
+      "army": 0.001,
+      "win": 1.0,
+      "loss": -1.0,
+      "tick": -0.001,
+      "potential_gamma": 0.99
+    },
+    "random_maps": true
+  },
+  "runner": {
+    "num_steps_per_env": 32,
+    "save_interval": 14,
+    "logger": "tensorboard",
+    "obs_groups": {
+      "policy": [
+        "policy",
+        "knowledge"
+      ],
+      "critic": [
+        "critic",
+        "policy",
+        "knowledge"
+      ]
+    },
+    "robogauge": {
+      "enabled": false
+    },
+    "policy": {
+      "class_name": "generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy",
+      "backbone": "vit",
+      "model_size": "1m",
+      "map_width": 23,
+      "map_height": 23,
+      "history_length": 4,
+      "players": 2,
+      "map_planes": 14,
+      "public_dim": 13,
+      "knowledge_channels": 11,
+      "critic_actor_information": true,
+      "own_king_geometry": true,
+      "action_distribution": "categorical",
+      "actor_obs_normalization": false,
+      "critic_obs_normalization": false,
+      "wait_move_factorization": true,
+      "critic_projection_channels": 0,
+      "input_channel_alignment": 4,
+      "head_channels": 128,
+      "inference_chunk_size": 2048,
+      "amp_bfloat16": true,
+      "spatial_mode": "dense",
+      "compile_forward": true
+    },
+    "algorithm": {
+      "class_name": "generals_rl.student_ppo.StudentPPO",
+      "teacher_env_ratio": 0,
+      "num_learning_epochs": 4,
+      "num_mini_batches": 64,
+      "learning_rate": 0.0001,
+      "schedule": "adaptive",
+      "desired_kl": 0.01,
+      "gamma": 0.99,
+      "lam": 0.95,
+      "entropy_coef": 0.01,
+      "rnd_cfg": null,
+      "ppo_monitor": true,
+      "ppo_probe_samples": 8192,
+      "ppo_probe_batch_size": 1024,
+      "physical_minibatch_size": 8192,
+      "amp_bfloat16": true,
+      "adaptive_lr_min": 1e-05,
+      "adaptive_lr_max": 0.001
+    },
+    "storage_obs_keys": [
+      "policy",
+      "critic",
+      "action_mask",
+      "knowledge"
+    ]
+  },
+  "self_play": {
+    "pool_size": 8,
+    "snapshot_interval": 1,
+    "stochastic": true,
+    "seed": 120261013,
+    "sampling": "uniform",
+    "retain_seed": false
+  },
+  "evaluation": {
+    "enabled": true,
+    "profile": null,
+    "batch_size": 0,
+    "max_ticks": 2000,
+    "seed": 271828,
+    "cpu_threads": 1,
+    "keep_snapshots": null,
+    "device": "cuda:0",
+    "timeout_seconds": 1800,
+    "every_n_updates": 14,
+    "maps_per_opponent": 100,
+    "backend": "gpu",
+    "final_top_k": 3,
+    "final_games_multiplier": 2
+  },
+  "torch_threads": 1,
+  "run_id": "official-31.4.5-vit1m",
+  "matmul_precision": "high",
+  "training_control": {
+    "max_seconds": null,
+    "min_seconds": 0,
+    "plateau_evaluations": null,
+    "min_improvement": 10.0,
+    "keep_checkpoints": 2
+  },
+  "curriculum": {
+    "tick_decay": true,
+    "tick_end_iteration": 125,
+    "gamma_final": 0.999,
+    "gamma_end_iteration": 112
+  },
+  "cudnn_benchmark": true,
+  "inference": {
+    "mode": "stochastic",
+    "precision": "from_config",
+    "execution": "eager"
+  }
+}

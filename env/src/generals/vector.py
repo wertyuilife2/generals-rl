@@ -36,6 +36,7 @@ class VecEnv:
     """
     step: Callable[[Any], BatchStep]
     reset: Callable[..., Any]
+    surrender: Callable[..., None]
     synchronize: Callable[[], None]
     check_errors: Callable[[], None]
     invalidate_cache: Callable[[], None]
@@ -49,7 +50,7 @@ class VecEnv:
     def _bind(self, backend):
         self.unwrapped = backend
         self.device = getattr(backend, "device", "cpu")
-        for name in ("step", "reset", "synchronize", "check_errors", "invalidate_cache",
+        for name in ("step", "reset", "surrender", "synchronize", "check_errors", "invalidate_cache",
                      "to_states", "close"):
             setattr(self, name, getattr(backend, name))
 
@@ -98,6 +99,14 @@ class VecEnv:
     @property
     def height(self):
         return self.unwrapped.height
+
+    def observer(self, player_ids):
+        """Bind a public on-device observation batch to fixed lane seats."""
+        from .core.batch_observation import batch_observer
+        return batch_observer(self, player_ids)
+
+    def observe(self, player_ids):
+        return self.observer(player_ids)()
 
     def __enter__(self):
         return self
