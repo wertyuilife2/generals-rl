@@ -23,6 +23,13 @@ class _Outputs(ctypes.Structure):
         "growth_cells", "growth_count", "cache_valid", "owned_structures")]
 
 
+class _Observation(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_void_p) for name in (
+        'terrain', 'structure', 'owner', 'army', 'visible', 'alive', 'fog_obstacles',
+        'has_kill', 'warn_afk', 'neutralize_in', 'stats', 'general_pos', 'active',
+        'tick', 'terminated', 'winner_id')]
+
+
 @lru_cache(maxsize=1)
 def _library():
     lib, metadata = build_shared(Path(__file__).with_name("step.cpp"),
@@ -30,6 +37,9 @@ def _library():
     lib.generals_step.argtypes = [ctypes.POINTER(_Batch), ctypes.POINTER(_Batch),
         ctypes.POINTER(_Outputs), ctypes.c_void_p, *([ctypes.c_int] * 6), ctypes.c_int64]
     lib.generals_step.restype = None
+    lib.generals_observe.argtypes = [ctypes.POINTER(_Batch), ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.c_void_p, ctypes.POINTER(_Observation), *([ctypes.c_int] * 4)]
+    lib.generals_observe.restype = None
     lib.omp_get_num_procs.argtypes = []
     lib.omp_get_num_procs.restype = ctypes.c_int
     return lib, metadata
@@ -134,6 +144,37 @@ class CPUEnv:
         if self._closed:
             raise RuntimeError("CPU environment is closed")
         self._cache_valid.fill(False)
+
+    def observer(self, player_ids):
+        """Bind seats; produce independent public snapshots in one native call."""
+        ids = np.asarray(player_ids)
+        if ids.ndim == 0:
+            ids = np.full(self.batch_size, ids)
+        if (ids.shape != (self.batch_size,) or ids.dtype.kind not in 'iu'
+                or np.any(ids < 0) or np.any(ids >= self.players)):
+            raise ValueError('one valid player id is required for every environment')
+        ids = np.array(ids, dtype=np.int64, order='C', copy=True)
+
+        def observe():
+            if self._closed:
+                raise RuntimeError('CPU environment is closed')
+            boards = {key: np.empty_like(self.state[key]) for key in
+                      ('terrain', 'structure', 'owner', 'army', 'alive', 'tick', 'terminated')}
+            boards.update(fog_obstacles=np.empty_like(self.state['terrain'], dtype=bool),
+                has_kill=np.empty_like(self.state['alive']), warn_afk=np.empty_like(self.state['alive']),
+                neutralize_in=np.empty(self.state['alive'].shape, dtype=np.float64),
+                winner_id=np.empty_like(self.state['winner']))
+            raw = dict(state=boards, visible=np.empty_like(self.state['terrain'], dtype=bool),
+                stats=np.empty_like(self.stats), general_pos=np.empty(self.batch_size, np.int32),
+                active=np.empty(self.batch_size, bool), player_ids=ids.copy(),
+                width=self.width, height=self.height, visibility='local')
+            arrays = {**boards, **{k: raw[k] for k in ('visible', 'stats', 'general_pos', 'active')}}
+            output = _Observation(*(arrays[key].ctypes.data for key, _ in _Observation._fields_))
+            self._lib.generals_observe(ctypes.byref(self._state), self.stats.ctypes.data,
+                self.done.ctypes.data, ids.ctypes.data, ctypes.byref(output),
+                self.batch_size, self.height, self.width, self.players)
+            return raw
+        return observe
 
     def surrender(self, player_id, mask=None):
         if self._closed:

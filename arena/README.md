@@ -169,7 +169,7 @@ generals-arena league rebuild outputs/arena/main
 这是本机实验服务，默认且仅监听 `127.0.0.1` / `localhost`，不作为公网多人游戏服务部署。
 游戏进行中 API 只返回该人类的允许观测，不发送地图种子、敌方主城位置或完整棋盘；
 迷雾中的山与城市仅以同一种 `fog_obstacles` 布尔标记显示为山，不能区分类型，归属、兵力和敌方主城继续隐藏；进入视野后恢复真实地形。
-算法、RL、桌面与浏览器共享上述原始观测边界；自然终局开放全图。完整回放只在比赛结束后可读取。自定义算法是管理员从 CLI 装载的可信本地 Python 代码，不是隔离的代码沙箱。C++ SDK ABI 已更新为 2，新增混淆障碍、击杀／AFK／离场字段，源码包需重新编译。
+算法、RL 与浏览器共享上述原始观测边界；自然终局开放全图。完整回放只在比赛结束后可读取。自定义算法是管理员从 CLI 装载的可信本地 Python 代码，不是隔离的代码沙箱。C++ SDK ABI 已更新为 2，新增混淆障碍、击杀／AFK／离场字段，源码包需重新编译。
 
 ## 接入算法版本
 
@@ -286,12 +286,21 @@ python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 
 | 入口 | 当前执行方式 | GPU 与批推理 |
 | --- | --- | --- |
-| `commit / run / league` | CPU 单局执行；任务 worker 可并行不同对局，保存 SQLite 结果和录像 | 策略包可配置 CUDA 推理，环境仍是 CPU；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置；不做跨对局神经网络批推理 |
+| `commit / run / league` | 在预排窗口内按地图尺寸和策略实例分组批执行，按原赛程序写入 SQLite 和录像；worker 可并行不同分组 | 环境是 CPU；策略包可配置 CUDA 批推理；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置 |
 | `tournament / evaluate` | 按相同地图配置与策略实例组合分组，调用共享 `MatchRunner` | 可选 CPU/CUDA VecEnv；支持 `reset_batch/act_batch` 的策略按组批推理 |
 
-独立 C++ 策略包（`kind="cpp"`）保留 CPU 隔离比赛进程和超时边界，不能传给 GPU 批执行。
-四个内置 baseline 属于 `kind="baseline"`，可参与 GPU 环境批评估；二人局用原生 batch，FFA 逐席位调用标量控制器。
+独立 C++ 策略包（`kind="cpp"`）在 CPU 隔离进程内批执行，宿主原生循环逐 lane 调用现有 SDK；
+无需改写策略源码，不增加策略线程，每个席位的每次决策仍有独立的 10ms 限制。暂不支持 CUDA 环境搭配 C++ SDK。
+硬超时通过共享动作记录恢复对应对局并判该席位投降；同批未发布的其他对局按原种子重试，按赛程序结算。
+四个内置 baseline 和普通策略共用 `reset_batch/act_batch/on_result_batch` 接口，2–8 人均批执行，
+接收 env 的公开观测。`kind="baseline"` 与 `baseline/名称` 保留为注册快捷方式，不决定批执行方式。
+仅提供标量接口的 Python Controller 使用通用逐 lane 适配；神经网络包已有批接口时直接使用。
 `--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 不受 C++ SDK 的 10ms 决策计时约束。
+
+2026-11-03 本机对照：25×25、每组 32 局、160 tick 上限、CPU 单线程、关闭录像，取 3 次完整执行耗时中位数。
+baseline 1v1 为 0.186→0.189 秒，4 人局为 0.983→0.321 秒；轻量 C++ 策略对 expansion 的
+1v1 为 1.244→0.310 秒，4 人局为 1.790→0.461 秒。128 局的逐局最终状态摘要全部一致。
+原始测量保存于 `outputs/benchmarks/unified-policy-batch.json`；此结果覆盖上述策略和批大小。
 
 
 ## 历史结果
@@ -336,8 +345,8 @@ generals-arena tournament --entrants roster.json --config rules.json \
 `generals_arena.competitions.evaluation.make_profile` 固定地图配置、人数、对手声明、种子、换位和预算；
 `profile_id()` 解析并绑定对手工件版本、赛程、执行源码、校准数据与评分规则。
 `evaluate(bundle, profile, backend="cpu"|"gpu", device=..., batch_size=...)` 运行批量比赛。
-支持 `reset_batch/act_batch` 的策略直接接收 `VecEnv.observer()` 的原始局部数组观测；二人局的四种 baseline 使用原 C++ batch，
-其他 Controller 使用标量接口。Arena 不构造神经网络特征。`record_replays=True` 输出可逐 tick 校验的 Arena 录像。
+所有策略通过统一批执行入口接收 `VecEnv.observer()` 的原始局部数组观测；C++ 与 baseline 的逐 lane 决策循环在原生层执行，
+只实现标量接口的 Controller 由通用适配器逐 lane 调用。Arena 不构造神经网络特征。`record_replays=True` 输出可逐 tick 校验的 Arena 录像。
 
 1v1 评估使用 `gor-batch-fit-v1`：保留 GoR 胜率函数，将整批结果联合拟合，消除逐局计分的顺序依赖。每个已观测策略对平滑一局虚拟平局，换座比赛各计半份权重。校准 profile 固定所有参考的原始分数；未校准 profile 固定 WAIT 为 0 后拟合当前面板。FFA 周期评估仍使用 Codeforces 均分 1000 的规则。
 `evaluate([...], profile, ...)` 或 CLI `--candidates JSON` 执行共同候选复评：候选挑战参考，同时候选相互循环赛，一次联合评分。当前共同复评要求 1v1。无需重复参考之间的校准对局。

@@ -46,3 +46,37 @@ def test_invalid_seats_fail_at_binding():
         for ids in ((-1, 0), (0, 2), (0,), (True, False)):
             with pytest.raises(ValueError):
                 env.observer(ids)
+
+
+def test_native_cpu_observer_matches_numpy_through_departure_reset_and_city_memory():
+    from generals.core.batch_observation import batch_observer
+    with VecEnv.from_config(MapConfig(25, 27, 4), batch_size=3, threads=1) as env:
+        seats = np.array([0, 2, 3])
+        native, reference = env.observer(seats), batch_observer(env, seats)
+
+        def compare():
+            left, right = native(), reference()
+            for key in right:
+                if key == 'state':
+                    for field in right[key]:
+                        np.testing.assert_array_equal(left[key][field], right[key][field], err_msg=field)
+                elif isinstance(right[key], np.ndarray):
+                    np.testing.assert_array_equal(left[key], right[key], err_msg=key)
+                else:
+                    assert left[key] == right[key]
+            return left
+
+        saved = compare()
+        env.surrender(1)
+        for _ in range(55):
+            env.step(np.zeros((3, 4), np.int64))
+            compare()
+        env.state['city_known'][:] = 0
+        compare()
+        env.state['city_known'][:] = 15
+        compare()
+        env.state['terminated'][:] = True
+        compare()
+        env.reset(np.array([True, False, True]))
+        compare()
+        np.testing.assert_array_equal(saved['state']['tick'], [0, 0, 0])

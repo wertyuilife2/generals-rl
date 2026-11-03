@@ -115,7 +115,7 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
     report=tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),
                       tmp_path/'cpp',record_replays=True)
     assert report['games']==6 and report['execution']=='mixed'
-    assert set(report['execution_modes'])=={'isolated','policy_batch'}
+    assert set(report['execution_modes'])=={'isolated_batch','policy_batch'}
     assert not list(tmp_path.rglob('league.sqlite3'))
     cpp_id = prepare_entrant(entries[0])['entrant_id']
     native_games = 0

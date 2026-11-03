@@ -109,6 +109,9 @@ class VecEnv:
 
     def observer(self, player_ids):
         """Bind a public on-device observation batch to fixed lane seats."""
+        native = getattr(self.unwrapped, 'observer', None)
+        if native is not None:
+            return native(player_ids)
         from .core.batch_observation import batch_observer
         return batch_observer(self, player_ids)
 

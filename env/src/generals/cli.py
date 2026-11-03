@@ -1,4 +1,4 @@
-"""Cross-platform command line. GUI imports are lazy."""
+"""Headless simulation, recording verification and backend benchmarks."""
 import argparse
 from dataclasses import asdict
 import json
@@ -12,28 +12,23 @@ from generals.runtime.runner import Runner, ControllerError
 
 
 def _parser():
-    parser = argparse.ArgumentParser(prog="generals-env", description="Generals environment: play, watch, simulate, replay, benchmark")
+    parser = argparse.ArgumentParser(prog="generals-env", description="Generals environment: simulate, replay, benchmark")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("play", "watch", "simulate"):
-        p = sub.add_parser(name)
-        p.add_argument("--players", type=int, default=4)
-        p.add_argument("--size", type=int, help="explicit square size; default samples an official map")
-        p.add_argument("--width", type=int)
-        p.add_argument("--height", type=int)
-        p.add_argument("--mountain-density", type=float, default=.5, help="official density slider (default .5)")
-        p.add_argument("--city-density", type=float, default=.5, help="official density slider (default .5)")
-        p.add_argument("--seed", type=int, default=42)
-        p.add_argument("--visibility", choices=("local", "full"), default="local")
-        p.add_argument("--ais", help="comma-separated aggressive,expansion,defensive,random (one per AI seat)")
-        if name == "simulate":
-            p.add_argument("--games", type=int, default=1)
-            p.add_argument("--max-ticks", type=int, default=50002)
-            p.add_argument("--record", type=Path, help="JSONL path; requires --games 1 and a new file")
-            p.add_argument("--output", type=Path, help="write JSON summary to a new file")
-            p.add_argument("--debug", action="store_true")
-        else:
-            p.add_argument("--speed", type=float, choices=(1, 2, 5, 10), default=1)
-            if name == "play": p.add_argument("--human-seat", type=int, default=0)
+    p = sub.add_parser("simulate")
+    p.add_argument("--players", type=int, default=4)
+    p.add_argument("--size", type=int, help="explicit square size; default samples an official map")
+    p.add_argument("--width", type=int)
+    p.add_argument("--height", type=int)
+    p.add_argument("--mountain-density", type=float, default=.5, help="official density slider (default .5)")
+    p.add_argument("--city-density", type=float, default=.5, help="official density slider (default .5)")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--visibility", choices=("local", "full"), default="local")
+    p.add_argument("--ais", help="comma-separated aggressive,expansion,defensive,random (one per AI seat)")
+    p.add_argument("--games", type=int, default=1)
+    p.add_argument("--max-ticks", type=int, default=50002)
+    p.add_argument("--record", type=Path, help="JSONL path; requires --games 1 and a new file")
+    p.add_argument("--output", type=Path, help="write JSON summary to a new file")
+    p.add_argument("--debug", action="store_true")
     from generals.benchmarks.step import add_arguments
     add_arguments(sub.add_parser("benchmark", help="compare CPU/GPU per-step environment throughput"))
     p = sub.add_parser("replay", help="verify a JSONL action recording without calling AI")
@@ -42,17 +37,12 @@ def _parser():
 
 
 def _kinds(args):
-    human = args.human_seat if args.command == "play" else None
-    if human is not None and not 0 <= human < args.players:
-        raise ValueError("human seat outside player range")
-    count = args.players - (human is not None)
+    count = args.players
     cycle = ("aggressive", "expansion", "defensive", "random")
     ai = args.ais.split(",") if args.ais else [cycle[i % 4] for i in range(count)]
     if len(ai) != count or any(kind not in cycle for kind in ai):
         raise ValueError(f"--ais requires exactly {count} valid AI names")
-    result = list(ai)
-    if human is not None: result.insert(human, "human")
-    return result
+    return ai
 
 
 def main(argv=None):
@@ -73,14 +63,6 @@ def main(argv=None):
                            args.height if args.height is not None else args.size,
                            args.players, args.mountain_density, args.city_density)
         kinds = _kinds(args)
-        if args.command in ("play", "watch"):
-            from generals.api import make_env
-            session = make_env(config, mode="realtime", device="cpu", seed=args.seed,
-                   watch=args.command == "watch",
-                   human_seat=getattr(args, "human_seat", 0), visibility=args.visibility,
-                   kinds=kinds, speed=args.speed)
-            session.run()
-            return 0
         if args.games < 1 or args.max_ticks < 1:
             raise ValueError("games and max-ticks must be positive")
         if args.record and args.games != 1:
@@ -129,8 +111,3 @@ def main(argv=None):
         return 1 if result["errors"] else 0
     except (ValueError, TypeError, OSError) as exc:
         parser.exit(2, f"error: {exc}\n")
-    except Exception as exc:
-        # Tk may be unavailable on an otherwise fully functional headless machine.
-        if type(exc).__name__ == "TclError":
-            parser.exit(2, f"GUI display unavailable: {exc}. Use simulate on a headless machine.\n")
-        raise

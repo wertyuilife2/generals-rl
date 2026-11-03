@@ -1,17 +1,14 @@
-"""Public modes, dependency boundaries and direct hot-path binding."""
+"""Public simulation API, dependency boundaries and direct hot-path binding."""
 import os
 from pathlib import Path
 import subprocess
 import sys
-import types
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
 from generals import BatchStep, MapConfig, VecEnv, make_env
 from generals.protocol.vector import VectorBackend
-from generals.runtime.play import PlaySession
 
 
 class PublicAPITests(unittest.TestCase):
@@ -24,47 +21,22 @@ with make_env(MapConfig(15,15,2), batch_size=2, threads=1) as env:
     assert isinstance(env, VecEnv)
     assert not any(n.startswith(('torch', 'tkinter', 'generals.benchmarks')) for n in sys.modules)
     assert not any(n.startswith('generals.benchmarks') for n in sys.modules)
-session = make_env(MapConfig(15,15,2), mode='realtime')
-assert 'tkinter' not in sys.modules
 '''
         environment = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / 'src'))
         result = subprocess.run([sys.executable, '-c', code], env=environment,
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_invalid_modes_devices_and_cross_mode_options_are_rejected(self):
+    def test_invalid_modes_devices_and_options_are_rejected(self):
         config = MapConfig(15, 15, 2)
         for options in ({'mode': 'unknown'}, {'device': 'gpu'}, {'device': 'cuda:no'},
-                        {'mode': 'realtime', 'device': 'cuda'}):
+                        {'mode': 'realtime'}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 make_env(config, **options)
         with self.assertRaises(TypeError):
-            make_env(config, mode='realtime', batch_size=4)
+            make_env(config, watch=True)
         with self.assertRaises(TypeError):
             make_env('not a config')
-
-    def test_realtime_session_delegates_to_existing_launch_without_changing_arguments(self):
-        fake = types.ModuleType('generals.gui.app')
-        with patch.object(fake, 'launch', create=True, return_value='closed') as launch:
-            with patch.dict(sys.modules, {'generals.gui.app': fake}):
-                config = MapConfig(15, 15, 2)
-                for watch in (False, True):
-                    session = make_env(config, mode='realtime', watch=watch, seed=81,
-                                       human_seat=1, visibility='full', kinds=['random','defensive'], speed=5)
-                    self.assertIsInstance(session, PlaySession)
-                    self.assertEqual(session.run(), 'closed')
-                    launch.assert_called_with(config, seed=81, mode='watch' if watch else 'play',
-                                              human_seat=1, visibility='full',
-                                              kinds=('random', 'defensive'), speed=5)
-
-    def test_cli_play_watch_use_realtime_mode(self):
-        from generals.cli import main
-        with patch('generals.api.make_env') as factory:
-            for command in ('play', 'watch'):
-                self.assertEqual(main([command, '--players', '2', '--size', '15']), 0)
-                self.assertEqual(factory.call_args.kwargs['mode'], 'realtime')
-                self.assertEqual(factory.call_args.kwargs['watch'], command == 'watch')
-                factory.return_value.run.assert_called()
 
     def exercise_vector(self, device):
         config = MapConfig(15, 15, 2)
