@@ -1,20 +1,20 @@
 # generals-env
 
-游戏环境子项目，源码包名为 `generals`，发行包名为 `generals-env`。支持 CPU/CUDA/MPS 批量模拟及 Tk 桌面游玩。
+游戏环境子项目，源码包名为 `generals`，发行包名为 `generals-env`。支持 CPU/CUDA/MPS 批量模拟；人类游玩使用 [Arena 网页界面](../arena/README.md#人类参赛)。
 
 当前规则固定为 2026-10-28 核查的官网 **31.4.5 普通 1v1 / FFA**，默认按官方尺寸与公平性规则随机生成地图。
-CPU、CUDA、MPS、桌面 GUI 和 Arena 使用相同动作时序、迷雾及结算语义；版本证据与验证边界见[实施记录](../doc/official_rules_alignment.md)。
+CPU、CUDA、MPS 和 Arena 使用相同动作时序、迷雾及结算语义；版本证据与验证边界见[实施记录](../doc/official_rules_alignment.md)。
 
 从仓库根目录安装和启动：
 
 ```bash
 conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
-conda run -n generals-rl python -m generals play --players 4 --seed 42
+conda run -n generals-rl python -m generals simulate --players 4 --max-ticks 2000 --seed 42
 ```
 
 不安装时，在仓库根目录使用 `PYTHONPATH=env/src:baselines/src python -m generals ...`。
-纯规则与批量环境只需要 `generals-env`；AI 游玩和模拟还需要 `generals-baselines`。
-这条 `PYTHONPATH` 写法用于 Bash 等 POSIX shell；当前内置 AI 与 CPU 原生后端支持 Linux/macOS，不能据此认为 Windows 已支持完整 GUI 对战。
+纯规则与批量环境只需要 `generals-env`；AI 模拟还需要 `generals-baselines`，对应 `simulate` 可选依赖组。
+这条 `PYTHONPATH` 写法用于 Bash 等 POSIX shell；当前内置 AI 与 CPU 原生后端支持 Linux/macOS。
 
 CPU 原生后端支持 Linux 与 macOS。Linux 需要支持 OpenMP 的 C++17 编译器；macOS 需要
 Apple clang 与已安装的 `libomp`，非标准位置可用 `GENERALS_LIBOMP_PREFIX` 指定。
@@ -23,6 +23,8 @@ Apple clang 与已安装的 `libomp`，非标准位置可用 `GENERALS_LIBOMP_PR
 
 CPU/CUDA/MPS 共用 `VecEnv.step()`、`observe(player_ids)` 和可复用的 `observer(player_ids)`。
 批量观测由 env 返回原始局部信息；特征、历史、知识、动作映射与模型推理属于 `rl/` 的策略实现。
+CPU 的迷雾、公开障碍、统计脱敏和生命周期字段由一次 C++ 调用生成，返回独立快照；
+不增加观测线程。NumPy 参考实现保留用于逐字段一致性验证，Arena 和策略无需自行重建观察。
 
 Apple Silicon 可用 `device="mps"`，需要支持 `torch.mps.compile_shader` 的 PyTorch。
 Metal 内核直接编译同一份 `backends/rules.h`，共享行动排序、交换将军、增长、离场宽限、AFK 和最终结算；
@@ -53,7 +55,7 @@ PYTHONPATH=env/src python -m generals.benchmarks.step --backend both --device mp
 规则、操作、依赖和开发说明统一维护在 [doc/README.md](../doc/README.md)：
 
 - [安装与平台支持](../doc/README.md#quickstart)
-- [GUI 操作](../doc/README.md#gui)
+- [网页游玩](../arena/README.md#人类参赛)
 - [统一 CPU/GPU API 与状态协议](../doc/README.md#api)
 - [观测、路径和控制器接入](../doc/README.md#features)
 - [基准及性能结果](../doc/README.md#benchmark)

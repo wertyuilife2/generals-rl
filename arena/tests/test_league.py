@@ -261,7 +261,7 @@ def test_failure_is_unrated_and_retryable_and_workers_exclusive(tmp_path):
     with process_lock(store.directory, '.worker.lock'):
         with pytest.raises(RuntimeError, match='another process'):
             run_jobs(store)
-    with patch('generals_arena.matches.runner.build_controllers', side_effect=RuntimeError('bad policy')):
+    with patch('generals_arena.matches.batch.load_controller', side_effect=RuntimeError('bad policy')):
         with pytest.raises(RuntimeError, match='bad policy'):
             run_jobs(store)
     assert store.jobs()[0]['status'] == 'failed'

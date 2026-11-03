@@ -23,7 +23,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(data['truncated'], 1)
 
     def test_bad_configuration_is_clear(self):
-        for args in [('simulate', '--players', '9'), ('play', '--human-seat', '4'),
+        for args in [('simulate', '--players', '9'), ('play',), ('watch',),
                      ('simulate', '--games', '0'), ('simulate', '--max-ticks', '0'),
                      ('simulate', '--ais', 'random')]:
             with self.subTest(args=args):

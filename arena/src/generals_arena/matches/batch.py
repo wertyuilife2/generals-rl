@@ -1,7 +1,6 @@
 """Joint-tick batch execution for explicit, independently seeded match plans."""
 from time import perf_counter
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -21,6 +20,15 @@ from generals_arena.matches.replay import encode_replay
 
 def _numpy(value):
     return value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
+
+
+def _host_observation(raw):
+    """Transfer public arrays once per batch, never once per scalar lane."""
+    if isinstance(raw['state']['army'], np.ndarray):
+        return raw
+    return {key: {name: _numpy(value) for name, value in item.items()} if key == 'state'
+            else _numpy(item) if hasattr(item, 'shape') else item
+            for key, item in raw.items()}
 
 
 class _HostSnapshot:
@@ -65,7 +73,7 @@ def _one_observation(batch, lane):
         neutralize_in=readonly(_numpy(state["neutralize_in"])[lane]),
         general_pos=int(_numpy(batch["general_pos"])[lane]),
         stats=PlayerStats(*(readonly(stats[:, index]) for index in range(3))),
-        visibility="local", terminated=bool(_numpy(state["terminated"])[lane]),
+        visibility=batch.get("visibility", "local"), terminated=bool(_numpy(state["terminated"])[lane]),
         winner_id=None if int(_numpy(state["winner_id"])[lane]) < 0 else int(_numpy(state["winner_id"])[lane]))
 
 
@@ -91,6 +99,7 @@ def _move(row, pid, encoded):
 class _PolicyGroup:
     def __init__(self, entry, rules, seats, seeds, *, scalar=False, cache=None, slot=None):
         self.entry, self.seats = entry, np.asarray(seats, dtype=np.int64)
+        self.lanes = np.arange(len(self.seats))
         key = (entry["entrant_id"], slot, rules.map, rules.visibility)
         self.controller = cache[key] if cache is not None and key in cache else load_controller(entry, rules)
         self.batch = not scalar and all(callable(getattr(self.controller, name, None))
@@ -115,6 +124,8 @@ class _PolicyGroup:
             raise
 
     def act(self, raw):
+        if not self.batch or getattr(self.controller, 'batch_device', None) == 'cpu':
+            raw = _host_observation(raw)
         if self.batch:
             actions = self.controller.act_batch(raw)
             if isinstance(actions, list) and all(isinstance(action, Action) for action in actions):
@@ -131,10 +142,9 @@ class _PolicyGroup:
         if self.batch:
             callback = getattr(self.controller, "on_result_batch", None)
             if callback is not None:
-                lanes = np.arange(len(self.seats))
-                own_moves = host["_moves"][lanes, self.seats].copy()
+                own_moves = host["_moves"][self.lanes, self.seats]
                 callback({"moves": own_moves,
-                          "actions": joint[lanes, self.seats].copy(),
+                          "actions": joint[self.lanes, self.seats],
                           "active": active & own_moves[:, 0].astype(bool), "player_ids": self.seats.copy()})
         else:
             for lane in np.flatnonzero(active):
@@ -175,7 +185,7 @@ def _instances(entries, plans):
 
 
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
-                  record_replays=False, scalar=False, runtime_cache=None):
+                  record_replays=False, scalar=False, runtime_cache=None, journal=None):
     """Return input-ordered (result, replay-or-None) pairs for explicit plans.
 
     Rows share map configuration and instance-to-entrant assignment; seats may
@@ -194,7 +204,7 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
     placement = {"device": device if str(device).startswith("cuda") else "cuda:0"} if backend == "gpu" else {
         "device": "cpu", "threads": cpu_threads}
     timing = dict(observation_seconds=0., policy_seconds=0., step_seconds=0., transfer_seconds=0.)
-    groups, baselines, records = [], [], [None] * count
+    groups, records = [], [None] * count
     eliminations = np.full((count, players), -1, dtype=np.int64)
     invalid = np.zeros((count, players), dtype=np.int64)
     traces = [[] for _ in plans] if record_replays else None
@@ -202,15 +212,8 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
     initial_digests = [state_digest(state) for state in states]
     try:
         for instance, entry, seats, seeds in roles:
-            if players == 2 and entry["kind"] == "baseline" and not scalar:
-                from generals_baselines import BatchBaselineControllers
-                specs = [SimpleNamespace(opponent=entry["factory_kwargs"]["kind"], learner_seat=1-int(seat))
-                         for seat in seats]
-                owner = BatchBaselineControllers(specs, height=config.height, width=config.width, seat_seeds=seeds)
-                baselines.append((owner, seats))
-            else:
-                groups.append(_PolicyGroup(entry, rules, seats, seeds, scalar=scalar,
-                                           cache=runtime_cache, slot=instance))
+            groups.append(_PolicyGroup(entry, rules, seats, seeds, scalar=scalar,
+                                       cache=runtime_cache, slot=instance))
         with VecEnv.from_states(states, **placement, auto_reset=False, episode_ticks=max_ticks) as env:
             observers = [env.observer(group.seats) for group in groups]
             active = np.ones(count, dtype=np.bool_)
@@ -219,12 +222,10 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                 joint = torch.zeros((count, players), dtype=torch.int64, device=env.device)
                 lanes = torch.arange(count, device=env.device)
                 group_seats = [torch.as_tensor(group.seats, device=env.device) for group in groups]
-                baseline_seats = [torch.as_tensor(seats, device=env.device) for _, seats in baselines]
             else:
                 joint = np.zeros((count, players), dtype=np.int64)
                 lanes = np.arange(count)
                 group_seats = [group.seats for group in groups]
-                baseline_seats = [seats for _, seats in baselines]
             host_view = _HostSnapshot(env, joint)
             host = host_view.arrays
             while active.any():
@@ -238,12 +239,6 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                     joint[lanes, seats] = (torch.as_tensor(actions, device=env.device, dtype=torch.int64)
                                            if backend == "gpu" else _numpy(actions))
                     timing["policy_seconds"] += perf_counter() - entered
-                for (owner, _), seats in zip(baselines, baseline_seats, strict=True):
-                    entered = perf_counter()
-                    actions = owner.act(host, active)
-                    joint[lanes, seats] = (torch.as_tensor(actions, device=env.device)
-                                           if backend == "gpu" else actions)
-                    timing["policy_seconds"] += perf_counter() - entered
                 entered = perf_counter()
                 env.step(joint)
                 timing["step_seconds"] += perf_counter() - entered
@@ -254,14 +249,18 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                 invalid += (moves[:, :, 0].astype(bool) & ~moves[:, :, 1].astype(bool)) * active[:, None]
                 newly_dead = ~host['alive'] & (eliminations < 0) & active[:, None]
                 eliminations[:] = np.where(newly_dead, host['tick'][:, None], eliminations)
-                for owner, _ in baselines:
-                    owner.on_result(moves, joint_host, active)
                 for group in groups:
                     group.feedback(host, joint_host, active)
+                if journal is not None:
+                    journal.record(host, active)
                 if record_replays:
+                    encoded = joint_host
+                    source = np.where(encoded > 0, (encoded - 1) // 8, -1)
+                    direction = np.where(encoded > 0, ((encoded - 1) // 2) % 4, 0)
+                    half = np.where(encoded > 0, (encoded - 1) % 2, 0)
+                    action_rows = np.stack((encoded > 0, source, direction, half), axis=-1).tolist()
                     for lane in np.flatnonzero(active):
-                        traces[lane].append([[int(a.kind), a.source, int(a.direction), int(a.mode)]
-                                             for a in (Action.decode(int(value)) for value in joint_host[lane])])
+                        traces[lane].append(action_rows[lane])
                         digests[lane].append(state_digest(_lane_state(host, lane, states[lane].layout)))
                 ending = active & host["_done"].any(axis=1)
                 for lane in np.flatnonzero(ending):
@@ -271,12 +270,16 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                         elimination_ticks=[None if value < 0 else int(value) for value in eliminations[lane]],
                         invalid_actions=invalid[lane].tolist(), initial_digest=initial_digests[lane])
                     record["execution_policy"] = EXECUTION_POLICY
+                    if journal is not None:
+                        metrics = journal.metrics(lane)
+                        if metrics:
+                            for item in metrics:
+                                item['entrant_id'] = plans[lane]['entrant_ids'][item['seat']]
+                            record['decision_timing'] = metrics
                     blob = encode_replay(state_to_dict(states[lane]), traces[lane], digests[lane]) if record_replays else None
                     records[lane] = record, blob
                 active[ending] = False
     finally:
-        for owner, _ in baselines:
-            owner.close()
         for group in groups:
             group.close()
     return records, timing

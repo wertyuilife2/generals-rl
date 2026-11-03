@@ -107,3 +107,67 @@ extern "C" void generals_step(Batch *s,const Batch *initial,Outputs *out,const i
     }
     GENERALS_PROFILE_BATCH_END();
 }
+
+// Public observation construction belongs to env, never to a policy adapter.
+// Outputs are caller-owned snapshots. This loop uses no extra worker threads.
+struct ObservationOutputs {
+    uint8_t *terrain, *structure;
+    int16_t *owner;
+    i64 *army;
+    bool *visible, *alive, *fog_obstacles, *has_kill, *warn_afk;
+    double *neutralize_in;
+    i64 *stats;
+    int32_t *general_pos;
+    bool *active;
+    i64 *tick;
+    bool *terminated;
+    int32_t *winner_id;
+};
+extern "C" void generals_observe(const Batch *source, const i64 *stats, const bool *done,
+                                  const i64 *ids, ObservationOutputs *out,
+                                  int batch, int h, int w, int players) {
+    const auto &s=*source;
+    const int n=h*w;
+    for (int lane=0;lane<batch;++lane) {
+        const size_t base=size_t(lane)*n, pb=size_t(lane)*players;
+        const int pid=int(ids[lane]);
+        bool *visible=out->visible+base;
+        std::fill(visible,visible+n,bool(s.terminated[lane]));
+        if (!s.terminated[lane]) {
+            for (int cell=0;cell<n;++cell) if (s.owner[base+cell]==pid) {
+                int y=cell/w,x=cell%w;
+                for (int row=std::max(0,y-1);row<=std::min(h-1,y+1);++row)
+                    for (int col=std::max(0,x-1);col<=std::min(w-1,x+1);++col)
+                        visible[row*w+col]=true;
+            }
+        }
+        for (int cell=0;cell<n;++cell) {
+            const size_t at=base+cell;
+            const bool seen=visible[cell];
+            out->terrain[at]=seen?s.terrain[at]:255;
+            out->structure[at]=seen?s.structure[at]:255;
+            out->owner[at]=seen?s.owner[at]:-3;
+            out->army[at]=seen?s.army[at]:-1;
+            out->fog_obstacles[at]=!seen&&(s.terrain[at]==1||s.structure[at]==1);
+        }
+        for (int p=0;p<players;++p) {
+            const size_t at=pb+p;
+            const int spawn=s.spawn_pos[at];
+            if (spawn>=0 && s.general_pos[at]<0 && !(s.city_known[pb+pid]&(1<<p)))
+                out->fog_obstacles[base+spawn]=false;
+            out->alive[at]=s.alive[at];
+            out->has_kill[at]=s.kills[at]>0;
+            out->warn_afk[at]=s.warn_afk[at]!=0;
+            out->neutralize_in[at]=(s.leave_tick[at]>=0 && s.general_pos[at]>=0)
+                ? std::clamp(double(s.tick[lane]-s.leave_tick[at])/50.,0.,1.) : -1.;
+            out->stats[at*3]=stats[at*3];
+            out->stats[at*3+1]=stats[at*3+1];
+            out->stats[at*3+2]=(p==pid||s.terminated[lane])?stats[at*3+2]:-1;
+        }
+        out->general_pos[lane]=s.general_pos[pb+pid];
+        out->active[lane]=!done[lane*2]&&!done[lane*2+1]&&s.alive[pb+pid];
+        out->tick[lane]=s.tick[lane];
+        out->terminated[lane]=s.terminated[lane];
+        out->winner_id[lane]=s.winner[lane];
+    }
+}

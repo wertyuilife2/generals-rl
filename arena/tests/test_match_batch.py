@@ -79,7 +79,7 @@ def test_chunking_and_cached_runtime_keep_instance_seeds_and_output_order(tmp_pa
             rows,_ = execute_batch(entries,[plan],max_ticks=10,record_replays=True,runtime_cache=cache)
             chunked.extend(rows)
         assert chunked == full
-        assert len(cache) == 2
+        assert len(cache) == 3
     finally:
         for controller in cache.values():
             close = getattr(controller,'close',None)

@@ -21,8 +21,6 @@ def play_online(spec, options, *, games=1, output=None, seed=42, max_decisions=N
     if games > 1 and output is None:
         raise ValueError('multiple online games require an output directory')
     entrant = prepare_entrant(spec)
-    if entrant['kind'] == 'baseline':
-        raise ValueError('path-following baselines require authoritative move receipts unavailable online')
     def factory(obs):
         if entrant['kind'] == 'package':
             from generals_arena.policies.artifacts import validate_bundle, capabilities_supports

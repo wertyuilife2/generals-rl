@@ -87,6 +87,7 @@ class MatchRunner:
         self.record_replays, self.scalar = record_replays, scalar
         self.execution = execution
         self.worker, self._owned_worker = worker, None
+        self._batch_worker = None
         self.runtime_cache = {}
         self.execution_modes = set()
 
@@ -140,6 +141,9 @@ class MatchRunner:
             if self._owned_worker is not None:
                 self._owned_worker.close()
                 self.worker = self._owned_worker = None
+            if self._batch_worker is not None:
+                self._batch_worker.close()
+                self._batch_worker = None
 
     def _isolated(self, plan, stop):
         from generals_arena.matches.game import RecordedGame
@@ -151,8 +155,8 @@ class MatchRunner:
             if self.worker is None:
                 from generals_arena.matches.worker import MatchWorker
                 self.worker = self._owned_worker = MatchWorker()
-            # The match process owns native watchdogs, journal recovery and
-            # decision-timeout forfeits; a generic batch call cannot replace it.
+            # Scalar/reference and interactive execution retain the existing
+            # single-game recovery boundary. Bulk execution uses BatchWorker.
             return self.worker.run(self.entries, plan, max_ticks=self.max_ticks)
 
         controllers, game = [], None
@@ -211,9 +215,8 @@ class MatchRunner:
                 results.append(value)
                 offset += 1
                 continue
-            isolated = self.execution == "isolated" or any(
-                self.entries[key]["kind"] == "cpp" for key in plans[offset]["entrant_ids"])
-            if isolated:
+            native = any(self.entries[key]["kind"] == "cpp" for key in plans[offset]["entrant_ids"])
+            if (self.scalar or stop is not None) and (self.execution == "isolated" or native):
                 self.execution_modes.add("isolated")
                 start = time.monotonic()
                 record = self._isolated(plans[offset], stop)
@@ -223,16 +226,28 @@ class MatchRunner:
                 records = [record]
                 offset += 1
             else:
-                self.execution_modes.add("scalar_reference" if self.scalar else "policy_batch")
+                self.execution_modes.add("isolated_batch" if native else
+                                         "scalar_reference" if self.scalar else "policy_batch")
                 from generals_arena.matches.batch import execute_batch
                 key = _batch_key(plans[offset])
                 limit = self.batch_size or len(plans)
                 indices = [index for index in range(offset, len(plans))
                            if index not in ready and _batch_key(plans[index]) == key][:limit]
-                records, elapsed = execute_batch(self.entries, [plans[index] for index in indices],
-                    max_ticks=self.max_ticks, device=self.device, backend=self.backend,
-                    cpu_threads=self.cpu_threads, record_replays=self.record_replays,
-                    scalar=self.scalar, runtime_cache=self.runtime_cache)
+                options = dict(max_ticks=self.max_ticks, device=self.device, backend=self.backend,
+                    cpu_threads=self.cpu_threads, record_replays=self.record_replays, scalar=self.scalar)
+                if native:
+                    if self.worker is not None:
+                        executor = self.worker.run_batch
+                    else:
+                        if self._batch_worker is None:
+                            from .batch_worker import BatchWorker
+                            self._batch_worker = BatchWorker()
+                        executor = self._batch_worker.run
+                    records, elapsed = executor(self.entries,
+                        [plans[index] for index in indices], **options)
+                else:
+                    records, elapsed = execute_batch(self.entries, [plans[index] for index in indices],
+                        **options, runtime_cache=self.runtime_cache)
                 for name, seconds in elapsed.items():
                     timing[name] = timing.get(name, 0.) + seconds
                 ready.update(zip(indices, records, strict=True))

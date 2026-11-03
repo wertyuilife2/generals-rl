@@ -235,6 +235,20 @@ Arena 不导入训练框架，不读取 PPO、网络、特征或动作版本配�
 提供批量路径；原始张量字段由 env 定义，不是 RL 特征。代码加载使用按内容隔离的包名，
 不同版本可共存。工件校验、原子快照和加载前复验由 Arena 负责；包代码是可信本地代码。
 
+批量协议对所有策略一致：
+
+- `reset_batch(player_ids, seeds)`：每个 lane 的席位与最终 uint64 种子；不得在 lane 间共享规划记忆。
+- `act_batch(raw)`：输入 env 的公开观测字典，返回 `[B] int64` 编码动作或长度 B 的 `Action` 列表。
+  `raw['active']` 为假的 lane 返回 WAIT，不推进记忆或随机流。观测与数组借用范围见 env 协议。
+- 可选 `on_result_batch(results)`：`moves[B,9]`、`actions[B]`、`player_ids[B]` 和 `active[B]`；
+  最后一个字段只标记实际收到移动回执的席位，淘汰后的 lane 不再收到有效回执。
+- 可选 `batch_device="cpu"`：整批公开数组转换到 NumPy；未声明时保留环境设备上的数组。
+- `requires_move_results=True`：声明必须接收精确回执，官方线上运行器据此判断兼容性。
+
+现有 C++ SDK 策略无需新增函数：Arena 原生宿主自动串行处理批内的独立实例，仍逐次执行 10ms watchdog。
+baseline 使用相同协议，移除原来只支持 1v1、读取环境真值的专用适配器。普通 Python 标量策略自动回退到逐 lane 调用，
+如需向量化加速，应提供上述批接口；不能自动把任意 Python 算法转换成 C++。
+
 取得别人共享的完整目录后，只需：
 
 ```bash

@@ -20,7 +20,7 @@ def create_controller(kind: str, player_id: int = 0, seed: int = 0) -> Controlle
 
 
 def make_controllers(kinds: list[str] | tuple[str, ...], seed: int = 0) -> list[Controller]:
-    """Use the same per-seat seeds as the interactive controller assembly."""
+    """Use the same per-seat seeds as the simulation controller assembly."""
     streams = np.random.SeedSequence(seed).spawn(len(kinds) + 1)[1:]
     return [create_controller(kind, pid, int(stream.generate_state(1, dtype=np.uint64)[0]))
             for pid, (kind, stream) in enumerate(zip(kinds, streams))]

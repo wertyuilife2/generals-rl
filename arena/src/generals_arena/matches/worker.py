@@ -185,6 +185,13 @@ def child_loop(connection):
 class MatchWorker:
     def __init__(self):
         self.process = self.connection = self.journal = None
+        self._batch_worker = None
+
+    def run_batch(self, entries, plans, **options):
+        if self._batch_worker is None:
+            from .batch_worker import BatchWorker
+            self._batch_worker = BatchWorker()
+        return self._batch_worker.run(entries, plans, **options)
 
     @lifecycle_locked
     def _start_process(self):
@@ -207,7 +214,7 @@ class MatchWorker:
             path.unlink(missing_ok=True)
         self.plan, self.config = plan, SimpleNamespace(max_ticks=max_ticks)
         self.context, self.forfeits = {"entries": entries, "max_ticks": max_ticks}, []
-        self.bounded = all(entries[key]['kind'] in ('cpp', 'baseline', 'human')
+        self.bounded = all(entries[key]['kind'] in ('cpp', 'human')
                            or entries[key].get('factory') == 'generals_arena.policies.builtin:create_wait_controller'
                            for key in plan['entrant_ids'])
         fd, path = tempfile.mkstemp(prefix='match-',dir=native._private_cache())
@@ -269,7 +276,7 @@ class MatchWorker:
             return self._failed()
 
     def call(self, request):
-        operation = request['op']
+        operation = request.get('continue_op', request['op'])
         human_actions = request.get('actions', {})
         while True:
             response = self._exchange(request)
@@ -304,6 +311,9 @@ class MatchWorker:
 
     @lifecycle_locked
     def close(self):
+        if self._batch_worker is not None:
+            self._batch_worker.close()
+            self._batch_worker = None
         if self.process is not None:
             if self.process.is_alive():
                 try:
