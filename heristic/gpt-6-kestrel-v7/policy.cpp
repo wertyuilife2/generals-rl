@@ -56,9 +56,11 @@ struct Policy {
   for(int c=0;c<N;c++)if(gd[c]<=12)homeCells[homeCount++]=c;
  }
  void update(const ArenaObservation *obs){
+  int previousGeneral=g;
   o=obs;tick=int(o->tick);g=o->general_pos;
+  for(int e=0;e<o->players;e++){int c=enemyGeneral[e];if(c>=0&&o->visible[c]&&(o->structure[c]!=2||o->owner[c]!=e))enemyGeneral[e]=-1;}
   if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
-  bool mapChanged=!geometryReady;
+  bool mapChanged=!geometryReady||previousGeneral!=g;
   for(int i=0;i<N;i++)armyCache[i]=int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));
   for(int i=0;i<N;i++){
    if(o->visible[i]&&ter[i]!=o->terrain[i])mapChanged=true;
@@ -68,17 +70,15 @@ struct Policy {
    reserve[i]=1;threat[i]=0;threatETA[i]=INF;
   }
   // Observation and remembered terrain are fixed for this decision. Keep the
-  // original growth-before-action expressions, evaluated once per cell.
+  // current pre-move armies, evaluated once per cell.
   for(int i=0;i<N;i++){
    int n=armyCache[i];
-   if((tick+1)%2==0&&st[i]>0&&st[i]<3)n++;
-   else if((tick+1)%50==0&&st[i]==0)n++;
    fullMoveCache[i]=std::max(0,n-1);halfMoveCache[i]=n/2;
    if(mine(i))defenseCache[i]=0;
    else if(own[i]<0)defenseCache[i]=std::max(0,a[i]);
    else{
     int add=(st[i]>0&&st[i]<3)?std::max(0,tick-seen[i])/2:0;
-    defenseCache[i]=a[i]+std::min(add,200)+int(o->visible[i]&&(((tick+1)%2==0&&st[i]>0&&st[i]<3)||((tick+1)%50==0&&st[i]==0)));
+    defenseCache[i]=a[i]+std::min(add,200);
     if(!o->visible[i]){
      // A last-seen field stack is mobile. Keep the observation in memory,
      // but let its planning estimate fade; the actual first step is visible.
@@ -154,7 +154,7 @@ struct Policy {
        closeOwnerArmy[e]=arriving;closeOwnerETA[e]=d;closeOwnerSource[e]=u;
       }
      }
-     
+
      if(threatETA[u]==INF||required>threat[u]||(required==threat[u]&&d<threatETA[u])){threat[u]=required;threatETA[u]=d;}
     }
    }
@@ -337,8 +337,8 @@ struct Policy {
  // the normal peacetime garrison on an immediately successful capture.
  bool captureSafe(int source,int dest,int moving)const {
   int victim=own[dest];
-  auto grows=[&](int c,int at){return int((at%2==0&&st[c]>0&&st[c]<3)||(at%50==0&&st[c]==0));};
-  auto ready=[&](int c){return army(c)+(own[c]>=0?grows(c,tick+1):0);};
+  auto grows=[&](int c,int at){return int(at%2==0&&st[c]>0&&st[c]<3)+int(at%50==0);};
+  auto ready=[&](int c){return army(c);};
   auto guard=[&](int c){
    if(c==dest)return moving-captureDefense(dest);
    if(c==source)return ready(c)-moving;

@@ -4,9 +4,9 @@ import { ReplayTimeline } from '../../src/generals_arena/web/replay.js';
 
 function frames(count) {
   const initial={width:2,height:1,tick:0,owner:[[0,1]],army:[[1,2]],structure:[[2,2]],
-    terrain:[[0,0]],alive:[true,true],stats:{army:[1,2]},forfeited:[]};
+    ranking:[0,1],has_kill:[false,false],warn_afk:[false,false],neutralize_in:[-1,-1],terrain:[[0,0]],alive:[true,true],stats:{army:[1,2]},forfeited:[]};
   return [initial,...Array.from({length:count},(_,i)=>({tick:i+1,
-    cells:[[i%2,i%2,i+10,i%3]],alive:[true,i<200],
+    ranking:i%2?[0,1]:[1,0],has_kill:[i>=200,false],warn_afk:[false,i<50],neutralize_in:[-1,i<200?-1:Math.min(1,(i-200)/50)],cells:[[i%2,i%2,i+10,i%3]],alive:[true,i<200],
     stats:{army:[i,i+1]},forfeited:i<200?[]:[1]}))];
 }
 function reference(data,target) {
@@ -15,7 +15,7 @@ function reference(data,target) {
     for(const [cell,owner,army,structure] of frame.cells) {
       state.owner[0][cell]=owner;state.army[0][cell]=army;state.structure[0][cell]=structure;
     }
-    for(const key of ['tick','alive','stats','forfeited'])state[key]=frame[key];
+    for(const key of ['tick','alive','stats','forfeited','ranking','has_kill','warn_afk','neutralize_in'])state[key]=frame[key];
   }
   return state;
 }

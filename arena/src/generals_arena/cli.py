@@ -1,38 +1,36 @@
-"""Commit C++ policies, run private games, and manage the local Arena."""
+"""Commit C++ / RL policies, run private games, and manage the local Arena."""
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 import sys
+import time
+
+from generals_arena.competitions.rating import MODES
+from generals_arena.competitions.config import DEFAULT_LEAGUE
 
 
 def league_command(args):
-    from .league.config import LeagueConfig
-    from .league.service import run_jobs
-    from .league.store import LeagueStore
+    from generals_arena.competitions.config import LeagueConfig
+    from generals_arena.competitions.jobs import run_jobs
+    from generals_arena.competitions.store import CompetitionStore
     if args.action == "init":
         config = json.loads(args.config.read_text()) if args.config else {}
-        store = LeagueStore.create(args.directory, LeagueConfig(**config))
-        print(f"League initialized: {store.directory} (1v1: WAIT = 0 GoR; FFA: mean = 1000)")
+        store = CompetitionStore.create(args.directory, LeagueConfig(**config))
+        labels = {'1v1': '1v1 GoR relative to WAIT', 'ffa': 'FFA Codeforces mean 1000'}
+        print(f"League initialized: {store.directory} ({'; '.join(labels[mode] for mode in store.rating_modes())})")
         return
-    store = LeagueStore(args.directory)
-    if args.action == 'configure-maps':
-        from generals import MapGenerationConfig
-        options = MapGenerationConfig(**json.loads(args.config.read_text())) if args.config else MapGenerationConfig()
-        ranges = store.configure_maps(options)
-        print(f'Map generation updated for future games: {json.dumps(ranges)}. Existing results and ratings retained.')
+    store = CompetitionStore(args.directory)
+    if args.action in ("retire", "restore"):
+        result = store.set_retired(args.entrant, args.action == "retire", reason=args.reason)
+        from generals_arena.competitions.submission import refresh_publications
+        refresh_publications(store)
+        print(json.dumps(result, ensure_ascii=False))
         return
     if args.action == "resize":
         ranges = store.resize_maps(args.min_side, args.max_side, args.side_cap)
         print(f"Map ranges updated for future games: {json.dumps(ranges)}. Existing results and ratings retained.")
-        return
-    if args.action in ("retire", "restore"):
-        result = store.set_retired(args.entrant, args.action == "retire", reason=args.reason)
-        # Research leagues keep a static board beside the database. Refresh it
-        # when present; publications and replay data remain untouched.
-        if (store.directory / "commits").is_dir():
-            from .research import refresh_publications
-            refresh_publications(store)
-        print(json.dumps(result, ensure_ascii=False))
         return
     if args.action == "add":
         spec = json.loads(args.entrant.read_text(encoding="utf-8"))
@@ -46,31 +44,147 @@ def league_command(args):
                          progress=lambda done: print(f"League: {done} new games completed", file=sys.stderr))
         print(f"Completed {count} new games. Jobs: {json.dumps(store.jobs(), ensure_ascii=False)}")
     elif args.action == "rebuild":
-        store.rebuild(upgrade=args.current_policy,
-                      progress=lambda done,total: print(f'Rating rebuild: {done}/{total}', file=sys.stderr, flush=True))
-        print("Independent 1v1 and FFA ratings rebuilt from completed matches.")
+        store.rebuild()
+        from generals_arena.competitions.submission import refresh_publications
+        refresh_publications(store)
+        print("Ratings rebuilt from completed matches.")
     else:
-        report = store.leaderboard(args.mode, include_retired=args.all)
+        reports = {args.mode: store.leaderboard(args.mode, include_retired=args.all)} if args.mode else store.leaderboards(include_retired=args.all)
         if args.json:
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            print(json.dumps(reports, ensure_ascii=False, indent=2))
         else:
-            reference = next((row['name'] for row in report['ranking'] if row['anchor']), None)
-            origin = f'{reference} = 0' if reference else f"mean = {report['rating_mean']:g}"
-            print(f"{report['mode'].upper()} rating / {report['completed_games']} games / {origin}")
-            for row in report["ranking"]:
-                print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
+            for mode, report in reports.items():
+                reference = (next(row['name'] for row in report['ranking'] if row['anchor']) + ' = 0'
+                             if mode == '1v1' else 'mean 1000')
+                print(f"{mode} / {report['rating_model']} / {report['completed_games']} games / {reference}")
+                for row in report["ranking"]:
+                    print(f"{row['name']:<28} {row['elo']:>8.1f}  {row['games']:>6} games")
+
+
+def match_mode_command(args):
+    if args.command == "tournament":
+        from generals import MapConfig
+        from generals_arena.matches.config import MatchConfig
+        from generals_arena.competitions.tournament import tournament
+        config = json.loads(args.config.read_text()) if args.config else {}
+        if "map" in config:
+            config["map"] = MapConfig(**config["map"])
+        roster = json.loads(args.entrants.read_text())
+        report = tournament(roster, MatchConfig(**config), args.output,
+                            maps_per_group=args.maps_per_group, seed=args.seed,
+                            paired_seats=not args.single_seat,
+                            base_dir=args.entrants.resolve().parent,
+                            fit_ratings=args.calibrate_profile is not None,
+                            **_execution_options(args))
+        if args.calibrate_profile is not None:
+            from generals_arena.competitions.evaluation import make_calibrated_profile
+            from generals_arena.util import write_json
+            profile = make_calibrated_profile(report, roster, maps_per_opponent=args.evaluation_maps,
+                                               base_dir=args.entrants.resolve().parent)
+            args.calibrate_profile.parent.mkdir(parents=True, exist_ok=True)
+            write_json(args.calibrate_profile, profile)
+        print(json.dumps({key: report[key] for key in ("run_id", "rating_mode", "rating_model", "games", "ranking")}, indent=2))
+    else:
+        from generals_arena.competitions.evaluation import evaluate
+        source_path = args.candidates or args.entrant
+        candidates = json.loads(args.candidates.read_text()) if args.candidates else [
+            args.bundle if args.bundle else json.loads(args.entrant.read_text())]
+        report = evaluate(candidates, args.profile, args.output,
+                          base_dir=source_path.resolve().parent if source_path else Path("."),
+                          **_execution_options(args))
+        print(json.dumps({key: report[key] for key in ("profile_id", "rating_mode", "rating_model", "candidates", "games")}, indent=2))
+    return 0
+
+
+def online_command(args):
+    from generals.backends.online.credentials import initialize_account, load_account
+    from generals.backends.online.endpoints import resolve_endpoint
+    if args.command == 'online-account':
+        result = initialize_account(args.account, args.username, directory=args.account_dir,
+                                    site=args.site, timeout=args.timeout)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.account:
+        account = load_account(args.account, args.account_dir)
+        endpoint = resolve_endpoint(server=account['server'])
+        if args.site is not None and args.site != endpoint.site:
+            raise ValueError('saved account belongs to a different site')
+        user_id = account['user_id']
+    else:
+        endpoint = resolve_endpoint(site=args.site or 'bot')
+        variable = args.user_id_env or ('GENERALS_MAIN_USER_ID' if endpoint.site == 'main' else 'GENERALS_BOT_USER_ID')
+        user_id = os.environ.get(variable)
+        if not user_id:
+            raise ValueError(f'credential environment variable {variable} is empty')
+    options = dict(user_id=user_id, server=endpoint.server, queue=args.queue, room=args.room,
+                   force_start=args.force_start, start_timeout=args.start_timeout,
+                   update_timeout=args.update_timeout)
+    from generals_arena.policies.artifacts import select_policy
+    from generals_arena.matches.online import play_online
+    entries = None
+    if args.policy.startswith('@'):
+        from generals_arena.competitions.store import CompetitionStore
+        entries = CompetitionStore(args.league).entrants()
+    parameters = json.loads(args.params.read_text()) if args.params else None
+    with tempfile.TemporaryDirectory(prefix='generals-online-policy-') as scratch:
+        directory = args.league if args.policy.startswith(('@', 'policy/')) else scratch
+        spec = select_policy(directory, args.policy, parameters, device=args.device, entries=entries)
+        report = play_online(spec, options, games=args.games, output=args.output,
+                             seed=args.seed, max_decisions=args.max_decisions)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report['status'] == 'completed' else 1
+
+
+def add_online_commands(commands):
+    account = commands.add_parser('online-account', help='register a dedicated official-site account')
+    account.add_argument('--account', required=True)
+    account.add_argument('--username', required=True)
+    account.add_argument('--account-dir', type=Path)
+    account.add_argument('--site', choices=('bot', 'main'), default='bot')
+    account.add_argument('--timeout', type=float, default=15.)
+    play = commands.add_parser('online', help='play official-server games with an Arena policy package')
+    play.add_argument('policy', help='source directory, package directory, @alias, or policy/hash')
+    play.add_argument('--params', type=Path)
+    play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    play.add_argument('--device', default='cpu')
+    play.add_argument('--site', choices=('bot', 'main'))
+    identity = play.add_mutually_exclusive_group()
+    identity.add_argument('--account')
+    identity.add_argument('--user-id-env')
+    play.add_argument('--account-dir', type=Path)
+    play.add_argument('--queue', choices=('custom', '1v1', 'ffa'), default='custom')
+    play.add_argument('--room')
+    play.add_argument('--force-start', action='store_true')
+    play.add_argument('--start-timeout', type=float, default=120.)
+    play.add_argument('--update-timeout', type=float, default=15.)
+    play.add_argument('--games', type=int, default=1)
+    play.add_argument('--seed', type=int, default=42)
+    play.add_argument('--max-decisions', type=int)
+    play.add_argument('--output', type=Path, help='new directory for reports and incoming packet traces')
+
+
+def _execution_options(args):
+    return {"backend": args.backend, "device": args.device, "batch_size": args.batch_size,
+            "cpu_threads": args.cpu_threads, "record_replays": args.record_replays}
+
+
+def _add_execution_options(parser):
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--backend", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument("--device", default="cpu", help="policy inference device; gpu backend requires cuda:N")
+    parser.add_argument("--batch-size", type=int, default=128, help="zero runs a whole compatible group")
+    parser.add_argument("--cpu-threads", type=int, default=1)
+    parser.add_argument("--record-replays", action="store_true")
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    from .research import add_cli
-    add_cli(commands)
-    from .online import add_cli as add_online_cli
-    add_online_cli(commands)
+    add_submission_commands(commands)
+    add_online_commands(commands)
     league = commands.add_parser("league", help="persistent random-map league (baseline, custom, human)")
     actions = league.add_subparsers(dest="action", required=True)
-    init = actions.add_parser("init", help="create a league with GoR duels and mean-1000 Codeforces FFA ratings")
+    init = actions.add_parser("init", help="create independent GoR 1v1 and Codeforces FFA rating pools")
     init.add_argument("directory", type=Path)
     init.add_argument("--config", type=Path, help="optional league distribution JSON")
     add = actions.add_parser("add", help="register a new version and schedule a bounded evaluation job")
@@ -87,49 +201,105 @@ def main(argv=None):
     ranking.add_argument("directory", type=Path)
     ranking.add_argument("--json", action="store_true")
     ranking.add_argument("--all", action="store_true", help="include retired entrants")
-    ranking.add_argument('--mode', choices=('1v1', 'ffa'), default='1v1', help='independent rating pool')
-    for action, help_text in (("retire", "hide an entrant and exclude it from future matchmaking"),
-                              ("restore", "return a retired entrant to the active roster")):
-        roster = actions.add_parser(action, help=help_text)
+    for action in ("retire", "restore"):
+        roster = actions.add_parser(action)
         roster.add_argument("directory", type=Path)
-        roster.add_argument("entrant", help="entrant name, @alias, or immutable entrant ID")
-        roster.add_argument("--reason", help="optional audit note")
+        roster.add_argument("entrant", help="name, @alias, or immutable entrant ID")
+        roster.add_argument("--reason")
+    ranking.add_argument("--mode", choices=MODES, help="one rating pool; default shows every enabled pool")
     refresh = actions.add_parser("rebuild")
     refresh.add_argument("directory", type=Path)
-    refresh.add_argument('--current-policy', action='store_true',
-                         help='re-score all recorded outcomes with current rules; stop server/workers first')
     resize = actions.add_parser("resize", help="revise future map sizes, preserving accounts and recorded matches (stop server/workers first)")
     resize.add_argument("directory", type=Path)
     resize.add_argument("--min-side", type=int, required=True)
     resize.add_argument("--max-side", type=int, required=True)
     resize.add_argument("--side-cap", type=int, required=True)
-    maps = actions.add_parser('configure-maps', help='adopt current map generator (finish evaluations and stop server/workers first)')
-    maps.add_argument('directory', type=Path)
-    maps.add_argument('--config', type=Path, help='MapGenerationConfig JSON; omitted values use official defaults')
     web = commands.add_parser("serve", help="serve rankings, verified replays, human games, and the job queue")
     web.add_argument("directory", type=Path)
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8086)
     web.add_argument("--no-worker", action="store_true", help="view/play while a separate league run handles evaluation")
+    tournament = commands.add_parser("tournament", help="fixed round-robin schedule mode")
+    tournament.add_argument("--entrants", type=Path, required=True, help="JSON list of ordinary entrant specs")
+    tournament.add_argument("--config", type=Path, help="MatchConfig JSON: map and max_ticks")
+    tournament.add_argument("--maps-per-group", type=int, default=1)
+    tournament.add_argument("--seed", type=int, default=42)
+    tournament.add_argument("--single-seat", action="store_true", help="skip cyclic seat rotations")
+    tournament.add_argument('--calibrate-profile', type=Path, help='fit GoR jointly and save a fixed-reference evaluation profile')
+    tournament.add_argument('--evaluation-maps', type=int, default=100, help='maps per opponent in the saved evaluation profile')
+    _add_execution_options(tournament)
+    evaluation = commands.add_parser("evaluate", help="fixed-opponent training-evaluation schedule mode")
+    source = evaluation.add_mutually_exclusive_group(required=True)
+    source.add_argument("--bundle", type=Path)
+    source.add_argument("--entrant", type=Path, help="ordinary Arena entrant JSON")
+    source.add_argument('--candidates', type=Path, help='JSON list of candidate bundles or entrant specs; include their round robin')
+    evaluation.add_argument("--profile", type=Path, required=True)
+    _add_execution_options(evaluation)
     args = parser.parse_args(argv)
     try:
         if args.command in ('online', 'online-account'):
-            from .online import command
-            return command(args)
+            return online_command(args)
         if args.command in ('commit', 'run', 'status'):
-            from .research import command
-            return command(args)
+            return submission_command(args)
+        if args.command in ("tournament", "evaluate"):
+            return match_mode_command(args)
         if args.command == "league":
             league_command(args)
             return 0
         if args.command == "serve":
-            from .server import serve
+            from generals_arena.web.server import serve
             serve(args.directory, args.host, args.port, run_worker=not args.no_worker)
             return 0
     except (ValueError, TypeError, KeyError, ImportError, OSError, RuntimeError) as exc:
         parser.exit(2, f"error: {exc}\n")
     except KeyboardInterrupt:
-        if args.command in ('online', 'online-account'):
-            parser.exit(130, 'Interrupted; online connection closed.\n')
         parser.exit(130, "Interrupted; repeat the command to resume recorded progress.\n")
     return 0
+
+
+def add_submission_commands(commands):
+    submit = commands.add_parser('commit', help='snapshot a native source or policy package and run its 1000-game evaluation')
+    submit.add_argument('source', type=Path, help='.cpp file, native source directory, or exported policy bundle')
+    submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
+    submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
+    submit.add_argument('--device', default='cpu', help='packaged policy device, e.g. cpu or cuda:0 (env remains CPU)')
+    submit.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    submit.add_argument('--workers', type=int, default=None, help='parallel games (default: up to 4 CPU workers)')
+    play = commands.add_parser('run', help='private games between explicit seats; never updates official ratings')
+    play.add_argument('--player', action='append', required=True,
+                      help='baseline/KIND, source.cpp, source directory, policy/HASH, or @alias; repeat for each seat')
+    play.add_argument('--size', default='auto', help='auto, WIDTHxHEIGHT, or MIN:MAX')
+    play.add_argument('--games', type=int, default=1)
+    play.add_argument('--seed', type=int, default=42)
+    play.add_argument('--max-ticks', type=int, help='private-game tick limit; defaults to official rules')
+    play.add_argument('--params', type=Path, help='fixed JSON parameters for all source-path players')
+    play.add_argument('--device', help='override packaged policy device; otherwise use registered device')
+    play.add_argument('--output', type=Path, help='optional report and replay database export directory')
+    play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+    play.add_argument('--workers', type=int, default=1, help='parallel games (default: 1)')
+    inspect = commands.add_parser('status', help='show managed submissions, jobs, and run report paths')
+    inspect.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
+
+
+def submission_command(args):
+    from generals_arena.competitions.submission import commit, status
+    from generals_arena.competitions.private import run
+    last_progress = 0.
+    def progress(done):
+        nonlocal last_progress
+        now = time.monotonic()
+        if done == 1 or now-last_progress >= 2:
+            print(f'Arena: {done} new games completed', file=sys.stderr, flush=True)
+            last_progress = now
+    parameters = json.loads(args.params.read_text()) if getattr(args, 'params', None) else None
+    if args.command == 'commit':
+        report = commit(args.source, name=args.name, league=args.league, parameters=parameters,
+                        progress=progress, workers=args.workers, device=args.device)
+    elif args.command == 'run':
+        report = run(args.player, league=args.league, size=args.size, games=args.games, seed=args.seed,
+                     output=args.output, parameters=parameters, max_ticks=args.max_ticks,
+                     progress=progress, workers=args.workers, device=args.device)
+    else:
+        report = status(args.league)
+    print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))
+    return 0 if report.get('ok', True) else 1

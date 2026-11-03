@@ -5,18 +5,35 @@ from pathlib import Path
 
 import torch
 
+from generals.protocol import STATE_DTYPES
 from generals.protocol.config import _integer
 from .env import field_major, pack_tensors
 
 
 @lru_cache(maxsize=32)
-def library(width, height, players, batch, layouts):
+def library(width, height, players, batch, layouts, state_layouts):
     source = Path(__file__).with_name("kernel.metal").read_text()
     preamble = f"#define W {width}\n#define H {height}\n#define P {players}\n#define B {batch}\n"
     for prefix, offsets in layouts:
         preamble += "".join(f"#define OFF_{prefix}_{name.upper()} {offset}\n" for name, offset in offsets)
-    code = preamble + source
+    # Keep Metal state addressing separate from the shared gameplay code.
+    builders = ""
+    for name, layout in state_layouts:
+        fields = []
+        for key, offset, columns, row_stride, column_stride in layout:
+            dtype = {"uint8": "uchar", "int16": "short", "int32": "int", "int64": "long", "bool": "bool"}[STATE_DTYPES[key]]
+            fields.append(f"{{reinterpret_cast<device {dtype} *>(storage + {offset}), {columns}, {row_stride}, {column_stride}, 0}}")
+        builders += f"inline generals::Batch {name}_batch(device uchar *storage) {{ return {{" + ",".join(fields) + "}; }\n"
+    rules = Path(__file__).parents[1].joinpath("rules.h").read_text()
+    code = preamble + rules + "\n" + builders + source
     return torch.mps.compile_shader(code), sha256(code.encode()).hexdigest()
+
+
+def state_layout(tensors, offsets):
+    offsets = dict(offsets)
+    return tuple((key, offsets[key], value.numel() // value.shape[0], value.stride(0),
+                  value.stride(-1) if value.ndim > 1 else 1)
+                 for key, value in tensors.items())
 
 
 class StepKernel:
@@ -24,15 +41,16 @@ class StepKernel:
         self.env = env
         self.cache = field_major(torch.zeros_like(env.stats))
         self.growth = torch.empty((env.width * env.height, env.batch_size), dtype=torch.uint16, device=env.device)
-        # Growth count, cache validity, owned count, per-player structures.
-        self.aux = torch.zeros((3 + env.players, env.batch_size), dtype=torch.int32, device=env.device)
-        self.owned = torch.empty((env.batch_size, env.width * env.height), dtype=torch.uint16, device=env.device)
+        # Growth count, cache validity, per-player structures.
+        self.aux = torch.zeros((2 + env.players, env.batch_size), dtype=torch.int32, device=env.device)
         self.storage, views, offsets = pack_tensors({
-            "totals": self.cache, "growth": self.growth, "aux": self.aux, "owned": self.owned})
-        self.cache, self.growth, self.aux, self.owned = (views[k] for k in ("totals", "growth", "aux", "owned"))
+            "totals": self.cache, "growth": self.growth, "aux": self.aux})
+        self.cache, self.growth, self.aux = (views[k] for k in ("totals", "growth", "aux"))
         self.lib, self.digest = library(env.width, env.height, env.players, env.batch_size,
             (("STATE", env._state_offsets), ("INITIAL", env._initial_offsets),
-             ("OUTPUT", env._output_offsets), ("CACHE", offsets)))
+             ("OUTPUT", env._output_offsets), ("CACHE", offsets)),
+            (("state", state_layout(env.state, env._state_offsets)),
+             ("initial", state_layout(env.initial, env._initial_offsets))))
         self.function = self.lib.step
         self.configure_group(threads_per_group)
         self.refs = tuple(env.state.values()) + tuple(env.initial.values())

@@ -1,0 +1,94 @@
+"""Controlled information-input ablations on the unchanged v17 light CNN.
+
+These adapters share the categorical PPO lifecycle, not actor/critic weights.
+New input weights start at zero: the randomly initialized baseline function
+and its RNG stream are retained, and the new features can learn immediately.
+No old checkpoint or optimizer is loaded.
+"""
+from copy import deepcopy
+from dataclasses import replace
+
+import torch
+from torch import nn
+
+from .policy.cnn import _extend_conv, add_actor_knowledge
+from .spatial_ppo import LightSpatialPPOPolicy
+
+
+class HistoryStateCritic(nn.Module):
+    """Fuse privileged maps, local history and optional player memory per cell."""
+    def __init__(self, baseline, knowledge_channels):
+        super().__init__()
+        self.layout = baseline.layout
+        self.history_length = self.layout.history_length
+        self.knowledge_channels = knowledge_channels
+        self.trunk = baseline.trunk
+        self.trunk[0] = _extend_conv(self.trunk[0], self.history_length * self.layout.map_planes + knowledge_channels)
+        old = baseline.context[0]
+        devices = [old.weight.device.index] if old.weight.is_cuda else []
+        with torch.random.fork_rng(devices=devices):
+            new = nn.Linear(old.in_features + self.layout.public_dim, old.out_features,
+                            bias=old.bias is not None, device=old.weight.device,
+                            dtype=old.weight.dtype)
+        with torch.no_grad():
+            new.weight.zero_()
+            new.weight[:, :old.in_features].copy_(old.weight)
+            if old.bias is not None:
+                new.bias.copy_(old.bias)
+        self.context = nn.Sequential(new, baseline.context[1])
+        self.value_head = baseline.value_head
+
+    def forward(self, privileged, history, knowledge=None):
+        if history.ndim != 2 or history.shape[-1] != self.history_length * self.layout.frame_dim:
+            raise ValueError("critic history shape does not match history_length")
+        if privileged.shape != (history.shape[0], self.layout.frame_dim):
+            raise ValueError("critic privileged observation shape does not match history batch")
+        frames = history.reshape(-1, self.history_length, self.layout.frame_dim)
+        maps = privileged[:, :-self.layout.public_dim].reshape(-1, self.layout.map_planes, self.layout.height, self.layout.width)
+        local = frames[..., :-self.layout.public_dim].reshape(-1, self.history_length * self.layout.map_planes, self.layout.height, self.layout.width)
+        inputs = [maps, local]
+        if self.knowledge_channels:
+            if knowledge is None or knowledge.shape != (history.shape[0], self.knowledge_channels * self.layout.cells):
+                raise ValueError("critic requires the actor's configured knowledge planes")
+            inputs.append(knowledge.reshape(-1, self.knowledge_channels, self.layout.height, self.layout.width))
+        pooled = self.trunk(torch.cat(inputs, 1)).mean(dim=(-2, -1))
+        context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:],
+                                          frames[:, -1, -self.layout.public_dim:]), -1))
+        return self.value_head(torch.cat((pooled, context), -1))
+
+
+class InformationSpatialPPOPolicy(LightSpatialPPOPolicy):
+    """The memory × history-state critic 2×2, without changing the PPO core."""
+    def __init__(self, obs, obs_groups, num_actions, *, critic_actor_information=False,
+                 knowledge_channels=0, **kwargs):
+        if not isinstance(critic_actor_information, bool):
+            raise TypeError("critic_actor_information must be boolean")
+        if isinstance(knowledge_channels, bool) or not isinstance(knowledge_channels, int) or knowledge_channels < 0:
+            raise ValueError("knowledge_channels must be a nonnegative integer")
+        actor_keys = ["policy"] + (["knowledge"] if knowledge_channels else [])
+        critic_keys = ["critic"] + (actor_keys if critic_actor_information else [])
+        expected = {"policy": actor_keys, "critic": critic_keys}
+        if obs_groups != expected:
+            raise ValueError(f"information policy requires obs_groups={expected}")
+        super().__init__(obs, {"policy": ["policy"], "critic": ["critic"]}, num_actions, **kwargs)
+        if knowledge_channels and ("knowledge" not in obs or obs["knowledge"].shape != (
+                obs.batch_size[0], knowledge_channels * self.layout.cells)):
+            raise ValueError("knowledge observation shape does not match knowledge_channels")
+        self.layout = replace(self.layout, knowledge_channels=knowledge_channels)
+        self.actor.layout = self.critic.layout = self.layout
+        self.obs_groups = deepcopy(obs_groups)
+        self.critic_actor_information = critic_actor_information
+        add_actor_knowledge(self.actor, knowledge_channels)
+        if knowledge_channels:
+            self.num_actor_obs += knowledge_channels * self.layout.cells
+        if critic_actor_information:
+            self.critic = HistoryStateCritic(self.critic, knowledge_channels)
+            self.num_critic_obs += self.history_length * self.layout.frame_dim + knowledge_channels * self.layout.cells
+        self.semantics += f"_knowledge{knowledge_channels}_critic_actor_info{int(critic_actor_information)}_v1"
+
+    def evaluate(self, obs, is_teacher=False, **kwargs):
+        if not self.critic_actor_information or obs.batch_size[0] == 0:
+            return super().evaluate(obs, is_teacher=is_teacher, **kwargs)
+        if is_teacher:
+            raise ValueError("information student policy has no nonempty teacher value branch")
+        return self.critic(obs["critic"], obs["policy"], obs.get("knowledge"))

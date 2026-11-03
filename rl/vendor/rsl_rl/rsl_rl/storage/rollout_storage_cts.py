@@ -49,6 +49,7 @@ class RolloutStorageCTS:
         distribution_shape: tuple[int] | list[int] | None = None,
         action_dtype: torch.dtype = torch.float32,
         store_action_std: bool = True,
+        store_action_mean: bool = True,
     ) -> None:
         self.training_type = training_type
         self.device = device
@@ -81,7 +82,10 @@ class RolloutStorageCTS:
         if training_type == "rl":
             self.values = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
             self.actions_log_prob = torch.zeros(num_transitions_per_env, num_envs, 1, device=self.device)
-            self.mu = torch.zeros(num_transitions_per_env, num_envs, *self.distribution_shape, device=self.device)
+            self.mu = (
+                torch.zeros(num_transitions_per_env, num_envs, *self.distribution_shape, device=self.device)
+                if store_action_mean else None
+            )
             self.sigma = (
                 torch.zeros(num_transitions_per_env, num_envs, *self.distribution_shape, device=self.device)
                 if store_action_std else None
@@ -115,7 +119,8 @@ class RolloutStorageCTS:
         if self.training_type == "rl":
             self.values[self.step].copy_(transition.values)
             self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, 1))
-            self.mu[self.step].copy_(transition.action_mean)
+            if self.mu is not None:
+                self.mu[self.step].copy_(transition.action_mean)
             if self.sigma is not None:
                 self.sigma[self.step].copy_(transition.action_sigma)
 

@@ -10,12 +10,15 @@ from unittest.mock import patch as mock_patch
 
 import numpy as np
 
-from generals import Action, Direction, MapConfig, MoveMode, make_env
+from generals import Action, Direction, MoveMode
 from generals.backends.online import OnlineBackend, OnlineProtocolError, UnsupportedGameError
 from generals.backends.online.protocol import ObservationDecoder, attack_arguments, patch
 from generals.backends.online.endpoints import MAIN_CLIENT_KEY, MAIN_SERVER, resolve_endpoint
-from generals.protocol.match import StaleFrameError
-from generals.runtime.match import run_match
+from generals.backends.online.backend import StaleFrameError
+from generals.runtime.online import run_online
+
+def run_controller(backend, controller, **options):
+    return run_online(backend, lambda observation: controller, **options)
 
 
 def start_packet(player=0):
@@ -81,7 +84,9 @@ class DecoderTests(unittest.TestCase):
             self.assertFalse(obs.visible.flat[cell])
             self.assertEqual((obs.structure.flat[cell], obs.owner.flat[cell], obs.army.flat[cell]),
                              (255, -3, -1))
-        self.assertEqual(obs.terrain.flat[3], 2)
+        self.assertEqual(obs.terrain.flat[3], 255)
+        self.assertTrue(obs.fog_obstacles.flat[3])
+        self.assertFalse(obs.fog_obstacles.flat[5])
         self.assertEqual(obs.terrain.flat[5], 255)
         self.assertEqual(obs.terrain.flat[4], 1)
         self.assertEqual(obs.owner.flat[4], -1)
@@ -171,6 +176,20 @@ class DecoderTests(unittest.TestCase):
         self.assertFalse(lost.alive[0])
         self.assertIsNone(lost.winner_id)
 
+    def test_current_score_fields_and_one_army_order(self):
+        decoder = ObservationDecoder()
+        decoder.start(start_packet())
+        update = update_packet()
+        update['scores'][0].update(has_kill=True, warn_afk=True, neutralize_in=.25)
+        update['map_diff'][4] = 1
+        obs = decoder.update(update)
+        self.assertEqual(obs.has_kill.tolist(), [False, True])
+        self.assertEqual(obs.warn_afk.tolist(), [False, True])
+        self.assertEqual(obs.neutralize_in.tolist(), [-1., .25])
+        self.assertIsNone(attack_arguments(Action.move(0, Direction.RIGHT), obs))
+        self.assertFalse(obs.fog_obstacles.flags.writeable)
+        self.assertFalse(obs.neutralize_in.flags.writeable)
+
     def test_move_encoding_half_wait_and_no_row_wrap(self):
         _, obs = self.decode()
         self.assertEqual(attack_arguments(Action.move(0, Direction.RIGHT, MoveMode.HALF), obs),
@@ -233,7 +252,7 @@ class OnlineSessionTests(unittest.TestCase):
             wire.on_emit = lambda event, args: wire.events.append(('game_update', (update_packet(2),))) if event == 'attack' else None
             second = backend.step({0: Action.move(0, Direction.RIGHT)}, frame_id=first.frame_id)
             self.assertEqual(wire.sent[-2:], [('clear_moves', ()), ('attack', (0, 1, False))])
-            self.assertEqual(second.results, ())
+            self.assertFalse(hasattr(second, "results"))
             wire.on_emit = lambda event, args: wire.events.append(('game_won', ({},))) if event == 'clear_moves' else None
             end = backend.step({0: Action.wait()}, frame_id=second.frame_id)
             self.assertTrue(end.done)
@@ -308,11 +327,7 @@ class OnlineSessionTests(unittest.TestCase):
                         {'room': 'a', 'update_timeout': float('inf')}):
             with self.subTest(options=options), self.assertRaises((ValueError, TypeError)):
                 OnlineBackend(user_id='test-secret', **options)
-        backend = make_env(mode='online', user_id='secret', room='test', transport=FakeTransport())
-        self.assertIsInstance(backend, OnlineBackend)
-        backend.close()
-        with self.assertRaises(ValueError):
-            make_env(MapConfig(), mode='online', user_id='secret', room='test')
+
 
 
 class WaitController:
@@ -334,16 +349,11 @@ class WaitController:
 
 
 class MatchRunnerTests(unittest.TestCase):
-    def test_same_controller_contract_runs_local_and_online(self):
-        controllers = {0: WaitController(), 1: WaitController()}
-        result = run_match(make_env(MapConfig(5, 5, 2), mode='match', max_ticks=3), controllers)
-        self.assertEqual(result['tick'], 3)
-        self.assertEqual(result['reason'], 'tick_limit')
-        self.assertEqual(len(controllers[0].results), 3)
+    def test_controller_contract_runs_online(self):
         backend, wire = session(player=1)
         wire.on_emit = lambda event, args: wire.events.append(('game_won', ({},))) if event == 'clear_moves' else None
         controller = WaitController()
-        result = run_match(backend, controller, seed=42)
+        result = run_controller(backend, controller, seed=42)
         self.assertEqual(result['winner_id'], 1)
         self.assertEqual(controller.resets, [(1, 43)])
         self.assertEqual(controller.results, [])
@@ -359,14 +369,14 @@ class MatchRunnerTests(unittest.TestCase):
             return original(obs)
         controller.act = act
         wire.on_emit = lambda event, args: wire.events.append(('game_won', ({},))) if event == 'clear_moves' else None
-        result = run_match(backend, controller)
+        result = run_controller(backend, controller)
         self.assertEqual(result['stale_decisions'], 1)
         self.assertEqual(controller.ticks, [1, 2])
         backend, wire = session()
         controller = WaitController()
         controller.act = lambda obs: 'not an action'
         with self.assertRaises(TypeError):
-            run_match(backend, controller)
+            run_controller(backend, controller)
         self.assertTrue(controller.closed)
         self.assertTrue(wire.closed)
 
@@ -375,7 +385,7 @@ class MatchRunnerTests(unittest.TestCase):
         controller = WaitController()
         controller.requires_move_results = True
         with self.assertRaisesRegex(ValueError, 'authoritative move results'):
-            run_match(backend, controller)
+            run_controller(backend, controller)
         self.assertEqual(controller.ticks, [])
         self.assertTrue(controller.closed)
         self.assertTrue(wire.closed)

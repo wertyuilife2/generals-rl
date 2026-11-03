@@ -39,31 +39,33 @@ class Runner:
         if self.stopped:
             raise RuntimeError(f"runner is stopped: {self.stop_reason}")
         started = perf_counter()
-        self.engine.begin_tick()
         actions = [Action.wait() for _ in self.controllers]
         failure = None
-        while self.engine.next_player is not None:
-            pid = self.engine.next_player
+        for pid, controller in enumerate(self.controllers):
+            if not self.engine.state.alive[pid]:
+                continue
             try:
                 obs = observe(self.engine.state, pid, self.visibility)
-                action = self.controllers[pid].act(obs)
+                action = controller.act(obs)
                 if not isinstance(action, Action):
                     raise TypeError("controller must return an Action")
-                result = self.engine.apply_action(pid, action)
                 actions[pid] = action
-                self.controllers[pid].on_result(result)
-                if result.eliminated is not None:
-                    defeated = self.controllers[result.eliminated]
-                    if hasattr(defeated, "eliminate"):
-                        defeated.eliminate()
             except Exception as exc:
                 failure = ControllerError(f"player {pid}: {type(exc).__name__}: {exc}")
                 self.error = str(failure)
-                # Finish the atomic tick with WAIT; no other policy is called.
-                while self.engine.next_player is not None:
-                    self.engine.apply_action(self.engine.next_player, Action.wait())
                 break
-        result = self.engine.finish_tick()
+        result = self.engine.step(actions)
+        try:
+            for move in result.moves:
+                pid = move.player_id
+                self.controllers[pid].on_result(move)
+            for pid in result.eliminated:
+                defeated = self.controllers[pid]
+                if hasattr(defeated, "eliminate"):
+                    defeated.eliminate()
+        except Exception as exc:
+            failure = ControllerError(f"player {pid}: {type(exc).__name__}: {exc}")
+            self.error = str(failure)
         self.last_result = result
         self._check_limit()
         if failure is not None:
@@ -84,6 +86,17 @@ class Runner:
     def stop(self, reason="user_stop"):
         if not self.stopped:
             self.stopped, self.stop_reason = True, reason
+
+    def surrender(self, player_id):
+        if self.stopped:
+            return
+        self.engine.surrender(player_id)
+        if self.recorder is not None:
+            self.recorder.write_surrender(player_id, self.engine.state)
+        self._check_limit()
+        eliminate = getattr(self.controllers[player_id], 'eliminate', None)
+        if eliminate is not None:
+            eliminate()
 
     def run(self):
         while not self.stopped:

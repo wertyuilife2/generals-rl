@@ -1,0 +1,186 @@
+"""Small native contracts for the optional combat observation layout."""
+from contextlib import redirect_stdout
+from dataclasses import asdict
+import io
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+import torch
+from tensordict import TensorDict
+
+from generals import VecEnv
+from generals.core.engine import CoreEngine
+from generals.core.state import Action, GameState, MapLayout
+from generals import MapConfig
+from generals_arena.competitions.evaluation import evaluate
+from generals_arena.competitions.evaluation import make_profile
+from generals_rl.export import export_policy
+from generals_rl.mdp import (CombatObservationEncoder, GameBatch, LocalObservationEncoder,
+                             make_observation_encoder)
+from generals_rl.self_play_training import prepare_self_play
+from generals_rl.information_ppo import InformationSpatialPPOPolicy
+from rl_test_utils import light_policy_config
+from generals_rl.task import GeneralsTask, TaskConfig
+
+torch.set_num_threads(1)
+
+
+def combat_state(tick=0):
+    shape=(9,9)
+    structure=np.zeros(shape,np.uint8)
+    owner=np.full(shape,-1,np.int16)
+    army=np.zeros(shape,np.int64)
+    for cell,pid,count,kind in ((27,0,2,2),(66,1,9,2),(28,1,4,0),
+                                (29,0,9,0),(37,0,4,0),(75,0,3,0),(80,1,8,1)):
+        structure.flat[cell],owner.flat[cell],army.flat[cell]=kind,pid,count
+    state=GameState(MapLayout(np.zeros(shape,np.uint8)),structure,owner,army,
+                    np.ones(2,bool),np.array([27,66],np.int32),tick)
+    state.validate()
+    return state
+
+
+def small_runner(task):
+    groups={"policy":["policy"],"critic":["critic"]}
+    options=light_policy_config()
+    options["class_name"]="generals_rl.information_ppo.InformationSpatialPPOPolicy"
+    obs=TensorDict(task.get_observations(),batch_size=[task.num_envs])
+    kwargs={key:value for key,value in options.items() if key!="class_name"}
+    with redirect_stdout(io.StringIO()):
+        policy=InformationSpatialPPOPolicy(obs,groups,task.action_space.size,**kwargs)
+    runner=SimpleNamespace(alg=SimpleNamespace(policy=policy),cfg={"obs_groups":groups},
+                           env=SimpleNamespace(get_observations=lambda:obs))
+    return runner,{"runner":{"policy":options,"obs_groups":groups},
+                   "self_play":{"pool_size":2,"stochastic":False},"torch_threads":1}
+
+
+class CombatObservationTests(unittest.TestCase):
+    def backend(self,states,episode_ticks=0):
+        env=VecEnv.from_states(states,device="cpu",threads=1,auto_reset=False,
+                               episode_ticks=episode_ticks)
+        self.addCleanup(env.close)
+        return env
+
+    def task(self,*,combat,opponent="wait",episode_ticks=8):
+        cfg=TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=2,max_episode_steps=episode_ticks,history_length=4,
+                       opponent=opponent,combat_features=combat,
+                       mountain_density=0,city_density=0)
+        task=GeneralsTask(cfg,backend=self.backend([combat_state(),combat_state()],episode_ticks))
+        self.addCleanup(task.close)
+        return task
+
+    def test_factory_defaults_and_geometry_validation(self):
+        original=make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0))
+        self.assertIs(type(original),LocalObservationEncoder)
+        self.assertIs(type(make_observation_encoder(TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=True))),
+                      CombatObservationEncoder)
+        for updates in ({"players":3},):
+            with self.assertRaises(ValueError):
+                TaskConfig(combat_features=True,**updates)
+        with self.assertRaises(TypeError):
+            TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, combat_features=1)
+        batch=GameBatch.from_backend(self.backend([combat_state()]),"cpu")
+        ids=torch.tensor([0])
+        torch.testing.assert_close(original.encode(batch,ids),
+                                   LocalObservationEncoder(512).encode(batch,ids),rtol=0,atol=0)
+
+    def test_potential_uses_core_growth_and_correct_combat_targets(self):
+        states=[combat_state(tick) for tick in (1,49,184)]
+        batch=GameBatch.from_backend(self.backend(states),"cpu")
+        encoded=CombatObservationEncoder(1024).encode(batch,torch.zeros(3,dtype=torch.long))
+        self.assertEqual(tuple(encoded.shape),(3,1147))
+        for lane,state in enumerate(states):
+            army=state.army.ravel()
+            risk=max(0,int(army[28])-1)
+            attack=max(0,int(army[29])-1)-int(army[28])
+            own_margin=int(army[27])-risk
+            torch.testing.assert_close(encoded[lane,810+27],torch.log1p(torch.tensor(float(risk)))/10)
+            torch.testing.assert_close(encoded[lane,891+27],
+                torch.tensor(float(np.sign(own_margin)))*torch.log1p(torch.tensor(float(abs(own_margin))))/10)
+            torch.testing.assert_close(encoded[lane,891+28],
+                torch.tensor(float(np.sign(attack)))*torch.log1p(torch.tensor(float(abs(attack))))/10)
+        # The recorded-failure geometry: own general at risk, a winning adjacent
+        # defense at28, and an underpowered attack on enemy general66.
+        torch.testing.assert_close(encoded[2,891+28],torch.log1p(torch.tensor(4.))/10)
+        torch.testing.assert_close(encoded[2,891+66],-torch.log1p(torch.tensor(7.))/10)
+
+    def test_hidden_world_changes_do_not_leak_or_persist_after_privileged_encode(self):
+        first=combat_state()
+        second=first.copy()
+        for array in (second.structure,second.owner,second.army):
+            array.flat[79],array.flat[80]=array.flat[80],array.flat[79]
+        terrain=second.layout.terrain.copy()
+        terrain.flat[8]=1
+        second.layout=MapLayout(terrain)
+        second.validate()
+        batch=GameBatch.from_backend(self.backend([first,second]),"cpu")
+        ids=torch.tensor([0,0])
+        encoder=CombatObservationEncoder(1024)
+        local=encoder.encode(batch,ids)
+        torch.testing.assert_close(local[0,:13*81],local[1,:13*81],rtol=0,atol=0)
+        torch.testing.assert_close(local[0,-13:],local[1,-13:],rtol=0,atol=0)
+        self.assertFalse(torch.equal(local[0,13*81:14*81],local[1,13*81:14*81]))
+        privileged=encoder.encode(batch,ids,privileged=True)
+        self.assertFalse(torch.equal(privileged[0],privileged[1]))
+        torch.testing.assert_close(encoder.encode(batch,ids),local,rtol=0,atol=0)
+
+    def test_native_task_history_partial_reset_and_reward_keep_same_boundary(self):
+        original=self.task(combat=False)
+        combat=self.task(combat=True)
+        self.assertIsInstance(combat.observation_encoder,CombatObservationEncoder)
+        for _ in range(2):
+            before=original.step(torch.zeros(2,dtype=torch.long))
+            after=combat.step(torch.zeros(2,dtype=torch.long))
+            torch.testing.assert_close(before.reward,after.reward,rtol=0,atol=0)
+            self.assertEqual(tuple(after.observations["policy"].shape),(2,4588))
+            self.assertEqual(tuple(after.observations["action_mask"].shape),(2,649))
+        continuing=combat.history.frames[1].clone()
+        combat.reset(torch.tensor([True,False]),rotate=True)
+        torch.testing.assert_close(combat.history.frames[1],continuing,rtol=0,atol=0)
+        current=combat.observation_encoder.encode(combat.batch(),combat.player_ids)
+        torch.testing.assert_close(combat.history.frames[0],current[0].expand(4,-1),rtol=0,atol=0)
+
+    def test_self_play_encoder_signature_and_real_evaluator_factory(self):
+        with TemporaryDirectory() as directory:
+            root=Path(directory)
+            original=self.task(combat=False,opponent="self_play")
+            old_runner,config=small_runner(original)
+            old=prepare_self_play(original,old_runner,config,root/"original")
+            old_checkpoint=root/"original/checkpoint.pt"
+            torch.save({"model_state_dict":old_runner.alg.policy.state_dict()},old_checkpoint)
+            combat=self.task(combat=True,opponent="self_play")
+            runner,config=small_runner(combat)
+            with self.assertRaisesRegex(ValueError,"policy_spec"):
+                prepare_self_play(combat,runner,config,root/"rejected",resume=old_checkpoint)
+            session=prepare_self_play(combat,runner,config,root/"combat")
+            self.assertNotEqual(old.pool.policy_spec["encoder"],session.pool.policy_spec["encoder"])
+            self.assertEqual(old.pool.policy_spec["encoder_semantics"], LocalObservationEncoder.semantics)
+            self.assertEqual(session.pool.policy_spec["encoder_semantics"],CombatObservationEncoder.semantics)
+            for pid,history in enumerate(combat.opponent.histories):
+                expected=combat.observation_encoder.encode(combat.batch(),torch.full_like(combat.player_ids,pid))
+                torch.testing.assert_close(history.frames,expected[:,None].expand(-1,4,-1),rtol=0,atol=0)
+            combat.step(torch.zeros(2,dtype=torch.long))  # Actual historical policy opponent.
+            destination=root/"combat/checkpoint.pt"
+            torch.save({"model_state_dict":runner.alg.policy.state_dict()},destination)
+            with patch.object(CombatObservationEncoder,"semantics","combat_p2_985_v2"), \
+                    self.assertRaisesRegex(ValueError,"policy_spec"):
+                prepare_self_play(combat,runner,config,root/"semantic_rejected",resume=destination)
+            config["task"]=asdict(combat.config)
+            destination.with_name("run_config.json").write_text(json.dumps(config))
+            with redirect_stdout(io.StringIO()):
+                bundle=export_policy(destination,root/"bundle",completed_updates=1)
+                profile=make_profile(MapConfig(**{key: config["task"][key] for key in (
+                    "width", "height", "players", "mountain_density", "city_density")}),
+                    maps_per_opponent=1,max_ticks=2,seed=91234)
+                report=evaluate(bundle,profile,batch_size=8,device="cpu",cpu_threads=1)
+            self.assertEqual(report["games"],10)
+            self.assertEqual(set(report["by_opponent"]),{"random","defensive","expansion","aggressive","WAIT"})
+
+
+
+if __name__=="__main__":
+    unittest.main()

@@ -6,7 +6,7 @@ import weakref
 
 import numpy as np
 
-from generals.backends._build import build_shared, build_extension
+from generals.backends._build import build_shared
 from generals.core.state import Action
 
 
@@ -40,16 +40,17 @@ def _library():
         'baseline_copy': ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p], ctypes.c_int),
         'baseline_set_path': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int], ctypes.c_int),
         'baseline_set_pending': ([ctypes.c_void_p, ctypes.c_int64], None),
+        'baseline_batch_create': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
+        'baseline_batch_destroy': ([ctypes.c_void_p], None),
+        'baseline_batch_act': ([ctypes.c_void_p, *([ctypes.c_void_p] * 9)], ctypes.c_int),
+        'baseline_batch_result': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+                                  ctypes.c_int, ctypes.c_void_p], None),
     }
     for name, (args, result) in signatures.items():
         function = getattr(lib, name)
         function.argtypes, function.restype = args, result
     return lib, metadata
-
-
-@lru_cache(maxsize=1)
-def _host():
-    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_baselines_host')
 
 
 class BaseAI:
@@ -79,11 +80,6 @@ class BaseAI:
         self._bits = bits
         self._random = _Random(bits.state, *[ctypes.cast(function, ctypes.c_void_p) for function in
                                           (bits.next_uint64, bits.next_uint32, bits.next_double)])
-        host, self.host_metadata = _host()
-        self._native_act = host.act
-        self._native_calls = (ctypes.cast(self._lib.baseline_act, ctypes.c_void_p).value,
-                              ctypes.cast(self._lib.baseline_error, ctypes.c_void_p).value,
-                              ctypes.addressof(self._random))
 
     def close(self):
         finalizer = getattr(self, '_finalizer', None)
@@ -94,8 +90,29 @@ class BaseAI:
     def act(self, observation):
         if not self._handle:
             raise RuntimeError('controller is closed; reset it before acting')
+        obs = observation
+        if not 2 <= len(obs.alive) <= 8 or not 0 <= self.player_id < len(obs.alive):
+            raise ValueError('invalid observation player count')
+        arrays = []
+        for name, dtype in [('terrain', np.uint8), ('structure', np.uint8), ('owner', np.int16),
+                            ('army', np.int64), ('visible', np.bool_), ('alive', np.bool_)]:
+            value = getattr(obs, name)
+            shape = (len(obs.alive),) if name == 'alive' else (obs.height, obs.width)
+            if value.dtype != dtype or value.shape != shape:
+                raise ValueError(f'invalid observation array: {name}')
+            arrays.append(np.ascontiguousarray(value))
+        if obs.height < 1 or obs.width < 1 or obs.size > 1024*1024:
+            raise ValueError('unsupported observation dimensions')
+        if min(self.max_sources, self.max_path_attempts, self.path_lifetime, self.memory_ttl) < 0:
+            raise ValueError('planning limits cannot be negative')
+        native = _Observation(*(value.ctypes.data for value in arrays), obs.height, obs.width,
+                              len(obs.alive), obs.player_id, obs.tick, bool(obs.terminated))
+        options = _Options(self.max_sources, self.max_path_attempts, self.path_lifetime,
+                           self.memory_ttl, self.temperature, (ctypes.c_double*3)(*self.weights.values()))
         with self.rng.bit_generator.lock:
-            encoded = self._native_act(self._handle, self._native_calls, self, observation)
+            encoded = self._lib.baseline_act(self._handle, ctypes.byref(native), ctypes.byref(options), ctypes.byref(self._random))
+        if encoded < 0:
+            raise RuntimeError(self._lib.baseline_error().decode())
         return Action.decode(encoded)
 
     def on_result(self, result):
@@ -104,7 +121,7 @@ class BaseAI:
         if result.action.source < 0 and int(result.action.kind) != 0:
             return
         code = result.action.encode()
-        if code > 0x7fffffffffffffff:
+        if code > np.iinfo(np.int64).max:
             return
         self._lib.baseline_result(self._handle, result.player_id, code, result.valid,
                                   result.target_owned, result.source, result.target)

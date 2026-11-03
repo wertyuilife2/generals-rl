@@ -100,7 +100,7 @@ class CUDAStepTests(unittest.TestCase):
         for threads, groups in ((4, 8), (8, 16), (16, 8), (16, 16), (32, 1), (32, 4),
                                 (32, 8), (32, 16), (64, 1), (128, 1), (256, 1), (512, 1)):
             with self.subTest(threads=threads, groups=groups):
-                states = [generate_map(MapConfig(9, 7, 8), seed) for seed in range(11)]
+                states = [generate_map(MapConfig(25, 25, 8), seed) for seed in range(11)]
                 for state in states: state.army.ravel()[state.general_pos] = 88
                 pair = self.pair(states, auto_reset=True, episode_ticks=53)
                 pair[1].configure_step(group_threads=threads, envs_per_block=groups)
@@ -115,7 +115,10 @@ class CUDAStepTests(unittest.TestCase):
         configs += [(64, 64, 8, threads, 1) for threads in (64, 128, 256, 512)]
         for w, h, p, threads, groups in configs:
             with self.subTest(width=w, height=h, threads=threads):
-                states = [generate_map(MapConfig(w, h, p, .1, .1), seed) for seed in (12, 19, 43)]
+                if min(w, h) == 1:
+                    states = [make_state(h, w, generals=list(range(p))) for _ in range(3)]
+                else:
+                    states = [generate_map(MapConfig(w, h, p, .1, .1), seed) for seed in (12, 19, 43)]
                 pair = self.pair(states, auto_reset=True, episode_ticks=61)
                 pair[1].configure_step(group_threads=threads, envs_per_block=groups)
                 for _ in range(67): self.advance(pair, np.zeros((3, p), np.int64))
@@ -128,7 +131,7 @@ class CUDAStepTests(unittest.TestCase):
                 pair[1].configure_step(group_threads=threads, envs_per_block=2)
 
     def test_prepared_trajectory_matches_cpu(self):
-        case = BenchmarkCase(MapConfig(9, 7, 4), batch_size=7, threads=2, episode_ticks=17)
+        case = BenchmarkCase(MapConfig(25, 25, 4), batch_size=7, threads=2, episode_ticks=17)
         result = measure_step_case(case, backend='gpu', steps=61, warmup=2, repeats=1)
         self.assertTrue(result['samples'][0]['verification']['state_statistics_counters_match'])
         self.assertTrue(result['samples'][0]['verification']['rng_unchanged'])

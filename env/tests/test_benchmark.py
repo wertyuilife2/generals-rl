@@ -22,7 +22,7 @@ from generals import MapConfig
 
 class StepWorkloadTests(unittest.TestCase):
     def case(self, **kwargs):
-        return BenchmarkCase(MapConfig(9, 7, 4), batch_size=5, threads=2, episode_ticks=17, **kwargs)
+        return BenchmarkCase(MapConfig(25, 25, 4), batch_size=5, threads=2, episode_ticks=17, **kwargs)
 
     def test_configuration_and_bad_parameters(self):
         for kw in ({'batch_size': 0}, {'threads': -1}, {'episode_ticks': 0}, {'seed': -1}):
@@ -42,7 +42,7 @@ class StepWorkloadTests(unittest.TestCase):
         self.assertGreater(np.count_nonzero(first.history), 0)
 
     def test_prepared_actions_match_independent_python_rules_every_tick(self):
-        for config in (MapConfig(9, 7, 2), MapConfig(9, 7, 4), MapConfig(9, 7, 8), MapConfig(2, 1, 2, 0, 0)):
+        for config in (MapConfig(25, 25, 2), MapConfig(25, 25, 4), MapConfig(25, 25, 8)):
             case = BenchmarkCase(config, batch_size=3, threads=2, episode_ticks=17)
             work = prepare_workload(case, 61, 0)
             initial = unpack_states(work.initial, width=config.width, height=config.height)
@@ -112,7 +112,7 @@ class StepCLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'report.json'
             cmd = [sys.executable, '-m', 'generals', 'benchmark', '--backend', 'cpu',
-                   '--sizes', '9x7', '--players', '2', '4', '--batch-sizes', '2',
+                   '--sizes', '25x25', '--players', '2', '4', '--batch-sizes', '2',
                    '--threads', '2', '--steps', '3', '--warmup', '1', '--repeats', '1', '--output', str(path)]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -127,7 +127,7 @@ class StepCLITests(unittest.TestCase):
     def test_source_entry_works_from_foreign_directory(self):
         script = Path(__file__).resolve().parents[1]/'benchmarks'/'benchmark_step.py'
         with tempfile.TemporaryDirectory() as directory:
-            result = subprocess.run([sys.executable, str(script), '--backend', 'cpu', '--sizes', '7',
+            result = subprocess.run([sys.executable, str(script), '--backend', 'cpu', '--sizes', '25',
                 '--players', '2', '--batch-sizes', '1', '--steps', '1', '--warmup', '0',
                 '--repeats', '1', '--output', str(Path(directory)/'result.json')],
                 cwd=directory, capture_output=True, text=True, timeout=45)

@@ -115,7 +115,7 @@ def new_report(args, mode):
                          if line.startswith("model name")), cpu_name)
     source = Path(__file__).resolve().parents[1]
     hashes = {str(path.relative_to(source)): sha256(path.read_bytes()).hexdigest()
-              for path in sorted(source.rglob("*")) if path.suffix in (".py", ".cpp", ".cu", ".metal")}
+              for path in sorted(source.rglob("*")) if path.suffix in (".py", ".h", ".cpp", ".cu", ".metal")}
     return {"schema_version": 2, "workload": WORKLOAD, "mode": mode,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "system": {"platform": platform.platform(), "python": platform.python_version(),

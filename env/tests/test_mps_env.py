@@ -39,11 +39,11 @@ class MPSEnvTests(unittest.TestCase):
 
     def test_prepared_trajectories_and_auto_reset(self):
         for players in (2, 4, 8):
-            case = BenchmarkCase(MapConfig(9, 7, players), batch_size=5, threads=2, episode_ticks=53)
+            case = BenchmarkCase(MapConfig(25, 25, players), batch_size=5, threads=2, episode_ticks=53)
             work = prepare_workload(case, 161, 0)
-            cpu = VecEnv(work.initial, width=9, height=7, auto_reset=True, episode_ticks=53)
+            cpu = VecEnv(work.initial, width=25, height=25, auto_reset=True, episode_ticks=53)
             gpu = VecEnv({k: torch.from_numpy(v) for k, v in work.initial.items()},
-                         width=9, height=7, device='mps', auto_reset=True, episode_ticks=53)
+                         width=25, height=25, device='mps', auto_reset=True, episode_ticks=53)
             with cpu, gpu:
                 for actions in work.history:
                     self.advance((cpu, gpu), actions)
@@ -72,7 +72,7 @@ class MPSEnvTests(unittest.TestCase):
         pair = self.pair([state])
         self.advance(pair, np.array([[11, 0, 0]], np.int64))
         self.assertFalse(pair[0].state['alive'][0, 1])
-        self.assertEqual(pair[0].state['army'][0, 3:5].tolist(), [2, 1])
+        self.assertEqual(pair[0].state['army'][0, 3:5].tolist(), [3, 0])
         for env in pair: env.unwrapped.episode_ticks = 2
         for _ in range(4): self.advance(pair, np.zeros((1, 3), np.int64))
         for env in pair: env.unwrapped.episode_ticks = 0
@@ -80,7 +80,7 @@ class MPSEnvTests(unittest.TestCase):
 
     def test_partial_reset_edits_and_inference_tensors(self):
         with torch.inference_mode():
-            cpu, gpu = self.pair(generate_states(MapConfig(9, 7, 4), 3), auto_reset=True, episode_ticks=7)
+            cpu, gpu = self.pair(generate_states(MapConfig(25, 25, 4), 3), auto_reset=True, episode_ticks=7)
             for _ in range(9): self.advance((cpu, gpu), np.zeros((3, 4), np.int64))
             cpu.reset(np.array([True, False, True]))
             gpu.reset(torch.tensor([True, False, True], device='mps'))
@@ -125,11 +125,11 @@ class MPSEnvTests(unittest.TestCase):
         for _ in range(51): self.advance(pair, np.zeros((1, 2), np.int64))
 
     def test_group_reconfiguration_preserves_live_trajectory(self):
-        case = BenchmarkCase(MapConfig(9, 7, 4), batch_size=37, threads=2, episode_ticks=17)
+        case = BenchmarkCase(MapConfig(25, 25, 4), batch_size=37, threads=2, episode_ticks=17)
         work = prepare_workload(case, 61, 0)
-        with VecEnv(work.initial, width=9, height=7, auto_reset=True, episode_ticks=17) as cpu, \
+        with VecEnv(work.initial, width=25, height=25, auto_reset=True, episode_ticks=17) as cpu, \
              VecEnv({k: torch.from_numpy(v) for k, v in work.initial.items()},
-                    width=9, height=7, device='mps', auto_reset=True, episode_ticks=17) as gpu:
+                    width=25, height=25, device='mps', auto_reset=True, episode_ticks=17) as gpu:
             for index, actions in enumerate(work.history):
                 if index % 20 == 0:
                     gpu.unwrapped.configure_step(threads_per_group=(32, 64, 128, 256)[index // 20])
@@ -138,7 +138,7 @@ class MPSEnvTests(unittest.TestCase):
             with self.assertRaises(ValueError): gpu.unwrapped.configure_step(threads_per_group=2**20)
 
     def test_prepared_step_benchmark_and_inference_output_edits(self):
-        case = BenchmarkCase(MapConfig(9, 7, 4), batch_size=5, threads=2, episode_ticks=17, device='mps')
+        case = BenchmarkCase(MapConfig(25, 25, 4), batch_size=5, threads=2, episode_ticks=17, device='mps')
         result = measure_step_case(case, backend='mps', steps=61, warmup=2, repeats=1)
         self.assertTrue(result['samples'][0]['verification']['state_statistics_counters_match'])
         self.assertTrue(result['samples'][0]['verification']['rng_unchanged'])
@@ -149,14 +149,14 @@ class MPSEnvTests(unittest.TestCase):
             self.advance(pair, np.zeros((1, 2), np.int64))
 
     def test_observation_masks_and_export(self):
-        states = generate_states(MapConfig(9, 7, 4), 3)
+        states = generate_states(MapConfig(25, 25, 4), 3)
         cpu, gpu = self.pair(states)
         for pid in range(4):
             actual = gpu.unwrapped.observe(pid)
             moves, wait = gpu.unwrapped.legal_action_mask(pid)
             for lane, state in enumerate(states):
                 expected = observe(state, pid)
-                for key in ('terrain', 'structure', 'owner', 'army', 'visible'):
+                for key in ('terrain', 'structure', 'owner', 'army', 'visible', 'fog_obstacles', 'has_kill', 'warn_afk', 'neutralize_in'):
                     np.testing.assert_array_equal(actual[key][lane].cpu(), getattr(expected, key))
                 expected_moves, expected_wait = legal_action_mask(expected)
                 np.testing.assert_array_equal(moves[lane].cpu(), expected_moves)
@@ -165,7 +165,7 @@ class MPSEnvTests(unittest.TestCase):
 
     def test_lines_max_board_noncontiguous_actions_and_validation(self):
         for width, height in ((1, 7), (7, 1), (64, 64)):
-            cpu, gpu = self.pair(generate_states(MapConfig(width, height, 2), 3))
+            cpu, gpu = self.pair([make_state(width=width, height=height) for _ in range(3)])
             gpu.unwrapped.configure_step(threads_per_group=32)
             actions = torch.zeros((2, 3), dtype=torch.int64, device='mps').t()
             for _ in range(51):
@@ -177,6 +177,55 @@ class MPSEnvTests(unittest.TestCase):
         with self.assertRaises(ValueError): gpu.step(actions)
         gpu.close()
         with self.assertRaises(RuntimeError): gpu.step(actions)
+
+
+    def test_official_metadata_and_bound_observation_after_reset_and_surrender(self):
+        from test_official_edges import CASES, initial
+        states = [initial(case) for case in CASES if case['name'].startswith('joint_random_')][:17]
+        pair = self.pair(states, auto_reset=True, episode_ticks=53)
+        ids = np.arange(len(states)) % 4
+        cpu_observe, mps_observe = (env.observer(ids) for env in pair)
+        rng = np.random.default_rng(92)
+        for tick in range(60):
+            self.advance(pair, rng.integers(0, 201, size=(len(states), 4), dtype=np.int64))
+            if tick in (0, 5, 49, 50, 53, 59):
+                cpu, mps = cpu_observe(), mps_observe()
+                for key in cpu['state']:
+                    if key == 'neutralize_in':
+                        np.testing.assert_allclose(cpu['state'][key], mps['state'][key].cpu(), atol=1e-7, rtol=0, err_msg=key)
+                    else:
+                        np.testing.assert_array_equal(cpu['state'][key], mps['state'][key].cpu(), err_msg=key)
+                for key in ('stats', 'visible', 'player_ids', 'general_pos', 'active'):
+                    np.testing.assert_array_equal(cpu[key], mps[key].cpu(), err_msg=key)
+            if tick == 5:
+                mask = np.arange(len(states)) % 2 == 0
+                pair[0].reset(mask)
+                pair[1].reset(torch.as_tensor(mask, device='mps'))
+            if tick == 8:
+                pair[0].surrender(0)
+                pair[1].surrender(0)
+                self.assert_equal(*pair)
+
+    def test_fog_obstacles_hide_converted_generals_until_seen(self):
+        state = make_state(height=9, width=9, generals=[0, 40, 80])
+        from generals.core.state import MapLayout
+        terrain = state.layout.terrain.copy()
+        terrain.flat[55] = 1
+        state.layout = MapLayout(terrain)
+        state.structure.flat[56], state.owner.flat[56], state.army.flat[56] = 1, -2, 40
+        state.alive[2], state.general_pos[2], state.death_order[2] = False, -1, 0
+        state.structure.flat[80], state.owner.flat[80] = 1, 1
+        pair = self.pair([state])
+        for known in (False, True):
+            if known:
+                pair[0].state['city_known'][0, 0] = 4
+                pair[1].state['city_known'][0, 0] = 4
+            actual = pair[1].observe([0])['state']
+            expected = pair[0].observe([0])['state']
+            for key in ('terrain', 'structure', 'owner', 'army', 'fog_obstacles'):
+                np.testing.assert_array_equal(expected[key], actual[key].cpu(), err_msg=key)
+            assert actual['fog_obstacles'][0, [55, 56, 80]].cpu().tolist() == [True, True, known]
+            assert actual['terrain'][0, [55, 56, 80]].cpu().tolist() == [255] * 3
 
 
 if __name__ == '__main__': unittest.main()
