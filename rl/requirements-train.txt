@@ -3,3 +3,5 @@ tensordict==0.14.2
 GitPython==3.2.0
 PyYAML==6.0.3
 tensorboard==2.21.0
+# Mature ResNetV2 and ViT implementations for matched-capacity map policies.
+timm==1.0.30

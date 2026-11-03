@@ -49,10 +49,6 @@ struct Policy {
  double networkBonus[MAXN];
  int lastHomeContact=-1000,raidNeed=0;
  bool homeKnownTo[8]{};
- bool growthBeforeMove=true;
- int growthEvidence=0,receiptSource=-1,receiptTarget=-1,receiptTick=-1;
- int receiptArmy=0,receiptTargetArmy=0,receiptOwner=-1;
- bool receiptHalf=false;
 
  int ter[MAXN],st[MAXN],own[MAXN],seen[MAXN],a[MAXN],lastOwn[MAXN];
  int enemyCount[MAXN],enemyNeighbors[MAXN][4],cellX[MAXN],cellY[MAXN];
@@ -100,46 +96,8 @@ struct Policy {
  int army(int i)const{return armyCache[i];}
  int moveArmy(int i,bool half=false)const {return half?halfMoveCache[i]:fullMoveCache[i];}
  bool canMoveNow(int i)const {return moveArmy(i)>0;}
- int actionTurn(int depth)const{return tick+depth-int(!growthBeforeMove);}
+ int actionTurn(int depth)const{return tick+depth-1;}
  int futureGrowth(int depth,int period=2)const{return std::max(0,actionTurn(depth)/period-tick/period);}
- // Infer growth/action order from isolated, fully observed transfers. The
- // local engine grows before moving; an online server can grow afterwards.
- // No backend identity or hidden state is needed, and ambiguous receipts do
- // not change the model (network delays can skip or postpone an action).
- void learnGrowth(const ArenaObservation *obs){
-  if(receiptSource<0||obs->tick!=receiptTick+1)return;
-  int s=receiptSource,t=receiptTarget;
-  if(!obs->visible[s]||!obs->visible[t]||obs->owner[s]!=p)return;
-  bool matches[2]{};
-  for(int before=0;before<2;before++){
-   int ready=receiptArmy+before;
-   int sent=receiptHalf?ready/2:std::max(0,ready-1);
-   int left=ready-sent+!before;
-   int ownerAfter=(sent||receiptOwner==p)?p:receiptOwner;
-   matches[before]=obs->army[s]==left&&obs->army[t]==receiptTargetArmy+sent&&obs->owner[t]==ownerAfter;
-  }
-  if(matches[0]==matches[1])return;
-  growthEvidence=std::clamp(growthEvidence+(matches[1]?-1:1),-4,4);
-  if(growthEvidence>=2)growthBeforeMove=false;
-  if(growthEvidence<=-2)growthBeforeMove=true;
- }
- void rememberAction(const ArenaObservation *obs,std::int64_t encoded){
-  receiptSource=-1;
-  if(encoded<=0)return;
-  int s=int((encoded-1)/8),dir=int((encoded-1)%8)/2;
-  if(s<0||s>=N||obs->owner[s]!=p)return;
-  int t=nb[s][dir];
-  if(t<0||!obs->visible[t]||obs->structure[s]<1||obs->structure[s]>2||
-     obs->structure[t]!=0||(tick+1)%2||(tick+1)%50==0)return;
-  if(obs->owner[t]!=p&&(obs->owner[t]!=-1||obs->army[t]!=0))return;
-  for(int c:{s,t})for(int k=0;k<4;k++){
-   int e=nb[c][k];if(e>=0&&obs->visible[e]&&obs->owner[e]>=0&&obs->owner[e]!=p)return;
-  }
-  if(obs->army[s]>10000000||obs->army[t]>10000000)return;
-  receiptSource=s;receiptTarget=t;receiptTick=tick;
-  receiptArmy=int(obs->army[s]);receiptTargetArmy=int(obs->army[t]);
-  receiptOwner=obs->owner[t];receiptHalf=(encoded-1)%2;
- }
  void bfs(int root,int *out,bool friends=false,bool noCities=false,bool fogPass=false){
   std::fill(out,out+N,INF);if(root<0)return;int h=0,z=0;queue[z++]=root;out[root]=0;
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||ter[v]==1||(!fogPass&&ter[v]==2)||out[v]!=INF||(friends&&!mine(v))||(noCities&&st[v]==1&&!mine(v)))continue;out[v]=out[u]+1;queue[z++]=v;}}
@@ -152,15 +110,16 @@ struct Policy {
   for(int c=0;c<N;c++)if(gd[c]<=24)homeCells[homeCount++]=c;
  }
  void update(const ArenaObservation *obs){
-  learnGrowth(obs);
+  int previousGeneral=g;
   o=obs;tick=int(o->tick);g=o->general_pos;
+  for(int e=0;e<o->players;e++){int c=enemyGeneral[e];if(c>=0&&o->visible[c]&&(o->structure[c]!=2||o->owner[c]!=e))enemyGeneral[e]=-1;}
   aliveCount=0;for(int e=0;e<o->players;e++)aliveCount+=o->alive[e]!=0;
   if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;cellX[i]=x;cellY[i]=y;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
-  bool mapChanged=!geometryReady;
+  bool mapChanged=!geometryReady||previousGeneral!=g;
   for(int i=0;i<N;i++)armyCache[i]=int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));
   for(int i=0;i<N;i++){
    if(o->visible[i]&&ter[i]!=o->terrain[i])mapChanged=true;
-   if(!o->visible[i]&&o->terrain[i]==2&&ter[i]==255){ter[i]=2;mapChanged=true;}
+   if(!o->visible[i]&&o->fog_obstacles[i]&&ter[i]==255){ter[i]=2;mapChanged=true;}
    lastOwn[i]=own[i];if(o->visible[i]){ter[i]=o->terrain[i];st[i]=o->structure[i];own[i]=o->owner[i];a[i]=army(i);seen[i]=tick;if(st[i]==2&&own[i]>=0&&own[i]!=p)enemyGeneral[own[i]]=i;}
    else if(own[i]==p){own[i]=-3;a[i]=0;}
    else if(own[i]>=0&&!o->alive[own[i]]){own[i]=-3;a[i]=std::max(1,a[i]/2);if(st[i]==2)st[i]=1;}
@@ -178,17 +137,15 @@ struct Policy {
    }
   }
   // Observation and remembered terrain are fixed for this decision. Keep the
-  // original growth-before-action expressions, evaluated once per cell.
+  // current pre-move armies, evaluated once per cell.
   for(int i=0;i<N;i++){
    int n=armyCache[i];
-   if(growthBeforeMove&&(tick+1)%2==0&&st[i]>0&&st[i]<3)n++;
-   else if(growthBeforeMove&&(tick+1)%50==0&&st[i]==0)n++;
    fullMoveCache[i]=std::max(0,n-1);halfMoveCache[i]=n/2;
    if(mine(i))defenseCache[i]=0;
    else if(own[i]<0)defenseCache[i]=std::max(0,a[i]);
    else{
     int add=(st[i]>0&&st[i]<3)?std::max(0,tick-seen[i])/2:0;
-    defenseCache[i]=a[i]+std::min(add,200)+int(growthBeforeMove&&o->visible[i]&&(((tick+1)%2==0&&st[i]>0&&st[i]<3)||((tick+1)%50==0&&st[i]==0)));
+    defenseCache[i]=a[i]+std::min(add,200);
     if(!o->visible[i]){
      // A last-seen field stack is mobile. Keep the observation in memory,
      // but let its planning estimate fade; the actual first step is visible.
@@ -564,8 +521,8 @@ struct Policy {
  // the normal peacetime garrison on an immediately successful capture.
  bool captureSafe(int source,int dest,int moving)const {
   int victim=own[dest];
-  auto grows=[&](int c,int at){return int((at%2==0&&st[c]>0&&st[c]<3)||(at%50==0&&st[c]==0));};
-  auto ready=[&](int c){return army(c)+(growthBeforeMove&&own[c]>=0?grows(c,tick+1):0);};
+  auto grows=[&](int c,int at){return int(at%2==0&&st[c]>0&&st[c]<3)+int(at%50==0);};
+  auto ready=[&](int c){return army(c);};
   auto guard=[&](int c){
    if(c==dest)return moving-captureDefense(dest);
    if(c==source)return ready(c)-moving;
@@ -933,6 +890,6 @@ struct Policy {
 extern "C" void *arena_create(int player,std::uint64_t seed,const char *params) { return new Policy(player,seed,params); }
 extern "C" std::int64_t arena_act(void *instance,const ArenaObservation *observation) {
  auto *policy=static_cast<Policy*>(instance);
- auto action=policy->act(observation);policy->rememberAction(observation,action);return action;
+ return policy->act(observation);
 }
 extern "C" void arena_destroy(void *instance) { delete static_cast<Policy*>(instance); }

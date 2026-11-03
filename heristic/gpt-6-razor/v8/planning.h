@@ -29,7 +29,7 @@ int direction(int s,int t)const {
 }
 int ready(int c)const { return moveArmy(c)+1; }
 int grows(int c,int at)const {
- return int((st[c]>0&&st[c]<3&&at%2==0)||(st[c]==0&&at%50==0));
+ return int(st[c]>0&&st[c]<3&&at%2==0)+int(at%50==0);
 }
 bool legalOrder(const Order &x,bool allowAttrition=false)const {
  if(x.s<0||x.t<0||!mine(x.s)||blocked(x.t)||direction(x.s,x.t)<0)return false;
@@ -669,4 +669,3 @@ void homeCounterPrograms(){
   }
  }
 }
-

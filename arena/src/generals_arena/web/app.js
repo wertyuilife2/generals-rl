@@ -64,6 +64,12 @@ function renderMeta(value) {
   if (signature === metaSignature) return;
   metaSignature = signature;
   meta = value;
+  const enabledModes = meta.rating_modes || [...new Set(meta.config.player_counts.map(p => p === 2 ? '1v1' : 'ffa'))];
+  if (!enabledModes.includes(rankingMode)) rankingMode = meta.default_rating_mode || enabledModes[0];
+  for (const button of document.querySelectorAll('[data-ranking-mode]')) {
+    button.hidden = !enabledModes.includes(button.dataset.rankingMode);
+    button.setAttribute('aria-pressed', String(button.dataset.rankingMode === rankingMode));
+  }
   const league = meta.league_id || meta.rules_id;
   if (accountLeague !== league) {
     accountLeague = league;
@@ -129,7 +135,7 @@ async function loadRank() {
     ['mean_decision_ms','决策耗时','每局先计算单步平均决策耗时，再对有计时数据的对局等权平均；不含 Arena / IPC 开销'],
   ] : [
     ['win_rate','胜率','夺冠局数 ÷ 参赛局数；任一同策略席位夺冠记为该策略获胜'],
-    ['survival_index','存活指数','（总席位数 − 存活名次）÷（总席位数 − 1）；重复席位先平均，再对各局平均'],
+    ['survival_index','存活指数','（总席位数 − 官方最终名次）÷（总席位数 − 1）；重复席位先平均，再对各局平均'],
     ['kill_index','击杀指数','亲自击杀的席位数 ÷ 其余席位数；重复席位先平均，再对各局平均'],
   ];
   $('ranking-head').replaceChildren(...[
@@ -266,7 +272,7 @@ async function loadHistory() {
         entry.delta === null ? '—' : `${entry.delta > 0 ? '+' : ''}${entry.delta.toFixed(1)}`);
       const pool = match.entrant_ids.length === 2 ? '1v1' : 'FFA';
       delta.title = entry.copies > 1 ? `${pool}：该策略本局 ${entry.copies} 个席位共用的 Elo 总变化，不按席位累加` : `本局 ${pool} Elo 变化`;
-      if (pool === '1v1' && match.rating_policy === 'gor-relative-codeforces-v9')
+      if (pool === '1v1' && match.rating_policy?.startsWith('gor-relative-codeforces-'))
         delta.title += '（本局原始评分变化，不含 WAIT 零点的平移）';
       if (entry.delta !== null) delta.append(el('small', '', entry.copies > 1 ? 'Elo 合计' : 'Elo'));
       item.append(rank, participant, delta); players.append(item);
@@ -348,6 +354,7 @@ function showDialog(mode) {
   $('board-dialog').classList.toggle('human-game', mode === 'live');
   $('board-error').textContent = '';
   $('live-controls').hidden = mode !== 'live'; $('replay-controls').hidden = mode !== 'replay';
+  $('surrender').hidden = mode !== 'live';
   $('board-mode').textContent = mode === 'live' ? 'LIVE / RANKED' : 'MATCH ARCHIVE';
   if (!$('board-dialog').open) $('board-dialog').showModal();
   battlefield.reset();
@@ -373,7 +380,9 @@ function renderGamePlayers(entries) {
   }
   const order=entries.map((_,seat)=>seat).sort((a,b)=>board.stats.army[b]-board.stats.army[a] || board.stats.territory[b]-board.stats.territory[a] || a-b);
   for(const [place,seat] of order.entries()) {
-    const {row,stats}=playerNodes[seat],text=`${board.forfeited?.includes(seat)?'超时投降 · ':board.alive[seat]?'':'已淘汰 · '}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
+    const warning=board.warn_afk?.[seat]?'挂机警告 · ':'';
+    const grace=board.neutralize_in?.[seat]>=0?`离场宽限期 ${Math.round(board.neutralize_in[seat]*100)}% · `:'';
+    const {row,stats}=playerNodes[seat],text=`${warning}${board.forfeited?.includes(seat)?'已弃权 · ':board.alive[seat]?'':'已淘汰 · '}${grace}兵力 ${number(board.stats.army[seat])} · 领地 ${number(board.stats.territory[seat])}`;
     if(stats.textContent!==text)stats.textContent=text;
     row.classList.toggle('eliminated',!board.alive[seat]);
     row.classList.toggle('forfeited',!!board.forfeited?.includes(seat));
@@ -389,6 +398,7 @@ function updateLive(value, force=false) {
   board=live.board;
   $('board-title').textContent=`${live.entrants.length} 人排位 · ${board.width} × ${board.height}`;
   $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 排行榜`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
+  $('surrender').disabled = live.done || !board.alive[board.player_id] || board.forfeited?.includes(board.player_id);
   draw();renderGamePlayers(live.entrants);
   if(live.done)renderPlayer();
 }
@@ -453,7 +463,7 @@ async function openReplay(id) {
     replay = data; timeline = new ReplayTimeline(data.frames); frame = 0;
     $('timeline').max = data.frames.length - 1;
     $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-    $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : data.result.reason === 'surrender' ? '投降结算' : data.result.reason === 'capture' ? '主城占领' : '达到时限'} · 已校验全部已执行动作与状态`;
+    $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : ({surrender:'弃权结算',capture:'将军被占领',afk:'未扩张自动弃权',idle_limit:'长时间无有效行动',game_limit:'官方对局时限',tick_limit:'达到评估时限'}[data.result.reason] || data.result.reason)} · 已校验全部已执行动作与状态`;
     setReplayLoading(false); seek(0); $('board').focus();
   } catch (error) {
     if (controller !== replayController || error.name === 'AbortError') return;
@@ -552,6 +562,7 @@ $('clear-history-filters').addEventListener('click', () => {
 });
 $('prev-page').addEventListener('click',()=>{page=Math.max(0,page-1);loadHistory().catch(e=>notice(e.message));});
 $('next-page').addEventListener('click',()=>{page++;loadHistory().catch(e=>notice(e.message));});
+$('surrender').addEventListener('click',()=>{input.issue('surrender');$('surrender').disabled=true;});
 $('new-account').addEventListener('click',()=>{showSignup=true;renderPlayer();$('player-name').focus();});
 $('cancel-signup').addEventListener('click',()=>{showSignup=false;renderPlayer();});
 $('play-account').addEventListener('change',async()=>{

@@ -56,13 +56,8 @@ def patch(previous, diff, *, limit=12290):
 
 
 class ObservationDecoder:
-    """Standard 2–8 player games; fog hides armies, owners and exact structures.
-
-    tick_offset is explicit because server rule phases must not be guessed by
-    extrapolating hidden state. The default preserves the raw server half-turn.
-    """
-    def __init__(self, *, tick_offset=0):
-        self.tick_offset = integer(tick_offset, 'tick_offset', low=-100, high=100)
+    """Standard 2–8 player games; preserve the server's raw half-turn counter."""
+    def __init__(self):
         self.player_id = None
         self.players = 0
         self.replay_id = None
@@ -143,7 +138,7 @@ class ObservationDecoder:
         cities = [integer(c, 'city position', high=size - 1) for c in cities]
         terrain = np.where(visible, Terrain.PLAIN, UNKNOWN).astype(np.uint8)
         terrain[raw_owner == -2] = Terrain.MOUNTAIN
-        terrain[raw_owner == -4] = Terrain.FOG_OBSTACLE
+        fog_obstacles = raw_owner == -4
         structure = np.where(visible, Structure.NONE, UNKNOWN).astype(np.uint8)
         owner = np.where(visible, raw_owner, UNKNOWN_OWNER).astype(np.int16)
         owner[raw_owner == -2] = EMPTY
@@ -167,6 +162,8 @@ class ObservationDecoder:
             raise OnlineProtocolError('scores must contain one entry per player')
         totals, land = np.zeros(self.players, np.int64), np.zeros(self.players, np.int64)
         alive, found = np.zeros(self.players, bool), set()
+        has_kill, warn_afk = np.zeros(self.players, bool), np.zeros(self.players, bool)
+        neutralize_in = np.full(self.players, -1., dtype=np.float64)
         for row in scores:
             if not isinstance(row, dict):
                 raise OnlineProtocolError('score must be an object')
@@ -180,20 +177,25 @@ class ObservationDecoder:
             if not isinstance(dead, (bool, np.bool_)):
                 raise OnlineProtocolError('score dead must be boolean')
             alive[pid] = not dead
+            has_kill[pid] = bool(row.get('has_kill', False))
+            warn_afk[pid] = bool(row.get('warn_afk', False))
+            grace = row.get('neutralize_in')
+            if grace is not None:
+                if isinstance(grace, bool) or not isinstance(grace, (int, float)) or not 0 <= grace <= 1:
+                    raise OnlineProtocolError('neutralize_in must be a progress value in [0,1]')
+                neutralize_in[pid] = grace
         own = self.player_id
         general = generals[own]
         if alive[own] and (general < 0 or not visible[general] or owner[general] != own):
             raise OnlineProtocolError('own living general is not visible')
         city_totals = np.full(self.players, -1, np.int64)
         city_totals[own] = np.count_nonzero((owner == own) & (structure == Structure.CITY))
-        tick = turn + self.tick_offset
-        if tick < 0:
-            raise OnlineProtocolError('tick_offset produces a negative tick')
         arrays = {name: readonly(value.reshape(height, width)) for name, value in
                   (('terrain', terrain), ('structure', structure), ('owner', owner),
-                   ('army', army), ('visible', visible))}
-        observation = Observation(player_id=own, tick=tick, **arrays,
+                   ('army', army), ('visible', visible), ('fog_obstacles', fog_obstacles))}
+        observation = Observation(player_id=own, tick=turn, **arrays,
             alive=readonly(alive), general_pos=general,
+            has_kill=readonly(has_kill), warn_afk=readonly(warn_afk), neutralize_in=readonly(neutralize_in),
             stats=PlayerStats(totals, land, city_totals), visibility='local',
             terminated=not bool(alive[own]), winner_id=None)
         self.map, self.cities, self.turn = board, cities, turn
@@ -216,6 +218,8 @@ def attack_arguments(action, observation):
         raise TypeError('controller must return an Action')
     if action.kind == ActionKind.WAIT:
         return None
+    if observation.terminated or not observation.alive[observation.player_id]:
+        raise ValueError('player cannot move after elimination')
     source = action.source
     if not 0 <= source < observation.size:
         raise ValueError('action source is outside the board')
@@ -228,6 +232,8 @@ def attack_arguments(action, observation):
     target = y * observation.width + x
     if observation.owner.flat[source] != observation.player_id:
         raise ValueError('action source is not owned by this player')
+    if observation.army.flat[source] <= 1:
+        return None  # Do not queue an order that would become executable only after growth.
     if observation.terrain.flat[target] == Terrain.MOUNTAIN:
         raise ValueError('action target is a mountain')
     return source, target, action.mode == MoveMode.HALF

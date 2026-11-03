@@ -30,8 +30,7 @@ export class ReplayTimeline {
         const y = Math.floor(cell/board.width), x = cell%board.width;
         board.owner[y][x] = owner; board.army[y][x] = army; board.structure[y][x] = structure;
       }
-      board.tick = frame.tick; board.alive = frame.alive;
-      board.stats = frame.stats; board.forfeited = frame.forfeited;
+      for (const key of ['tick','alive','stats','forfeited','ranking','has_kill','warn_afk','neutralize_in']) board[key] = frame[key];
       if (this.index % this.interval === 0 && !this.snapshots.has(this.index)) {
         this.snapshots.set(this.index, copyBoard(board));
         if (this.snapshots.size > this.capacity) this.snapshots.delete([...this.snapshots.keys()][1]);

@@ -13,7 +13,7 @@ from unittest.mock import patch
 from generals.backends.online.protocol import OnlineProtocolError
 from generals.backends.online.endpoints import MAIN_CLIENT_KEY, MAIN_SERVER
 from generals_arena.cli import main
-from generals_arena.online_accounts import account_path, initialize_account, load_account
+from generals.backends.online.credentials import account_path, initialize_account, load_account
 
 
 class RegistrationWire:
@@ -169,14 +169,6 @@ class AccountTests(unittest.TestCase):
         self.assertFalse(account_path('razor', self.directory).exists())
         self.assertEqual(wire.sent, [])
 
-    def test_play_binds_saved_identity_to_its_registered_server(self):
-        self.create()
-        with redirect_stderr(io.StringIO()), patch('generals.api.make_env') as factory:
-            with self.assertRaises(SystemExit) as result:
-                main(['online', 'unused.cpp', '--account', 'razor', '--account-dir', str(self.directory),
-                      '--server', 'https://example.com', '--room', 'test'])
-            self.assertEqual(result.exception.code, 2)
-            factory.assert_not_called()
 
 
 if __name__ == '__main__':

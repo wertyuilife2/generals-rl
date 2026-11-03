@@ -6,8 +6,8 @@ from urllib.parse import urlsplit
 DEFAULT_SERVER = 'https://botws.generals.io'
 MAIN_SERVER = 'https://ws.generals.io'
 # Public client protocol field, not an account credential. Verified against:
-# https://generals.io/generals-main-prod-v31.4.3-485dbf55.js (2026-10-15).
-MAIN_CLIENT_KEY = 'sd09fjdZ03i0ejwi_changeme'
+# https://generals.io/generals-main-prod-v31.4.5-e5c53eb3.js (2026-10-28).
+MAIN_CLIENT_KEY = 'sdO9fjdZO3iOejwi_changeme'
 
 
 def validate_server(server):

@@ -43,73 +43,44 @@ class HumanControllerTests(unittest.TestCase):
         self.assertEqual(self.human.queue[1].mode, MoveMode.ALL_BUT_ONE)
         self.assertFalse(self.human.half)
 
-    def test_zero_army_order_executes_and_next_order_runs_on_next_tick(self):
+    def test_insufficient_army_queue_skips_to_next_executable_order(self):
         for count in (0, 1):
-            for mode in MoveMode:
-                with self.subTest(count=count, mode=mode):
-                    state = board(army=count)
-                    state.owner[0, 1], state.army[0, 1] = 0, 7
-                    human = HumanController()
-                    obs = observe(state, 0)
-                    human.select(0, obs)
-                    if mode == MoveMode.HALF:
-                        human.toggle_half()
-                    human.enqueue(Direction.RIGHT, obs)
-                    human.enqueue(Direction.RIGHT, obs)
-                    engine = CoreEngine(state, debug=True)
-                    engine.begin_tick()
-                    action = human.act(observe(state, 0))
-                    self.assertEqual(action, Action.move(0, Direction.RIGHT, mode))
-                    move = engine.apply_action(0, action)
-                    human.on_result(move)
-                    engine.apply_action(1, Action.wait())
-                    engine.finish_tick()
-                    self.assertTrue(move.valid)
-                    self.assertEqual(move.moved, 0)
-                    self.assertEqual((state.army[0, 0], state.army[0, 1]), (count, 7))
-                    self.assertEqual((human.selected, human.anchor, human.cursor), (1, 1, 2))
-                    self.assertEqual(list(human.queue), [Action.move(1, Direction.RIGHT)])
-                    engine.begin_tick()
-                    move = engine.apply_action(0, human.act(observe(state, 0)))
-                    human.on_result(move)
-                    engine.apply_action(1, Action.wait())
-                    engine.finish_tick()
-                    self.assertEqual(move.moved, 6)
-                    self.assertEqual(state.owner[0, 2], 0)
-                    self.assertEqual(state.army[0, 2], 6)
-                    self.assertFalse(human.queue)
+            state = board(army=count)
+            state.owner.flat[1], state.army.flat[1] = 0, 7
+            obs = observe(state, 0)
+            human = HumanController()
+            human.select(0, obs)
+            human.enqueue(Direction.RIGHT, obs)
+            human.enqueue(Direction.RIGHT, obs)
+            action = human.act(obs)
+            self.assertEqual(action, Action.move(1, Direction.RIGHT))
+            result = CoreEngine(state).step([action, Action.wait()])
+            human.on_result(result.moves[0])
+            self.assertFalse(human.queue)
+            self.assertEqual(state.army.flat[2], 6)
+            self.assertEqual(human.selected, 2)
 
-    def test_zero_army_attack_is_consumed_instead_of_waiting(self):
+    def test_insufficient_army_attack_is_discarded_without_waiting_for_growth(self):
         state = board(army=1)
         obs = observe(state, 0)
         human = HumanController()
         human.select(0, obs)
         human.enqueue(Direction.RIGHT, obs)
         human.enqueue(Direction.RIGHT, obs)
-        engine = CoreEngine(state, debug=True)
-        engine.begin_tick()
-        move = engine.apply_action(0, human.act(observe(state, 0)))
-        human.on_result(move)
-        engine.apply_action(1, Action.wait())
-        engine.finish_tick()
-        self.assertTrue(move.valid)
-        self.assertEqual(move.moved, 0)
-        self.assertFalse(move.target_owned)
-        self.assertEqual(state.owner[0, 1], EMPTY)
+        self.assertEqual(human.act(obs), Action.wait())
         self.assertFalse(human.queue)
-        self.assertEqual((human.selected, human.anchor, human.cursor), (0, 0, 0))
-        engine.begin_tick()  # Growth must not revive a consumed order.
-        self.assertEqual(human.act(observe(state, 0)), Action.wait())
-        engine.apply_action(0, Action.wait())
-        engine.apply_action(1, Action.wait())
-        engine.finish_tick()
-        self.assertEqual(state.owner[0, 1], EMPTY)
+        engine = CoreEngine(state)
+        for _ in range(2):
+            engine.step([human.act(observe(state, 0)), Action.wait()])
+        self.assertEqual(state.owner.flat[1], EMPTY)
 
-    def test_failed_attack_consumes_action_and_clears_downstream(self):
+    def test_failed_attack_leaves_queue_for_next_boundary_validation(self):
         self.human.enqueue(Direction.RIGHT, self.obs)
         self.human.enqueue(Direction.RIGHT, self.obs)
         action = self.human.act(self.obs)
         self.human.on_result(MoveResult(0, action, True, "MOVED", 0, 1, 9, target_owned=False))
+        self.assertEqual(len(self.human.queue), 1)
+        self.assertEqual(self.human.act(self.obs), Action.wait())
         self.assertFalse(self.human.queue)
         self.assertEqual(self.human.anchor, 0)
         self.assertEqual(self.human.selected, 0)
@@ -171,7 +142,7 @@ class HumanControllerTests(unittest.TestCase):
         for command in ("undo", "clear_queue"):
             with self.subTest(command=command):
                 state = board()
-                state.owner[0, 1], state.army[0, 1] = 0, 1
+                state.owner[0, 1], state.army[0, 1] = 0, 3
                 human = HumanController()
                 human.select(1, observe(state, 0))
                 human.enqueue(Direction.RIGHT, observe(state, 0))

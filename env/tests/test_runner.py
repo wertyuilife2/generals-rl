@@ -34,16 +34,16 @@ def duel():
 
 
 class RunnerTests(unittest.TestCase):
-    def test_sequential_observations_and_growth(self):
+    def test_joint_observations_precede_moves_and_growth(self):
         a, b = Scripted(Action.move(0, Direction.RIGHT)), Scripted()
         runner = Runner(duel(), [a, b], max_ticks=2)
         result = runner.tick()
-        self.assertEqual(b.observations[0].owner[0, 1], 0)
-        self.assertEqual(b.observations[0].army[0, 1], 4)
+        self.assertEqual(b.observations[0].owner[0, 1], -1)
+        self.assertEqual(b.observations[0].army[0, 1], 0)
         self.assertEqual(result.stats.territory.tolist(), [2, 1])
         a.action = Action.wait()
         runner.tick()
-        self.assertEqual(a.observations[-1].army[0, 0], 2)
+        self.assertEqual(a.observations[-1].army[0, 0], 1)
         self.assertTrue(runner.truncated)
         self.assertFalse(runner.engine.state.terminated)
         self.assertIsNone(runner.engine.state.winner_id)
@@ -59,7 +59,7 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(runner.truncated)
         self.assertEqual(runner.stop_reason, 'terminated')
         self.assertEqual(runner.engine.state.winner_id, 0)
-        self.assertEqual(b.observations, [])
+        self.assertEqual(len(b.observations), 1)
 
     def test_user_stop_does_not_change_state(self):
         state = duel()
@@ -78,7 +78,6 @@ class RunnerTests(unittest.TestCase):
             runner.tick()
         self.assertEqual(runner.stop_reason, 'controller_error')
         self.assertIsNotNone(runner.last_result)
-        self.assertIsNone(runner.engine.next_player)
         runner.engine.state.validate()
         with self.assertRaises(RuntimeError): runner.tick()
 
@@ -103,6 +102,31 @@ class RunnerTests(unittest.TestCase):
 
 
 class RecordingTests(unittest.TestCase):
+    def test_surrender_records_with_protocol_only_controllers(self):
+        state = duel(); state.tick = 1
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'surrender.jsonl'
+            with TraceWriter(path, state) as writer:
+                runner = Runner(state, [Scripted(), Scripted()], recorder=writer)
+                runner.surrender(0)
+            self.assertTrue(runner.stopped)
+            self.assertEqual(state.winner_id, 1)
+            self.assertEqual(state_digest(replay(path)), state_digest(state))
+
+    def test_result_callback_failure_keeps_completed_tick_replayable(self):
+        class Bad(Scripted):
+            def on_result(self, result): raise ValueError('feedback failed')
+        state = duel()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'feedback.jsonl'
+            with TraceWriter(path, state) as writer:
+                runner = Runner(state, [Bad(), Scripted()], recorder=writer)
+                with self.assertRaisesRegex(ControllerError, 'feedback failed'):
+                    runner.tick()
+            self.assertEqual(runner.stop_reason, 'controller_error')
+            self.assertEqual(runner.last_result.tick, 1)
+            self.assertEqual(state_digest(replay(path)), state_digest(state))
+
     def test_round_trip_and_corruption_detection(self):
         kinds = ['aggressive', 'expansion']
         state = generate_map(MapConfig(15, 15, 2), 11)
@@ -141,7 +165,8 @@ class RecordingTests(unittest.TestCase):
                                 max_ticks=1, recorder=writer)
                 runner.run()
             move = runner.last_result.moves[0]
-            self.assertTrue(move.valid)
+            self.assertFalse(move.valid)
+            self.assertEqual(move.reason, "NO_ARMY")
             self.assertEqual(move.moved, 0)
             row = json.loads(path.read_text().splitlines()[1])
             self.assertEqual(row['actions'][0], [1, 0, 1, 0])

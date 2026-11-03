@@ -24,13 +24,13 @@ export class MoveInput {
     const queue=[...this.base];
     for(const command of this.pending) {
       if(command.op==='append')queue.push({id:command.id,action:command.action});
-      else if(command.op==='clear')queue.length=0;
+      else if(command.op==='clear'||command.op==='surrender')queue.length=0;
       else queue.pop();
     }
     return queue;
   }
   issue(op,action) {
-    if(!this.board?.alive[this.board.player_id])return;
+    if(!this.board?.alive[this.board.player_id]||this.pending.some(c=>c.op==='surrender')||this.board.forfeited?.includes(this.board.player_id))return;
     const command={id:this.next++,op};if(action!==undefined)command.action=action;
     this.pending.push(command);this.changed();this.send(command);
   }

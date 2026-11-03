@@ -1,1 +1,1 @@
-"""Algorithm-independent tournaments. Optional player packages load on demand."""
+"""Unified Arena match management: league, round robin and training evaluation."""

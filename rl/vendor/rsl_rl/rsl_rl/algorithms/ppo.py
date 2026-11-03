@@ -256,13 +256,19 @@ class PPO:
             # Compute KL divergence and adapt the learning rate
             if self.desired_kl is not None and self.schedule == "adaptive":
                 with torch.inference_mode():
-                    kl = torch.sum(
-                        torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
-                        + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
-                        / (2.0 * torch.square(sigma_batch))
-                        - 0.5,
-                        axis=-1,
-                    )
+                    if getattr(self.policy, "action_distribution", None) == "categorical":
+                        # E_old[exp(log_ratio) - 1 - log_ratio] = KL(old || new).
+                        # Reuse selected-action log-probs; no full old distribution cache.
+                        log_ratio = actions_log_prob_batch - old_actions_log_prob_batch.squeeze(-1)
+                        kl = (torch.expm1(log_ratio) - log_ratio).clamp_min(0)
+                    else:
+                        kl = torch.sum(
+                            torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                            + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
+                            / (2.0 * torch.square(sigma_batch))
+                            - 0.5,
+                            axis=-1,
+                        )
                     kl_mean = torch.mean(kl)
 
                     # Reduce the KL divergence across all GPUs
@@ -371,11 +377,19 @@ class PPO:
                 self.reduce_parameters()
 
             # Apply the gradients for PPO
-            nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            grad_norm = nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
             self.optimizer.step()
             # Apply the gradients for RND
             if self.rnd_optimizer:
                 self.rnd_optimizer.step()
+
+            # Optional observer supplied by adapters; ordinary PPO has no observer.
+            observer = getattr(self, "_on_ppo_minibatch", None)
+            if observer is not None:
+                observer(
+                    (actions_log_prob_batch - old_actions_log_prob_batch.squeeze(-1)).detach(),
+                    entropy_batch.detach(), grad_norm.detach(),
+                )
 
             # Store the losses
             mean_value_loss += value_loss.item()

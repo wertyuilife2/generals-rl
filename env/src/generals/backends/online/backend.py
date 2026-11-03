@@ -5,10 +5,29 @@ from pathlib import Path
 from time import monotonic, time_ns
 from urllib.parse import quote
 
-from generals.protocol.match import MatchFrame, StaleFrameError
+from dataclasses import dataclass
+from types import MappingProxyType
+
 from .protocol import ObservationDecoder, OnlineProtocolError, attack_arguments
 from .account import register_username, validate_username
 from .endpoints import resolve_endpoint
+
+
+@dataclass(frozen=True)
+class OnlineFrame:
+    frame_id: int
+    observations: dict
+    done: bool = False
+    reason: str | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, 'observations', MappingProxyType(dict(self.observations)))
+
+
+class StaleFrameError(RuntimeError):
+    def __init__(self, frame):
+        super().__init__('a newer online frame is available; action was not sent')
+        self.frame = frame
 
 
 class OnlineBackend:
@@ -16,7 +35,7 @@ class OnlineBackend:
 
     def __init__(self, *, user_id, room=None, queue='custom', username=None,
                  server=None, site=None, force_start=False,
-                 start_timeout=120.0, update_timeout=15.0, tick_offset=0,
+                 start_timeout=120.0, update_timeout=15.0,
                  record=None, transport=None):
         if not isinstance(user_id, str) or not user_id.strip():
             raise ValueError('user_id is required; load it from an environment variable')
@@ -39,7 +58,7 @@ class OnlineBackend:
         self.site = self.endpoint.site
         self.force_start = bool(force_start)
         self.start_timeout, self.update_timeout = start_timeout, update_timeout
-        self.decoder = ObservationDecoder(tick_offset=tick_offset)
+        self.decoder = ObservationDecoder()
         self.transport = transport
         self.record_path = Path(record) if record is not None else None
         self._record = None
@@ -71,7 +90,7 @@ class OnlineBackend:
 
     def _publish(self, observation=None, *, done=False, reason=None):
         self._revision += 1
-        self.frame = MatchFrame(self._revision,
+        self.frame = OnlineFrame(self._revision,
             {} if observation is None else {observation.player_id: observation},
             done=done, reason=reason)
 
@@ -138,8 +157,7 @@ class OnlineBackend:
             if self.record_path is not None:
                 self.record_path.parent.mkdir(parents=True, exist_ok=True)
                 self._record = self.record_path.open('x', encoding='utf-8')
-                self._log('start', schema=1, backend='online', server=self.server, site=self.site,
-                          tick_offset=self.decoder.tick_offset)
+                self._log('start', schema=1, backend='online', server=self.server, site=self.site)
             if self.transport is None:
                 from .transport import SocketIOTransport
                 self.transport = SocketIOTransport()
