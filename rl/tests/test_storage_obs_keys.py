@@ -63,10 +63,14 @@ class StorageObsKeysTests(unittest.TestCase):
                 alg.compute_returns(obs)
             self.assertEqual(timeouts, task.num_envs)
             self.assertEqual(set(obs.keys()), FULL_KEYS)
-            stored = {key: storage.observations[key].clone() for key in STORAGE_KEYS}
+            steps = cfg['runner']['num_steps_per_env']
+            complete = storage.observation_batch(torch.arange(steps)[:, None].expand(steps, task.num_envs),
+                torch.arange(task.num_envs)[None].expand(steps, task.num_envs))
+            stored = {key: complete[key].clone() for key in STORAGE_KEYS}
             fields = {key: getattr(storage, key).clone() for key in
                       ("actions", "rewards", "dones", "values", "actions_log_prob", "returns", "advantages")}
-            payload = sum(value.numel() * value.element_size() for value in storage.observations.values())
+            payload = sum(value.numel() * value.element_size()
+                          for value in storage.observations.values(include_nested=True, leaves_only=True))
             keys = set(storage.observations.keys())
             losses = alg.update()
             self.assertTrue(any(not torch.equal(initial[key], value)
@@ -104,6 +108,28 @@ class StorageObsKeysTests(unittest.TestCase):
                     options = deepcopy(cfg["runner"])
                     options["storage_obs_keys"] = invalid
                     OnPolicyRunnerCTS(env, options, None, "cpu")
+
+    def test_history_deduplication_preserves_real_ppo_and_optimizer_bitwise(self):
+        cfg = config()
+        cfg['runner']['storage_obs_keys'] = STORAGE_KEYS
+        reference = self.rollout(cfg)
+        cfg['runner']['storage_history'] = {'policy': cfg['task']['history_length']}
+        compact = self.rollout(cfg)
+        for key in ('initial', 'records', 'observations', 'fields', 'losses', 'model', 'adam', 'rng'):
+            with self.subTest(field=key):
+                assert_nested_equal(self, compact[key], reference[key])
+
+    def test_binary_codec_preserves_real_ppo_and_optimizer_bitwise(self):
+        cfg = config()
+        cfg['runner']['storage_obs_keys'] = STORAGE_KEYS
+        reference = self.rollout(cfg)
+        cfg['runner']['storage_codec'] = 'generals_rl.rollout_codec.GeneralsObservationCodec'
+        for history in (None, {'policy': cfg['task']['history_length']}):
+            cfg['runner']['storage_history'] = history
+            compact = self.rollout(cfg)
+            for key in ('initial', 'records', 'observations', 'fields', 'losses', 'model', 'adam', 'rng'):
+                with self.subTest(history=history, field=key):
+                    assert_nested_equal(self, compact[key], reference[key])
 
 
 if __name__ == "__main__":

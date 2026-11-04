@@ -89,11 +89,13 @@
       "ppo_monitor": true,
       "ppo_probe_samples": 8192,
       "ppo_probe_batch_size": 1024,
-      "physical_minibatch_size": 8192,
+      "physical_minibatch_size": 4096,
       "amp_bfloat16": true,
       "adaptive_lr_min": 1e-05,
       "adaptive_lr_max": 0.001
     },
+    "storage_history": {"policy": 4},
+    "storage_codec": "generals_rl.rollout_codec.GeneralsObservationCodec",
     "storage_obs_keys": [
       "policy",
       "critic",

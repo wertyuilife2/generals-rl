@@ -15,6 +15,22 @@
 | `storage/rollout_storage_cts.py` | 分离动作与分布形状/dtype，保留 bool mask；按 env-major 索引逐批读取 rollout；支持有效时间前缀。新增默认开启的 `store_action_std` / `store_action_mean`；关闭时对应 `sigma` / `mu` 为 `None`，不分配、写入或取样缓存。Categorical 关闭标准差，StudentPPO 另关闭旧动作分布均值。 |
 | `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。可选 `storage_obs_keys` 仅筛选 rollout 存储键，默认完整保存；构造策略和实时 obs 保持完整。 |
 
+`runner.storage_history` 可指定堆叠观测的帧数，例如 `{"policy": 4}`。
+CTS storage 对这些键仅保存每 tick 的当前帧、rollout 起点的 H−1 帧上下文和 episode 边界；
+采样时通过 `observation_batch(time_indices, env_indices, keys=...)` 无损重建完整观测。
+`storage.observations` 是物理存储，历史键的最后一维仅为单帧；算法与诊断工具统一通过上述方法读取。
+未指定的键保留原格式；省略配置时保持完整存储。该选项只用于 RL，要求输入为按时间顺序展平的
+固定帧窗口，且 episode 重置时重复首帧。当前 Generals task 满足此约定；训练入口校验 policy 帧数
+与 task 一致。观测、GAE、随机采样和 PPO 数学不变，覆盖异步重置、跨 rollout 和末尾短 rollout，
+CPU 与确定性 CUDA/BF16 的真实 PPO 更新、模型和 Adam 状态与完整存储精确一致。
+
+`runner.storage_codec` 可配置可解析的工厂类路径，工厂接收筛选后的逻辑观察TensorDict，返回
+`encode(key, value)`／`gather(key, storage, time_indices, env_indices)` 对象。
+前者返回Tensor或嵌套TensorDict作为物理存储，后者恢复原观察；可与历史去重组合。
+CTS只管理分配、前缀、episode索引和标量字段，不包含Generals特征知识。
+当前二值特征编解码器位于vendor外的 `generals_rl.rollout_codec`，CUDA融合gather和解码，
+连续FP32值不量化。PPO与KL probe仍统一调用 `observation_batch`，读取方不接触物理格式。
+
 默认 MoE-CTS 的 PPO/GAE、两个 optimizer、student PPO encoder 停止梯度、latent MSE、expert load balance 和网络结构沿用上游。
 Categorical KL 不使用标准差；logger 的 `Policy/mean_noise_std` 为兼容常数，不能用于分析离散探索。
 Normal 模式仍完整缓存标准差。16384 环境 × 32 tick × 649 动作时，移除的 float32 缓存理论大小为 1.268 GiB。

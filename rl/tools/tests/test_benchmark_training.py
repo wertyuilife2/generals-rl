@@ -39,26 +39,31 @@ def test_counts_fresh_samples_once_and_uses_slowest_rank_per_complete_update():
     assert sum(result["stage_seconds_sum_of_iteration_rank_maxima"][stage] for stage in bench.STAGES[:-1]) > .4
 
 
-def test_storage_estimate_preserves_boolean_mask_and_matches_real_allocation():
+@pytest.mark.parametrize('history', (None, {'policy': 2}, {'policy': 1}))
+def test_storage_estimate_preserves_boolean_mask_and_matches_real_allocation(history):
     from rsl_rl.storage import RolloutStorageCTS
     obs = TensorDict({"policy": torch.zeros(8, 4), "critic": torch.zeros(8, 3),
                       "action_mask": torch.ones(8, 5, dtype=torch.bool)}, batch_size=[8])
-    estimate = bench.estimate_storage(obs, 8, 2)
-    assert estimate["observation_bytes_per_transition"] == 33
+    estimate = bench.estimate_storage(obs, 8, 2, history_lengths=history)
+    assert estimate["observation_bytes_per_transition"] == 17 + 16 // (history or {}).get('policy', 1)
     assert estimate["observation_fields"]["action_mask"]["bytes_per_transition"] == 5
     storage = RolloutStorageCTS("rl", 8, 0, 2, obs, [1], action_dtype=torch.long,
-                                store_action_mean=False, store_action_std=False)
+                                store_action_mean=False, store_action_std=False, history_lengths=history)
     assert estimate["total_storage_bytes"] == bench.actual_storage_bytes(storage)["total_storage_bytes"]
 
 
-@pytest.mark.parametrize("profile", (False, True))
-def test_real_cpu_rollout_gae_four_epoch_updates_exclude_warmup_and_refuse_overwrite(tmp_path, monkeypatch, profile):
+@pytest.mark.parametrize("profile,compact,packed", ((False, False, False), (False, True, False), (True, True, True)))
+def test_real_cpu_rollout_gae_four_epoch_updates_exclude_warmup_and_refuse_overwrite(tmp_path, monkeypatch, profile, compact, packed):
     for name in ("WORLD_SIZE", "RANK", "LOCAL_RANK"):
         monkeypatch.delenv(name, raising=False)
     config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
     config["task"].update(backend="cpu", device="cpu", num_envs=8, max_episode_steps=4,
                           map_pool_size=0, opponent="current_self_play")
     config["runner"]["num_steps_per_env"] = 2
+    if compact:
+        config['runner']['storage_history'] = {'policy': config['task']['history_length']}
+    if packed:
+        config['runner']['storage_codec'] = 'generals_rl.rollout_codec.GeneralsObservationCodec'
     config["runner"]["algorithm"].update(num_mini_batches=2, ppo_monitor=False,
                                           schedule="fixed", desired_kl=None)
     config["self_play"].update(pool_size=2, snapshot_interval=50)

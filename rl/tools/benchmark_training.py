@@ -20,6 +20,7 @@ from time import perf_counter
 
 import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
+from rsl_rl.utils import resolve_callable
 
 from generals_rl.config import merge_config, seed_everything, task_config
 from generals_rl.cts import GeneralsCTSVecEnv, runner_config
@@ -66,34 +67,55 @@ def synchronize(device):
         torch.cuda.synchronize(device)
 
 
-def estimate_storage(observations, num_envs, rollout_steps, keys=None):
+def estimate_storage(observations, num_envs, rollout_steps, keys=None, history_lengths=None, observation_codec=None):
     selected = list(observations.keys()) if keys is None else list(keys)
     if not selected or len(set(selected)) != len(selected):
         raise ValueError("storage observation keys must be nonempty and unique")
     fields = {}
+    history_lengths = history_lengths or {}
+    prefix_bytes = 0
     for key in selected:
         value = observations[key]
         if value.shape[0] != num_envs:
             raise ValueError("storage observation batch does not match per-rank environments")
+        length = history_lengths.get(key, 1)
+        if (isinstance(length, bool) or not isinstance(length, int) or length < 1
+                or value.shape[-1] % length):
+            raise ValueError(f'invalid flattened history length for {key}')
+        frame_bytes = value.numel() // num_envs * value.element_size() // length
+        if observation_codec is not None:
+            example = value.reshape(num_envs, length, -1)[:, -1] if key in history_lengths else value
+            encoded = observation_codec.encode(key, example)
+            leaves = encoded.values(include_nested=True, leaves_only=True) if hasattr(encoded, 'batch_size') else [encoded]
+            frame_bytes = sum(v.numel() * v.element_size() for v in leaves) // num_envs
         fields[key] = {"shape_per_environment": list(value.shape[1:]), "dtype": str(value.dtype),
-                       "bytes_per_transition": value.numel() // num_envs * value.element_size()}
+                       "history_length": length, "bytes_per_transition": frame_bytes}
+        prefix_bytes += (length - 1) * num_envs * frame_bytes
     obs_bytes = sum(field["bytes_per_transition"] for field in fields.values())
     # Student categorical storage: five fp32 scalar buffers, one int64 action,
     # one uint8 done. No old649-class mean/std or teacher distillation buffers.
     scalar_bytes = 5 * 4 + 8 + 1
+    history_metadata = (num_envs * rollout_steps * 4 + sum(history_lengths.values()) * 8
+                        if history_lengths else 0)
+    observation_storage = obs_bytes * num_envs * rollout_steps + prefix_bytes
     return {"observation_fields": fields, "observation_bytes_per_transition": obs_bytes,
             "auxiliary_bytes_per_transition": scalar_bytes,
             "bytes_per_transition": obs_bytes + scalar_bytes,
-            "observation_storage_bytes": obs_bytes * num_envs * rollout_steps,
-            "total_storage_bytes": (obs_bytes + scalar_bytes) * num_envs * rollout_steps,
-            "scope": "rollout storage only; excludes live env, optimizer, gradients, indices, probes and activations"}
+            "history_prefix_bytes": prefix_bytes, "history_metadata_bytes": history_metadata,
+            "observation_storage_bytes": observation_storage,
+            "total_storage_bytes": observation_storage + scalar_bytes * num_envs * rollout_steps + history_metadata,
+            "scope": "rollout storage only; excludes live env, optimizer, gradients, minibatch permutations, probes and activations"}
 
 
 def actual_storage_bytes(storage):
-    obs = sum(value.numel() * value.element_size() for value in storage.observations.values())
+    # History views share a backing allocation with their rollout-start prefix.
+    obs = sum(value.untyped_storage().nbytes()
+              for value in storage.observations.values(include_nested=True, leaves_only=True))
     auxiliary = sum(value.numel() * value.element_size() for name in
-                    ("rewards", "actions", "dones", "values", "actions_log_prob", "returns", "advantages", "mu", "sigma")
+                    ("rewards", "actions", "dones", "values", "actions_log_prob", "returns", "advantages", "mu", "sigma",
+                     "_history_starts")
                     if isinstance(value := getattr(storage, name, None), torch.Tensor))
+    auxiliary += sum(value.numel() * value.element_size() for value in storage._history_offsets.values())
     return {"observation_storage_bytes": obs, "auxiliary_storage_bytes": auxiliary,
             "total_storage_bytes": obs + auxiliary}
 
@@ -372,8 +394,11 @@ def benchmark(args):
                 GeneralsTask(settings) as task:
             env = GeneralsCTSVecEnv(task)
             observations = env.get_observations()
+            codec = config['runner'].get('storage_codec')
+            codec = resolve_callable(codec)(observations) if codec is not None else None
             estimated = estimate_storage(observations, task.num_envs, config["runner"]["num_steps_per_env"],
-                                         config["runner"].get("storage_obs_keys"))
+                                         config["runner"].get("storage_obs_keys"),
+                                         config["runner"].get("storage_history"), codec)
             if task.device.type == "cuda":
                 free, total_device = torch.cuda.mem_get_info(task.device)
                 estimated.update(cuda_free_before_runner_bytes=free, total_device_bytes=total_device)

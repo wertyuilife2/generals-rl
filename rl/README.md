@@ -22,7 +22,7 @@ python -m generals_rl.train
 
 默认从头初始化，训练 **224 轮 PPO**，输出写入新的 `outputs/rl/<时间戳>/`。`--output PATH` 可指定新目录；`--iterations` 或 `--steps-per-env` 可覆盖预算，二者互斥。单卡执行沿用每 rank 配置，环境总数和全局 minibatch 小于八卡实验。
 
-八卡启动方式（采样预算沿用旧实验，23×23 输入的显存与最优 batch 尚未重新调优）：
+八卡启动方式（以下规模已在 H200 上验证；其他设备需要按显存调整环境数）：
 
 ```bash
 torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/rl/f03-selected
@@ -36,6 +36,8 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 | 模型 | ViT 1M dense，actor/critic 参数独立 |
 | 采样 | 每 rank 16,384 个环境，全局 N=131,072；T=32 |
 | PPO | E=4，每 epoch 64 个逻辑 minibatch；全局 B=65,536，每 rank B=8,192 |
+| 激活内存 | 每 rank 物理 minibatch=4096，梯度累积为原逻辑 minibatch；推理 chunk=2048 |
+| Rollout存储 | H4历史去重＋二值位打包；连续特征与公开统计保持FP32，取样恢复原观察 |
 | 预算 | 224 轮，八卡合计 939,524,096 个 fresh learner transitions |
 | 历史对手 | 最近 8 个候选快照，逐局抽样；每轮发布，`retain_seed=false` |
 | 学习率 | actor/critic 共享，adaptive 范围 `[1e-5, 1e-3]`，desired KL=.01 |
@@ -43,6 +45,23 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 | 数值执行 | learner／历史对手推理与 PPO 使用 BF16，`compile_forward=true`；概率、GAE、loss 归约及主参数/Adam 状态保持 FP32 |
 
 iteration 从 0 起算。每次 PPO 轮包含一次采样、GAE 和完整 E4；重复使用的数据不重复计为 fresh 样本，对手样本也不计入 learner transitions。物理 microbatch 与推理 chunk 用于控制激活内存，不改变逻辑更新预算。
+
+默认配置通过 `{"runner": {"storage_history": {"policy": 4}}}` 无损去重 H4
+rollout 历史：每 tick 只存当前帧，额外保留 rollout 起点的三帧上下文和 episode 边界，
+在取 minibatch 时恢复原观察。帧数须与 `task.history_length` 一致；省略该配置则完整保存。
+它只改变采样缓存的表示，可用于原 checkpoint 的 `--resume`。
+在每卡 N=16,384、T=32、23×23 画布下，每卡节省约42.1 GiB，允许测试更大的物理批；
+逻辑 minibatch、PPO epochs 和总采样预算仍单独配置。正确性、显存和八卡吞吐实测见
+[历史去重测试](../doc/history_storage_20261103.md)。
+
+默认 `runner.storage_codec` 为
+`"storage_codec": "generals_rl.rollout_codec.GeneralsObservationCodec"`，
+可将当前P2十四通道观察中的二值地图／K11标志和action mask按位打包；
+连续特征及公开统计保留FP32，minibatch取样时恢复原观察。
+该选项与历史去重独立，当前默认启用，只影响训练采样缓存，不进入env／Arena协议或导出策略包。
+可将 `storage_codec` 设为 `null` 关闭位打包，将 `storage_history` 设为 `null` 关闭历史去重。
+CUDA融合取样与解码，CPU使用相同张量表达式；配置、正确性及实测见
+[无损位打包测试](../doc/packed_storage_20261103.md)。
 
 Actor 只接收该座位的局部观测、历史、知识和公开统计；critic 的完整棋盘不传给 actor。H4 是四帧近期输入，recent8 是八个历史对手，二者不同。知识和历史按座位及 episode 隔离，初始随机对手随候选池更新淘汰，进行中对局继续使用其原对手。
 默认 actor/critic 的运行统计 observation normalization 均关闭；各字段的固定缩放由 `policy/` 中的特征构造实现。

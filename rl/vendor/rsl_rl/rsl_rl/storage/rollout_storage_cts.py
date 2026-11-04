@@ -50,6 +50,8 @@ class RolloutStorageCTS:
         action_dtype: torch.dtype = torch.float32,
         store_action_std: bool = True,
         store_action_mean: bool = True,
+        history_lengths: dict[str, int] | None = None,
+        observation_codec=None,
     ) -> None:
         self.training_type = training_type
         self.device = device
@@ -60,12 +62,36 @@ class RolloutStorageCTS:
         self.student_num_envs = num_envs - teacher_num_envs
         self.distribution_shape = actions_shape if distribution_shape is None else distribution_shape
 
+        # Stacked observations are chronological flattened frame windows.
+        # Keep each current frame once plus the exact context at rollout start.
+        self.history_lengths = dict(history_lengths or {})
+        self.observation_codec = observation_codec
+        if (self.history_lengths or observation_codec is not None) and training_type != 'rl':
+            raise ValueError('compact storage requires RL transitions with episode boundaries')
+        self._history_frames = {}
+        self._history_offsets = {}
+        stored = {}
+        for key, value in obs.items():
+            if key in self.history_lengths:
+                length = self.history_lengths[key]
+                if (isinstance(length, bool) or not isinstance(length, int) or length < 1
+                        or value.ndim != 2 or value.shape[-1] % length):
+                    raise ValueError(f'invalid flattened history length for {key}')
+                example = self._encode(key, value.reshape(num_envs, length, -1)[:, -1])
+                frames = self._allocate(example, num_transitions_per_env + length - 1)
+                self._history_frames[key] = frames
+                self._history_offsets[key] = torch.arange(1 - length, 1, device=device)
+                stored[key] = frames[length - 1:]
+            else:
+                stored[key] = self._allocate(self._encode(key, value), num_transitions_per_env)
+        if self.history_lengths.keys() - obs.keys():
+            raise ValueError('history storage keys must exist in stored observations')
+        self._history_starts = (torch.zeros(num_transitions_per_env, num_envs, dtype=torch.int32, device=device)
+                                if self.history_lengths else None)
+
         # Core
         self.observations = TensorDict(
-            {
-                key: torch.zeros(num_transitions_per_env, *value.shape, dtype=value.dtype, device=device)
-                for key, value in obs.items()
-            },
+            stored,
             batch_size=[num_transitions_per_env, num_envs],
             device=self.device,
         )
@@ -106,7 +132,25 @@ class RolloutStorageCTS:
             raise OverflowError("Rollout buffer overflow! You should call clear() before adding new transitions.")
 
         # Core
-        self.observations[self.step].copy_(transition.observations)
+        if self.history_lengths or self.observation_codec is not None:
+            if self.history_lengths and self.step == 0:
+                self._history_starts[0].fill_(1 - max(self.history_lengths.values()))
+            elif self.history_lengths:
+                self._history_starts[self.step].copy_(torch.where(
+                    self.dones[self.step - 1, :, 0].bool(), self.step, self._history_starts[self.step - 1]))
+            for key, target in self.observations.items():
+                source = transition.observations[key]
+                if key in self.history_lengths:
+                    length = self.history_lengths[key]
+                    frames = source.reshape(self.num_envs, length, -1)
+                    if self.step == 0 and length > 1:
+                        prefix = self._encode(key, frames[:, :-1].transpose(0, 1))
+                        self._history_frames[key][:length - 1].copy_(prefix)
+                    target[self.step].copy_(self._encode(key, frames[:, -1]))
+                else:
+                    target[self.step].copy_(self._encode(key, source))
+        else:
+            self.observations[self.step].copy_(transition.observations)
         self.actions[self.step].copy_(transition.actions)
         self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
         self.dones[self.step].copy_(transition.dones.view(-1, 1))
@@ -132,6 +176,44 @@ class RolloutStorageCTS:
 
     def clear(self) -> None:
         self.step = 0
+
+    def _allocate(self, example, steps):
+        def zeros(value):
+            return torch.zeros(steps, *value.shape, dtype=value.dtype, device=self.device)
+        if isinstance(example, TensorDict):
+            return example.apply(zeros, batch_size=[steps, *example.batch_size])
+        return zeros(example)
+
+    def _encode(self, key, value):
+        return self.observation_codec.encode(key, value) if self.observation_codec is not None else value
+
+    def _gather(self, key, value, times, envs):
+        if self.observation_codec is not None:
+            return self.observation_codec.gather(key, value, times, envs)
+        return value[times, envs]
+
+    def observation_batch(self, time_indices, env_indices, *, keys=None) -> TensorDict:
+        """Gather complete observations, reconstructing history at episode boundaries.
+
+        Physical `observations` may contain packed fields or current frames.
+        Policy consumers use this method rather than indexing them directly.
+        """
+        if not self.history_lengths and self.observation_codec is None:
+            values = self.observations if keys is None else self.observations.select(*keys)
+            return values[time_indices, env_indices].detach()
+        time_indices, env_indices = torch.broadcast_tensors(time_indices, env_indices)
+        values = {}
+        starts = None
+        for key in (self.observations.keys() if keys is None else keys):
+            if key in self.history_lengths:
+                if starts is None:
+                    starts = self._history_starts[time_indices, env_indices]
+                indices = torch.maximum(time_indices[..., None] + self._history_offsets[key], starts[..., None])
+                indices = indices + self.history_lengths[key] - 1
+                values[key] = self._gather(key, self._history_frames[key], indices, env_indices[..., None]).flatten(-2).detach()
+            else:
+                values[key] = self._gather(key, self.observations[key], time_indices, env_indices).detach()
+        return TensorDict(values, batch_size=time_indices.shape, device=self.device)
 
     # For distillation
     def generator(self) -> Generator:
@@ -172,7 +254,7 @@ class RolloutStorageCTS:
         teacher_mini_batch_size = len(teacher_indices) // num_mini_batches
         student_mini_batch_size = len(student_indices) // num_mini_batches
         data = (
-            self.observations, self.actions, self.values, self.advantages,
+            self.actions, self.values, self.advantages,
             self.returns, self.actions_log_prob, self.mu, self.sigma,
         )
         for epoch in range(num_epochs):
@@ -184,13 +266,13 @@ class RolloutStorageCTS:
                 # T may be shorter than allocated storage for the final rollout.
                 env_indices = batch_indices // self.num_transitions_per_env
                 time_indices = batch_indices % self.num_transitions_per_env
-                obs_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, \
+                actions_batch, target_values_batch, advantages_batch, returns_batch, \
                     old_actions_log_prob_batch, old_mu_batch, old_sigma_batch = (
                         field[time_indices, env_indices].detach() if field is not None else None
                         for field in data
                     )
                 yield (
-                    obs_batch,
+                    self.observation_batch(time_indices, env_indices),
                     actions_batch,
                     target_values_batch,
                     advantages_batch,

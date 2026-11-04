@@ -94,7 +94,7 @@ class PPOUpdateMonitor:
         keys = list(dict.fromkeys([*algorithm.policy.obs_groups["policy"], "action_mask"] +
                                   (["single_obs"] if "single_obs" in storage.observations else [])))
         # Env-major indexing matches CTS, without copying or flattening the rollout.
-        self.observations = storage.observations.select(*keys)[indices % steps, indices // steps]
+        self.observations = storage.observation_batch(indices % steps, indices // steps, keys=keys)
         self.old_logits = self._logits(algorithm.policy)
         self.metrics["probe_samples"] = float(count)
         self.metrics["probe_cache_bytes"] = float(sum(t.numel() * t.element_size() for t in self.observations.values()) +

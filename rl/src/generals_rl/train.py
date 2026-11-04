@@ -83,6 +83,11 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
+    storage_history = config['runner'].get('storage_history') or {}
+    if not isinstance(storage_history, dict):
+        raise ValueError('runner.storage_history must map observation keys to history lengths')
+    if 'policy' in storage_history and storage_history['policy'] != settings.history_length:
+        raise ValueError('storage policy history must match task.history_length')
     curriculum_settings = CurriculumConfig(**config.get("curriculum", {}))
     potential_gamma = settings.reward.potential_gamma
     if potential_gamma is not None:
