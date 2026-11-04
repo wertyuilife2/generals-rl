@@ -252,21 +252,30 @@ template<bool Packed=false> struct Rules {
                 if(tick<b.afk_turn[lane])b.warn_afk[pb+pid]=1;
                 else {leave[pid]=tick;die(pid);b.end_reason[lane]=5;}}
         }
-        bool rebuild=false;
-        for(int pid=0;pid<p;++pid)if(leave[pid]>=0&&tick==leave[pid]+50){
-            int g=general[pid];if(g<0)continue;
-            if(owner[g]==pid){
-                for(int c=0;c<n;++c)if(owner[c]==pid)
-                    replace(c,!army[c]&&!structure[c]?-1:-2,army[c],c==g?1:structure[c]);
-                int killer=-1;I maximum=0;
-                for(int k=0;k<p;++k)if(alive[k]&&damage[k*p+pid]>maximum){killer=k;maximum=damage[k*p+pid];}
-                if(killer>=0)credit(killer,pid);rebuild=true;
-            }
-            general[pid]=-1;
-        }
-        if(rebuild){cache.growth_count=0;for(int c=0;c<n;++c)if(owner[c]>=0&&structure[c])growth[cache.growth_count++]=c;}
+        for(int pid=0;pid<p;++pid)if(leave[pid]>=0&&tick==leave[pid]+50)neutralize(pid);
         for(int slot=0;slot<p;++slot)if(general[slot]<0&&spawn[slot]>=0)
             for(int pid=0;pid<p;++pid)if(!(known[pid]&(1<<slot))&&visible(spawn[slot],pid))known[pid]|=1<<slot;
+        finish();
+    }
+    RULE_INLINE void neutralize(int pid) {
+        int g=general[pid];if(g<0)return;
+        if(owner[g]==pid){
+            for(int c=0;c<n;++c)if(owner[c]==pid)
+                replace(c,!army[c]&&!structure[c]?-1:-2,army[c],c==g?1:structure[c]);
+            int killer=-1;I maximum=0;
+            for(int k=0;k<p;++k)if(alive[k]&&damage[k*p+pid]>maximum){killer=k;maximum=damage[k*p+pid];}
+            if(killer>=0)credit(killer,pid);
+            cache.growth_count=0;
+            for(int c=0;c<n;++c)if(owner[c]>=0&&structure[c])growth[cache.growth_count++]=c;
+        }
+        general[pid]=-1;
+    }
+    RULE_INLINE void surrender(int pid) {
+        if(b.terminated[lane]||!alive[pid]||leave[pid]>=0)return;
+        leave[pid]=b.tick[lane]>0?b.tick[lane]:1;
+        if(b.tick[lane]){die(pid);b.end_reason[lane]=2;finish();}
+    }
+    RULE_INLINE void finish() {
         int survivors=0,winner=-1;
         for(int pid=0;pid<p;++pid)if(alive[pid]){++survivors;winner=pid;}
         b.terminated[lane]=survivors<=1;

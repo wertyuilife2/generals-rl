@@ -4,6 +4,7 @@ This is a policy host, not a game backend. Native code is trusted local code;
 the match process contains crashes/hangs but is not an OS security sandbox.
 """
 from functools import lru_cache
+from contextlib import contextmanager
 from hashlib import sha256
 import io
 import fcntl
@@ -11,6 +12,7 @@ import ctypes as C
 import json
 import os
 from pathlib import Path, PurePosixPath
+from generals.protocol.native import INCLUDE as PROTOCOL_INCLUDE
 import platform
 import re
 import shutil
@@ -40,10 +42,16 @@ def decision_timeout(details):
 
 def execution_fingerprint():
     """Bind the binary controller to its Python ABI and recovery process host."""
+    from generals.backends._build import source_bytes
+    from generals.protocol.native import INCLUDE
     root = Path(__file__).resolve().parents[1]
     return digest({'native_sha256': file_digest(Path(__file__)),
                    'host_sha256': file_digest(Path(__file__).with_name('host.cpp')),
-                   'worker_sha256': file_digest(root/'matches'/'worker.py')})
+                   'host_includes_sha256': sha256(source_bytes(Path(__file__).with_name('host.cpp'),
+                                                              include_dirs=[INCLUDE])).hexdigest(),
+                   'loop_sha256': sha256(source_bytes(root/'matches'/'native.cpp', include_dirs=[INCLUDE, INCLUDE.parent/'backends'])).hexdigest(),
+                   **{name: file_digest(root/'matches'/name) for name in
+                      ('native.py', 'batch.py', 'batch_worker.py', 'worker.py')}})
 
 
 def _private_cache():
@@ -115,7 +123,7 @@ def source_identity(directory, parameters=None):
     identity = {'protocol': PROTOCOL, 'platform': [platform.system(), platform.machine()],
                 'compiler': version, 'compiler_path': compiler, 'flags': flags,
                 'sources': {name: sha256(data).hexdigest() for name, data in files.items()},
-                'sdk': {name: file_digest(SDK/name) for name in ('arena_policy.h', 'adapter.cpp')},
+                'sdk': {name: file_digest((PROTOCOL_INCLUDE if name == "decision.h" else SDK)/name) for name in ('arena_policy.h', 'adapter.cpp', 'decision.h')},
                 'parameters': parameters, 'decision_limit_ns': DECISION_NS}
     # Validate parameters before creating any registered artifact.
     return digest(identity), identity, files
@@ -132,8 +140,8 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
             target = source/name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(contents)
-        for name in ('arena_policy.h', 'adapter.cpp'):
-            (root/name).write_bytes((SDK/name).read_bytes())
+        for name in ('arena_policy.h', 'adapter.cpp', 'decision.h'):
+            (root/name).write_bytes(((PROTOCOL_INCLUDE if name == "decision.h" else SDK)/name).read_bytes())
         result = subprocess.run([metadata['compiler_path'], *metadata['flags'], '-I', str(root),
             '-I', str(source), str(root/'adapter.cpp'),
             *(str(source/name) for name in files if name.endswith('.cpp')),
@@ -146,6 +154,7 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
                 'policy.so': (root/'policy.so').read_bytes(),
                 'sdk/arena_policy.h': (root/'arena_policy.h').read_bytes(),
                 'sdk/adapter.cpp': (root/'adapter.cpp').read_bytes(),
+                'sdk/decision.h': (root/'decision.h').read_bytes(),
                 **{'source/'+name: content for name, content in files.items()}}
         output = io.BytesIO()
         with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
@@ -249,14 +258,26 @@ def _library(path):
 @lru_cache(maxsize=1)
 def _host():
     from generals.backends._build import build_extension
-    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_arena_host')[0]
+    from generals.protocol.native import INCLUDE
+    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_arena_host',
+                           include_dirs=[INCLUDE])[0]
+
+
+@lru_cache(maxsize=1)
+def _bound_library():
+    return C.CDLL(_host().__file__)
+
+
+class _BoundPolicy(C.Structure):
+    _fields_ = [(name, C.c_void_p) for name in
+                ('handles', 'call', 'previous', 'metrics', 'headers', 'cursor')]
 
 
 def metrics(values):
     data = {name: int(values[i]) for i, name in enumerate(METRIC_FIELDS)}
     return {key: data[key] for key in METRIC_FIELDS[:6]} | {
         'limit_ns': DECISION_NS, 'native_max_ns': data['max_ns'],
-        'measurement': 'single-thread C++ arena_act wall time; excludes Arena and IPC'}
+        'measurement': 'serial native policy decision wall time; excludes observations and IPC'}
 
 
 class NativeController:
@@ -387,6 +408,22 @@ class NativeController:
         # ArenaMoveResult's source is canonical -1 for WAIT.
         self._previous[active, 4] = np.where(raw['actions'][active] > 0,
                                             (raw['actions'][active] - 1) // 8, -1)
+
+    @contextmanager
+    def native_batch(self, height, width, players):
+        from generals.protocol.native import ABI_VERSION, PolicyABI, PolicyBinding, address
+        if not self._children or np.any(self._seats < 0) or np.any(self._seats >= players):
+            raise ValueError('reset_batch with valid player ids before binding')
+        self._previous[:, 1] = self._seats
+        context = _BoundPolicy(self._handles.ctypes.data, self._children[0]._act_address,
+            self._previous.ctypes.data, self._metrics.ctypes.data, self._headers.ctypes.data,
+            self._active_lane.ctypes.data)
+        library = _bound_library()
+        abi = PolicyABI(ABI_VERSION, C.addressof(context), address(library.arena_bound_act),
+                        address(library.arena_bound_feedback), address(library.arena_bound_one))
+        def check_error(lane, tick):
+            self._children[lane]._check(tick, 'decision')
+        yield PolicyBinding(abi, (self, context, library), check_error)
 
     def close(self):
         children, self._children = self._children, []

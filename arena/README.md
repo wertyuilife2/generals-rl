@@ -73,7 +73,27 @@ generals-arena league restore outputs/arena/main @旧策略
 不会重算其余选手的评分。评分参考不能退役，涉及未完成任务或已安排比赛的选手需先完成这些任务。
 历史 FFA 评分仍在完整参赛池中归一化，隐藏后的活动榜单不保证平均值恰好为 1000。
 
-原生策略通过 CPython/NumPy 桥接调用现有 ABI 2，策略的 10ms 计时与比赛进程隔离保持不变。
+批量、单局、人类对战和故障恢复共用 C++ 对局执行器。Python 管理赛程、进程、工件、
+动作日志和对局元数据；Web 管理输入队列、展示和录像播放。原生层调用 backend 构建观测，
+执行策略、环境推进、投降、反馈、终局统计、状态摘要和录像帧。没有独立的 Python 规则引擎；
+旧 `CoreEngine` 名称仅兼容调用原生 CPU backend，`backend="reference"` 已移除。
+
+baseline、WAIT、C++ SDK 都通过相同的原生席位入口执行、计时、校验动作并接受 10ms 限额，
+在同一种比赛子进程中运行。新对局均写入各席位的决策耗时，历史无计时的比赛不会补造数据。
+纯 Python/NN 策略通过通用策略适配器接收 backend 构建的观测，批推理耗时标为每个活动 lane
+的摊销时间，不施加原生策略的 10ms 限额；对局循环仍在 C++，保留 NN 批推理能力。
+
+恢复由 Python 调度进程重启，向原生层提交已确认的动作前缀和投降事件。C++ 重建环境及
+存活策略记忆，恢复成功不重复计入决策耗时。人类输入也作为命令进入同一执行器。
+新录像（schema 4）携带原生生成的帧和完整性校验；Web 直接解码播放。旧 schema 3 动作录像
+通过原生执行器转换；显式 `verified_replay` 审计接口仍可验证每个动作对应的状态摘要。
+
+Arena 现在要求原生 CPU 对局 backend，移除了 Python 逐 tick 协调 GPU 环境的分支。
+NN 策略仍可在 CUDA 上推理；env 包的 CUDA/MPS VecEnv 训练接口保持独立。
+绑定期间独占策略实例、随机数和缓冲区，公开入口保留一次性的边界校验。
+`python arena/benchmarks/native_loop.py --output outputs/native-loop.json` 对比同一原生执行器中的
+直接策略绑定与公开策略桥接；`--replays` 逐字节验证录像。该口径与 env step benchmark 不同，
+也不再是原来 Python 对局循环的性能对比。
 临时编译工件被系统清理后会在下次加载时恢复；无策略责任归属的基础设施失败可用 `--retry` 重试，
 失败尝试和原始种子仍保留。网页回放使用容量上限 32 MiB 的 gzip 缓存，同一回放的并发加载共用验证结果。
 
@@ -107,9 +127,9 @@ generals-arena league restore outputs/arena/main @旧策略
   完成窗口后再更新配对。窗口持久化，单进程和多进程使用相同赛程；重启优先执行已有赛程。
 
 前 6 场包含其他算法的有效对局用于快速定级，全同算法对局不推进定级；该标签不是统计置信区间。
-C++ 策略决策超过 10ms 时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
+原生策略（包括 baseline、WAIT）决策超过 10ms 时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
 按环境弃权规则停止行动，领土保留 50 tick 并继续增长、可被夺取，到期后才转中立；将军转城市。损伤领先者／最后存活者的击杀归属同样由 env 结算，Arena 不额外模拟投降规则。
-C++ 硬超时退出比赛进程后，Arena 从动作日志重建存活策略状态并继续比赛；事件与计时保存在回放中。
+原生策略硬超时退出比赛进程后，Arena 从动作日志重建存活策略状态并继续比赛；事件与计时保存在回放中。
 初始化、析构、崩溃和非法返回值仍作为策略错误处理。
 
 ## 独立评分池
@@ -286,21 +306,39 @@ python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 
 | 入口 | 当前执行方式 | GPU 与批推理 |
 | --- | --- | --- |
-| `commit / run / league` | 在预排窗口内按地图尺寸和策略实例分组批执行，按原赛程序写入 SQLite 和录像；worker 可并行不同分组 | 环境是 CPU；策略包可配置 CUDA 批推理；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置 |
-| `tournament / evaluate` | 按相同地图配置与策略实例组合分组，调用共享 `MatchRunner` | 可选 CPU/CUDA VecEnv；支持 `reset_batch/act_batch` 的策略按组批推理 |
+| `commit / run / league` | 多 worker 动态领取单局任务，完成即回传，并按原赛程序写入 SQLite 和录像；单 worker 保留兼容分组批执行 | 环境是 CPU；策略包可配置 CUDA 推理；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置 |
+| `tournament / evaluate` | 按相同地图配置与策略实例组合分组，调用共享 `MatchRunner` | 原生 CPU 对局；支持 `reset_batch/act_batch` 的策略按组批推理 |
 
 独立 C++ 策略包（`kind="cpp"`）在 CPU 隔离进程内批执行，宿主原生循环逐 lane 调用现有 SDK；
-无需改写策略源码，不增加策略线程，每个席位的每次决策仍有独立的 10ms 限制。暂不支持 CUDA 环境搭配 C++ SDK。
+无需改写策略源码，不增加策略线程，每个席位的每次决策仍有独立的 10ms 限制。环境推进统一在 CPU，策略推理设备单独指定。
 硬超时通过共享动作记录恢复对应对局并判该席位投降；同批未发布的其他对局按原种子重试，按赛程序结算。
 四个内置 baseline 和普通策略共用 `reset_batch/act_batch/on_result_batch` 接口，2–8 人均批执行，
 接收 env 的公开观测。`kind="baseline"` 与 `baseline/名称` 保留为注册快捷方式，不决定批执行方式。
 仅提供标量接口的 Python Controller 使用通用逐 lane 适配；神经网络包已有批接口时直接使用。
-`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 不受 C++ SDK 的 10ms 决策计时约束。
+`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 记录批调用摊销耗时，不受原生策略的 10ms 决策限额约束。
 
 2026-11-03 本机对照：25×25、每组 32 局、160 tick 上限、CPU 单线程、关闭录像，取 3 次完整执行耗时中位数。
 baseline 1v1 为 0.186→0.189 秒，4 人局为 0.983→0.321 秒；轻量 C++ 策略对 expansion 的
 1v1 为 1.244→0.310 秒，4 人局为 1.790→0.461 秒。128 局的逐局最终状态摘要全部一致。
 原始测量保存于 `outputs/benchmarks/unified-policy-batch.json`；此结果覆盖上述策略和批大小。
+
+### 并行评测调度
+
+多 worker 共用待执行队列，不再把一个窗口固定切成几大块。长局只占用自己的 worker；其他 worker 完成后立即领取下一局。已完成结果按赛程顺序缓冲和结算，因此完成快慢不改变 rating。正常停止、异常恢复仍保留已经落盘的对局。
+
+所有本用户启动的 Arena CPU 批评测共用进程间 CPU 配额，默认上限为可用 CPU 数减 2，至少为 1。每次重计算领取一个配额，结束或进程退出时释放，等待配额不计入策略的决策时间。CPU 环境仍使用一个 OpenMP 线程。实时人类对局不进入批评测等待队列，预留的 CPU 用于服务和交互。策略的 CUDA 推理不由此配额分配显存。
+
+自适应匹配仍在固定的约 32 局窗口完成后更新。窗口末尾可能仍需等待尚未结束的长局，这是按已有计分和匹配顺序运行的依赖，不是数据库锁。未修改游戏规则、策略决策预算或 rating 公式。
+
+2026-11-03，本机同一批真实 128 局、8 workers、完整回放和官方结束条件，包含一局 50,002 ticks 的长局：30.15 → 23.09 秒，约 **1.31×**。每局动作回放、结果和 rating 更新的摘要全部一致。这是该工作负载的一次对照，不代表所有阵容都有相同加速。
+
+可复用 `arena/benchmarks/scheduling.py` 对已记录工作负载做临时联赛测试，测试不会写入正式榜单：
+
+```bash
+python arena/benchmarks/scheduling.py outputs/benchmarks/arena-scheduling/fixture.json \
+  --workers 8 --output /tmp/scheduling.json \
+  --compare outputs/benchmarks/arena-scheduling/before.json
+```
 
 
 ## 历史结果
@@ -331,7 +369,7 @@ baseline 1v1 为 0.186→0.189 秒，4 人局为 0.983→0.321 秒；轻量 C++ 
 ```bash
 generals-arena tournament --entrants roster.json --config rules.json \
   --maps-per-group 20 --seed 42 --record-replays --output outputs/arena/rr
-# 对支持 CUDA 推理的包与 baseline，可附加 --backend gpu --device cuda:0
+# 对支持 CUDA 推理的包与 baseline，可附加 --backend cpu --device cuda:0
 # batch-size=0 表示同一兼容策略组全量并行
 ```
 
@@ -344,8 +382,8 @@ generals-arena tournament --entrants roster.json --config rules.json \
 
 `generals_arena.competitions.evaluation.make_profile` 固定地图配置、人数、对手声明、种子、换位和预算；
 `profile_id()` 解析并绑定对手工件版本、赛程、执行源码、校准数据与评分规则。
-`evaluate(bundle, profile, backend="cpu"|"gpu", device=..., batch_size=...)` 运行批量比赛。
-所有策略通过统一批执行入口接收 `VecEnv.observer()` 的原始局部数组观测；C++ 与 baseline 的逐 lane 决策循环在原生层执行，
+`evaluate(bundle, profile, backend="cpu", device=..., batch_size=...)` 运行批量比赛。
+所有策略通过统一批执行入口接收 backend 原生构建的局部数组观测；C++ 与 baseline 的逐 lane 决策循环在原生层执行，
 只实现标量接口的 Controller 由通用适配器逐 lane 调用。Arena 不构造神经网络特征。`record_replays=True` 输出可逐 tick 校验的 Arena 录像。
 
 1v1 评估使用 `gor-batch-fit-v1`：保留 GoR 胜率函数，将整批结果联合拟合，消除逐局计分的顺序依赖。每个已观测策略对平滑一局虚拟平局，换座比赛各计半份权重。校准 profile 固定所有参考的原始分数；未校准 profile 固定 WAIT 为 0 后拟合当前面板。FFA 周期评估仍使用 Codeforces 均分 1000 的规则。
@@ -358,14 +396,14 @@ profile 中 bundle 路径相对配置文件解析，支持 `${GENERALS_POLICY_DI
 
 ```bash
 generals-arena evaluate --bundle outputs/policy_bundle --profile profile.json \
-  --backend gpu --device cuda:0 --batch-size 128 --output outputs/arena/evaluation
+  --backend cpu --device cuda:0 --batch-size 128 --output outputs/arena/evaluation
 
 # roster.json 为普通策略声明列表；1v1 自动补 WAIT。
 generals-arena tournament --entrants roster.json --config rules.json \
   --maps-per-group 200 --calibrate-profile calibrated.json --evaluation-maps 100 \
-  --backend gpu --device cuda:0 --batch-size 0 --output outputs/arena/calibration
+  --backend cpu --device cuda:0 --batch-size 0 --output outputs/arena/calibration
 
 # finalists.json 为导出包路径或策略声明列表。
 generals-arena evaluate --candidates finalists.json --profile calibrated.json \
-  --backend gpu --device cuda:0 --batch-size 0 --output outputs/arena/finalists
+  --backend cpu --device cuda:0 --batch-size 0 --output outputs/arena/finalists
 ```

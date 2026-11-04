@@ -3,17 +3,11 @@ from .protocol import MapConfig
 
 
 def make_engine(state, *, backend='cpu'):
-    """Single-game step interface; CPU shares the native VecEnv implementation.
-
-    The reference engine remains available for independent rule verification.
-    """
-    if backend == 'cpu':
-        from .backends.cpu.engine import CPUEngine
-        return CPUEngine(state)
-    if backend == 'reference':
-        from .core.engine import CoreEngine
-        return CoreEngine(state)
-    raise ValueError('backend must be cpu or reference')
+    """Single-game adapter to the authoritative native CPU backend."""
+    if backend != 'cpu':
+        raise ValueError('backend must be cpu; the Python reference backend was removed')
+    from .backends.cpu.engine import CPUEngine
+    return CPUEngine(state)
 
 
 def make_env(config=None, *, mode="vector", device="cpu", **options):

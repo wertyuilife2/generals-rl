@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include "sdk/arena_policy.h"
+#include "bound.h"
 
 using i64 = std::int64_t;
 using Move = ArenaMoveResult;
@@ -141,7 +142,7 @@ static PyObject *act_batch(PyObject *, PyObject *args) {
     const char *names[]={"terrain","structure","owner","army","visible","alive","fog_obstacles",
                          "has_kill","warn_afk","neutralize_in","player_ids","tick","general_pos","active","stats"};
     const int types[]={NPY_UINT8,NPY_UINT8,NPY_INT16,NPY_INT64,NPY_BOOL,NPY_BOOL,NPY_BOOL,
-                       NPY_BOOL,NPY_BOOL,NPY_DOUBLE,NPY_INT64,NPY_INT64,NPY_INT64,NPY_BOOL,NPY_INT64};
+                       NPY_BOOL,NPY_BOOL,NPY_DOUBLE,NPY_INT64,NPY_INT64,NPY_INT32,NPY_BOOL,NPY_INT64};
     Ref arrays[15]; void *data[15];
     for (int i=0;i<15;++i) {
         PyObject *value=PyDict_GetItemString(i==4 || i==10 || i>=12 ? raw : state,names[i]);
@@ -155,39 +156,21 @@ static PyObject *act_batch(PyObject *, PyObject *args) {
          *journal_headers=static_cast<std::uintptr_t *>(ptr(hd));
     auto *moves=static_cast<i64 *>(ptr(ps)), *actions=static_cast<i64 *>(ptr(os));
     auto *lane_cursor=static_cast<i64 *>(ptr(cursor));
-    const auto *ids=static_cast<const i64 *>(data[10]), *ticks=static_cast<const i64 *>(data[11]),
-               *generals=static_cast<const i64 *>(data[12]), *stats=static_cast<const i64 *>(data[14]);
+    const auto *ids=static_cast<const i64 *>(data[10]);
     for (npy_intp lane=0;lane<count;++lane) if (!instances[lane] || !diagnostics[lane] || ids[lane]<0 || ids[lane]>=players) {
         PyErr_SetString(PyExc_ValueError,"invalid native batch instance/player"); return nullptr;
     }
-    npy_intp failed=-1;
+    GeneralsObservation observation{static_cast<std::uint8_t *>(data[0]),static_cast<std::uint8_t *>(data[1]),
+        static_cast<std::int16_t *>(data[2]),static_cast<i64 *>(data[3]),
+        static_cast<bool *>(data[4]),static_cast<bool *>(data[5]),static_cast<bool *>(data[6]),
+        static_cast<bool *>(data[7]),static_cast<bool *>(data[8]),static_cast<double *>(data[9]),
+        static_cast<i64 *>(data[14]),static_cast<std::int32_t *>(data[12]),static_cast<bool *>(data[13]),
+        static_cast<i64 *>(data[11]),nullptr,nullptr};
+    GeneralsBatchView view{int(count),int(height),int(width),int(players),ids,observation};
+    BoundPolicy bound{instances,call,moves,diagnostics,journal_headers,lane_cursor};
+    i64 failed=-1;
     Py_BEGIN_ALLOW_THREADS
-    for (npy_intp lane=0;lane<count;++lane) {
-        actions[lane]=0;
-        if (!static_cast<const std::uint8_t *>(data[13])[lane]) continue;
-        const auto base=lane*cells, seatbase=lane*players;
-        i64 army[8],land[8],cities[8];
-        for (int p=0;p<players;++p) {
-            army[p]=stats[(seatbase+p)*3]; land[p]=stats[(seatbase+p)*3+1]; cities[p]=stats[(seatbase+p)*3+2];
-        }
-        const i64 *r=moves+lane*10;
-        Move move{r[1],r[2],r[3],r[4],r[5],r[6],r[7],r[8],r[9]};
-        Observation obs{int(width),int(height),int(players),int(ids[lane]),ticks[lane],int(generals[lane]),
-            static_cast<const std::uint8_t *>(data[0])+base,static_cast<const std::uint8_t *>(data[1])+base,
-            static_cast<const std::int16_t *>(data[2])+base,static_cast<const i64 *>(data[3])+base,
-            static_cast<const std::uint8_t *>(data[4])+base,static_cast<const std::uint8_t *>(data[5])+seatbase,
-            army,land,cities,static_cast<const std::uint8_t *>(data[6])+base,
-            static_cast<const std::uint8_t *>(data[7])+seatbase,static_cast<const std::uint8_t *>(data[8])+seatbase,
-            static_cast<const double *>(data[9])+seatbase,r[0] ? &move : nullptr};
-        auto *m=reinterpret_cast<i64 *>(diagnostics[lane]);
-        auto *header=reinterpret_cast<i64 *>(journal_headers[lane]);
-        *lane_cursor=lane;
-        if (header) { header[1]=ids[lane]; header[2]=ticks[lane]; header[3]=2; }
-        actions[lane]=call(reinterpret_cast<void *>(instances[lane]),&obs,m);
-        if (header) header[1]=-1;
-        if (actions[lane]<0 || actions[lane]>cells*8) { ++m[5]; m[7]=2; }
-        if (m[7]) { failed=lane; break; }
-    }
+    failed=arena_bound_act(&bound,&view,actions);
     Py_END_ALLOW_THREADS
     return PyLong_FromSsize_t(failed);
 }

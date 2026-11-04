@@ -30,6 +30,12 @@ class _Observation(ctypes.Structure):
         'tick', 'terminated', 'winner_id')]
 
 
+class _BoundCPU(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_void_p) for name in ('state', 'initial', 'out')] + [
+        (name, ctypes.c_int) for name in ('count', 'height', 'width', 'players', 'threads', 'auto_reset')
+    ] + [('horizon', ctypes.c_int64)]
+
+
 @lru_cache(maxsize=1)
 def _library():
     lib, metadata = build_shared(Path(__file__).with_name("step.cpp"),
@@ -40,6 +46,11 @@ def _library():
     lib.generals_observe.argtypes = [ctypes.POINTER(_Batch), ctypes.c_void_p, ctypes.c_void_p,
         ctypes.c_void_p, ctypes.POINTER(_Observation), *([ctypes.c_int] * 4)]
     lib.generals_observe.restype = None
+    lib.generals_depart.argtypes = [ctypes.POINTER(_Batch), ctypes.POINTER(_Outputs),
+        *([ctypes.c_int] * 5), ctypes.c_void_p, ctypes.c_int, ctypes.c_int64]
+    lib.generals_depart.restype = None
+    lib.generals_visibility.argtypes = [ctypes.c_void_p, ctypes.c_void_p, *([ctypes.c_int] * 3)]
+    lib.generals_legal.argtypes = [*([ctypes.c_void_p] * 4), *([ctypes.c_int] * 3)]
     lib.omp_get_num_procs.argtypes = []
     lib.omp_get_num_procs.restype = ctypes.c_int
     return lib, metadata
@@ -145,15 +156,41 @@ class CPUEnv:
             raise RuntimeError("CPU environment is closed")
         self._cache_valid.fill(False)
 
-    def observer(self, player_ids):
+    def native_binding(self):
+        """Lease the CPU kernel ABI to an exclusive synchronous executor.
+
+        The lease holds all buffers and ctypes structures alive. Callers must
+        finish execution before closing/resetting this environment or editing
+        its storage. The public step/observer APIs keep their existing checks.
+        """
+        from generals.protocol.native import ABI_VERSION, BackendABI, BackendBinding, address
+        if self._closed:
+            raise RuntimeError('CPU environment is closed')
+        if self.auto_reset:
+            raise ValueError('native match execution requires auto_reset=False')
+        if tuple(map(id, self.state.values())) + tuple(map(id, self.initial.values())) != self._array_ids:
+            raise ValueError('edit arrays in place; replacing their storage is unsupported')
+        context = _BoundCPU(ctypes.addressof(self._state), ctypes.addressof(self._initial),
+            ctypes.addressof(self._out), self.batch_size, self.height, self.width, self.players,
+            self.threads, 0, self.episode_ticks)
+        abi = BackendABI(ABI_VERSION, ctypes.addressof(context), address(self._lib.generals_bound_observe),
+            address(self._lib.generals_bound_step), self.state['alive'].ctypes.data, self.done.ctypes.data,
+            self.state['tick'].ctypes.data, self.last_moves.ctypes.data, self.errors.ctypes.data,
+            address(self._lib.generals_bound_depart), ctypes.addressof(self._state), self.stats.ctypes.data, address(self._lib.generals_bound_legal))
+        return BackendBinding(abi, (self, context, self._state, self._initial, self._out,
+            *self._array_refs, self.stats, self.last_moves, self.done, self.errors,
+            self._current_stats, self._growth_cells, self._growth_count, self._cache_valid, self._owned_structures))
+
+    def observer(self, player_ids, *, full=False):
         """Bind seats; produce independent public snapshots in one native call."""
         ids = np.asarray(player_ids)
         if ids.ndim == 0:
             ids = np.full(self.batch_size, ids)
         if (ids.shape != (self.batch_size,) or ids.dtype.kind not in 'iu'
-                or np.any(ids < 0) or np.any(ids >= self.players)):
+                or np.any(ids < (-1 if full else 0)) or np.any(ids >= self.players)):
             raise ValueError('one valid player id is required for every environment')
         ids = np.array(ids, dtype=np.int64, order='C', copy=True)
+        native_ids = -ids-2 if full else ids
 
         def observe():
             if self._closed:
@@ -167,11 +204,11 @@ class CPUEnv:
             raw = dict(state=boards, visible=np.empty_like(self.state['terrain'], dtype=bool),
                 stats=np.empty_like(self.stats), general_pos=np.empty(self.batch_size, np.int32),
                 active=np.empty(self.batch_size, bool), player_ids=ids.copy(),
-                width=self.width, height=self.height, visibility='local')
+                width=self.width, height=self.height, visibility='full' if full else 'local')
             arrays = {**boards, **{k: raw[k] for k in ('visible', 'stats', 'general_pos', 'active')}}
             output = _Observation(*(arrays[key].ctypes.data for key, _ in _Observation._fields_))
             self._lib.generals_observe(ctypes.byref(self._state), self.stats.ctypes.data,
-                self.done.ctypes.data, ids.ctypes.data, ctypes.byref(output),
+                self.done.ctypes.data, native_ids.ctypes.data, ctypes.byref(output),
                 self.batch_size, self.height, self.width, self.players)
             return raw
         return observe
@@ -179,8 +216,19 @@ class CPUEnv:
     def surrender(self, player_id, mask=None):
         if self._closed:
             raise RuntimeError("CPU environment is closed")
-        from generals.core.lifecycle import surrender_batch
-        surrender_batch(self, player_id, mask)
+        self.depart(player_id, mask)
+
+    def depart(self, player_id, mask=None, *, neutralize=False):
+        player_id = _integer('player_id', player_id, 0)
+        if player_id >= self.players:
+            raise ValueError('invalid player id')
+        if mask is not None and (not isinstance(mask, np.ndarray) or mask.dtype != bool
+                                 or mask.shape != (self.batch_size,)):
+            raise ValueError('surrender mask must be bool [batch] on the environment device')
+        mask = np.ascontiguousarray(mask) if mask is not None else None
+        self._lib.generals_depart(ctypes.byref(self._state), ctypes.byref(self._out),
+            self.batch_size, self.height, self.width, self.players, player_id,
+            None if mask is None else mask.ctypes.data, neutralize, self.episode_ticks)
 
     def reset(self, mask=None):
         if self._closed:

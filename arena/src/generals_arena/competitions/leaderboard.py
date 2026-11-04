@@ -87,9 +87,12 @@ class DuelStatistics:
 def match_statistics(result, kills):
     """Each strategy has one sample per game, regardless of its seat count."""
     ids = result['entrant_ids']
+    # AFK and departures eliminate a player without necessarily crediting a
+    # capture. Only attributed captures count as kills under the official rules.
+    eliminated = sum(t is not None for t in result['elimination_ticks'])
     if (len(kills) != len(ids) or
             any(type(k) is not int or not 0 <= k < len(ids) for k in kills) or
-            sum(kills) != sum(t is not None for t in result.get('capture_ticks', result['elimination_ticks']))):
+            sum(kills) > eliminated):
         raise ValueError('invalid kill counts')
     seats = defaultdict(list)
     for seat, entrant in enumerate(ids):

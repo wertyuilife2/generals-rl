@@ -29,7 +29,8 @@ class _Options(ctypes.Structure):
 
 @lru_cache(maxsize=1)
 def _library():
-    lib, metadata = build_shared(Path(__file__).with_name('policy.cpp'), name='baselines')
+    from generals.protocol.native import INCLUDE
+    lib, metadata = build_shared(Path(__file__).with_name('policy.cpp'), name='baselines', include_dirs=[INCLUDE])
     signatures = {
         'baseline_error': ([], ctypes.c_char_p),
         'baseline_create': ([ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
@@ -104,6 +105,12 @@ class BaseAI:
 
     def on_result_batch(self, results):
         self._batch.on_result(results)
+
+    def native_batch(self, height, width, players):
+        """Lease the same independently seeded planners to a native executor."""
+        if self._batch is None:
+            raise RuntimeError('reset_batch must be called before native_batch')
+        return self._batch.native_binding(height, width, players)
 
     def act(self, observation):
         if not self._handle:

@@ -53,7 +53,7 @@ def decode_actions(frame, state):
 
 
 @pytest.mark.parametrize('path', sorted((FIXTURES / 'replays').glob('*.json')), ids=lambda p: p.stem)
-@pytest.mark.parametrize('backend', ['reference', 'cpu'])
+@pytest.mark.parametrize('backend', ['mutable_adapter', 'cpu'])
 def test_official_replay(path, backend):
     data = json.loads(path.read_text())
     state = replay_state(data)

@@ -1,4 +1,5 @@
 """Joint decisions and elimination lifecycle through the active Arena executor."""
+from execution_test_utils import without_timing
 from dataclasses import asdict
 
 import numpy as np
@@ -91,7 +92,7 @@ def test_tick_limit_and_reset_do_not_reuse_previous_game_memory(game_factory):
     second = game_factory(adjacent_state(), controllers, 2)
     while not second.done:
         second.advance()
-    assert first_result == second.result()
+    assert without_timing(first_result) == without_timing(second.result())
     assert first_result['reason'] == 'tick_limit' and first_result['winner_seat'] is None
     assert len(controllers[0].observations) == 2
     assert [controller.seed for controller in controllers] == [10, 11]

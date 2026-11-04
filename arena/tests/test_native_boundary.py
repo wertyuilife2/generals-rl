@@ -15,7 +15,7 @@ def test_recorded_games_use_shared_native_environment():
             'map': {'height':15, 'width':15, 'players':2}}
     game = RecordedGame(plan, LeagueConfig(max_ticks=2), [None,None])
     try:
-        assert isinstance(game.engine, CPUEngine)
+        assert game.execution.handle and game.env.unwrapped.__class__.__name__ == 'CPUEnv'
         game.advance()
         assert game.engine.env.state['tick'][0] == game.state.tick == 1
     finally:

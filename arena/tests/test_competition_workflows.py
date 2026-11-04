@@ -309,7 +309,7 @@ return 0;''')
     assert result['kills'] == [0]*4
     assert all(move.eliminated is None for _, outcome in verified_replay(blob, result)
                if outcome is not None for move in outcome.moves)
-    assert [m['calls'] for m in result['decision_timing']] == [3,4,4]
+    assert [m['calls'] for m in result['decision_timing']] == [3,4,4,4]
     trace = json.loads(gzip.decompress(blob))
     assert all(Action(*row[0]) == Action.wait() for row in trace['actions'][2:])
     frames = replay_frames(blob, result)
@@ -340,6 +340,45 @@ def test_native_parallel_and_serial_results_and_ratings_match(setup, tmp_path):
         assert blob_a == blob_b
         assert a['final_digest'] == b['final_digest']
         assert a['rating_changes'] == b['rating_changes']
+
+
+def test_idle_worker_takes_next_game_while_first_game_is_blocked(setup, tmp_path, monkeypatch):
+    from generals_arena.competitions.jobs import NativeMatchPool, run_jobs
+    import threading
+    directory, store = setup
+    spec = snapshot_policy(directory, source(tmp_path/'dynamic'))
+    entrant, job = store.add(spec, games=6)
+    plans = candidate_panel(store.config, entrant['entrant_id'], [store.reference], 6, 8, 'dynamic')
+    store.insert_plans(plans, job)
+    indices = {plan['game_id']: index for index, plan in enumerate(plans)}
+    third_started = threading.Event()
+    def simulated(self, directory, chunk):
+        records = []
+        for plan in chunk:
+            index = indices[plan['game_id']]
+            if index == 0:
+                assert third_started.wait(3), 'a long task starved queued short games'
+            if index == 2:
+                third_started.set()
+            players = len(plan['entrant_ids'])
+            records.append(({**plan, 'ticks': 1, 'elimination_ticks': [1]*(players-1)+[None],
+                'placements': list(range(players, 0, -1)), 'kills': [0]*(players-1)+[players-1],
+                'winner_seat': players-1, 'final_alive': [False]*(players-1)+[True]}, b''))
+        return records
+    monkeypatch.setattr(NativeMatchPool, '_run', simulated)
+    assert run_jobs(store, workers=2) == 6
+    with store.connect() as db:
+        ids = [row[0] for row in db.execute("SELECT id FROM games ORDER BY sequence")]
+    assert ids == [plan['game_id'] for plan in plans]
+
+
+def test_coordinator_failure_before_policy_execution_can_resume(setup, tmp_path):
+    directory, store = setup
+    spec = snapshot_policy(directory, source(tmp_path/'not-started'))
+    _, job = store.add(spec, games=2)
+    store.fail(job, 'worker could not start')
+    store.retry(job)
+    assert next(row for row in store.jobs() if row['id'] == job)['status'] == 'queued'
 
 
 def test_duplicate_policy_timeouts_forfeit_each_seat_once_and_keep_playing(setup, tmp_path):

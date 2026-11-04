@@ -15,7 +15,7 @@ import tempfile
 _openmp_runtime = None
 
 
-def source_bytes(source, seen=None):
+def source_bytes(source, seen=None, include_dirs=()):
     """Include local headers in build identities (also handles profiling includes)."""
     source = Path(source).resolve()
     seen = set() if seen is None else seen
@@ -23,8 +23,12 @@ def source_bytes(source, seen=None):
         return b""
     seen.add(source)
     data = source.read_bytes()
-    return data + b"".join(source_bytes(source.parent / name.decode(), seen)
-                           for name in re.findall(rb'^\s*#include\s+"([^"]+)"', data, re.M))
+    headers = []
+    for name in re.findall(rb'^\s*#include\s+"([^"]+)"', data, re.M):
+        candidates = [root / name.decode() for root in (source.parent, *map(Path, include_dirs))]
+        header = next((path for path in candidates if path.is_file()), candidates[0])
+        headers.append(source_bytes(header, seen, include_dirs))
+    return data + b"".join(headers)
 
 
 def openmp_flags():
@@ -54,7 +58,7 @@ def openmp_flags():
             f'-Wl,-rpath,{library}', '-lomp', '-dynamiclib']
 
 
-def build_shared(source, *, name, flags=None):
+def build_shared(source, *, name, flags=None, include_dirs=()):
     source = Path(source)
     compiler = shutil.which(os.environ.get('CXX', 'c++'))
     if compiler is None:
@@ -64,8 +68,8 @@ def build_shared(source, *, name, flags=None):
         if sys.platform not in ('linux', 'darwin'):
             raise RuntimeError('native execution supports Linux and macOS')
         flags = ['-dynamiclib'] if sys.platform == 'darwin' else ['-fPIC', '-shared']
-    flags = ['-std=c++17', '-O3', '-ffp-contract=off', *flags]
-    key = sha256(source_bytes(source)+repr((compiler, version, flags)).encode()).hexdigest()
+    flags = ['-std=c++17', '-O3', '-ffp-contract=off', *['-I' + str(p) for p in include_dirs], *flags]
+    key = sha256(source_bytes(source, include_dirs=include_dirs)+repr((compiler, version, flags)).encode()).hexdigest()
     root = Path(tempfile.gettempdir())/f'generals-{name}-{os.getuid()}'
     root.mkdir(mode=0o700, exist_ok=True)
     info = root.lstat()
@@ -85,7 +89,7 @@ def build_shared(source, *, name, flags=None):
                                      'build_sha256': key}
 
 
-def build_extension(source, *, name):
+def build_extension(source, *, name, include_dirs=()):
     """Load a small CPython/NumPy bridge, isolated from the policy/engine ABI."""
     import importlib.util
     from importlib.machinery import ExtensionFileLoader
@@ -96,7 +100,7 @@ def build_extension(source, *, name):
              '-DNUMPY_BUILD_ID="' + np.__version__ + '"']
     if sys.platform == 'darwin':
         flags += ['-undefined', 'dynamic_lookup']
-    lib, metadata = build_shared(source, name=name, flags=flags)
+    lib, metadata = build_shared(source, name=name, flags=flags, include_dirs=include_dirs)
     spec = importlib.util.spec_from_file_location(name, lib._name,
                                                 loader=ExtensionFileLoader(name, lib._name))
     module = importlib.util.module_from_spec(spec)

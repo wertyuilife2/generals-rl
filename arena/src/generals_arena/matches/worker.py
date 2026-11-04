@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 import numpy as np
 from generals import Action
-from generals.core.recording import state_to_dict
 
 from generals_arena.policies import native
 from generals_arena.matches.game import RecordedGame
@@ -25,7 +24,6 @@ from generals_arena.matches.game import close_game
 from generals_arena.matches.game import timing
 from generals_arena.matches.game import failure
 from generals_arena.policies.native import decision_timeout
-from generals.core.recording import state_from_dict
 
 
 _process_lifecycle = threading.RLock()
@@ -43,6 +41,8 @@ def lifecycle_locked(function):
 
 class ForfeitedController:
     """Retain diagnostics without loading or calling a surrendered policy again."""
+    inactive = True
+
     def __init__(self, values):
         self.values = values
 
@@ -69,6 +69,7 @@ class Journal:
             self.file.truncate(size)
         self.memory = mmap.mmap(self.file.fileno(), size)
         self.header = np.ndarray((4,), np.int64, self.memory)
+        self.active_lane = np.zeros(1, np.int64)
         self.records = np.ndarray((8,8), np.int64, self.memory, offset=32)
         self.committed = np.ndarray((8,8), np.int64, self.memory, offset=(4+64)*8)
         self.actions = np.ndarray((ticks,players), np.int64, self.memory, offset=(4+128)*8)
@@ -77,18 +78,21 @@ class Journal:
             self.records[:] = 0
             self.committed[:] = 0
 
-    def record(self, game):
-        self.actions[game.state.tick-1] = [Action(*a).encode() for a in game.actions[-1]]
-        self.committed[:] = self.records
-        self.header[0] = game.state.tick  # Publish after the entire action row.
+    @property
+    def journals(self):
+        return [self]
+
+    def select(self, lane):
+        if lane != 0:
+            raise ValueError('single-match journal has one lane')
+
+    def native_view(self):
+        return SimpleNamespace(headers=self.header[None], all_records=self.records[None],
+            committed=self.committed[None], actions=self.actions[:,None], active_lane=self.active_lane)
 
     def recover(self, plan, config, forfeits=()):
-        game = RecordedGame(plan, config, [None]*self.players, forfeits)
-        for row in self.actions[:int(self.header[0])]:
-            game.advance_recorded([Action.decode(int(a)) for a in row])
-        game.controllers = [SimpleNamespace(decision_metrics=native.metrics(self.records[i]))
-                            if self.records[i,0] or i == self.header[1] else None
-                            for i in range(self.players)]
+        game = RecordedGame(plan, config, [None]*self.players, forfeits, journal=self.native_view())
+        game.restore(self.actions[:int(self.header[0])])
         return game
 
     def close(self):
@@ -97,9 +101,10 @@ class Journal:
         self.file.close()
 
 
-def snapshot(game):
-    return {'state':state_to_dict(game.state), 'initial_digest':game.initial_digest,
-            'done':game.done, 'timing':timing(game), 'forfeits':game.forfeits}
+def snapshot(game, seats=()):
+    return {'summary': game.summary(), 'initial_digest': game.initial_digest,
+            'done': game.done, 'timing': timing(game), 'forfeits': game.forfeits,
+            'views': {seat: game.view(seat) for seat in seats}}
 
 
 def child_loop(connection):
@@ -135,25 +140,21 @@ def child_loop(connection):
                     for event in forfeits:
                         seat = event['seat']
                         controllers[seat] = ForfeitedController(journal.records[seat])
-                    game = RecordedGame(plan, config, controllers, forfeits)
+                    game = RecordedGame(plan, config, controllers, forfeits, journal=journal.native_view())
                     if op == 'resume':
                         journal.records[:] = saved
                         # Restart only after a hard timeout. Warm survivors with
                         # the original observations/results, using the journal's
                         # actions as authority even for nondeterministic policies.
-                        for row in journal.actions[:int(journal.header[0])]:
-                            game.advance_recorded([Action.decode(int(a)) for a in row], warm=True)
+                        game.restore(journal.actions[:int(journal.header[0])], warm=True)
                         op = request['continue_op']
                 if op == 'run':
-                    while not game.done:
-                        game.advance()
-                        journal.record(game)
+                    game.run()
                 elif op == 'advance' and not game.done:
                     game.advance({int(k):Action.decode(v) for k,v in request['actions'].items()})
-                    journal.record(game)
                 elif op == 'surrender' and not game.done:
                     game.surrender(request['seat'])
-                response = {'snapshot':snapshot(game)}
+                response = {'snapshot':snapshot(game, request.get('view_seats', ())) }
                 if op in ('run','replay') or game.done:
                     response['blob'] = game.replay_blob()
                 if game.done:
@@ -173,7 +174,7 @@ def child_loop(connection):
                     game = RecordedGame(plan, config, [None]*len(plan['entrant_ids']))
                     game.controllers = controllers
                 connection.send({'failure':str(exc), 'details':getattr(exc,'details',{}),
-                    'snapshot':snapshot(game), 'result':failure(game,exc), 'blob':game.replay_blob()})
+                    'snapshot':snapshot(game, request.get('view_seats', ())), 'result':failure(game,exc), 'blob':game.replay_blob()})
     except (EOFError, BrokenPipeError):
         pass
     finally:
@@ -186,6 +187,7 @@ class MatchWorker:
     def __init__(self):
         self.process = self.connection = self.journal = None
         self._batch_worker = None
+        self.stop = None
 
     def run_batch(self, entries, plans, **options):
         if self._batch_worker is None:
@@ -213,10 +215,11 @@ class MatchWorker:
             self.journal.close()
             path.unlink(missing_ok=True)
         self.plan, self.config = plan, SimpleNamespace(max_ticks=max_ticks)
-        self.context, self.forfeits = {"entries": entries, "max_ticks": max_ticks}, []
-        self.bounded = all(entries[key]['kind'] in ('cpp', 'human')
-                           or entries[key].get('factory') == 'generals_arena.policies.builtin:create_wait_controller'
-                           for key in plan['entrant_ids'])
+        self.context, self.forfeits = {"entries": entries, "max_ticks": max_ticks,
+            "view_seats": [seat for seat,key in enumerate(plan["entrant_ids"]) if entries[key]["kind"] == "human"]}, []
+        # Process supervision is uniform; native per-decision watchdogs supply
+        # exact deadlines. Python/NN adapters leave the decision header idle.
+        self.bounded = False
         fd, path = tempfile.mkstemp(prefix='match-',dir=native._private_cache())
         os.close(fd)
         self.journal = Journal(path, max_ticks, len(plan['entrant_ids']), create=True)
@@ -242,7 +245,7 @@ class MatchWorker:
                                    f'{elapsed/1e6:.3f} ms; match process exited',details=details)
         game = self.journal.recover(self.plan,self.config,self.forfeits)
         try:
-            return {'failure':str(error),'details':details,'snapshot':snapshot(game),
+            return {'failure':str(error),'details':details,'snapshot':snapshot(game, self.context.get('view_seats', ())),
                     'result':failure(game,error),'blob':game.replay_blob()}
         finally:
             close_game(game)
@@ -260,7 +263,12 @@ class MatchWorker:
                 # Also cover native library static initialization, before the
                 # C ABI watchdog is armed. Python inference leaves seat=-1.
                 phase, entered = None, monotonic()
-                while not (ready := self.connection.poll(1)):
+                while not (ready := self.connection.poll(.1 if self.stop is not None else 1)):
+                    if self.stop is not None and self.stop.is_set():
+                        with _process_lifecycle:
+                            self.process.kill()
+                            self.process.join()
+                        raise InterruptedError('match cancelled by scheduler')
                     current = tuple(self.journal.header[1:4])
                     if current != phase:
                         phase, entered = current, monotonic()
@@ -276,6 +284,7 @@ class MatchWorker:
             return self._failed()
 
     def call(self, request):
+        request.setdefault('view_seats', self.context.get('view_seats', []))
         operation = request.get('continue_op', request['op'])
         human_actions = request.get('actions', {})
         while True:
@@ -305,9 +314,15 @@ class MatchWorker:
                        **self.context, 'plan':self.plan,
                        'journal':str(self.journal.path), 'forfeits':self.forfeits}
 
-    def run(self, entries, plan, *, max_ticks):
-        response = self.begin(entries,plan,max_ticks=max_ticks,run=True)
-        return response['result'], response['blob']
+    def run(self, entries, plan, *, max_ticks, stop=None):
+        self.stop = stop
+        try:
+            if stop is not None and stop.is_set():
+                raise InterruptedError('match cancelled by scheduler')
+            response = self.begin(entries,plan,max_ticks=max_ticks,run=True)
+            return response['result'], response['blob']
+        finally:
+            self.stop = None
 
     @lifecycle_locked
     def close(self):
@@ -333,7 +348,7 @@ class MatchWorker:
             self.journal = None
 
 
-class HumanCppGame:
+class HumanGame:
     """Incremental native match behind the same public raw observation/action boundary."""
     def __init__(self, entries, plan, *, max_ticks):
         self.plan, self.config = plan, SimpleNamespace(max_ticks=max_ticks)
@@ -347,7 +362,8 @@ class HumanCppGame:
     def _receive(self, response):
         value = response['snapshot']
         self.forfeits = value.get('forfeits', [])
-        self.state = state_from_dict(value['state'])
+        self._summary, self._views = value['summary'], value['views']
+        self.tick = self._summary['ticks']
         self.initial_digest, self.done = value['initial_digest'], value['done']
         records = {m['seat']:m for m in value['timing']}
         self.controllers = [SimpleNamespace(decision_metrics=records[i]) if i in records else None
@@ -365,6 +381,15 @@ class HumanCppGame:
     def surrender(self, seat):
         self._receive(self.worker.call({'op': 'surrender', 'seat': seat}))
 
+    def view(self, seat=None):
+        return self._views[-1 if seat is None else seat]
+
+    def decision_timing(self):
+        return self._summary.get('decision_timing', [])
+
+    def summary(self):
+        return self._summary
+
     def result(self):
         return self._result
 
@@ -375,3 +400,6 @@ class HumanCppGame:
 
     def close(self):
         self.worker.close()
+
+
+HumanCppGame = HumanGame  # Public import compatibility; every policy uses HumanGame.

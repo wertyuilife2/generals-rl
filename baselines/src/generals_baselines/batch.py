@@ -2,6 +2,7 @@
 import ctypes
 import threading
 import weakref
+from contextlib import contextmanager, ExitStack
 
 import numpy as np
 
@@ -93,6 +94,21 @@ class PolicyBatch:
                 raise RuntimeError('batch must act before receiving results')
             self._lib.baseline_batch_result(self._handle, moves.ctypes.data,
                                             actions.ctypes.data, active.ctypes.data)
+
+    @contextmanager
+    def native_binding(self, height, width, players):
+        from generals.protocol.native import ABI_VERSION, PolicyABI, PolicyBinding, address
+        # NumPy RNG state and planner instances are exclusively leased for the
+        # entire native run, rather than repeatedly acquired for each tick.
+        with self._lock, ExitStack() as stack:
+            self._bind(height, width, players)
+            for controller in self.controllers:
+                stack.enter_context(controller.rng.bit_generator.lock)
+            abi = PolicyABI(ABI_VERSION, self._handle, address(self._lib.baseline_bound_act),
+                            address(self._lib.baseline_bound_result), address(self._lib.baseline_bound_one))
+            def check_error(lane, tick):
+                raise RuntimeError(self._lib.baseline_error().decode())
+            yield PolicyBinding(abi, self, check_error)
 
     def close(self):
         with self._lock:

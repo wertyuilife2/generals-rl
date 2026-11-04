@@ -1,5 +1,5 @@
 """Resumable persistent jobs with ordered commits through the shared runner."""
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import json
 import multiprocessing
 import os
@@ -8,7 +8,7 @@ import time
 from types import SimpleNamespace
 
 from generals_arena.util import integer, process_lock
-from generals_arena.matches.runner import MatchRunner
+from generals_arena.matches.runner import MatchRunner, resolve_geometries
 from generals_arena.matches.worker import MatchWorker
 from generals_arena.policies.native import PolicyError
 from generals_arena.competitions.matchmaking import choose_player_count, make_block
@@ -187,16 +187,39 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
             if limit is not None:
                 plans = plans[:limit - completed]
             directory = str(store.directory.resolve())
-            chunk_size = max(1, (len(plans) + workers - 1) // workers)
-            chunks = [plans[i:i+chunk_size] for i in range(0, len(plans), chunk_size)]
-            futures = [executor.submit_native(directory, chunk) if native else executor.submit(simulate_batch, directory, chunk)
-                       for chunk in chunks]
-            first_error = None
-            for future in futures:
-                if future.cancelled():
-                    continue
+            # One match per task lets an idle process immediately take another
+            # game, instead of waiting for an assigned chunk's longest game.
+            # Resolve repeated map geometries once before dispatching threads.
+            plans = resolve_geometries(plans)
+            futures = {(executor.submit_native(directory, [plan]) if native else
+                        executor.submit(simulate_batch, directory, [plan])): index
+                       for index, plan in enumerate(plans)}
+            first_error, ready, next_index = None, {}, 0
+            for future in as_completed(futures):
+                index = futures[future]
                 try:
-                    for result, blob in future.result():
+                    if future.cancelled():
+                        ready[index] = None
+                    else:
+                        records = future.result()
+                        if len(records) != 1:
+                            raise RuntimeError('match worker returned an incomplete task')
+                        ready[index] = records[0]
+                        result = records[0][0]
+                        if 'policy_error' in result:
+                            first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
+                except Exception as exc:
+                    first_error = first_error or exc
+                    ready[index] = None
+                # Completion order never becomes rating order. Commit any
+                # contiguous ready prefix while the other processes keep going.
+                while next_index in ready:
+                    record = ready.pop(next_index)
+                    next_index += 1
+                    if record is None:
+                        continue
+                    result, blob = record
+                    try:
                         if 'policy_error' in result:
                             store.fail_game(result, blob)
                             first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
@@ -205,11 +228,9 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
                             completed += 1
                             if progress is not None:
                                 progress(completed)
-                    if first_error is not None:
-                        for queued in futures:
-                            queued.cancel()
-                except Exception as exc:
-                    first_error = first_error or exc
+                    except Exception as exc:
+                        first_error = first_error or exc
+                if first_error is not None:
                     for queued in futures:
                         queued.cancel()
                     # Drain started games and preserve their results/violations.
