@@ -37,41 +37,57 @@ def test_single_game_and_recovery_never_dispatch_python_rules_or_observations(mo
         assert result['elimination_ticks'][1] == 1
         assert len(list(verified_replay(blob, result))) == 9
         trace = json.loads(gzip.decompress(blob))
-        from generals import Action
-        actions = np.array([[Action(*a).encode() for a in row] for row in trace['actions']], np.int64)
+        actions = np.array(trace['actions'], np.int64)
         recovered = RecordedGame(plan(), SimpleNamespace(max_ticks=8), [None]*3, result['forfeits'])
         try:
             recovered.restore(actions)
             assert recovered.summary()['final_digest'] == result['final_digest']
-            assert recovered.trace()['frames'] == trace['frames']
+            assert recovered.trace()['actions'] == trace['actions']
+            assert replay_frames(recovered.replay_blob(), recovered.summary()) == replay_frames(blob, result)
         finally:
             recovered.close()
     finally:
         game.close()
 
 
-def test_playback_only_decodes_recorded_frames(monkeypatch):
+def test_action_log_materializes_once_in_web_cache_without_python_rules(monkeypatch):
     import generals_arena.matches.replay as replay
+    from generals.backends.cpu.env import CPUEnv
+    from generals_arena.web.replays import ReplayResponses
+    from unittest.mock import Mock, patch
     game = RecordedGame(plan(2), SimpleNamespace(max_ticks=5), [WaitController(), WaitController()])
     try:
         game.run()
         result, blob = game.result(), game.replay_blob()
+        trace = json.loads(gzip.decompress(blob))
+        assert trace['schema'] == 5 and trace['actions'] == [[0,0]]*5
+        assert 'frames' not in trace and 'digests' not in trace
         def forbidden(*args, **kwargs):
-            raise AssertionError('playback attempted to simulate the game')
-        monkeypatch.setattr(replay, '_audit', forbidden)
-        assert len(replay_frames(blob, result)) == 6
-        assert replay_frames(blob, result, compact=True)[-1]['tick'] == 5
+            raise AssertionError('playback attempted Python rules or observations')
+        monkeypatch.setattr(CPUEnv, 'step', forbidden)
+        monkeypatch.setattr(CPUEnv, 'observer', forbidden)
+        store = Mock()
+        store.replay.return_value = result, blob
+        cache = ReplayResponses(store)
+        with patch.object(replay, '_audit', wraps=replay._audit) as audit:
+            first = cache.get('game')
+            assert cache.get('game') == first
+            assert audit.call_count == 1
+        assert len(json.loads(gzip.decompress(first))['frames']) == 6
     finally:
         game.close()
 
 
 def test_legacy_replay_is_converted_with_same_native_frames():
     from generals_arena.matches.replay import encode_replay
-    game = RecordedGame(plan(2), SimpleNamespace(max_ticks=5), [WaitController(), WaitController()])
+    game = RecordedGame(plan(2), SimpleNamespace(max_ticks=5), [WaitController(), WaitController()], record=2)
     try:
         game.run()
         trace, result = game.trace(), game.result()
-        legacy = encode_replay(trace['initial'], trace['actions'], trace['digests'])
+        from dataclasses import astuple
+        from generals import Action
+        actions = [[astuple(Action.decode(a)) for a in row] for row in trace['actions']]
+        legacy = encode_replay(trace['initial'], actions, trace['digests'])
         assert replay_frames(legacy, result) == replay_frames(game.replay_blob(), result)
     finally:
         game.close()

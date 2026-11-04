@@ -137,17 +137,16 @@ def test_registered_matches_run_without_any_training_package(submission):
         sys.meta_path.insert(0, BlockTraining())
         from generals_arena.competitions import submission as submissions
         from generals_arena.competitions.private import run
-        submissions.PUBLICATION_GAMES = 1
-        bundle, directory = sys.argv[1:]
-        report = submissions.commit(bundle,
-                                 league=directory, workers=1)
-        assert report['ok'], report
-        private = run(['@'+report['name'], 'baseline/aggressive'],
-                               league=directory, games=2)
-        assert private['ok'], private
-        assert not any(name.split('.')[0] in {'generals_rl', 'rsl_rl', 'tensordict'}
-                       for name in sys.modules)
-        print('independent Arena publication and matches passed')
+        if __name__ == '__main__':
+            submissions.PUBLICATION_GAMES = 1
+            bundle, directory = sys.argv[1:]
+            report = submissions.commit(bundle, league=directory, workers=1)
+            assert report['ok'], report
+            private = run(['@'+report['name'], 'baseline/aggressive'], league=directory, games=2)
+            assert private['ok'], private
+            assert not any(name.split('.')[0] in {'generals_rl', 'rsl_rl', 'tensordict'}
+                           for name in sys.modules)
+            print('independent Arena publication and matches passed')
     '''))
     result = subprocess.run([sys.executable, str(script), str(bundle), str(league.directory)],
                             capture_output=True, text=True, timeout=60)

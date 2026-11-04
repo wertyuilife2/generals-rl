@@ -1,6 +1,6 @@
 // Native result/recording projection. Rules and fog construction stay in env.
 #pragma once
-#include "rules.h"
+#include "generals_native.h"
 #include "sha256.h"
 #include <numeric>
 #include <sstream>
@@ -21,10 +21,10 @@ struct Object {std::string s="{";bool first=true;
     void add(const char *k,const std::string &v){if(!first)s+=',';first=false;s+=quote(k)+":"+v;}
     std::string done(){return s+"}";}};
 struct Lane {
-    const generals::Batch &s;const I *stats;int lane,h,w,p,n;std::size_t base,pb;
+    GeneralsStateView s;const I *stats;int lane,h,w,p,n;std::size_t base,pb;
     Lane(const GeneralsBackend &b,int l,int height,int width,int players):
-        s(*static_cast<const generals::Batch *>(b.state)),stats(b.stats+std::size_t(l)*players*3),
-        lane(l),h(height),w(width),p(players),n(h*w),base(std::size_t(l)*n),pb(std::size_t(l)*p){}
+        stats(b.stats+std::size_t(l)*players*3),lane(l),h(height),w(width),p(players),n(h*w),
+        base(std::size_t(l)*n),pb(std::size_t(l)*p){b.snapshot(b.context,&s);}
     std::string digest(const std::string &topology)const{
         SHA256 hash;hash.add(topology);
         hash.integers(s.structure+base,n);hash.integers(s.owner+base,n);hash.integers(s.army+base,n);
@@ -88,21 +88,25 @@ struct Lane {
         o.add("placements",joined(places));return o.done();
     }
 };
-struct Trace {std::string topology,initial,initial_digest;bool enabled;
-    std::vector<std::string> actions,digests,frames,states;std::vector<I> previous;
-    Trace(const Lane &l,const char *id,bool record):topology(id),initial(l.state()),initial_digest(l.digest(topology)),enabled(record){}
+struct Trace {std::string topology,initial,initial_digest;bool enabled,detailed;int players;
+    std::vector<I> actions;
+    std::vector<std::string> digests,frames;std::vector<I> previous;
+    Trace(const Lane &l,const char *id,int record):topology(id),initial(l.state()),initial_digest(l.digest(topology)),
+        enabled(record!=0),detailed(record==2),players(l.p){if(enabled)actions.reserve(1024*l.p);}
     void frame(const Lane &l,const GeneralsObservation &o,const bool *forfeited,bool replace=false){
-        if(!enabled)return;
+        if(!detailed)return;
         // Boundary departures replace the current frame; a full frame also resets the delta base.
         auto frame=l.board(o,-1,forfeited,replace||frames.empty()?nullptr:&previous);
         if(replace&&!frames.empty())frames.back()=frame;else frames.push_back(frame);
         previous.resize(l.n*3);for(int c=0;c<l.n;++c){previous[c*3]=l.s.owner[l.base+c];previous[c*3+1]=l.s.army[l.base+c];previous[c*3+2]=l.s.structure[l.base+c];}
     }
     void tick(const Lane &l,const I *joint){if(!enabled)return;
-        std::vector<std::string> row;for(int k=0;k<l.p;++k){I a=joint[k];
-            row.push_back(a>0?"[1,"+scalar((a-1)/8)+","+scalar(((a-1)/2)%4)+","+scalar((a-1)%2)+"]":"[0,-1,0,0]");}
-        actions.push_back(joined(row));digests.push_back(quote(l.digest(topology)));
+        actions.insert(actions.end(),joint,joint+l.p);
+        if(detailed)digests.push_back(quote(l.digest(topology)));
     }
-    std::string json()const{Object o;o.add("initial",initial);o.add("actions",joined(actions));o.add("digests",joined(digests));o.add("frames",joined(frames));return o.done();}
+    std::string json(const Lane &l)const{Object o;o.add("initial",initial);
+        o.add("action_encoding",quote("generals-v1"));o.add("actions",matrix(actions.data(),actions.size()/players,players));
+        o.add("final_digest",quote(l.digest(topology)));
+        if(detailed){o.add("digests",joined(digests));o.add("frames",joined(frames));}return o.done();}
 };
 }

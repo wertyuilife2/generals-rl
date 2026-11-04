@@ -5,6 +5,7 @@ lifetimes and emits the same completed result/replay pair for either executor.
 """
 import json
 import time
+from collections import defaultdict, deque
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from generals_arena.policies.entries import verify_artifacts
 from generals_arena.util import integer
 from generals_arena.util import source_digest
 from generals_arena.matches.resources import cpu_slot
+from generals_arena.matches.cache import initial_map
 
 
 def _verify_implementations(entries):
@@ -68,7 +70,6 @@ def _batch_key(plan):
 
 def resolve_geometries(plans):
     """Resolve a schedule's random dimensions once per map, before dispatch."""
-    from generals.core.mapgen import generate_map
     geometries, resolved = {}, []
     for original in plans:
         plan = dict(original)
@@ -76,7 +77,7 @@ def resolve_geometries(plans):
         if 'geometry' not in plan and (config.width is None or config.height is None):
             key = (config, plan['map_seed'])
             if key not in geometries:
-                state = generate_map(config, plan['map_seed'])
+                state = initial_map(config, plan['map_seed'])
                 geometries[key] = [state.layout.width, state.layout.height]
             plan['geometry'] = geometries[key]
         resolved.append(plan)
@@ -171,6 +172,10 @@ class MatchRunner:
         used = self._validate(plans)
         results, timing = [], {}
         ready = {}
+        buckets = defaultdict(deque)
+        if not self.scalar and stop is None:
+            for index, plan in enumerate(plans):
+                buckets[_batch_key(plan)].append(index)
         offset = 0
         while offset < len(plans):
             if stop is not None and stop.is_set():
@@ -195,10 +200,13 @@ class MatchRunner:
                 self.execution_modes.add("isolated_batch")
                 key = _batch_key(plans[offset])
                 limit = self.batch_size or len(plans)
-                indices = [index for index in range(offset, len(plans))
-                           if index not in ready and _batch_key(plans[index]) == key][:limit]
+                bucket = buckets[key]
+                indices = [bucket.popleft() for _ in range(min(limit, len(bucket)))]
                 options = dict(max_ticks=self.max_ticks, device=self.device, backend=self.backend,
                     cpu_threads=self.cpu_threads, record_replays=self.record_replays, scalar=self.scalar)
+                config = MapConfig(**plans[offset]['map'])
+                options['initial_states'] = {(config, plans[index]['map_seed']):
+                    initial_map(config, plans[index]['map_seed']) for index in indices}
                 if self.worker is not None:
                     executor = self.worker.run_batch
                 else:

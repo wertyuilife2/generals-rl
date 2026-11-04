@@ -381,12 +381,11 @@ i64 baseline_bound_one(void *context,const GeneralsBatchView *view,int lane,i64 
         reinterpret_cast<const std::uint8_t *>(o.visible)+base,
         reinterpret_cast<const std::uint8_t *>(o.alive)+std::size_t(lane)*batch->players,
         batch->h,batch->w,batch->players,batch->policies[lane]->pid,o.tick[lane],o.terminated[lane]};
-    generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(metrics),10000000,true,o.tick[lane]);
     i64 action=0;int status=0;
     try {action=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]);}
     catch(const std::exception &e){error=e.what();status=2;}
     catch(...){error="native policy exception";status=2;}
-    guard.done(status);return action;
+    metrics[7]=status;return action;
 }
 void baseline_bound_result(void *context,const GeneralsFeedback *result) {
     baseline_batch_result(static_cast<PolicyBatch *>(context),result->moves,result->actions,

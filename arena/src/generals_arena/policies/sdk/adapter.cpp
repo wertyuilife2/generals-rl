@@ -18,6 +18,10 @@ EXPORT std::int64_t arena_host_act(void *instance,const ArenaObservation *o,Metr
     try { action=arena_act(instance,o); } catch(...) { status=2; }
     guard.done(status); return action;
 }
+// Native Arena supplies the watchdog once, outside this adapter.
+EXPORT std::int64_t arena_host_decide(void *instance,const ArenaObservation *o,Metrics *m) {
+    try {return arena_act(instance,o);} catch(...) {m->status=2;return 0;}
+}
 EXPORT void arena_host_destroy(void *instance,Metrics *m) {
     Guard guard(m,2000000000,false);
     int status=0;

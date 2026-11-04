@@ -85,7 +85,7 @@ def test_native_kills_do_not_transfer_and_statistics_use_recorded_counts(tmp_pat
         assert samples[a]['kill_index'] == samples[b]['kill_index'] == .5
         assert samples[store.reference]['survival_index'] == 0
         trace = json.loads(gzip.decompress(blob))
-        trace['digests'][0] = 'corrupt'
+        trace['actions'][0][0] = 1
         with pytest.raises(ValueError, match='checksum'):
             list(verified_replay(gzip.compress(json.dumps(trace).encode()), result))
         store.insert_plans([plan])

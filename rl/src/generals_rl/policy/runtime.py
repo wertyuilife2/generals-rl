@@ -3,6 +3,8 @@ from collections.abc import Mapping
 import json
 from numbers import Integral
 from pathlib import Path
+from threading import RLock
+from weakref import WeakValueDictionary
 
 import torch
 
@@ -18,12 +20,38 @@ from .precision import matmul_precision, validate_precision
 from .state import GameBatch
 
 
+_actors = WeakValueDictionary()
+_actor_lock = RLock()
+
+
+def _shared_actor(weights, config, device):
+    """Share frozen parameters only; history, knowledge and RNG remain per runtime."""
+    path = Path(weights).resolve()
+    stat = path.stat()
+    key = (str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns,
+           json.dumps(config, sort_keys=True), str(device))
+    with _actor_lock:
+        actor = _actors.get(key)
+        if actor is None:
+            with torch.random.fork_rng(devices=[]):
+                actor = build_actor(config['network'], config['features']).to(device)
+            saved = torch.load(path, weights_only=True, map_location='cpu')
+            if not isinstance(saved, Mapping) or not isinstance(saved.get('actor_state_dict'), Mapping):
+                raise ValueError('weights must contain actor_state_dict')
+            actor.load_state_dict(saved['actor_state_dict'], strict=True)
+            actor.eval().requires_grad_(False)
+            _actors[key] = actor
+        return actor
+
+
 class PolicyRuntime:
     """One actor with independent lane history, memory and counter-based RNG.
 
     Tensor batches stay on the actor device. Stable lane_ids identify states
     when callers filter or reorder a batch. Scalar controllers use lane zero.
     """
+    needs_feedback = False
+
     def __init__(self, *, weights, config_path, device="cpu", player_id=0, seed=0):
         self.config = json.loads(Path(config_path).read_text(encoding="utf-8"))
         self.features = FeatureConfig(**self.config["features"])
@@ -43,14 +71,7 @@ class PolicyRuntime:
             raise ValueError("policy supports CPU or CUDA inference")
         self.encoder = make_observation_encoder(self.features)
         self.action_space = make_action_space(self.features)
-        with torch.random.fork_rng(devices=[]):
-            self.actor = build_actor(network, self.config["features"]).to(self.device)
-        saved = torch.load(weights, weights_only=True, map_location="cpu")
-        if not isinstance(saved, Mapping) or not isinstance(saved.get("actor_state_dict"), Mapping):
-            raise ValueError("weights must contain actor_state_dict")
-        state = saved["actor_state_dict"]
-        self.actor.load_state_dict(state, strict=True)
-        self.actor.eval().requires_grad_(False)
+        self.actor = _shared_actor(weights, self.config, self.device)
         self.capacity = 0
         self.history = ObservationHistory(self.features.history_length)
         self.knowledge = None

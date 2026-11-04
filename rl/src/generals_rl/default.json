@@ -121,7 +121,7 @@
     "timeout_seconds": 1800,
     "every_n_updates": 14,
     "maps_per_opponent": 100,
-    "backend": "gpu",
+    "backend": "cpu",
     "final_top_k": 3,
     "final_games_multiplier": 2
   },

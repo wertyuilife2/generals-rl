@@ -5,7 +5,7 @@ import numpy as np
 
 from generals import Action, MapConfig, VecEnv
 from generals.protocol import MOVE_REASONS
-from generals.core.mapgen import generate_map
+from .cache import initial_map as generate_map
 from generals.core.observation import Observation, readonly
 from generals.core.state import MoveResult, PlayerStats
 
@@ -63,6 +63,9 @@ class _PolicyGroup:
         self.lanes = np.arange(len(self.seats))
         key = (entry["entrant_id"], slot, rules.map, rules.visibility)
         self.controller = cache[key] if cache is not None and key in cache else load_controller(entry, rules)
+        if cache is not None and key in cache:
+            if hasattr(cache, 'move_to_end'):
+                cache.move_to_end(key)
         self.batch = (not scalar or callable(getattr(self.controller, 'native_batch', None))) and all(callable(getattr(self.controller, name, None))
                                         for name in ("reset_batch", "act_batch"))
         self.controllers = []
@@ -116,6 +119,9 @@ class _PolicyGroup:
 
     def close(self):
         if self.cached:
+            release = getattr(self.controller, 'release_batch', None)
+            if release is not None:
+                release()
             return
         for controller in ([self.controller] if self.batch else self.controllers):
             close = getattr(controller, "close", None)
@@ -147,7 +153,8 @@ def _instances(entries, plans):
 
 @cpu_bounded
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
-                  record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True):
+                  record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True,
+                  initial_states=None):
     """Schedule one homogeneous batch in the native Arena executor.
 
     native=False benchmarks the public policy bridge, not a second match loop.
@@ -160,7 +167,8 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
     config, roles = _instances(entries, plans)
     maps = {plan['map_seed']: None for plan in plans}
     for seed in maps:
-        maps[seed] = generate_map(config, seed)
+        maps[seed] = (initial_states[(config, seed)] if initial_states is not None and (config, seed) in initial_states
+                      else generate_map(config, seed))
     states = [maps[plan['map_seed']] for plan in plans]
     config = replace(config, width=states[0].layout.width, height=states[0].layout.height)
     count, players = len(plans), config.players
@@ -189,7 +197,7 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
                                 item['entrant_id'] = plans[lane]['entrant_ids'][item['seat']]
                             record['decision_timing'] = metrics
                         from .replay import encode_native_trace
-                        blob = encode_native_trace(execution.query(1, lane)) if record_replays else None
+                        blob = encode_native_trace(execution.query_bytes(1, lane)) if record_replays else None
                         records[lane] = record, blob
     finally:
         for group in groups:

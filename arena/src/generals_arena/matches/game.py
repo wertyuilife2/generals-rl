@@ -40,7 +40,7 @@ class _Input:
         from generals_arena.policies.builtin import _native_library
         library = _native_library()
         yield PolicyBinding(PolicyABI(ABI_VERSION, self.actions.ctypes.data,
-            address(library.arena_wait_act), None, address(library.arena_input_one)), (self, library), None)
+            address(library.arena_wait_act), None, address(library.arena_input_one), 0), (self, library), None)
 
 
 class RecordedGame:
@@ -161,7 +161,8 @@ class RecordedGame:
 
     def replay_blob(self):
         from .replay import encode_native_trace
-        return encode_native_trace(self.trace(), self.forfeits)
+        raw = self._trace if self._closed else self.execution.query_bytes(1)
+        return encode_native_trace(raw, self.forfeits)
 
     def view(self, seat=None):
         key = -1 if seat is None else seat

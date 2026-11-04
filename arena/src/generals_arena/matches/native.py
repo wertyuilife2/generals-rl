@@ -20,7 +20,7 @@ class _Config(C.Structure):
         ('backend', BackendABI), ('policies', C.c_void_p), ('seats', C.c_void_p),
         *[(name, C.c_void_p) for name in ('joint', 'invalid', 'eliminations', 'active', 'ending')],
         ('journal', _Journal), ('metrics', C.c_void_p), ('cursor', C.c_void_p),
-        ('topologies', C.c_void_p), ('record', C.c_bool)]
+        ('topologies', C.c_void_p), ('record', C.c_int)]
 
 
 class _Status(C.Structure):
@@ -122,12 +122,15 @@ class NativeLoop:
         if not self.handle:
             raise RuntimeError('native match loop is closed')
 
-    def query(self, kind, lane=0, seat=-1):
+    def query_bytes(self, kind, lane=0, seat=-1):
         self._require_open()
         data = self.lib.arena_loop_query(self.handle, kind, lane, seat)
         if data is None:
             raise RuntimeError(self.lib.arena_loop_error().decode())
-        return json.loads(data)
+        return data
+
+    def query(self, kind, lane=0, seat=-1):
+        return json.loads(self.query_bytes(kind, lane, seat))
 
     def decision_timing(self, lane=0):
         from generals_arena.policies.native import metrics
@@ -205,35 +208,42 @@ def _array(pointer, dtype, shape):
 def callback_binding(group, env):
     """Python/NN policy adapter. Native execution still owns the match and observations."""
     from generals.protocol.native import PolicyBinding, ABI_VERSION, address
+    from .batch import _numpy
     failure = []
     b, p, n = env.num_envs, env.players, env.height * env.width
+    raw = result = None
     @C.CFUNCTYPE(C.c_int64, C.c_void_p, C.POINTER(_View), C.c_void_p)
     def act(context, view, output):
+        nonlocal raw, result
         try:
             if failure:
                 raise failure[0]
-            o = view.contents.observation
-            boards = {key: _array(getattr(o, key), dtype, shape) for key, dtype, shape in (
-                ('terrain', 'u1', (b,n)), ('structure', 'u1', (b,n)), ('owner', 'i2', (b,n)),
-                ('army', 'i8', (b,n)), ('alive', '?', (b,p)), ('fog_obstacles', '?', (b,n)),
-                ('has_kill', '?', (b,p)), ('warn_afk', '?', (b,p)), ('neutralize_in', 'f8', (b,p)),
-                ('tick', 'i8', (b,)), ('terminated', '?', (b,)), ('winner_id', 'i4', (b,)))}
-            raw = dict(state=boards, visible=_array(o.visible, '?', (b,n)),
-                stats=_array(o.stats, 'i8', (b,p,3)), general_pos=_array(o.general_pos, 'i4', (b,)),
-                active=_array(o.active, '?', (b,)), player_ids=group.seats,
-                width=env.width, height=env.height, visibility='local')
-            _array(output, 'i8', (b,))[:] = group.act(raw)
+            if raw is None:
+                # Storage and output addresses are stable for this native lease.
+                o = view.contents.observation
+                boards = {key: _array(getattr(o, key), dtype, shape) for key, dtype, shape in (
+                    ('terrain', 'u1', (b,n)), ('structure', 'u1', (b,n)), ('owner', 'i2', (b,n)),
+                    ('army', 'i8', (b,n)), ('alive', '?', (b,p)), ('fog_obstacles', '?', (b,n)),
+                    ('has_kill', '?', (b,p)), ('warn_afk', '?', (b,p)), ('neutralize_in', 'f8', (b,p)),
+                    ('tick', 'i8', (b,)), ('terminated', '?', (b,)), ('winner_id', 'i4', (b,)))}
+                raw = dict(state=boards, visible=_array(o.visible, '?', (b,n)),
+                    stats=_array(o.stats, 'i8', (b,p,3)), general_pos=_array(o.general_pos, 'i4', (b,)),
+                    active=_array(o.active, '?', (b,)), player_ids=group.seats,
+                    width=env.width, height=env.height, visibility='local')
+                result = _array(output, 'i8', (b,))
+            # CPU tensors share storage; device tensors explicitly synchronize
+            # their small action vector back to the host backend.
+            result[:] = _numpy(group.act(raw))
             return -1
         except BaseException as exc:
             failure[:] = [exc]
             return 0
+    moves, joint = np.zeros((b,p,9), np.int64), np.zeros((b,p), np.int64)
+    lanes = np.arange(b)
     @C.CFUNCTYPE(None, C.c_void_p, C.POINTER(_Feedback))
     def feedback(context, data):
         try:
             data = data.contents
-            moves = np.zeros((b,p,9), np.int64)
-            joint = np.zeros((b,p), np.int64)
-            lanes = np.arange(b)
             moves[lanes, group.seats] = _array(data.moves, 'i8', (b,9))
             joint[lanes, group.seats] = _array(data.actions, 'i8', (b,))
             group.feedback({'_moves': moves}, joint, _array(data.active, '?', (b,)))
@@ -242,7 +252,8 @@ def callback_binding(group, env):
     def check_error(lane, tick):
         if failure:
             raise failure[0]
-    binding = PolicyBinding(PolicyABI(ABI_VERSION, None, address(act), address(feedback), None),
+    needs_feedback = getattr(group.controller, 'needs_feedback', True)
+    binding = PolicyBinding(PolicyABI(ABI_VERSION, None, address(act), address(feedback) if needs_feedback else None, None),
                             (group, act, feedback, failure), check_error)
     binding.pending_error = lambda: check_error(0, 0)
     return binding

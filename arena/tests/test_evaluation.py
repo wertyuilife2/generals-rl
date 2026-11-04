@@ -110,7 +110,7 @@ def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(in_proc
     army.flat[0]=20
     state=GameState(MapLayout(np.zeros(shape,dtype=np.uint8)),structure,owner,army,
                     np.ones(3,dtype=np.bool_),np.array([0,1,80],dtype=np.int32))
-    monkeypatch.setattr('generals_arena.matches.batch.generate_map',lambda *args: state.copy())
+    monkeypatch.setattr('generals_arena.matches.runner.initial_map',lambda *args: state.copy())
     bundle=make_bundle(tmp_path/'bundle',players=(3,))
     settings=make_profile(MapConfig(25, 25,3,0,0),max_ticks=1,maps_per_opponent=1,
         opponents=[{'name':'aggressive','kind':'baseline','policy':'aggressive'}])
