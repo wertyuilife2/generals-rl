@@ -163,6 +163,7 @@ class GeneralsTask:
             "single_obs": self.history.frames[:, -1].clone(),
             "critic": self.observation_encoder.encode(batch, self.player_ids, privileged=True),
             "action_mask": self.action_space.mask(batch, self.player_ids),
+            "valid_cells": batch.valid_cells.clone(),
         }
         if self.knowledge is not None:
             observations["knowledge"] = self.knowledge.encode(batch.state["tick"], self.player_ids).flatten(1)

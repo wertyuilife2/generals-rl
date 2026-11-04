@@ -8,6 +8,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 from .backbones import RESNET_DEPTHS, ResNetBackbone, ViTBackbone
 from .layout import own_king_coordinates
+from .tokens import prepare_tokens, valid_mean, valid_token_features
 
 
 RESNET_TOTAL_PRESETS = {
@@ -115,10 +116,16 @@ def _build_total_backbone(kind, size, inputs, spatial_mode="dense", map_shape=(2
 
 
 class _ScaledInformationActor(nn.Module):
-    def __init__(self, layout, kind, size, alignment, head_channels, spatial_mode="dense"):
+    def __init__(self, layout, kind, size, alignment, head_channels, spatial_mode="dense",
+                 mask_padding_tokens=None):
         super().__init__()
+        if mask_padding_tokens is None:
+            mask_padding_tokens = kind == "vit" and spatial_mode == "dense"
+        if type(mask_padding_tokens) is not bool or mask_padding_tokens and (kind != 'vit' or spatial_mode != 'dense'):
+            raise ValueError('mask_padding_tokens requires a dense ViT')
         self.layout = layout
         self.spatial_mode = spatial_mode
+        self.mask_padding_tokens = mask_padding_tokens
         self.knowledge_channels = layout.knowledge_channels
         self.logical_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels + 2
         padding = (-self.logical_inputs) % alignment if alignment else 0
@@ -132,14 +139,17 @@ class _ScaledInformationActor(nn.Module):
         if spatial_mode == "pyramid":
             self.local_skip = nn.Conv2d(self.backbone.local_channels, head_channels, 1)
 
-    def forward(self, history, knowledge=None):
+    def forward(self, history, knowledge=None, valid_cells=None, tokens=None):
         layout, count = self.layout, history.shape[0]
         frames = layout.frames(history)
         if not count:
             layout.memory_maps(knowledge, 0)
             return history.new_empty((0, layout.num_actions))
         maps = layout.history_maps(history)
-        parts = [maps, layout.memory_maps(knowledge, count), own_king_coordinates(maps[:, -layout.map_planes:])]
+        valid = valid_cells if self.mask_padding_tokens else None
+        if self.mask_padding_tokens:
+            tokens = prepare_tokens(valid) if tokens is None else tokens
+        parts = [maps, layout.memory_maps(knowledge, count), own_king_coordinates(maps[:, -layout.map_planes:], valid_cells)]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
         if self.spatial_mode == "pyramid":
@@ -150,9 +160,12 @@ class _ScaledInformationActor(nn.Module):
                 coarse = coarse.contiguous(memory_format=torch.channels_last)
             spatial = F.silu(F.interpolate(coarse, size=(layout.height, layout.width),
                                           mode="bilinear", align_corners=False) + self.local_skip(local))
+        elif self.mask_padding_tokens:
+            features = valid_token_features(self.backbone.transformer, torch.cat(parts, 1), valid, tokens)
+            spatial = F.silu(self.projection(features))
         else:
             spatial = F.silu(self.projection(self.backbone(torch.cat(parts, 1))))
-        pooled = spatial.mean(dim=(-2, -1))
+        pooled = valid_mean(spatial, valid) if self.mask_padding_tokens else spatial.mean(dim=(-2, -1))
         context = self.context(torch.cat((pooled, frames[:, -1, -layout.public_dim:]), -1))
         fused = F.silu(spatial + context[..., None, None])
         moves = self.cell_head(fused).permute(0, 2, 3, 1).reshape(count, 8 * layout.cells)

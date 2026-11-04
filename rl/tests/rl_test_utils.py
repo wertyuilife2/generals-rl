@@ -15,7 +15,7 @@ def light_policy_config():
     return {"class_name": "generals_rl.spatial_ppo.LightSpatialPPOPolicy",
             "action_distribution": "categorical", "spatial_channels": 16,
             "history_length": 4, "players": 2, "map_width": 9, "map_height": 9,
-            "map_planes": 14, "public_dim": 13,
+            "map_planes": 13, "public_dim": 13,
             "actor_obs_normalization": False, "critic_obs_normalization": False}
 
 
@@ -25,12 +25,13 @@ def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory
     layout = ObservationLayout(width, height, history_length=history_length,
                                knowledge_channels=11 if memory else 0)
     frames = torch.randn(count, history_length, layout.frame_dim)
-    maps = frames[..., :14 * layout.cells].reshape(count, history_length, 14, layout.cells)
+    maps = frames[..., :13 * layout.cells].reshape(count, history_length, 13, layout.cells)
     maps[:, :, 4:6].zero_()
     maps[:, :, 4:6, width + 1] = 1
     values = {"policy": frames.flatten(1), "single_obs": frames[:, -1].clone(),
               "critic": frames[:, -1].clone(),
-              "action_mask": torch.ones(count, layout.num_actions, dtype=torch.bool)}
+              "action_mask": torch.ones(count, layout.num_actions, dtype=torch.bool),
+              "valid_cells": torch.ones(count, layout.cells, dtype=torch.bool)}
     if memory:
         values["knowledge"] = torch.randn(count, layout.knowledge_dim)
     return TensorDict(values, [count])

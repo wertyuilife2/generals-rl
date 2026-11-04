@@ -69,32 +69,32 @@ class OwnKingGeometryTests(unittest.TestCase):
     def test_relative_xy_latest_local_frame_guards_and_dtype(self):
         for dtype in (torch.float32, torch.float64):
             with self.subTest(dtype=dtype):
-                maps = torch.zeros(2, 56, 9, 9, dtype=dtype)
+                maps = torch.zeros(2, 52, 9, 9, dtype=dtype)
                 for lane, (row, column) in enumerate(((7, 3), (1, 6))):
-                    maps[lane, 46:48, row, column] = 1
+                    maps[lane, 43:45, row, column] = 1
                     # A visible enemy general and a self-owned plain cell are
                     # insufficient individually: both markers must intersect.
-                    maps[lane, 46, 0, 8] = 1
-                    maps[lane, 47, 8, 0] = 1
+                    maps[lane, 43, 0, 8] = 1
+                    maps[lane, 44, 8, 0] = 1
                 geometry = OwnKingRelativeGeometry(ObservationLayout(9, 9)).to(device=maps.device, dtype=dtype)
                 actual = geometry(maps)
                 self.assertEqual((actual.dtype, actual.device), (maps.dtype, maps.device))
-                self.assertEqual(tuple(actual.shape), (2, 58, 9, 9))
-                torch.testing.assert_close(actual[:, :56], maps, rtol=0, atol=0)
+                self.assertEqual(tuple(actual.shape), (2, 54, 9, 9))
+                torch.testing.assert_close(actual[:, :52], maps, rtol=0, atol=0)
                 rows, columns = torch.meshgrid(torch.arange(9, dtype=dtype),
                                                torch.arange(9, dtype=dtype), indexing='ij')
                 expected = torch.stack([torch.stack(((columns-column)/8, (rows-row)/8))
                                         for row, column in ((7, 3), (1, 6))])
                 torch.testing.assert_close(actual[:, -2:], expected, rtol=0, atol=0)
                 changed = maps.clone()
-                changed[:, :42] = torch.randn_like(changed[:, :42])
+                changed[:, :39] = torch.randn_like(changed[:, :39])
                 torch.testing.assert_close(geometry(changed)[:, -2:], expected, rtol=0, atol=0)
                 # Latest missing marker must not fall back to any old frame.
                 changed[:, 4:6, 4, 4] = 1
-                changed[:, 46] = 0
+                changed[:, 43] = 0
                 self.assertTrue(bool(geometry(changed)[:, -2:].eq(0).all()))
                 changed = maps.clone()
-                changed[:, 46:48, 4, 4] = 1
+                changed[:, 43:45, 4, 4] = 1
                 self.assertTrue(bool(geometry(changed)[:, -2:].eq(0).all()))
                 self.assertFalse(geometry.state_dict())
                 self.assertEqual(sum(p.numel() for p in geometry.parameters()), 0)
@@ -118,7 +118,7 @@ class OwnKingGeometryTests(unittest.TestCase):
         self.assertEqual(sum(p.numel() for p in enabled.parameters()) -
                          sum(p.numel() for p in base.parameters()), 288)
         self.assertIsInstance(enabled.actor.trunk[0], OwnKingRelativeGeometry)
-        self.assertEqual(enabled.actor.trunk[1].in_channels, 58)
+        self.assertEqual(enabled.actor.trunk[1].in_channels, 54)
         self.assertEqual(enabled.actor.trunk[3].dilation, (1, 1))
         self.assertIs(enabled.actor.forward.__func__, base.actor.forward.__func__)
         self.assertTrue(enabled.semantics.endswith('_own_king_relative_xy_v1'))

@@ -226,7 +226,7 @@ class StudentMicrobatchTests(unittest.TestCase):
         torch.manual_seed(928)
         obs = map_observations(7)
         if kind == "map":
-            models = [ScaledInformationSpatialPPOPolicy(obs, MAP_GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m", knowledge_channels=11)
+            models = [ScaledInformationSpatialPPOPolicy(obs, {key: [*value, "valid_cells"] for key, value in MAP_GROUPS.items()}, 649, map_width=9, map_height=9, backbone="vit", model_size="1m", knowledge_channels=11)
                       for _ in range(2)]
         else:
             groups = {"policy": ["policy"], "critic": ["critic"]}

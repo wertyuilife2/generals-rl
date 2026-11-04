@@ -33,12 +33,12 @@ class SpatialPPOPolicy(CategoricalActorCritic):
     The base supplies sampling, log probabilities and the runner lifecycle.
     Observation normalization, BatchNorm, Dropout and recurrence are unsupported.
     """
-    semantics = "spatial_p2_hist4_current_public13_v1"
+    semantics = "spatial_p2_hist4_cells13_current_public13_v2"
     trunk_factory = staticmethod(SpatialTrunk)
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=32,
                  residual_blocks=4, history_length=4, players=2, map_width=23,
-                 map_height=23, map_planes=14, public_dim=13,
+                 map_height=23, map_planes=13, public_dim=13,
                  action_distribution="categorical", actor_obs_normalization=False,
                  critic_obs_normalization=False,
                  wait_move_factorization=False, **kwargs):
@@ -52,8 +52,8 @@ class SpatialPPOPolicy(CategoricalActorCritic):
             raise ValueError("categorical action vocabulary must match board geometry")
         _validate_history_length(history_length)
         geometry = (players, map_width, map_height, map_planes, public_dim)
-        if any(not isinstance(value, int) or isinstance(value, bool) for value in geometry) or (players, map_planes, public_dim) != (2, 14, 13):
-            raise ValueError("spatial policy requires P2, 14 map planes and 13 public features")
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in geometry) or (players, map_planes, public_dim) != (2, 13, 13):
+            raise ValueError("spatial policy requires P2, 13 map planes and 13 public features")
         for value in (spatial_channels, residual_blocks):
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError("spatial channels and residual blocks must be positive integers")
@@ -110,7 +110,7 @@ class SpatialPPOPolicy(CategoricalActorCritic):
 
 class LightSpatialPPOPolicy(SpatialPPOPolicy):
     """Two standard convolutions, with optional own-general coordinates."""
-    semantics = "light_spatial_p2_hist4_current_public13_standard2_v1"
+    semantics = "light_spatial_p2_hist4_cells13_current_public13_standard2_v2"
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16,
                  own_king_geometry=False, **kwargs):

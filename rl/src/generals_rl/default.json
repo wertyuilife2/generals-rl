@@ -38,12 +38,14 @@
     "obs_groups": {
       "policy": [
         "policy",
-        "knowledge"
+        "knowledge",
+        "valid_cells"
       ],
       "critic": [
         "critic",
         "policy",
-        "knowledge"
+        "knowledge",
+        "valid_cells"
       ]
     },
     "robogauge": {
@@ -57,7 +59,7 @@
       "map_height": 23,
       "history_length": 4,
       "players": 2,
-      "map_planes": 14,
+      "map_planes": 13,
       "public_dim": 13,
       "knowledge_channels": 11,
       "critic_actor_information": true,
@@ -66,13 +68,13 @@
       "actor_obs_normalization": false,
       "critic_obs_normalization": false,
       "wait_move_factorization": true,
-      "critic_projection_channels": 0,
       "input_channel_alignment": 4,
       "head_channels": 128,
       "inference_chunk_size": 2048,
       "amp_bfloat16": true,
       "spatial_mode": "dense",
-      "compile_forward": true
+      "compile_forward": true,
+      "mask_padding_tokens": true
     },
     "algorithm": {
       "class_name": "generals_rl.student_ppo.StudentPPO",
@@ -100,7 +102,8 @@
       "policy",
       "critic",
       "action_mask",
-      "knowledge"
+      "knowledge",
+      "valid_cells"
     ]
   },
   "self_play": {
@@ -128,7 +131,7 @@
     "final_games_multiplier": 2
   },
   "torch_threads": 1,
-  "run_id": "official-31.4.5-vit1m",
+  "run_id": "official-31.4.5-vit1m-direct",
   "matmul_precision": "high",
   "training_control": {
     "max_seconds": null,

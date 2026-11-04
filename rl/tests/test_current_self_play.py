@@ -28,7 +28,7 @@ class ProbePolicy(torch.nn.Module):
 
     def action_probabilities(self, observations, *, is_teacher=False, validate_mask=True):
         assert not is_teacher
-        assert set(observations.keys()) <= {"policy", "single_obs", "action_mask", "knowledge"}
+        assert set(observations.keys()) <= {"policy", "single_obs", "action_mask", "knowledge", "valid_cells"}
         self.inputs.append({key: value.clone() for key, value in observations.items()})
         self.validate_masks.append(validate_mask)
         mask = observations["action_mask"]

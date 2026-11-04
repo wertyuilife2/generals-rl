@@ -97,7 +97,7 @@ def test_terminal_actor_features_publish_enemy_city_count():
     with VecEnv.from_states([state]) as backend:
         batch = GameBatch.from_backend(backend, 'cpu')
         features = LocalObservationEncoder(2000).encode(batch, torch.tensor([0]))
-        assert features[0, 14 * state.layout.size + 6].item() == pytest.approx(1 / state.layout.size)
+        assert features[0, 13 * state.layout.size + 6].item() == pytest.approx(1 / state.layout.size)
 
 
 def test_without_map_bank_initial_lanes_are_independent_and_repeatable():

@@ -1,6 +1,6 @@
 # Generals PPO self-play
 
-默认训练沿用 F03 消融选出的 **ViT 1M dense、H4/K11、recent8 历史对手池与 gamma 课程**，并迁移到官网 31.4.5 规则及随机 1v1 地图。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前代码只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。
+默认训练使用 **纯 ViT Actor／Critic、H4/K11、recent8 历史对手池与 gamma 课程**，运行官网 31.4.5 规则及随机 1v1 地图。Actor／Critic 都直接进行每格 patch embedding 和 Transformer 编码，参数独立；Critic 的前置 CNN 已移除。自对弈和优化配方沿用 F03，本次网络改造的长期训练效果尚待评估。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前代码只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。
 
 新输入与地图尚未进行大规模效果／吞吐实验，不能把旧 F03 的胜率和最优 batch 结论当作新默认的验证。旧模型需用对应冻结源码与旧规则运行，不提供静默兼容转换。
 
@@ -32,8 +32,8 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 
 | 项目 | 默认值 |
 | --- | --- |
-| 游戏与输入 | 官方随机 18–23 格长方形、2 人；RL 填充到 23×23，14 通道局部 H4 combat 历史＋K11；独立特权 critic |
-| 模型 | ViT 1M dense，actor/critic 参数独立 |
+| 游戏与输入 | 官方随机 18–23 格长方形、2 人；RL 填充到 23×23，13 通道局部 H4 combat 历史＋K11；独立 `valid_cells` 布尔掩码；特权 critic |
+| 模型 | 纯 ViT 1M dense，Actor／Critic 参数独立；23×23 配置实际共 1,142,154 参数 |
 | 采样 | 每 rank 16,384 个环境，全局 N=131,072；T=32 |
 | PPO | E=4，每 epoch 64 个逻辑 minibatch；全局 B=65,536，每 rank B=8,192 |
 | 激活内存 | 每 rank 物理 minibatch=4096，梯度累积为原逻辑 minibatch；推理 chunk=2048 |
@@ -49,14 +49,14 @@ iteration 从 0 起算。每次 PPO 轮包含一次采样、GAE 和完整 E4；�
 默认配置通过 `{"runner": {"storage_history": {"policy": 4}}}` 无损去重 H4
 rollout 历史：每 tick 只存当前帧，额外保留 rollout 起点的三帧上下文和 episode 边界，
 在取 minibatch 时恢复原观察。帧数须与 `task.history_length` 一致；省略该配置则完整保存。
-它只改变采样缓存的表示，可用于原 checkpoint 的 `--resume`。
+它只改变采样缓存的表示，可在相同源码与网络结构下继续 `--resume`；本次纯 ViT／十三通道结构需要从头训练。
 在每卡 N=16,384、T=32、23×23 画布下，每卡节省约42.1 GiB，允许测试更大的物理批；
 逻辑 minibatch、PPO epochs 和总采样预算仍单独配置。正确性、显存和八卡吞吐实测见
 [历史去重测试](../doc/history_storage_20261103.md)。
 
 默认 `runner.storage_codec` 为
 `"storage_codec": "generals_rl.rollout_codec.GeneralsObservationCodec"`，
-可将当前P2十四通道观察中的二值地图／K11标志和action mask按位打包；
+可将当前 P2 十三通道观察中的二值地图／K11 标志，以及 action mask／valid_cells 分别按位打包；
 连续特征及公开统计保留FP32，minibatch取样时恢复原观察。
 该选项与历史去重独立，当前默认启用，只影响训练采样缓存，不进入env／Arena协议或导出策略包。
 可将 `storage_codec` 设为 `null` 关闭位打包，将 `storage_history` 设为 `null` 关闭历史去重。
@@ -66,7 +66,23 @@ CUDA融合取样与解码，CPU使用相同张量表达式；配置、正确性�
 Actor 只接收该座位的局部观测、历史、知识和公开统计；critic 的完整棋盘不传给 actor。H4 是四帧近期输入，recent8 是八个历史对手，二者不同。知识和历史按座位及 episode 隔离，初始随机对手随候选池更新淘汰，进行中对局继续使用其原对手。
 默认 actor/critic 的运行统计 observation normalization 均关闭；各字段的固定缩放由 `policy/` 中的特征构造实现。
 
-14 个棋盘通道包含有效地图区域和迷雾障碍提示；填充格不进入行动掩码，统计按真实地图面积缩放。combat 使用行动前的当前兵力，0/1 兵来源不可行动。K11 记录曾经看见的信息及年龄，不把将军身份当作永久属性：将军转换／交换后会根据新观测更新。训练与导出共用这些构造器；部署包将原始地图填充后推理，再将动作还原为真实宽度的格点编码。CPU/CUDA 都有多尺寸逐 tick 的训练／部署输入与动作一致性测试。
+13 个棋盘通道包含迷雾障碍提示，有效地图区域通过独立 `valid_cells` 传递；填充格不进入行动掩码，统计按真实地图面积缩放。combat 使用行动前的当前兵力，0/1 兵来源不可行动。K11 记录曾经看见的信息及年龄，不把将军身份当作永久属性：将军转换／交换后会根据新观测更新。训练与导出共用这些构造器；部署包将原始地图填充后推理，再将动作还原为真实宽度的格点编码。CPU/CUDA 都有多尺寸逐 tick 的训练／部署输入与动作一致性测试。
+
+Dense ViT 默认开启 `runner.policy.mask_padding_tokens=true`：Actor／Critic 的 Transformer 排除填充格，空间汇聚只使用有效格点。`valid_cells` 是 `[batch, cells]` 的独立布尔输入，不作为可学习地图通道，不堆叠到 H4 历史。训练、自对弈、rollout 取样与导出推理共同传递此字段；每次终局观察保留其自己的掩码。CUDA 混合精度通过 PyTorch 的变长 Flash Attention 打包有效 token，CPU/FP32 使用 attention mask，保留原画布位置编码与动作编码。
+
+Actor 的空间输入为局部 H4（52 通道）、K11 和将军相对坐标（2 通道）；Critic 为完整当前地图（13 通道）、同一份局部 H4 与 K11。两者直接进入同一份 ViT 编码实现，各自实例化权重，随后使用动作头／价值头及公开统计。Critic 不再使用 history projection、32 通道中间瓶颈或 `3×3` spatial stem；`critic_projection_channels` 参数已删除。旧 checkpoint 使用对应的归档源码，新架构标识为 `official_p2_cells13_hist4_knowledge11_direct_backbone_v1`，新训练默认运行名为 `official-31.4.5-vit1m-direct`。
+
+本机改造对照（2026-11-04，RTX 4090、PyTorch 2.13.0+cu130）：官方随机地图填充至 23×23，ViT1M、N128/T8、E4、逻辑 minibatch256／物理128，当前模型自对弈，BF16＋编译。完整 PPO 先预热3轮、测量5轮，包含采样、GAE和更新，排除评估、checkpoint／日志I/O及另跑的profile。网络分项固定同一批观察，预热后取9组中位数。
+
+| 实现 | Actor 推理 ms/批 | Critic 前向 ms/批 | Actor＋Critic 前向反向 ms/批 | 完整 PPO transitions/s |
+|---|---:|---:|---:|---:|
+| 改造前默认，未屏蔽 padding | 2.586 | 2.610 | 20.718 | 1231 |
+| 改造前，仅开启 padding mask | 2.025 | 2.053 | 13.999 | 1747 |
+| 当前纯 ViT＋独立 mask | 1.969 | 1.831 | 13.606 | 1778 |
+
+完整 PPO 相对旧默认快约44%，相对旧 masked 版本约1.8%；本次主要速度收益来自排除padding，去除前置CNN的额外收益较小。Profile 中更新窗口的 Flash Attention 反向自用GPU时间从7.68ms降至3.94ms，`aten::mm`从7.99ms降至4.68ms；当前主要计算仍在Transformer。另用记录输入形状的critic profile确认：两个3×3卷积已消失，只剩patch embedding和输出投影的1×1映射。
+
+十三通道布局不意味着位打包存储必然更小：相同N128/T8的rollout实际分配从21,964,576增至22,033,184字节（约+0.31%），来自独立mask的额外位打包字段。改造前源码、输入配置、原始计时和profile保存在本机 `outputs/analysis/pure_vit_20261104/`；这些短程效率结果不代表H200吞吐或长期训练效果结论。
 
 ## 配置覆盖与恢复
 

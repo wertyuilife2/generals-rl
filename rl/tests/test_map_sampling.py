@@ -42,6 +42,20 @@ class MapSamplingTests(unittest.TestCase):
             with self.subTest(size=invalid), self.assertRaises(ValueError):
                 TaskConfig(width=9, height=9, random_maps=False, map_pool_size=invalid)
 
+    def test_terminal_valid_cells_survive_random_map_resets(self):
+        with GeneralsTask(TaskConfig(num_envs=4, map_pool_size=16, opponent="wait",
+                                      max_episode_steps=1, seed=42)) as task:
+            before = task.get_observations()["valid_cells"].clone()
+            step = task.step(torch.zeros(4, dtype=torch.long))
+            self.assertTrue(step.truncated.all())
+            self.assertEqual(step.terminal_observations["valid_cells"].dtype, torch.bool)
+            torch.testing.assert_close(step.terminal_observations["valid_cells"], before)
+            returned = step.observations["valid_cells"].clone()
+            for _ in range(4):
+                task.reset()
+            torch.testing.assert_close(step.terminal_observations["valid_cells"], before)
+            torch.testing.assert_close(step.observations["valid_cells"], returned)
+
     def test_cpu_ended_lanes_preserve_native_bindings_and_next_tick_matches_core(self):
         env = self.env()
         sampler = MapSampler(env, self.config, 64, seed=19)

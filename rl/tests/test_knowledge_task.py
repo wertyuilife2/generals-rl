@@ -30,7 +30,7 @@ class KnowledgePolicy(torch.nn.Module):
 
     def action_probabilities(self, observations, *, is_teacher=False):
         assert not is_teacher
-        assert set(observations.keys()) == {"policy", "single_obs", "action_mask", "knowledge"}
+        assert set(observations.keys()) == {"policy", "single_obs", "action_mask", "knowledge", "valid_cells"}
         self.inputs.append({key: value.clone() for key, value in observations.items()})
         weights = observations["action_mask"].float()
         return weights / weights.sum(1, keepdim=True)

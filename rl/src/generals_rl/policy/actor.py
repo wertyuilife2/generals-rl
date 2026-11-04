@@ -20,12 +20,12 @@ def build_actor(network, features):
             "knowledge_channels", 11 if features.get("persistent_knowledge", False) else 0))
         layout = ObservationLayout(features["width"], features["height"],
                                    history_length=features.get("history_length", 4),
-                                   map_planes=features.get("map_planes", 14),
+                                   map_planes=features.get("map_planes", 13),
                                    public_dim=features.get("public_dim", 13), knowledge_channels=channels)
     else:
         raise TypeError("features must be a mapping or ObservationLayout")
-    if type(players) is not int or (players, layout.map_planes, layout.public_dim) != (2, 14, 13):
-        raise ValueError("actors require P2 fourteen-plane/public13 features")
+    if type(players) is not int or (players, layout.map_planes, layout.public_dim) != (2, 13, 13):
+        raise ValueError("actors require P2 thirteen-plane/public13 features")
     family = network.get("family")
     common = {"family", "amp_bfloat16", "wait_move_factorization"}
     if "amp_bfloat16" in network and type(network["amp_bfloat16"]) is not bool:
@@ -33,14 +33,14 @@ def build_actor(network, features):
     if "wait_move_factorization" in network and type(network["wait_move_factorization"]) is not bool:
         raise TypeError("wait_move_factorization must be boolean")
     if family == "scaled":
-        allowed = common | {"backbone", "model_size", "spatial_mode", "head_channels", "input_channel_alignment", "knowledge_channels"}
+        allowed = common | {"backbone", "model_size", "spatial_mode", "head_channels", "input_channel_alignment", "knowledge_channels", "mask_padding_tokens"}
         if set(network) - allowed:
             raise ValueError(f"unsupported scaled actor options: {sorted(set(network) - allowed)}")
         if layout.history_length != 4 or layout.knowledge_channels != 11 or feature_values.get("persistent_knowledge", True) is not True:
             raise ValueError("scaled actors require H4/K11 persistent knowledge")
         if network.get("wait_move_factorization", True) is not True:
             raise ValueError("scaled actors require WAIT/MOVE factorization")
-        kind = network.get("backbone", "resnet")
+        kind = network.get("backbone", "vit")
         if kind not in ("vit", "resnet"):
             raise ValueError("scaled backbone must be vit or resnet")
         size, mode = network.get("model_size", "1m"), network.get("spatial_mode", "dense")
@@ -51,7 +51,8 @@ def build_actor(network, features):
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
         from .scaled import _ScaledInformationActor
-        return _ScaledInformationActor(layout, kind, size, alignment, head, mode)
+        return _ScaledInformationActor(layout, kind, size, alignment, head, mode,
+                                       network.get("mask_padding_tokens"))
     if family not in ("spatial", "lightcnn", "information", "optimized"):
         raise ValueError("unsupported actor family")
     allowed = common | {"spatial_channels", "residual_blocks", "own_king_geometry", "knowledge_channels", "input_channel_alignment"}

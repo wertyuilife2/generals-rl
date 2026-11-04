@@ -6,7 +6,7 @@ from .state import GameBatch
 
 
 class LocalObservationEncoder:
-    semantics = "official_31_4_5_local_v1"
+    semantics = "official_31_4_5_local_cells13_v2"
     channels = ("visible", "plain", "mountain", "city", "general", "self",
                 "enemy", "empty", "neutral", "log_army")
 
@@ -36,7 +36,6 @@ class LocalObservationEncoder:
         # including in multiplayer games. Hidden identities stay zero.
         identities = (owner[:, None] == order[:, :, None]) & visible[:, None]
         maps = torch.cat((maps, army[:, None], identities.float(),
-                          batch.valid_cells[:, None].float(),
                           batch.fog_obstacles(player_ids, visible)[:, None].float()), 1).flatten(1)
         # Relative player order starts at the learner; all army/territory/alive
         # totals are public. Opponent city counts are unknown in local mode.

@@ -1,4 +1,4 @@
-"""Frozen inference must preserve the original Scaled ViT checkpoint numerics."""
+"""Exported actors preserve training weights, outputs and gradients."""
 from pathlib import Path
 import subprocess
 import sys
@@ -22,12 +22,13 @@ NETWORK = {"family": "scaled", "backbone": "vit", "model_size": "1m", "head_chan
 FEATURES = {"width": 9, "height": 9, "players": 2, "history_length": 4,
             "max_episode_steps": 800,             "combat_features": True, "king_threat_distance": True, "persistent_knowledge": True}
 GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
+SCALED_GROUPS = {key: [*value, "valid_cells"] for key, value in GROUPS.items()}
 
 
 def observations(count=3):
     generator = torch.Generator().manual_seed(108)
-    frames = torch.rand(count, 4, 1147, generator=generator)
-    maps = frames[..., :1134].reshape(count, 4, 14, 9, 9)
+    frames = torch.rand(count, 4, 1066, generator=generator)
+    maps = frames[..., :1053].reshape(count, 4, 13, 9, 9)
     maps[:, :, 4:6].zero_()
     for tick in range(4):
         maps[:, tick, 4:6, tick, tick] = 1
@@ -42,15 +43,15 @@ def observations(count=3):
     if count > 2:
         mask[2, 0] = False
     return TensorDict({"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-                       "critic": torch.rand(count, 1147, generator=generator),
+                       "critic": torch.rand(count, 1066, generator=generator),
                        "knowledge": torch.rand(count, 891, generator=generator),
-                       "action_mask": mask}, [count])
+                       "action_mask": mask, "valid_cells": torch.ones(count, 81, dtype=torch.bool)}, [count])
 
 
-def old_policy(obs, **options):
+def training_policy(obs, **options):
     return ScaledInformationSpatialPPOPolicy(
-        obs, GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m",
-        critic_projection_channels=0, compile_forward=False, **options).eval()
+        obs, SCALED_GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m",
+        compile_forward=False, **options).eval()
 
 
 class PolicyActorTests(unittest.TestCase):
@@ -67,13 +68,13 @@ class PolicyActorTests(unittest.TestCase):
         obs = observations()
         with torch.random.fork_rng(devices=[]):
             torch.manual_seed(117)
-            original = old_policy(obs, amp_bfloat16=True)
+            original = training_policy(obs, amp_bfloat16=True)
             frozen = build_actor(NETWORK, FEATURES)
         self.assertIs(type(frozen), type(original.actor))
         self.assertTrue(frozen.training)
         self.assertTrue(all(parameter.requires_grad for parameter in frozen.parameters()))
         self.assertFalse(any("critic" in key for key in frozen.state_dict()))
-        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 527_753)
+        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 527_369)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic_training_checkpoint.pt"
             torch.save({"model_state_dict": original.state_dict()}, path)
@@ -85,7 +86,7 @@ class PolicyActorTests(unittest.TestCase):
             self.assertEqual(value.shape, actor_state[key].shape, key)
         frozen.load_state_dict(actor_state, strict=True)
         with torch.inference_mode():
-            logits = frozen(obs["policy"], obs["knowledge"])
+            logits = frozen(obs["policy"], obs["knowledge"], obs["valid_cells"])
             torch.testing.assert_close(logits, original._forward(obs), rtol=0, atol=0)
             probabilities = action_probabilities(logits, obs["action_mask"])
             torch.testing.assert_close(probabilities, original.action_probabilities(obs), rtol=0, atol=0)
@@ -99,7 +100,7 @@ class PolicyActorTests(unittest.TestCase):
         for size in ("1m", "10m", "100m"):
             with self.subTest(size=size), torch.device("meta"):
                 original = ScaledInformationSpatialPPOPolicy(
-                    obs, GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size=size, critic_projection_channels=0)
+                    obs, SCALED_GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size=size)
                 frozen = build_actor(dict(NETWORK, model_size=size), FEATURES)
                 self.assertEqual({key: value.shape for key, value in original.actor.state_dict().items()},
                                  {key: value.shape for key, value in frozen.state_dict().items()})
@@ -121,7 +122,7 @@ class PolicyActorTests(unittest.TestCase):
         for kind in ("vit", "resnet"):
             for mode in ("dense", "pyramid"):
                 options = {"backbone": kind, "spatial_mode": mode}
-                cases.append(("scaled", ScaledInformationSpatialPPOPolicy, options, options, GROUPS))
+                cases.append(("scaled", ScaledInformationSpatialPPOPolicy, options, options, SCALED_GROUPS))
         for family, policy_class, options, network, groups in cases:
             with self.subTest(family=family, network=network):
                 original = policy_class(obs, groups, 649, map_width=9, map_height=9, **options)
@@ -133,7 +134,10 @@ class PolicyActorTests(unittest.TestCase):
                     self.assertTrue(actor.training)
                     self.assertTrue(all(parameter.requires_grad for parameter in actor.parameters()))
                 original_probabilities = original.action_probabilities(obs)
-                logits = shared(obs["policy"], obs["knowledge"]) if family in ("information", "optimized", "scaled") else shared(obs["policy"])
+                if family == "scaled":
+                    logits = shared(obs["policy"], obs["knowledge"], obs["valid_cells"])
+                else:
+                    logits = shared(obs["policy"], obs["knowledge"]) if family in ("information", "optimized") else shared(obs["policy"])
                 probabilities = action_probabilities(logits, obs["action_mask"], factorized=original.wait_move_factorization)
                 torch.testing.assert_close(probabilities, original_probabilities, rtol=0, atol=0)
                 (-original_probabilities[:, 0].log().mean()).backward()
@@ -143,7 +147,7 @@ class PolicyActorTests(unittest.TestCase):
                     torch.testing.assert_close(parameter.grad, reference.grad, rtol=0, atol=0, msg=name)
         # The export's generic scaled family uses the training constructor default.
         default_actor = build_actor({"family": "scaled"}, FEATURES)
-        original = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9)
+        original = ScaledInformationSpatialPPOPolicy(obs, SCALED_GROUPS, 649, map_width=9, map_height=9)
         self.assertEqual({key: value.shape for key, value in default_actor.state_dict().items()},
                          {key: value.shape for key, value in original.actor.state_dict().items()})
 
@@ -160,12 +164,12 @@ class PolicyActorTests(unittest.TestCase):
 
     def test_unaligned_input_and_smaller_head_also_match_original_actor(self):
         obs = observations()
-        original = old_policy(obs, head_channels=16, input_channel_alignment=0)
+        original = training_policy(obs, head_channels=16, input_channel_alignment=0)
         frozen = build_actor(dict(NETWORK, head_channels=16, input_channel_alignment=0),
                              ObservationLayout(9, 9, knowledge_channels=11))
         frozen.load_state_dict(original.actor.state_dict(), strict=True)
         with torch.inference_mode():
-            torch.testing.assert_close(frozen(obs["policy"], obs["knowledge"]),
+            torch.testing.assert_close(frozen(obs["policy"], obs["knowledge"], obs["valid_cells"]),
                                        original._forward(obs), rtol=0, atol=0)
 
     def test_factorized_greedy_wait_gate_is_not_flat_joint_argmax(self):
@@ -183,7 +187,7 @@ class PolicyActorTests(unittest.TestCase):
     def test_layout_geometry_and_empty_batch(self):
         obs = observations()
         layout = ObservationLayout(9, 9, knowledge_channels=11)
-        current = layout.history_maps(obs["policy"])[:, -14:]
+        current = layout.history_maps(obs["policy"])[:, -13:]
         geometry = own_king_coordinates(current)
         torch.testing.assert_close(geometry[0, :, 3, 3], torch.zeros(2), rtol=0, atol=0)
         torch.testing.assert_close(geometry[0, :, 0, 0], torch.tensor([-3 / 8, -3 / 8]), rtol=0, atol=0)
@@ -226,12 +230,12 @@ assert not any(key.startswith('critic.') for key in actor.state_dict())
     @unittest.skipUnless(torch.cuda.is_available() and torch.cuda.is_bf16_supported(), "BF16 CUDA unavailable")
     def test_cuda_bfloat16_logits_probabilities_and_greedy_are_exact(self):
         obs = observations().cuda()
-        original = old_policy(obs, amp_bfloat16=True).cuda()
+        original = training_policy(obs, amp_bfloat16=True).cuda()
         frozen = build_actor(NETWORK, FEATURES).cuda()
         frozen.load_state_dict(original.actor.state_dict(), strict=True)
         with torch.inference_mode():
             with torch.autocast("cuda", dtype=torch.bfloat16):
-                logits = frozen(obs["policy"], obs["knowledge"]).float()
+                logits = frozen(obs["policy"], obs["knowledge"], obs["valid_cells"]).float()
             torch.testing.assert_close(logits, original._forward(obs), rtol=0, atol=0)
             torch.testing.assert_close(action_probabilities(logits, obs["action_mask"]),
                                        original.action_probabilities(obs), rtol=0, atol=0)

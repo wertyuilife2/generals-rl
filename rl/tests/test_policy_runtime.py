@@ -108,7 +108,7 @@ def test_policy_inputs_history_knowledge_and_actions_match_real_training_task(po
             selected = controller.act(observe(current, seat))
             expected = task.get_observations()
             actual = captured[-1]
-            assert set(actual) == {"policy", "single_obs", "action_mask", "knowledge"}
+            assert set(actual) == {"policy", "single_obs", "action_mask", "knowledge", "valid_cells"}
             for key in actual:
                 torch.testing.assert_close(actual[key], expected[key], rtol=0, atol=0)
             torch.testing.assert_close(controller.history.frames, task.history.frames, rtol=0, atol=0)
@@ -116,8 +116,8 @@ def test_policy_inputs_history_knowledge_and_actions_match_real_training_task(po
                 torch.testing.assert_close(getattr(controller.knowledge, name), getattr(task.knowledge, name), rtol=0, atol=0)
             with torch.inference_mode():
                 expected_action = training.act_inference(TensorDict(expected, [1]))
-                logits = controller.actor(actual["policy"], actual["knowledge"]).float()
-                trained_logits = training.actor(expected["policy"], expected["knowledge"]).float()
+                logits = controller.actor(actual["policy"], actual["knowledge"], actual["valid_cells"]).float()
+                trained_logits = training.actor(expected["policy"], expected["knowledge"], expected["valid_cells"]).float()
                 torch.testing.assert_close(logits, trained_logits, rtol=0, atol=0)
             assert selected.encode() == int(expected_action.item())
             assert float(actual["single_obs"][0, -5]) == (start_tick + step)/1024

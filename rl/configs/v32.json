@@ -57,7 +57,7 @@
       "players": 2,
       "map_width": 23,
       "map_height": 23,
-      "map_planes": 14,
+      "map_planes": 13,
       "public_dim": 13,
       "actor_obs_normalization": false,
       "critic_obs_normalization": false,

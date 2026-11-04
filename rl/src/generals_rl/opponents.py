@@ -71,7 +71,8 @@ class CurrentSelfPlayOpponent:
     def _cache_observations(self, batch, action_space):
         values = {"policy": self.history.frames.flatten(1),
                   "single_obs": self.history.frames[:, -1],
-                  "action_mask": action_space.mask(batch, self._player_ids)}
+                  "action_mask": action_space.mask(batch, self._player_ids),
+                  "valid_cells": batch.valid_cells.clone()}
         if self.knowledge is not None:
             values["knowledge"] = self.knowledge.encode(batch.state["tick"], self._player_ids).flatten(1)
         self.observations = values
@@ -238,7 +239,8 @@ class SelfPlayOpponent:
                 snapshot = self._snapshots[snapshot_id]
                 values = {"policy": self.histories[pid].frames.index_select(0, rows).flatten(1),
                           "single_obs": current.index_select(0, rows),
-                          "action_mask": mask.index_select(0, rows)}
+                          "action_mask": mask.index_select(0, rows),
+                          "valid_cells": batch.valid_cells.index_select(0, rows)}
                 if knowledge is not None:
                     values["knowledge"] = knowledge.index_select(0, rows)
                 observations = TensorDict(values, batch_size=[rows.numel()], device=batch.device)

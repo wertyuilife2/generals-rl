@@ -9,7 +9,7 @@ class ObservationLayout:
     width: int
     height: int
     history_length: int = 4
-    map_planes: int = 14
+    map_planes: int = 13
     public_dim: int = 13
     knowledge_channels: int = 0
 
@@ -66,10 +66,12 @@ class ObservationLayout:
         return replace(self, width=width, height=height)
 
 
-def own_king_coordinates(current_maps):
+def own_king_coordinates(current_maps, valid_cells=None):
     """Relative XY derived exclusively from the supplied current observation."""
     n, _, height, width = current_maps.shape
     marker = (current_maps[:, 4].bool() & current_maps[:, 5].bool()).flatten(1)
+    if valid_cells is not None:
+        marker = marker & valid_cells
     valid = marker.sum(1).eq(1)
     position = marker.long().argmax(1)
     rows = torch.arange(height, device=current_maps.device, dtype=current_maps.dtype)

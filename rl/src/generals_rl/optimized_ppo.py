@@ -54,10 +54,6 @@ class _PendingHistory:
 class OptimizedInformationSpatialPPOPolicy(InformationSpatialPPOPolicy):
     """v32 actor and critic capacity with packed/aligned execution.
 
-    ``critic_projection_channels=0`` is retained in checkpoint metadata; the
-    projected LightCNN experiment is retired. Scaled policies have their own
-    independent projection implementation.
-
     History sharing is a one-use actor→critic handoff. It never caches a graph
     for gradient-bearing inputs or tensors without a mutation counter (inference
     tensors); both safely fall back to unpacking. Actor-only observations, greedy
@@ -65,24 +61,20 @@ class OptimizedInformationSpatialPPOPolicy(InformationSpatialPPOPolicy):
     """
 
     def __init__(self, obs, obs_groups, num_actions, *, input_channel_alignment=4,
-                 critic_projection_channels=0, share_history_unpack=True, **kwargs):
+                 share_history_unpack=True, **kwargs):
         if (isinstance(input_channel_alignment, bool) or not isinstance(input_channel_alignment, int)
                 or input_channel_alignment < 0):
             raise ValueError("input_channel_alignment must be a nonnegative integer (0 disables alignment)")
-        if (isinstance(critic_projection_channels, bool) or not isinstance(critic_projection_channels, int)
-                or critic_projection_channels != 0):
-            raise ValueError("LightCNN critic_projection_channels experiments are retired; expected 0")
         if not isinstance(share_history_unpack, bool):
             raise TypeError("share_history_unpack must be boolean")
         super().__init__(obs, obs_groups, num_actions, **kwargs)
         self.input_channel_alignment = input_channel_alignment
-        self.critic_projection_channels = critic_projection_channels
         self.share_history_unpack = share_history_unpack
         self._pending_history = None
         self.actor = _PackedSpatialActor(self.actor, input_channel_alignment)
         if self.critic_actor_information:
             self.critic = _PackedHistoryCritic(self.critic, input_channel_alignment)
-        self.semantics += f"_packed_aligned{input_channel_alignment}_critic_projection{critic_projection_channels}_v1"
+        self.semantics += f"_packed_aligned{input_channel_alignment}_v1"
 
     def clear_input_cache(self):
         self._pending_history = None

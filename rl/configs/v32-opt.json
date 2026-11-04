@@ -57,7 +57,7 @@
       "players": 2,
       "map_width": 23,
       "map_height": 23,
-      "map_planes": 14,
+      "map_planes": 13,
       "public_dim": 13,
       "actor_obs_normalization": false,
       "critic_obs_normalization": false,
@@ -66,7 +66,6 @@
       "knowledge_channels": 11,
       "critic_actor_information": true,
       "input_channel_alignment": 4,
-      "critic_projection_channels": 0,
       "share_history_unpack": true
     },
     "algorithm": {

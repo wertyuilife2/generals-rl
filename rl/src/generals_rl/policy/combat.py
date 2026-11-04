@@ -25,7 +25,7 @@ class CombatObservationEncoder(LocalObservationEncoder):
     rules/debug boundaries own exceptional int64 overflow checks, avoiding host
     synchronization in every GPU encode.
     """
-    semantics = "official_31_4_5_combat_p2_v1"
+    semantics = "official_31_4_5_combat_p2_cells13_v2"
     channels = LocalObservationEncoder.channels + ("enemy_attack_risk", "combat_margin")
 
     def encode(self, batch, player_ids, **visibility_options):

@@ -25,7 +25,9 @@ def make_checkpoint(directory, seed=7, filename="checkpoint.pt", family="informa
     elif family == "scaled":
         options.pop("spatial_channels")
         options.update(class_name="generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy",
-                       backbone="vit", model_size="1m", spatial_mode="dense", critic_projection_channels=0)
+                       backbone="vit", model_size="1m", spatial_mode="dense")
+        config["runner"]["obs_groups"]["policy"].append("valid_cells")
+        config["runner"]["obs_groups"]["critic"].append("valid_cells")
     policy_options = deepcopy(options)
     policy_type = resolve_callable(policy_options.pop("class_name"))
     with torch.random.fork_rng(devices=[]), GeneralsTask(task_config(config["task"])) as task:

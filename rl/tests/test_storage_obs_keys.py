@@ -18,7 +18,7 @@ from rl_test_utils import assert_nested_equal, small_training_config
 
 
 STORAGE_KEYS = ["policy", "critic", "action_mask"]
-FULL_KEYS = {*STORAGE_KEYS, "single_obs"}
+FULL_KEYS = {*STORAGE_KEYS, "single_obs", "valid_cells"}
 
 
 def config():
@@ -96,7 +96,8 @@ class StorageObsKeysTests(unittest.TestCase):
                         assert_nested_equal(self, actual[key], reference[key])
                 expected_keys = FULL_KEYS if selected is None else set(STORAGE_KEYS)
                 self.assertEqual(actual["storage_keys"], expected_keys)
-                saved_bytes = 0 if selected is None else 4 * 4 * 1147 * 4
+                # A subset drops the FP32 current frame and the auxiliary boolean cell mask.
+                saved_bytes = 0 if selected is None else 4 * 4 * (1066 * 4 + 81)
                 self.assertEqual(reference["payload"] - actual["payload"], saved_bytes)
 
     def test_invalid_storage_keys_rejected(self):

@@ -142,9 +142,9 @@ class MDPComponentTests(unittest.TestCase):
         encoder = LocalObservationEncoder(episode_ticks=64)
         pids = torch.zeros(2, dtype=torch.long)
         local = encoder.encode(batch, pids)
-        torch.testing.assert_close(local[0, :13*25], local[1, :13*25], rtol=0, atol=0)
+        torch.testing.assert_close(local[0, :12*25], local[1, :12*25], rtol=0, atol=0)
         torch.testing.assert_close(local[0, -13:], local[1, -13:], rtol=0, atol=0)
-        self.assertNotEqual(local[0, 13*25+23], local[1, 13*25+23])
+        self.assertNotEqual(local[0, 12*25+23], local[1, 12*25+23])
         full = encoder.encode(batch, pids, privileged=True)
         self.assertFalse(torch.equal(full[0], full[1]))
 

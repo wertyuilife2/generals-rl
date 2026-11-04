@@ -14,7 +14,7 @@ class RolloutCodecTests(unittest.TestCase):
         self.n, self.cells, self.history = 8, 6, 4
 
     def frame(self):
-        maps = torch.randint(2, (self.n, 14, self.cells), generator=self.generator).float()
+        maps = torch.randint(2, (self.n, 13, self.cells), generator=self.generator).float()
         maps[:, 9:12] = torch.randn(self.n, 3, self.cells, generator=self.generator) * 1000
         return torch.cat((maps.flatten(1), torch.randn(self.n, 13, generator=self.generator)), -1)
 
@@ -23,6 +23,7 @@ class RolloutCodecTests(unittest.TestCase):
         knowledge[:, 10] = torch.randint(2001, (self.n, self.cells), generator=self.generator).float() / 2000
         return TensorDict(dict(policy=frames.flatten(1), critic=self.frame(), knowledge=knowledge.flatten(1),
             action_mask=torch.randint(2, (self.n, 1 + self.cells * 8), generator=self.generator).bool(),
+            valid_cells=torch.randint(2, (self.n, self.cells), generator=self.generator).bool(),
             auxiliary=torch.arange(self.n, dtype=torch.int32)[:, None]), [self.n])
 
     def assert_same(self, a, b):
@@ -78,17 +79,17 @@ class RolloutCodecTests(unittest.TestCase):
                                 sum(v.untyped_storage().nbytes() for v in reference.observations.values()) / 2)
 
     def test_all_flag_combinations_and_signed_zero_are_exact(self):
-        flags = torch.arange(2048, dtype=torch.int16)
-        maps = torch.zeros(2048, 14, 1)
-        for bit, channel in enumerate((*range(9), 12, 13)):
+        flags = torch.arange(1024, dtype=torch.int16)
+        maps = torch.zeros(1024, 13, 1)
+        for bit, channel in enumerate((*range(9), 12)):
             maps[:, channel, 0] = ((flags >> bit) & 1).float()
         maps[:, 9:12] = -0.
-        public = torch.randn(2048, 13, generator=self.generator)
+        public = torch.randn(1024, 13, generator=self.generator)
         original = torch.cat((maps.flatten(1), public), -1)
-        obs = TensorDict(dict(policy=original, action_mask=torch.ones(2048, 9, dtype=torch.bool)), [2048])
+        obs = TensorDict(dict(policy=original, action_mask=torch.ones(1024, 9, dtype=torch.bool)), [1024])
         codec = GeneralsObservationCodec(obs)
         encoded = codec.encode('policy', original).unsqueeze(0)
-        actual = codec.gather('policy', encoded, torch.zeros(2048, dtype=torch.long), torch.arange(2048))
+        actual = codec.gather('policy', encoded, torch.zeros(1024, dtype=torch.long), torch.arange(1024))
         self.assertTrue(torch.equal(original.view(torch.int32), actual.view(torch.int32)))
 
 

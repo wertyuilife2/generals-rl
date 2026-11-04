@@ -48,7 +48,7 @@ class KingThreatDistanceTests(unittest.TestCase):
             actual=enabled.encode(batch,ids)
             torch.testing.assert_close(actual[:,:-1],original[:,:-1],rtol=0,atol=0)
             torch.testing.assert_close(actual[:,-1],torch.tensor([3/16,1,1,1]),rtol=0,atol=0)
-            self.assertEqual(tuple(actual.shape),(4,1147))
+            self.assertEqual(tuple(actual.shape),(4,1066))
             self.assertTrue(enabled.semantics.endswith('_king_threat_distance_v1'))
             # Seat1 uses its own King80; hostile own0 cell29 is visible from its cell30.
             ids.fill_(1)

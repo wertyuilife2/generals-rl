@@ -16,60 +16,49 @@ from torch.nn import functional as F
 
 from .spatial_ppo import SpatialPPOPolicy
 from .policy.layout import ObservationLayout
-from .policy.cnn import AlignedInputConv2d
 from .policy.scaled import (_build_total_backbone, _ScaledInformationActor, RESNET_TOTAL_PRESETS)
+from .policy.tokens import prepare_tokens, valid_mean, valid_token_features
 
 
 class _ScaledInformationCritic(nn.Module):
-    """Independent full backbone after privileged + all history/knowledge input."""
-    def __init__(self, layout, kind, size, alignment, projection_channels, head_channels,
-                 spatial_mode="dense"):
+    """Embed full state, actor history and knowledge directly in the backbone."""
+    def __init__(self, layout, kind, size, alignment, head_channels,
+                 spatial_mode="dense", mask_padding_tokens=False):
         super().__init__()
-        self.layout, self.projection_channels = layout, projection_channels
+        self.layout = layout
         self.spatial_mode = spatial_mode
-        self.knowledge_channels = layout.knowledge_channels
-        history_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels
-        spatial_inputs = layout.map_planes + (projection_channels or history_inputs)
-        if projection_channels:
-            self.history_projection = AlignedInputConv2d(history_inputs, projection_channels, 1,
-                                                         input_channel_alignment=alignment)
-            self.register_buffer("_history_zero_padding", self.history_projection.weight.new_zeros(
-                1, self.history_projection.input_padding, layout.height, layout.width), persistent=False)
-        first = AlignedInputConv2d(spatial_inputs, 32, 3, padding=1, input_channel_alignment=alignment)
-        # Both spatial layers survive the projection ablation for either family;
-        # the entire ResNet/ViT then adds capacity to the independent critic.
-        self.spatial_stem = nn.Sequential(first, nn.SiLU(), nn.Conv2d(32, 32, 3, padding=1), nn.SiLU())
-        self.backbone = _build_total_backbone(kind, size, 32, spatial_mode, (layout.height, layout.width))
+        self.mask_padding_tokens = mask_padding_tokens
+        inputs = (layout.history_length + 1) * layout.map_planes + layout.knowledge_channels
+        padding = (-inputs) % alignment if alignment else 0
+        self.backbone = _build_total_backbone(kind, size, inputs + padding, spatial_mode, (layout.height, layout.width))
         self.projection = nn.Conv2d(self.backbone.out_channels, head_channels, 1)
         self.context = nn.Sequential(nn.Linear(head_channels + 2 * layout.public_dim, head_channels), nn.SiLU())
         self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
-        self.register_buffer("_input_zero_padding", first.weight.new_zeros(
-            1, first.input_padding, layout.height, layout.width), persistent=False)
+        self.register_buffer("_input_zero_padding", self.projection.weight.new_zeros(
+            1, padding, layout.height, layout.width), persistent=False)
         if spatial_mode == "pyramid":
             self.local_skip = nn.Conv2d(self.backbone.local_channels, head_channels, 1)
 
-    def forward(self, privileged, history=None, knowledge=None):
+    def forward(self, privileged, history=None, knowledge=None, valid_cells=None, tokens=None):
         layout, count = self.layout, privileged.shape[0]
         frames = layout.frames(history)
-        local, memory = layout.history_maps(history), layout.memory_maps(knowledge, count)
-        if self.projection_channels:
-            parts = [local, memory]
-            if self._history_zero_padding.shape[1]:
-                parts.append(self._history_zero_padding.expand(count, -1, -1, -1))
-            information = [self.history_projection(torch.cat(parts, 1))]
-        else:
-            information = [local, memory]
-        parts = [layout.current_maps(privileged), *information]
+        current = layout.current_maps(privileged)
+        valid = valid_cells if self.mask_padding_tokens else None
+        if self.mask_padding_tokens:
+            tokens = prepare_tokens(valid) if tokens is None else tokens
+        parts = [current, layout.history_maps(history), layout.memory_maps(knowledge, count)]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
-        spatial = self.spatial_stem(torch.cat(parts, 1))
+        inputs = torch.cat(parts, 1)
         if self.spatial_mode == "pyramid":
-            local, deep = self.backbone.forward_pyramid(spatial)
+            local, deep = self.backbone.forward_pyramid(inputs)
             pooled = (F.silu(self.projection(deep)).mean(dim=(-2, -1))
                       + F.silu(self.local_skip(local)).mean(dim=(-2, -1)))
+        elif self.mask_padding_tokens:
+            features = valid_token_features(self.backbone.transformer, inputs, valid, tokens)
+            pooled = valid_mean(F.silu(self.projection(features)), valid)
         else:
-            spatial = F.silu(self.projection(self.backbone(spatial)))
-            pooled = spatial.mean(dim=(-2, -1))
+            pooled = F.silu(self.projection(self.backbone(inputs))).mean(dim=(-2, -1))
         context = self.context(torch.cat((pooled, privileged[:, -layout.public_dim:],
                                           frames[:, -1, -layout.public_dim:]), -1))
         return self.value_head(torch.cat((pooled, context), -1))
@@ -111,31 +100,35 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     Master parameters remain float32; CUDA bf16 autocasts only network forwards,
     then logits/probabilities/log-probabilities and values return to float32.
     """
-    semantics = "official_p2_hist4_knowledge11_independent_critic_v2"
+    semantics = "official_p2_cells13_hist4_knowledge11_direct_backbone_v1"
 
-    def __init__(self, obs, obs_groups, num_actions, *, backbone="resnet", model_size="1m",
+    def __init__(self, obs, obs_groups, num_actions, *, backbone="vit", model_size="1m",
                  map_width=23, map_height=23, history_length=4, players=2,
-                 map_planes=14, public_dim=13, knowledge_channels=11,
+                 map_planes=13, public_dim=13, knowledge_channels=11,
                  critic_actor_information=True, own_king_geometry=True,
-                 critic_projection_channels=32, input_channel_alignment=4,
+                 input_channel_alignment=4,
                  head_channels=128, action_distribution="categorical",
                  actor_obs_normalization=False, critic_obs_normalization=False,
                  wait_move_factorization=True,
                  inference_chunk_size=128, amp_bfloat16=False, compile_forward=False,
-                 spatial_mode="dense"):
+                 spatial_mode="dense", mask_padding_tokens=None):
         nn.Module.__init__(self)
         if backbone not in ("resnet", "vit"):
             raise ValueError("backbone must be resnet or vit")
         if spatial_mode not in ("dense", "pyramid"):
             raise ValueError("spatial_mode must be dense or pyramid")
+        if mask_padding_tokens is None:
+            mask_padding_tokens = backbone == "vit" and spatial_mode == "dense"
+        if type(mask_padding_tokens) is not bool or mask_padding_tokens and (backbone != 'vit' or spatial_mode != 'dense'):
+            raise ValueError('mask_padding_tokens requires a dense ViT')
         if not isinstance(model_size, str) or model_size.lower() not in RESNET_TOTAL_PRESETS:
             raise ValueError("model_size must be 1m, 10m, or 100m")
         self.backbone_kind, self.model_size = backbone, model_size.lower()
         schema = (players, map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
         if (any(isinstance(value, bool) or not isinstance(value, int) for value in schema)
-                or (players, history_length, map_planes, public_dim, knowledge_channels) != (2, 4, 14, 13, 11)
+                or (players, history_length, map_planes, public_dim, knowledge_channels) != (2, 4, 13, 13, 11)
                 or min(map_width, map_height) < 1):
-            raise ValueError("scaled policy requires P2 H4/K11 fourteen-plane/public13 features")
+            raise ValueError("scaled policy requires P2 H4/K11 thirteen-plane/public13 features")
         if action_distribution != "categorical" or actor_obs_normalization is not False or critic_obs_normalization is not False:
             raise ValueError("scaled policy uses categorical actions and unnormalized explicit features")
         for name, value in (("critic_actor_information", critic_actor_information), ("own_king_geometry", own_king_geometry),
@@ -145,16 +138,14 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                 raise TypeError(f"{name} must be boolean")
         if not critic_actor_information or not own_king_geometry or not wait_move_factorization:
             raise ValueError("scaled policy requires actor-information critic, own-king geometry and WAIT/MOVE factorization")
-        if (isinstance(critic_projection_channels, bool) or not isinstance(critic_projection_channels, int)
-                or critic_projection_channels != 0 and critic_projection_channels < 16):
-            raise ValueError("critic_projection_channels must be 0 or an integer of at least 16")
         if isinstance(input_channel_alignment, bool) or not isinstance(input_channel_alignment, int) or input_channel_alignment < 0:
             raise ValueError("input_channel_alignment must be a nonnegative integer")
         for name, value in (("head_channels", head_channels), ("inference_chunk_size", inference_chunk_size)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         self.layout = ObservationLayout(map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
-        expected = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
+        expected = {"policy": ["policy", "knowledge", "valid_cells"],
+                    "critic": ["critic", "policy", "knowledge", "valid_cells"]}
         if obs_groups != expected:
             raise ValueError(f"scaled policy requires obs_groups={expected}")
         self._validate_observations(obs, num_actions)
@@ -166,17 +157,20 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.inference_chunk_size, self.amp_bfloat16 = inference_chunk_size, amp_bfloat16
         self.compile_forward = compile_forward
         self.spatial_mode = spatial_mode
-        self.critic_projection_channels, self.input_channel_alignment = critic_projection_channels, input_channel_alignment
+        self.mask_padding_tokens = mask_padding_tokens
+        self.input_channel_alignment = input_channel_alignment
         self.history_length, self.head_channels = history_length, head_channels
         self.actor = _ScaledInformationActor(self.layout, backbone, self.model_size, input_channel_alignment,
-                                             head_channels, spatial_mode)
+                                             head_channels, spatial_mode, mask_padding_tokens)
         self.critic = _ScaledInformationCritic(self.layout, backbone, self.model_size, input_channel_alignment,
-                                               critic_projection_channels, head_channels, spatial_mode)
+                                               head_channels, spatial_mode, mask_padding_tokens)
         self.distribution = None
         self._update_dimensions()
-        self.semantics += f"_{backbone}_{self.model_size}_projection{critic_projection_channels}_head{head_channels}"
+        self.semantics += f"_{backbone}_{self.model_size}_direct_head{head_channels}"
         if spatial_mode == "pyramid":
             self.semantics += "_spatial_pyramid_v1"
+        if mask_padding_tokens:
+            self.semantics += "_valid_tokens_v1"
 
     def _update_dimensions(self):
         self.num_actions = self.layout.num_actions
@@ -190,6 +184,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.layout.frames(obs["policy"])
         self.layout.current_maps(obs["single_obs"])
         self.layout.current_maps(obs["critic"])
+        if obs['valid_cells'].dtype != torch.bool or obs['valid_cells'].shape != (obs.batch_size[0], self.layout.cells):
+            raise ValueError('valid_cells must be bool [batch, cells]')
         if self.layout.knowledge_channels:
             self.layout.memory_maps(obs.get("knowledge"), obs.batch_size[0])
 
@@ -216,24 +212,30 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                 count = reference.shape[0]
                 bucket = 1 << (count - 1).bit_length()
                 history, knowledge = part["policy"], part.get("knowledge")
+                valid = part["valid_cells"]
                 if bucket != count:
                     history = F.pad(history, (0, 0, 0, bucket - count))
+                    valid = F.pad(valid, (0, 0, 0, bucket - count))
                     if knowledge is not None:
                         knowledge = F.pad(knowledge, (0, 0, 0, bucket - count))
                 max_autotune = (self.backbone_kind == "vit" and self.model_size == "100m"
                                 and self.spatial_mode == "pyramid" and reference.is_cuda)
+                tokens = (prepare_tokens(valid)
+                          if self.mask_padding_tokens else None)
                 return _compiled_frozen_actor_forward(bucket, max_autotune)(
-                    self.actor, history, knowledge)[:count]
+                    self.actor, history, knowledge, valid, tokens)[:count]
             if (self.backbone_kind == "vit" and self.model_size == "100m"
                     and self.spatial_mode == "pyramid" and reference.is_cuda):
                 forward = _compiled_numeric_forward(critic, max_autotune=True)
             else:
                 forward = _compiled_numeric_forward(critic)
-            return (forward(self.critic, part["critic"], part["policy"], part.get("knowledge"))
-                    if critic else forward(self.actor, part["policy"], part.get("knowledge")))
+            tokens = (prepare_tokens(part['valid_cells'])
+                      if self.mask_padding_tokens else None)
+            return (forward(self.critic, part["critic"], part["policy"], part.get("knowledge"), part["valid_cells"], tokens)
+                    if critic else forward(self.actor, part["policy"], part.get("knowledge"), part["valid_cells"], tokens))
         if critic:
-            return self.critic(part["critic"], part["policy"], part.get("knowledge"))
-        return self.actor(part["policy"], part.get("knowledge"))
+            return self.critic(part["critic"], part["policy"], part.get("knowledge"), part["valid_cells"])
+        return self.actor(part["policy"], part.get("knowledge"), part["valid_cells"])
 
     def _network_forward(self, part, critic, reference):
         autocast = torch.autocast("cuda", dtype=torch.bfloat16) if self.amp_bfloat16 and reference.is_cuda else nullcontext()

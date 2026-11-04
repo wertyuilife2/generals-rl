@@ -97,8 +97,8 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         learned_weights(baseline)
         policy.load_state_dict(baseline.state_dict(), strict=True)
         baseline.load_state_dict(policy.state_dict(), strict=True)
-        self.assertEqual((policy.actor.trunk[1].in_channels, policy.actor.trunk[1].compute_in_channels), (69, 72))
-        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (81, 84))
+        self.assertEqual((policy.actor.trunk[1].in_channels, policy.actor.trunk[1].compute_in_channels), (65, 68))
+        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (76, 76))
 
     def test_learned_fp32_logits_masks_values_and_parameter_gradients_are_equivalent(self):
         # Disable the CPU backend's lower-precision/reordered kernels so this
@@ -134,7 +134,7 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
                         torch.testing.assert_close(actual, parameter.grad, rtol=3e-6, atol=3e-7, msg=name)
                     first_actor = baseline.actor.trunk[int(geometry)].weight.grad
                     self.assertGreater(float(first_actor[:, history_length * MAP_PLANES:history_length * MAP_PLANES + 11].abs().sum()), 0)
-                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 14:].abs().sum()), 0)
+                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 13:].abs().sum()), 0)
 
     def test_learned_fp32_input_gradients_cover_each_history_and_knowledge_plane(self):
         obs = observations(history_length=8)
@@ -180,19 +180,19 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         finally:
             for hook in hooks:
                 hook.remove()
-        local = obs["policy"].reshape(4, 4, FRAME_DIM)[..., :-PUBLIC_DIM].reshape(4, 56, 9, 9)
+        local = obs["policy"].reshape(4, 4, FRAME_DIM)[..., :-PUBLIC_DIM].reshape(4, 52, 9, 9)
         memory = obs["knowledge"].reshape(4, 11, 9, 9)
-        self.assertEqual(tuple(captured["actor"].shape), (4, 72, 9, 9))
-        self.assertEqual(tuple(captured["critic"].shape), (4, 84, 9, 9))
-        torch.testing.assert_close(captured["actor"][:, :56], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["actor"][:, 56:67], memory, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 14:70], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 70:81], memory, rtol=0, atol=0)
-        self.assertEqual(float(captured["actor"][:, 69:].abs().sum()), 0)
-        self.assertEqual(float(captured["critic"][:, 81:].abs().sum()), 0)
-        torch.testing.assert_close(captured["actor"][0, 67], ((torch.arange(9.) - 3) / 8)[None, :].expand(9, 9))
-        torch.testing.assert_close(captured["actor"][0, 68], ((torch.arange(9.) - 3) / 8)[:, None].expand(9, 9))
-        self.assertEqual(float(captured["actor"][-1, 67:69].abs().sum()), 0)
+        self.assertEqual(tuple(captured["actor"].shape), (4, 68, 9, 9))
+        self.assertEqual(tuple(captured["critic"].shape), (4, 76, 9, 9))
+        torch.testing.assert_close(captured["actor"][:, :52], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["actor"][:, 52:63], memory, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 13:65], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 65:76], memory, rtol=0, atol=0)
+        self.assertEqual(float(captured["actor"][:, 65:].abs().sum()), 0)
+        self.assertEqual(float(captured["critic"][:, 76:].abs().sum()), 0)
+        torch.testing.assert_close(captured["actor"][0, 63], ((torch.arange(9.) - 3) / 8)[None, :].expand(9, 9))
+        torch.testing.assert_close(captured["actor"][0, 64], ((torch.arange(9.) - 3) / 8)[:, None].expand(9, 9))
+        self.assertEqual(float(captured["actor"][-1, 63:65].abs().sum()), 0)
 
     def test_history_handoff_is_single_use_and_never_reuses_mutated_history(self):
         obs = observations()
@@ -308,13 +308,8 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         for invalid in (-1, True, 4.0):
             with self.subTest(alignment=invalid), self.assertRaisesRegex(ValueError, "input_channel_alignment"):
                 self.make_policy(obs, input_channel_alignment=invalid)
-        for invalid in (-1, 8, 32, True, 32.0):
-            with self.subTest(projection=invalid), self.assertRaisesRegex(ValueError, "critic_projection_channels"):
-                self.make_policy(obs, critic_projection_channels=invalid)
         with self.assertRaises(TypeError):
             self.make_policy(obs, share_history_unpack=1)
-        with self.assertRaisesRegex(ValueError, "critic_projection_channels"):
-            self.make_policy(obs, critic_actor_information=False, critic_projection_channels=32)
         policy = self.make_policy(obs)
         changed = obs.clone()
         changed["policy"] = changed["policy"][:, :FRAME_DIM]
