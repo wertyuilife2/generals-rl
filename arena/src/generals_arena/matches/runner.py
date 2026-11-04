@@ -158,7 +158,8 @@ class MatchRunner:
             self.worker = self._owned_worker = MatchWorker()
         try:
             with cpu_slot():
-                return self.worker.run(self.entries, plan, max_ticks=self.max_ticks, stop=stop)
+                return self.worker.run({key: self.entries[key] for key in plan['entrant_ids']},
+                                       plan, max_ticks=self.max_ticks, stop=stop)
         except InterruptedError:
             return None  # Scheduler leaves the cancelled plan pending for retry.
 
@@ -214,7 +215,8 @@ class MatchRunner:
                         from .batch_worker import BatchWorker
                         self._batch_worker = BatchWorker()
                     executor = self._batch_worker.run
-                records, elapsed = executor(self.entries,
+                entries = {key: self.entries[key] for index in indices for key in plans[index]['entrant_ids']}
+                records, elapsed = executor(entries,
                     [plans[index] for index in indices], **options)
                 for name, seconds in elapsed.items():
                     timing[name] = timing.get(name, 0.) + seconds

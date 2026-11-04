@@ -88,6 +88,14 @@ tr:last-child td {border:0;}
 .elo-delta {color:var(--muted);}
 .elo-delta.positive {color:#83bd95;}
 .elo-delta.negative {color:#e89292;}
+/* Keep shared columns aligned when switching between rating pools. */
+.ranking-scroll > table {table-layout:fixed;min-width:960px;}
+#ranking-head th:first-child {width:36%;}
+#ranking-head th:nth-child(2) {width:160px;}
+#ranking-head th:nth-child(3) {width:88px;}
+#ranking .rank-player > div {min-width:0;}
+#ranking .player-name {min-width:0;overflow:hidden;text-overflow:ellipsis;}
+#ranking .rank-no {flex:none;}
 #ranking-panel th:not(:first-child),#ranking-panel td:not(:first-child) {text-align:right;}
 #ranking-panel th[title] {cursor:help;}
 .footnote {font-size:11px;color:var(--muted);padding:0 24px;margin:18px 0;line-height:1.9;}

@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 import time
+import threading
 import uuid
 
 from generals_arena.policies.entries import prepare_entrant
@@ -37,6 +38,7 @@ CREATE INDEX games_completed_players ON games(status,json_array_length(plan, '$.
 
 class CompetitionStore:
     def __init__(self, directory):
+        self._connections = threading.local()
         self.directory = Path(directory)
         self.path = self.directory / "league.sqlite3"
         if not self.path.is_file():
@@ -96,13 +98,33 @@ class CompetitionStore:
             db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
                        ('rating_reference', canonical(entrant_id)))
 
-    @contextmanager
-    def connect(self, write=False):
+    def _open_connection(self):
         db = sqlite3.connect(self.path, timeout=30)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute("PRAGMA journal_mode=WAL")
+        return db
+
+    @contextmanager
+    def session(self):
+        """Reuse a connection on this thread; every game still commits separately."""
+        if getattr(self._connections, 'db', None) is not None:
+            yield self
+            return
+        db = self._connections.db = self._open_connection()
         try:
-            db.execute("PRAGMA foreign_keys=ON")
-            db.execute("PRAGMA journal_mode=WAL")
+            yield self
+        finally:
+            self._connections.db = None
+            db.close()
+
+    @contextmanager
+    def connect(self, write=False):
+        db = getattr(self._connections, 'db', None)
+        owned = db is None or db.in_transaction
+        if owned:
+            db = self._open_connection()
+        try:
             if write:
                 db.execute("BEGIN IMMEDIATE")
             else:
@@ -113,7 +135,8 @@ class CompetitionStore:
             db.rollback()
             raise
         finally:
-            db.close()
+            if owned:
+                db.close()
 
     def verify_execution(self):
         if canonical(self.config.manifest()) != canonical(self.manifest):
@@ -400,7 +423,9 @@ class CompetitionStore:
         mode = rating_mode(result)
         result['rating_mode'] = mode
         result.setdefault('rating_policy', POLICY)
-        rows = list(db.execute("SELECT * FROM ratings WHERE mode=?", (mode,)))
+        keys = tuple(dict.fromkeys(ids))
+        rows = list(db.execute("SELECT * FROM ratings WHERE mode=? AND entrant_id IN (" +
+                              ','.join('?' for _ in keys) + ')', (mode, *keys)))
         old = {r["entrant_id"]: r["elo"] for r in rows}
         games = {r["entrant_id"]: r["rated_games"] for r in rows}
         changes = score(old, result, games)

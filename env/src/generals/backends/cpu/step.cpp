@@ -26,7 +26,10 @@ struct Outputs {
     bool *cache_valid;
     int32_t *owned_structures;
 };
-static void initialize(generals::Rules<> &rules){
+static void observe_metadata(const Batch &,const i64 *,const bool *,const i64 *,GeneralsObservation &,int,int,bool);
+#include "observation.h"
+
+template<class Rules> static void initialize(Rules &rules){
     auto &c=rules.cache;
     for(int k=0;k<rules.p;++k)c.total[k]=c.territory[k]=c.cities[k]=c.structures[k]=0;
     c.growth_count=0;
@@ -35,15 +38,16 @@ static void initialize(generals::Rules<> &rules){
         c.total[pid]+=rules.army[cell];++c.territory[pid];c.cities[pid]+=rules.structure[cell]==1;
         if(rules.structure[cell]){++c.structures[pid];rules.growth[c.growth_count++]=cell;}}
 }
+template<class Changes=generals::NoChanges>
 static void step_lane(Batch s,Batch initial,Outputs out,const i64 *actions,
-                      int lane,int h,int w,int p,bool auto_reset,i64 horizon){
+                      int lane,int h,int w,int p,bool auto_reset,i64 horizon,Changes changes={}){
     const int n=h*w;const size_t base=size_t(lane)*n,pb=size_t(lane)*p;
     auto *moves=out.moves+pb*9,*stats=out.stats+pb*3,*cached=out.current_stats+pb*3;
     auto *counts=reinterpret_cast<u64*>(out.counters+size_t(lane)*9);
     if(out.errors[lane]||s.terminated[lane]||(!auto_reset&&horizon>0&&s.tick[lane]>=horizon)){
         for(int k=0;k<p;++k)generals::empty(moves+k*9);return;}
     generals::Cache c{};
-    generals::Rules<> rules(s,lane,p,h,w,c,out.growth_cells+base);
+    generals::Rules<false,Changes> rules(s,lane,p,h,w,c,out.growth_cells+base,{},changes);
     if(out.cache_valid[lane]){
         c.growth_count=out.growth_count[lane];
         for(int k=0;k<p;++k){c.total[k]=cached[k*3];c.territory[k]=cached[k*3+1];
@@ -67,11 +71,11 @@ static void step_lane(Batch s,Batch initial,Outputs out,const i64 *actions,
         }
     }
     if(tick%2==0){
-        for(int k=0;k<c.growth_count;++k)++rules.army[rules.growth[k]];
+        for(int k=0;k<c.growth_count;++k){int cell=rules.growth[k];++rules.army[cell];changes.changed(cell);}
         for(int k=0;k<p;++k)c.total[k]+=c.structures[k];
     }
     if(tick%50==0){
-        for(int cell=0;cell<n;++cell)if(rules.owner[cell]>=0)++rules.army[cell];
+        for(int cell=0;cell<n;++cell)if(rules.owner[cell]>=0){++rules.army[cell];changes.changed(cell);}
         for(int k=0;k<p;++k)c.total[k]+=c.territory[k];
     }
     GENERALS_PROFILE_MARK(1);
@@ -125,6 +129,27 @@ extern "C" void generals_depart(Batch *s, Outputs *out, int batch, int h, int w,
     }
 }
 
+static void observe_metadata(const Batch &s,const i64 *stats,const bool *done,const i64 *ids,
+                             GeneralsObservation &out,int lane,int players,bool full) {
+    const size_t pb=size_t(lane)*players;
+    const int pid=full?int(-ids[lane]-2):int(ids[lane]);
+    for(int p=0;p<players;++p){const size_t at=pb+p;
+        out.alive[at]=s.alive[at];
+        out.has_kill[at]=s.kills[at]>0;
+        out.warn_afk[at]=s.warn_afk[at]!=0;
+        out.neutralize_in[at]=(s.leave_tick[at]>=0 && s.general_pos[at]>=0)
+            ? std::clamp(double(s.tick[lane]-s.leave_tick[at])/50.,0.,1.) : -1.;
+        out.stats[at*3]=stats[at*3];
+        out.stats[at*3+1]=stats[at*3+1];
+        out.stats[at*3+2]=(full||p==pid||s.terminated[lane])?stats[at*3+2]:-1;
+    }
+    out.general_pos[lane]=pid<0?-1:s.general_pos[pb+pid];
+    out.active[lane]=!done[lane*2]&&!done[lane*2+1]&&pid>=0&&s.alive[pb+pid];
+    out.tick[lane]=s.tick[lane];
+    out.terminated[lane]=s.terminated[lane];
+    out.winner_id[lane]=s.winner[lane];
+}
+
 // Public observation construction belongs to env, never to a policy adapter.
 // Outputs are caller-owned snapshots. This loop uses no extra worker threads.
 using ObservationOutputs = GeneralsObservation;
@@ -162,20 +187,8 @@ static void observe_batch(const Batch *source, const i64 *stats, const bool *don
             const int spawn=s.spawn_pos[at];
             if (!full && spawn>=0 && s.general_pos[at]<0 && !(s.city_known[pb+pid]&(1<<p)))
                 out->fog_obstacles[base+spawn]=false;
-            out->alive[at]=s.alive[at];
-            out->has_kill[at]=s.kills[at]>0;
-            out->warn_afk[at]=s.warn_afk[at]!=0;
-            out->neutralize_in[at]=(s.leave_tick[at]>=0 && s.general_pos[at]>=0)
-                ? std::clamp(double(s.tick[lane]-s.leave_tick[at])/50.,0.,1.) : -1.;
-            out->stats[at*3]=stats[at*3];
-            out->stats[at*3+1]=stats[at*3+1];
-            out->stats[at*3+2]=(full||p==pid||s.terminated[lane])?stats[at*3+2]:-1;
         }
-        out->general_pos[lane]=pid<0?-1:s.general_pos[pb+pid];
-        out->active[lane]=!done[lane*2]&&!done[lane*2+1]&&pid>=0&&s.alive[pb+pid];
-        out->tick[lane]=s.tick[lane];
-        out->terminated[lane]=s.terminated[lane];
-        out->winner_id[lane]=s.winner[lane];
+        observe_metadata(s,stats,done,ids,*out,lane,players,full);
     }
 }
 
@@ -186,21 +199,32 @@ extern "C" void generals_observe(const Batch *source, const i64 *stats, const bo
 }
 
 // Same kernels with geometry and storage bound once by the backend owner.
-// Observation masking remains exclusively in generals_observe above.
+// Local observations use incremental caches; full snapshots use the public kernel.
 struct BoundCPU {
     Batch *state, *initial;
     Outputs *out;
     int count, height, width, players, threads, auto_reset;
     i64 horizon;
+    ObservationCache *observations;
 };
 extern "C" void generals_bound_step(void *context, const i64 *actions) {
     auto &b=*static_cast<BoundCPU *>(context);
-    generals_step(b.state,b.initial,b.out,actions,b.count,b.height,b.width,b.players,
-                  b.threads,b.auto_reset,b.horizon);
+    if(!b.observations||!b.observations->active){generals_step(b.state,b.initial,b.out,actions,b.count,b.height,b.width,b.players,
+                                    b.threads,b.auto_reset,b.horizon);return;}
+    #pragma omp parallel for num_threads(b.threads) if(b.threads>1) schedule(static)
+    for(int l=0;l<b.count;++l){
+        step_lane(*b.state,*b.initial,*b.out,actions,l,b.height,b.width,b.players,false,b.horizon,b.observations->changes(l));
+        b.observations->finish(*b.state,l);
+    }
 }
 extern "C" void generals_bound_observe(void *context, const i64 *ids, const bool *selected, GeneralsObservation *out) {
     auto &b=*static_cast<BoundCPU *>(context);
-    observe_batch(b.state,b.out->stats,b.out->done,ids,out,b.count,b.height,b.width,b.players,selected);
+    bool local=true;for(int l=0;l<b.count;++l)local=local&&ids[l]>=0;
+    if(b.observations&&local)b.observations->observe(*b.state,b.out->stats,b.out->done,ids,selected,*out);
+    else {
+        if(b.observations)b.observations->invalidate_output(*out);
+        observe_batch(b.state,b.out->stats,b.out->done,ids,out,b.count,b.height,b.width,b.players,selected);
+    }
 }
 
 extern "C" void generals_bound_snapshot(void *context, GeneralsStateView *out) {
@@ -213,7 +237,12 @@ extern "C" void generals_bound_snapshot(void *context, GeneralsStateView *out) {
 extern "C" void generals_bound_depart(void *context,int pid,const bool *mask) {
     auto &b=*static_cast<BoundCPU *>(context);
     generals_depart(b.state,b.out,b.count,b.height,b.width,b.players,pid,mask,0,b.horizon);
+    if(b.observations&&b.observations->active)for(int l=0;l<b.count;++l)if(!mask||mask[l])b.observations->reset(*b.state,l);
 }
+extern "C" void *generals_observation_cache_create(const Batch *s,int count,int height,int width,int players) {
+    try{return new ObservationCache(*s,count,height,width,players);}catch(...){return nullptr;}
+}
+extern "C" void generals_observation_cache_destroy(ObservationCache *cache){delete cache;}
 extern "C" void generals_visibility(const int16_t *owner,bool *visible,int h,int w,int pid) {
     std::fill(visible,visible+h*w,false);
     for(int c=0;c<h*w;++c)if(owner[c]==pid)

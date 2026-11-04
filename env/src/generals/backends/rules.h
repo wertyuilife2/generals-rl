@@ -73,20 +73,22 @@ RULE_INLINE void empty(RULE_LOCAL I *r) {
     for (int k=0;k<9;++k) r[k]=(k==2||k==3||k==6)?-1:0;
 }
 
-template<bool Packed=false> struct Rules {
+struct NoChanges { RULE_INLINE void changed(int) {} };
+template<bool Packed=false, class Changes=NoChanges> struct Rules {
     Batch b; int lane, p, h, w, n; size_t base, pb;
     Array<uint8_t> terrain, structure; Array<int16_t> owner; Array<U> army; Array<bool> alive;
     Array<int32_t> general, deaths, kills, spawn; Array<I> leave, damage;
     Array<uint8_t> known; Array<uint16_t> growth; Array<uint32_t> packed;
     RULE_LOCAL Cache &cache;
+    Changes changes;
     int error = 0;
     RULE_INLINE Rules(Batch batch,int lane_,int p_,int h_,int w_,RULE_LOCAL Cache &c,
-                      Array<uint16_t> g,Array<uint32_t> info={}):
+                      Array<uint16_t> g,Array<uint32_t> info={},Changes changes_={}):
         b(batch),lane(lane_),p(p_),h(h_),w(w_),n(h_*w_),base(size_t(lane_)*n),pb(size_t(lane_)*p_),
         terrain(b.terrain+base),structure(b.structure+base),owner(b.owner+base),
         army(unsigned_armies(b.army+base)),alive(b.alive+pb),general(b.general_pos+pb),
         deaths(b.death_order+pb),kills(b.kills+pb),spawn(b.spawn_pos+pb),leave(b.leave_tick+pb),
-        damage(b.damage+pb*p),known(b.city_known+pb),growth(g),packed(info),cache(c) {}
+        damage(b.damage+pb*p),known(b.city_known+pb),growth(g),packed(info),cache(c),changes(changes_) {}
     RULE_INLINE int owns(int cell) const {
         if constexpr(Packed) return int16_t(packed[cell]>>16);
         return owner[cell];
@@ -101,6 +103,7 @@ template<bool Packed=false> struct Rules {
         if(pid>=0&&cache.total[pid]>U(INT64_MAX))error=3;
 #endif
         owner[cell]=pid; army[cell]=count; structure[cell]=kind;
+        changes.changed(cell);
         if constexpr(Packed) packed[cell]=uint32_t(terrain[cell])|(uint32_t(kind)<<8)|(uint32_t(uint16_t(pid))<<16);
     }
     RULE_INLINE void die(int pid) {
@@ -200,6 +203,7 @@ template<bool Packed=false> struct Rules {
             if(friendly&&defense>U(INT64_MAX)-moving){error=2;return activity;}
 #endif
             r[4]=moving;army[m.source]-=moving;
+            changes.changed(m.source);changes.changed(m.target);
             bool captured=!friendly&&moving>defense;
             if(friendly)army[m.target]+=moving;
             else{

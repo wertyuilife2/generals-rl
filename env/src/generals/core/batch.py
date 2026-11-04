@@ -4,7 +4,8 @@ Array packing owns its storage. Unpacking constructs independent GameState
 copies; callers explicitly transfer GPU tensors before invoking it.
 """
 import numpy as np
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 from generals.protocol import MapConfig, STATE_DTYPES
 from generals.protocol.config import _integer
@@ -28,13 +29,40 @@ def generate_states(config, batch_size=1, *, seed=42):
     return states
 
 
+@dataclass(frozen=True, init=False)
+class PreparedState:
+    """Owned, validated initial arrays. Used by workers' immutable map banks."""
+    arrays: dict
+    width: int
+    height: int
+
+    @classmethod
+    def from_state(cls, state):
+        arrays, width, height = pack_states([state])
+        for value in arrays.values():
+            value.flags.writeable = False
+        result = object.__new__(cls)
+        for name, value in (('arrays', MappingProxyType(arrays)), ('width', width), ('height', height)):
+            object.__setattr__(result, name, value)
+        return result
+
+
 def pack_states(states):
     states = list(states)
     if not states:
         raise ValueError("states cannot be empty")
     first = states[0]
+    if isinstance(first, PreparedState):
+        if any(not isinstance(s, PreparedState) or (s.width, s.height, s.arrays['alive'].shape[1]) !=
+               (first.width, first.height, first.arrays['alive'].shape[1]) for s in states):
+            raise ValueError('prepared states must share dimensions and player count')
+        return ({name: np.concatenate([s.arrays[name] for s in states]) for name in STATE_DTYPES},
+                first.width, first.height)
+    checked = set()
     for state in states:
-        state.validate()
+        if id(state) not in checked:
+            state.validate()
+            checked.add(id(state))
         if (state.layout.terrain.shape != first.layout.terrain.shape
                 or state.player_count != first.player_count):
             raise ValueError("all states must share dimensions and player count")

@@ -25,6 +25,10 @@ CPU/CUDA/MPS 共用 `VecEnv.step()`、`observe(player_ids)` 和可复用的 `obs
 批量观测由 env 返回原始局部信息；特征、历史、知识、动作映射与模型推理属于 `rl/` 的策略实现。
 CPU 的迷雾、公开障碍、统计脱敏和生命周期字段由一次 C++ 调用生成，返回独立快照；
 不增加观测线程。NumPy 参考实现保留用于逐字段一致性验证，Arena 和策略无需自行重建观察。
+独占的原生 Arena 绑定支持增量观测：规则更新记录变化格，backend 维护每席位的视野覆盖计数，
+只刷新变化格及发生显隐切换的区域。终局、离场、大范围变化与缓冲区切换会完整刷新；动态统计、
+将军发现和 AFK 字段保持逐 tick 更新。普通 `observer` 仍返回独立完整快照，借用缓冲区只用于
+原生绑定的生命周期内。规则中的变化记录钩子在普通 CPU/CUDA/MPS 步进中编译为空操作。
 
 Apple Silicon 可用 `device="mps"`，需要支持 `torch.mps.compile_shader` 的 PyTorch。
 Metal 内核直接编译同一份 `backends/rules.h`，共享行动排序、交换将军、增长、离场宽限、AFK 和最终结算；
