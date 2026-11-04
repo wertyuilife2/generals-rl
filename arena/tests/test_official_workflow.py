@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from generals import MapConfig
 from generals_arena.competitions.config import LeagueConfig
+from generals_arena.competitions.leaderboard import match_statistics
 from generals_arena.competitions.store import CompetitionStore
 from generals_arena.competitions.jobs import run_jobs
 from generals_arena.competitions.tournament import tournament
@@ -55,6 +56,8 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
         assert result['winner_seat'] == 1-seat and result['placements'][seat] == 2
         assert len(result['forfeits']) == 1 and frames[-1]['forfeited'] == [seat]
         assert len(frames) == result['ticks'] + 1
+        samples = match_statistics(result, result['kills'])
+        assert samples[human]['kill_index'] == 0
     finally:
         live.close()
 
@@ -94,6 +97,8 @@ def test_live_afk_cached_winner_scores_as_a_win():
         assert result['final_alive'] == [False, False] and result['winner_seat'] == 1
         assert result['placements'] == [2, 1]
         assert seat_outcome(result, 1) == 'win' and seat_outcome(result, 0) == 'loss'
+        samples = match_statistics(result, result['kills'])
+        assert all(sample['kill_index'] == 0 for sample in samples.values())
 
 
 def test_random_maps_batch_scalar_and_gpu_results_agree():

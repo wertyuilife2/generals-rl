@@ -38,7 +38,7 @@ class PolicyValue(Protocol[ObservationT]):
 
 @dataclass(frozen=True)
 class JointTickInfo:
-    """Independent reference-rule result and episode status for one branch."""
+    """Native rule result and episode status for one branch."""
 
     result: TickResult
     terminated: bool

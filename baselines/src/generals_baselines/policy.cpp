@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "generals_native.h"
+#include "decision.h"
 
 using i64 = std::int64_t;
 using wide = __int128;
@@ -354,5 +356,40 @@ void baseline_batch_result(PolicyBatch *batch,const i64 *moves,const i64 *action
         int source=action>0?int((action-1)/8):-1;
         baseline_result(policy,policy->pid,action,int(row[1]),int(row[7]),source,int(row[3]));
     }
+}
+i64 baseline_bound_act(void *context,const GeneralsBatchView *view,i64 *actions) {
+    auto *batch=static_cast<PolicyBatch *>(context);
+    const auto &o=view->observation;
+    for(int lane=0;lane<batch->lanes;++lane) {
+        actions[lane]=0;
+        if(!o.active[lane]) continue;
+        const std::size_t base=std::size_t(lane)*batch->n;
+        Observation observation{o.terrain+base,o.structure+base,o.owner+base,o.army+base,
+            reinterpret_cast<const std::uint8_t *>(o.visible)+base,
+            reinterpret_cast<const std::uint8_t *>(o.alive)+std::size_t(lane)*batch->players,
+            batch->h,batch->w,batch->players,batch->policies[lane]->pid,o.tick[lane],o.terminated[lane]};
+        try { actions[lane]=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]); }
+        catch(const std::exception &e) {error=e.what();return lane;}
+    }
+    return -1;
+}
+i64 baseline_bound_one(void *context,const GeneralsBatchView *view,int lane,i64 *metrics) {
+    auto *batch=static_cast<PolicyBatch *>(context);
+    const auto &o=view->observation;
+    const std::size_t base=std::size_t(lane)*batch->n;
+    Observation observation{o.terrain+base,o.structure+base,o.owner+base,o.army+base,
+        reinterpret_cast<const std::uint8_t *>(o.visible)+base,
+        reinterpret_cast<const std::uint8_t *>(o.alive)+std::size_t(lane)*batch->players,
+        batch->h,batch->w,batch->players,batch->policies[lane]->pid,o.tick[lane],o.terminated[lane]};
+    generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(metrics),10000000,true,o.tick[lane]);
+    i64 action=0;int status=0;
+    try {action=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]);}
+    catch(const std::exception &e){error=e.what();status=2;}
+    catch(...){error="native policy exception";status=2;}
+    guard.done(status);return action;
+}
+void baseline_bound_result(void *context,const GeneralsFeedback *result) {
+    baseline_batch_result(static_cast<PolicyBatch *>(context),result->moves,result->actions,
+                          reinterpret_cast<const std::uint8_t *>(result->active));
 }
 }

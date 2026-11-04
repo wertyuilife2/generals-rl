@@ -19,7 +19,7 @@ conda run -n generals-rl python -m generals simulate --players 4 --max-ticks 200
 CPU 原生后端支持 Linux 与 macOS。Linux 需要支持 OpenMP 的 C++17 编译器；macOS 需要
 Apple clang 与已安装的 `libomp`，非标准位置可用 `GENERALS_LIBOMP_PREFIX` 指定。
 首次使用自动编译，后续复用缓存。单局调用 `generals.make_engine(state)`，批量调用 `VecEnv`；
-二者执行同一个 `backends/cpu/step.cpp`，Arena 不再维护执行后端。Python `CoreEngine` 继续作为独立规则参考。
+二者执行同一个 `backends/cpu/step.cpp`，Arena 不再维护执行后端。独立 Python 规则实现已移除；旧 `CoreEngine` 名称只保留调用原生 CPU backend 的兼容入口。投降、中立化、观测和合法动作掩码也由原生 backend 构建。
 
 CPU/CUDA/MPS 共用 `VecEnv.step()`、`observe(player_ids)` 和可复用的 `observer(player_ids)`。
 批量观测由 env 返回原始局部信息；特征、历史、知识、动作映射与模型推理属于 `rl/` 的策略实现。

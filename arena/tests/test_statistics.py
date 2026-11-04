@@ -86,7 +86,7 @@ def test_native_kills_do_not_transfer_and_statistics_use_recorded_counts(tmp_pat
         assert samples[store.reference]['survival_index'] == 0
         trace = json.loads(gzip.decompress(blob))
         trace['digests'][0] = 'corrupt'
-        with pytest.raises(ValueError, match='diverged at tick 1'):
+        with pytest.raises(ValueError, match='checksum'):
             list(verified_replay(gzip.compress(json.dumps(trace).encode()), result))
         store.insert_plans([plan])
         store.complete_result(result, blob)
@@ -144,3 +144,22 @@ def test_survival_uses_official_placement_instead_of_elimination_tick():
     # A's kill can place it above B despite its earlier elimination.
     values = match_statistics(result, [1, 0, 1])
     assert [values[k]['survival_index'] for k in ('a', 'b', 'c')] == [.5, 0, 1]
+
+
+@pytest.mark.parametrize('kills', ([0, 0, 1], [0, 0, 0]))
+def test_elimination_without_capture_does_not_invent_kills(kills):
+    result = dict(entrant_ids=['a', 'b', 'c'], ticks=263, winner_seat=2,
+                  elimination_ticks=[263, 121, None], placements=[2, 3, 1])
+    values = match_statistics(result, kills)
+    assert [values[k]['kill_index'] for k in ('a', 'b', 'c')] == [k / 2 for k in kills]
+    assert values['c']['win_rate'] == 1
+    assert [values[k]['survival_index'] for k in ('a', 'b', 'c')] == [.5, 0, 1]
+
+
+@pytest.mark.parametrize('kills', ([0, 0], [-1, 0, 1], [False, 0, 1],
+                                 [0, 0, 1.0], [0, 0, 3], [1, 1, 1]))
+def test_invalid_kill_counts_are_still_rejected(kills):
+    result = dict(entrant_ids=['a', 'b', 'c'], ticks=263, winner_seat=2,
+                  elimination_ticks=[263, 121, None], placements=[2, 3, 1])
+    with pytest.raises(ValueError, match='invalid kill counts'):
+        match_statistics(result, kills)

@@ -25,12 +25,17 @@ export class ReplayTimeline {
       this.index = start;
     }
     while (this.index < target) {
-      const frame = this.frames[++this.index], board = this.board;
-      for (const [cell,owner,army,structure] of frame.cells) {
-        const y = Math.floor(cell/board.width), x = cell%board.width;
-        board.owner[y][x] = owner; board.army[y][x] = army; board.structure[y][x] = structure;
+      const frame = this.frames[++this.index];
+      // Boundary events may publish a complete keyframe at any tick.
+      if (!frame.cells) this.board = copyBoard(frame);
+      const board = this.board;
+      if (frame.cells) {
+        for (const [cell,owner,army,structure] of frame.cells) {
+          const y = Math.floor(cell/board.width), x = cell%board.width;
+          board.owner[y][x] = owner; board.army[y][x] = army; board.structure[y][x] = structure;
+        }
+        for (const key of ['tick','alive','stats','forfeited','ranking','has_kill','warn_afk','neutralize_in']) board[key] = frame[key];
       }
-      for (const key of ['tick','alive','stats','forfeited','ranking','has_kill','warn_afk','neutralize_in']) board[key] = frame[key];
       if (this.index % this.interval === 0 && !this.snapshots.has(this.index)) {
         this.snapshots.set(this.index, copyBoard(board));
         if (this.snapshots.size > this.capacity) this.snapshots.delete([...this.snapshots.keys()][1]);

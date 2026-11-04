@@ -47,49 +47,35 @@ class Observation:
 
 
 def visibility_mask(owner: np.ndarray, player_id: int) -> np.ndarray:
-    owned = owner == player_id
-    horizontal = owned.copy()
-    horizontal[:, 1:] |= owned[:, :-1]
-    horizontal[:, :-1] |= owned[:, 1:]
-    visible = horizontal.copy()
-    visible[1:] |= horizontal[:-1]
-    visible[:-1] |= horizontal[1:]
+    from generals.backends.cpu.env import _library
+    board = np.ascontiguousarray(owner, dtype=np.int16)
+    visible = np.empty(board.shape, dtype=bool)
+    _library()[0].generals_visibility(board.ctypes.data, visible.ctypes.data,
+                                     *board.shape, int(player_id))
     return visible
 
 
 def _build(state, pid, mode, stats=None):
-    visible = (np.ones(state.owner.shape, dtype=bool) if mode == "full" or state.terminated
-               else visibility_mask(state.owner, pid))
-    stats = compute_stats(state) if stats is None else stats
-    cities = stats.cities
-    if mode == "local" and not state.terminated:
-        cities = np.full_like(stats.cities, -1)
-        cities[pid] = stats.cities[pid]
-    stats = PlayerStats(stats.army, stats.territory, cities)
-    obstacles = (state.layout.terrain == Terrain.MOUNTAIN) | (state.structure == Structure.CITY)
-    if mode == "local":
-        for slot, spawn in enumerate(state.spawn_pos):
-            if spawn >= 0 and state.general_pos[slot] < 0 and not (state.city_known[pid] & (1 << slot)):
-                obstacles.flat[spawn] = False
-    arrays = {
-        "terrain": np.where(visible, state.layout.terrain, np.uint8(UNKNOWN)),
-        "structure": np.where(visible, state.structure, np.uint8(UNKNOWN)),
-        "owner": np.where(visible, state.owner, np.int16(UNKNOWN_OWNER)),
-        "army": np.where(visible, state.army, np.int64(-1)),
-        "visible": visible,
-        "alive": state.alive.copy(),
-        "fog_obstacles": obstacles & ~visible,
-        "has_kill": state.kills > 0,
-        "warn_afk": state.warn_afk.astype(bool),
-        "neutralize_in": np.where((state.leave_tick >= 0) & (state.general_pos >= 0),
-                                  np.clip((state.tick - state.leave_tick) / 50., 0, 1), -1.),
-    }
+    from generals.backends.cpu.env import CPUEnv
+    backend = CPUEnv.from_states([state], threads=1)
+    try:
+        if stats is not None:
+            backend.stats[0] = np.stack((stats.army, stats.territory, stats.cities), axis=-1)
+        raw = backend.observer(pid, full=mode == 'full')()
+    finally:
+        backend.close()
+    boards = raw['state']
+    shape = state.owner.shape
+    arrays = {key: boards[key][0].reshape(shape) for key in
+              ('terrain', 'structure', 'owner', 'army', 'fog_obstacles')}
+    arrays.update({key: boards[key][0] for key in ('alive', 'has_kill', 'warn_afk', 'neutralize_in')})
+    arrays['visible'] = raw['visible'][0].reshape(shape)
     for array in arrays.values():
         array.flags.writeable = False
-    return Observation(
-        player_id=pid, tick=state.tick, **arrays,
-        general_pos=int(state.general_pos[pid]) if pid >= 0 else -1,
-        stats=stats, visibility=mode, terminated=state.terminated, winner_id=state.winner_id)
+    return Observation(player_id=pid, tick=int(boards['tick'][0]), **arrays,
+        general_pos=int(raw['general_pos'][0]), stats=PlayerStats(*raw['stats'][0].T),
+        visibility=mode, terminated=bool(boards['terminated'][0]),
+        winner_id=None if boards['winner_id'][0] < 0 else int(boards['winner_id'][0]))
 
 
 def observe(state: GameState, player_id: int, mode: str = "local", *,
@@ -119,13 +105,10 @@ def legal_action_mask(obs: Observation):
     pid = obs.player_id
     if pid < 0 or not obs.alive[pid] or obs.terminated:
         return mask, False
-    sources = np.flatnonzero((obs.owner == pid) & (obs.army > 1))
-    terrain = obs.terrain.ravel()
-    h, w = obs.height, obs.width
-    for source in sources:
-        y, x = divmod(int(source), w)
-        for direction, (dy, dx) in enumerate(((-1, 0), (0, 1), (1, 0), (0, -1))):
-            ny, nx = y + dy, x + dx
-            if 0 <= ny < h and 0 <= nx < w and terrain[ny * w + nx] != Terrain.MOUNTAIN:
-                mask[source, direction, :] = True
+    from generals.backends.cpu.env import _library
+    owner = np.ascontiguousarray(obs.owner, dtype=np.int16)
+    army = np.ascontiguousarray(obs.army, dtype=np.int64)
+    terrain = np.ascontiguousarray(obs.terrain, dtype=np.uint8)
+    _library()[0].generals_legal(owner.ctypes.data, army.ctypes.data, terrain.ctypes.data,
+                               mask.ctypes.data, obs.height, obs.width, pid)
     return mask, True

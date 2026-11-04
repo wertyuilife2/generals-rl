@@ -1,43 +1,27 @@
 """Physical match results and explicit participant outcome summaries."""
 
-from generals.core.recording import state_digest
-from generals.core.state import rank_players
-from generals.protocol.rules import END_REASONS
-
-EXECUTION_POLICY = "official-surrender-grace-v3"
+EXECUTION_POLICY = "official-native-session-v4"
 
 
-def _list(value):
-    return value.tolist() if hasattr(value, "tolist") else list(value)
-
-
-def build_result(plan, *, state, stats, elimination_ticks, invalid_actions,
-                 initial_digest):
-    """Describe an authoritative final state without adding a scoring mode.
-
-    The caller decides when its match has ended. Schedule fields remain intact,
-    so seat rotations, policy identities and rating evidence travel together.
-    """
-    names = ("army", "territory", "cities")
-    final_stats = {name: _list(stats[name] if isinstance(stats, dict) else getattr(stats, name))
-                   for name in names}
-    winner = state.winner_id
-    value = {**plan, "winner_seat": None if winner is None else int(winner),
-             "ticks": int(state.tick), "reason": END_REASONS[state.end_reason] if state.terminated else "tick_limit",
-             "elimination_ticks": [None if tick is None else int(tick) for tick in elimination_ticks],
-             "invalid_actions": [int(count) for count in invalid_actions],
-             "final_alive": [bool(alive) for alive in state.alive],
-             "initial_digest": initial_digest, "final_digest": state_digest(state),
-             "final_stats": final_stats, "kills": state.kills.tolist(),
-             "death_order": state.death_order.tolist()}
-    # The official FFA leaderboard prioritizes having at least one kill, then
-    # survival/death order. A bounded, unfinished duel remains a draw.
-    if state.player_count == 2:
-        value['placements'] = [1.5 if winner is None else 1 if p == winner else 2 for p in range(2)]
-    else:
-        order = rank_players(state, final_stats)
-        value['placements'] = [order.index(p) + 1 for p in range(state.player_count)]
-    return value
+def build_result(plan, *, state, stats, elimination_ticks, invalid_actions, initial_digest):
+    """Compatibility projection; all physical outcomes are computed natively."""
+    from types import SimpleNamespace
+    import numpy as np
+    from .game import RecordedGame
+    p = state.player_count
+    context = dict(entrant_ids=[str(i) for i in range(p)], controller_seeds=[0]*p, map={}, map_seed=0)
+    game = RecordedGame(context, SimpleNamespace(max_ticks=max(1,state.tick+1)), [None]*p,
+                        initial=state, record=False)
+    try:
+        game._invalid[0] = invalid_actions
+        game._eliminations[0] = [-1 if t is None else t for t in elimination_ticks]
+        game.env.stats[0] = np.stack([stats[k] if isinstance(stats,dict) else getattr(stats,k)
+                                     for k in ('army','territory','cities')],axis=-1)
+        value = game.execution.query(0)
+        value['initial_digest'] = initial_digest
+        return {**plan, **value}
+    finally:
+        game.close()
 
 
 def seat_outcome(result, seat):

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <omp.h>
 #include "../rules.h"
+#include "../../protocol/generals_native.h"
 #ifndef GENERALS_PROFILE_MARK
 #define GENERALS_PROFILE_MARK(phase) ((void)0)
 #define GENERALS_PROFILE_BATCH_BEGIN(batch, threads) ((void)0)
@@ -108,21 +109,25 @@ extern "C" void generals_step(Batch *s,const Batch *initial,Outputs *out,const i
     GENERALS_PROFILE_BATCH_END();
 }
 
+// Boundary commands use the same lifecycle and cache updates as ordinary ticks.
+extern "C" void generals_depart(Batch *s, Outputs *out, int batch, int h, int w, int p,
+                                int pid, const bool *mask, int neutralize, i64 horizon) {
+    for(int lane=0;lane<batch;++lane) {
+        if((mask&&!mask[lane]) || (horizon>0&&s->tick[lane]>=horizon))continue;
+        generals::Cache cache{};
+        generals::Rules<> rules(*s,lane,p,h,w,cache,out->growth_cells+size_t(lane)*h*w);
+        initialize(rules);
+        if(neutralize)rules.neutralize(pid);else rules.surrender(pid);
+        out->cache_valid[lane]=false;
+        out->done[lane*2]=out->done[lane*2]||s->terminated[lane];
+        if(neutralize)for(int k=0;k<p;++k){auto *v=out->stats+(size_t(lane)*p+k)*3;
+            v[0]=cache.total[k];v[1]=cache.territory[k];v[2]=cache.cities[k];}
+    }
+}
+
 // Public observation construction belongs to env, never to a policy adapter.
 // Outputs are caller-owned snapshots. This loop uses no extra worker threads.
-struct ObservationOutputs {
-    uint8_t *terrain, *structure;
-    int16_t *owner;
-    i64 *army;
-    bool *visible, *alive, *fog_obstacles, *has_kill, *warn_afk;
-    double *neutralize_in;
-    i64 *stats;
-    int32_t *general_pos;
-    bool *active;
-    i64 *tick;
-    bool *terminated;
-    int32_t *winner_id;
-};
+using ObservationOutputs = GeneralsObservation;
 extern "C" void generals_observe(const Batch *source, const i64 *stats, const bool *done,
                                   const i64 *ids, ObservationOutputs *out,
                                   int batch, int h, int w, int players) {
@@ -130,10 +135,11 @@ extern "C" void generals_observe(const Batch *source, const i64 *stats, const bo
     const int n=h*w;
     for (int lane=0;lane<batch;++lane) {
         const size_t base=size_t(lane)*n, pb=size_t(lane)*players;
-        const int pid=int(ids[lane]);
+        const bool full=ids[lane]<0;
+        const int pid=full?int(-ids[lane]-2):int(ids[lane]);
         bool *visible=out->visible+base;
-        std::fill(visible,visible+n,bool(s.terminated[lane]));
-        if (!s.terminated[lane]) {
+        std::fill(visible,visible+n,bool(full||s.terminated[lane]));
+        if (!full&&!s.terminated[lane]) {
             for (int cell=0;cell<n;++cell) if (s.owner[base+cell]==pid) {
                 int y=cell/w,x=cell%w;
                 for (int row=std::max(0,y-1);row<=std::min(h-1,y+1);++row)
@@ -153,7 +159,7 @@ extern "C" void generals_observe(const Batch *source, const i64 *stats, const bo
         for (int p=0;p<players;++p) {
             const size_t at=pb+p;
             const int spawn=s.spawn_pos[at];
-            if (spawn>=0 && s.general_pos[at]<0 && !(s.city_known[pb+pid]&(1<<p)))
+            if (!full && spawn>=0 && s.general_pos[at]<0 && !(s.city_known[pb+pid]&(1<<p)))
                 out->fog_obstacles[base+spawn]=false;
             out->alive[at]=s.alive[at];
             out->has_kill[at]=s.kills[at]>0;
@@ -162,12 +168,57 @@ extern "C" void generals_observe(const Batch *source, const i64 *stats, const bo
                 ? std::clamp(double(s.tick[lane]-s.leave_tick[at])/50.,0.,1.) : -1.;
             out->stats[at*3]=stats[at*3];
             out->stats[at*3+1]=stats[at*3+1];
-            out->stats[at*3+2]=(p==pid||s.terminated[lane])?stats[at*3+2]:-1;
+            out->stats[at*3+2]=(full||p==pid||s.terminated[lane])?stats[at*3+2]:-1;
         }
-        out->general_pos[lane]=s.general_pos[pb+pid];
-        out->active[lane]=!done[lane*2]&&!done[lane*2+1]&&s.alive[pb+pid];
+        out->general_pos[lane]=pid<0?-1:s.general_pos[pb+pid];
+        out->active[lane]=!done[lane*2]&&!done[lane*2+1]&&pid>=0&&s.alive[pb+pid];
         out->tick[lane]=s.tick[lane];
         out->terminated[lane]=s.terminated[lane];
         out->winner_id[lane]=s.winner[lane];
     }
+}
+
+// Same kernels with geometry and storage bound once by the backend owner.
+// Observation masking remains exclusively in generals_observe above.
+struct BoundCPU {
+    Batch *state, *initial;
+    Outputs *out;
+    int count, height, width, players, threads, auto_reset;
+    i64 horizon;
+};
+extern "C" void generals_bound_step(void *context, const i64 *actions) {
+    auto &b=*static_cast<BoundCPU *>(context);
+    generals_step(b.state,b.initial,b.out,actions,b.count,b.height,b.width,b.players,
+                  b.threads,b.auto_reset,b.horizon);
+}
+extern "C" void generals_bound_observe(void *context, const i64 *ids, GeneralsObservation *out) {
+    auto &b=*static_cast<BoundCPU *>(context);
+    generals_observe(b.state,b.out->stats,b.out->done,ids,out,b.count,b.height,b.width,b.players);
+}
+
+extern "C" void generals_bound_depart(void *context,int pid,const bool *mask) {
+    auto &b=*static_cast<BoundCPU *>(context);
+    generals_depart(b.state,b.out,b.count,b.height,b.width,b.players,pid,mask,0,b.horizon);
+}
+extern "C" void generals_visibility(const int16_t *owner,bool *visible,int h,int w,int pid) {
+    std::fill(visible,visible+h*w,false);
+    for(int c=0;c<h*w;++c)if(owner[c]==pid)
+        for(int y=std::max(0,c/w-1);y<=std::min(h-1,c/w+1);++y)
+            for(int x=std::max(0,c%w-1);x<=std::min(w-1,c%w+1);++x)visible[y*w+x]=true;
+}
+extern "C" void generals_legal(const int16_t *owner,const i64 *army,const uint8_t *terrain,
+                               bool *mask,int h,int w,int pid) {
+    std::fill(mask,mask+h*w*8,false);
+    const int dy[4]={-1,0,1,0},dx[4]={0,1,0,-1};
+    for(int c=0;c<h*w;++c)if(owner[c]==pid&&army[c]>1)for(int d=0;d<4;++d){
+        int y=c/w+dy[d],x=c%w+dx[d];
+        if(y>=0&&y<h&&x>=0&&x<w&&terrain[y*w+x]!=1)mask[c*8+d*2]=mask[c*8+d*2+1]=true;
+    }
+}
+
+extern "C" void generals_bound_legal(void *context,int pid,bool *out) {
+    auto &b=*static_cast<BoundCPU *>(context);int n=b.height*b.width;
+    for(int l=0;l<b.count;++l){auto base=size_t(l)*n;auto *mask=out+base*8;
+        if(!b.state->alive[size_t(l)*b.players+pid]||b.state->terminated[l])std::fill_n(mask,n*8,false);
+        else generals_legal(b.state->owner+base,b.state->army+base,b.state->terrain+base,mask,b.height,b.width,pid);}
 }

@@ -13,6 +13,7 @@ import numpy as np
 from generals_arena.policies import native
 from .worker import Journal, MatchWorker, _process_lifecycle
 from .game import close_game, failure
+from .resources import cpu_slot
 
 
 class BatchJournal:
@@ -194,9 +195,13 @@ class BatchWorker:
                             if other != seat:
                                 recovered.records[other] = recovered.committed[other]
                         recovered.header[1:4] = [-1, 0, 0]
-                        worker._start_process()
-                        result = worker.call({'op': 'resume', 'continue_op': 'run', 'plan': plan,
-                            **worker.context, 'journal': str(recovered.path), 'forfeits': worker.forfeits})
+                        # The failed child released its lease on exit. Acquire
+                        # another before starting scalar recovery; waiting here
+                        # is never part of a policy's decision deadline.
+                        with cpu_slot():
+                            worker._start_process()
+                            result = worker.call({'op': 'resume', 'continue_op': 'run', 'plan': plan,
+                                **worker.context, 'journal': str(recovered.path), 'forfeits': worker.forfeits})
                         output[index] = result['result'], result['blob']
                     else:
                         game = recovered.recover(plan, worker.config)

@@ -4,7 +4,6 @@ import threading
 import time
 import uuid
 
-from generals.core.observation import legal_action_mask, observe
 from generals.core.state import Action
 from generals_arena.util import integer, process_lock
 from generals_arena.matches.game import RecordedGame, close_game, failure as execution_failure, mark_forfeits
@@ -66,12 +65,8 @@ class LiveArena:
             controllers, game = [], None
             try:
                 entries = self.store.entrants()
-                if any(entries[key]['kind']=='cpp' for key in plan['entrant_ids']):
-                    from generals_arena.matches.worker import HumanCppGame
-                    game = HumanCppGame(entries, plan, max_ticks=self.store.config.max_ticks)
-                else:
-                    controllers = build_controllers(entries, plan)
-                    game = RecordedGame(plan, self.store.config, controllers)
+                from generals_arena.matches.worker import HumanGame
+                game = HumanGame(entries, plan, max_ticks=self.store.config.max_ticks)
             except Exception as exc:
                 if hasattr(exc, 'partial'):
                     self.store.fail_game(*exc.partial)
@@ -108,7 +103,7 @@ class LiveArena:
     def _view(self, game_id, value):
         game = value["game"]
         if value["board"] is None:
-            value["board"] = human_board(game.state, value["seat"])
+            value["board"] = game.view(value["seat"])
             mark_forfeits(value['board'], getattr(game, 'forfeits', []))
         if "entrants" not in value:
             names = self.store.entrants()
@@ -146,13 +141,13 @@ class LiveArena:
             if command_id != value["last_command_id"] + 1:
                 raise ValueError("commands must arrive in order")
             game, seat = value["game"], value["seat"]
-            if value["finished"] or not game.state.alive[seat] or game.state.leave_tick[seat] >= 0:
+            if value["finished"] or not game.view(seat)['can_play']:
                 raise ValueError("player is no longer active")
             queue = value["queue"]
             if op == "append":
                 encoded = command.get("action")
                 integer("action", encoded)
-                if encoded > game.state.layout.size * 8:
+                if encoded > game.view(seat)['max_action']:
                     raise ValueError("action is outside the map")
                 if len(queue) >= 256:
                     raise ValueError("move queue is full (256 moves)")
@@ -195,14 +190,14 @@ class LiveArena:
                     if value["finished"] or now < value["next_tick"]:
                         continue
                     try:
-                        if not value["game"].state.alive[value["seat"]]:
+                        if not value['game'].view(value['seat'])['can_play']:
                             value["queue"].clear()
                         action = Action.wait()
                         if value['queue']:
-                            legal, _ = legal_action_mask(observe(value['game'].state, value['seat']))
+                            legal = value['game'].view(value['seat'])['legal_actions']
                             while value['queue']:
                                 encoded = value['queue'].popleft()['action']
-                                if encoded == 0 or legal.ravel()[encoded - 1]:
+                                if encoded == 0 or legal[encoded - 1]:
                                     action = Action.decode(encoded)
                                     break
                         value["game"].advance({value["seat"]: action})

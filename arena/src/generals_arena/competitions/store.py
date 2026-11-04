@@ -340,8 +340,8 @@ class CompetitionStore:
                 if any(retired.intersection(json.loads(row['plan'])['entrant_ids']) for row in failed):
                     continue
                 failures = [json.loads(row['result'] or '{}') for row in failed]
-                if job['kind'] != 'cpp' or (failures and all(
-                        r.get('error_detail', {}).get('player') is None or decision_timeout(r.get('error_detail', {})) for r in failures)):
+                if job['kind'] != 'cpp' or not failures or all(
+                        r.get('error_detail', {}).get('player') is None or decision_timeout(r.get('error_detail', {})) for r in failures):
                     db.execute("UPDATE jobs SET status='queued',error=NULL WHERE id=?", (job['id'],))
                     for row in failed:
                         # Keep the failed attempt and its replay as evidence.
