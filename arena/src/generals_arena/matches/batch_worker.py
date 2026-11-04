@@ -77,14 +77,27 @@ def _child(connection):
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
     from .batch import execute_batch
+    from .cache import RuntimeCache
+    from generals import MapConfig
+    from collections import OrderedDict
+    runtimes, maps = RuntimeCache(), OrderedDict()
     try:
         while (request := connection.recv()) is not None:
+            maps.update(request.pop('initial_states', {}))
+            for plan in request['plans']:
+                key = (MapConfig(**plan['map']), plan['map_seed'])
+                if key in maps:
+                    maps.move_to_end(key)
             journal = BatchJournal(request.pop('journal'), len(request['plans']),
                                    request['max_ticks'], len(request['plans'][0]['entrant_ids']))
             native.DIAGNOSTICS = journal
             try:
-                records, timing = execute_batch(**request, journal=journal)
-                connection.send({'records': records, 'timing': timing})
+                records, timing = execute_batch(**request, journal=journal,
+                    runtime_cache=runtimes, initial_states=maps)
+                runtimes.trim()
+                while len(maps) > 256:
+                    maps.popitem(last=False)
+                connection.send({'records': records, 'timing': timing, 'maps': list(maps)})
             except Exception as exc:
                 details = getattr(exc, 'details', {})
                 connection.send({'error': str(exc), 'details': details,
@@ -95,12 +108,14 @@ def _child(connection):
     except (EOFError, BrokenPipeError):
         pass
     finally:
+        runtimes.close()
         connection.close()
 
 
 class BatchWorker:
     def __init__(self):
         self.process = self.connection = None
+        self._sent_maps = set()
 
     def _start(self):
         with _process_lifecycle:
@@ -114,6 +129,7 @@ class BatchWorker:
             child.close()
 
     def close(self):
+        self._sent_maps.clear()
         with _process_lifecycle:
             if self.process is not None:
                 if self.process.is_alive():
@@ -125,6 +141,9 @@ class BatchWorker:
     def _exchange(self, request, journal):
         self._start()
         try:
+            request = dict(request)
+            request['initial_states'] = {key: state for key, state in request.get('initial_states', {}).items()
+                                         if key not in self._sent_maps}
             self.connection.send(request)
             phase, entered = None, monotonic()
             while not self.connection.poll(1):
@@ -137,7 +156,9 @@ class BatchWorker:
                         self.process.kill()
                     break
             if self.connection.poll():
-                return self.connection.recv()
+                response = self.connection.recv()
+                self._sent_maps = set(response.pop('maps', ()))
+                return response
         except (EOFError, BrokenPipeError, ConnectionResetError):
             pass
         with _process_lifecycle:

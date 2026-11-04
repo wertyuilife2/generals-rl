@@ -39,16 +39,22 @@ static void failed(int signum) {
     finish(now()-started, signum==SIGALRM ? 1 : 2);
     _exit(128+signum);
 }
+static void install() {
+    struct sigaction action{};
+    action.sa_handler=failed; sigemptyset(&action.sa_mask);
+    for(int s : {SIGALRM,SIGSEGV,SIGBUS,SIGFPE,SIGABRT}) sigaction(s,&action,nullptr);
+}
 class Guard {
     sigset_t blocked, oldmask;
     std::int64_t limit;
 public:
-    Guard(Metrics *m, std::int64_t ns, bool act, std::int64_t current_tick=0):limit(ns) {
+    Guard(Metrics *m, std::int64_t ns, bool act, std::int64_t current_tick=0, bool prepared=false):limit(ns) {
         sigemptyset(&blocked); sigaddset(&blocked,SIGALRM);
         sigprocmask(SIG_BLOCK,&blocked,&oldmask);
-        struct sigaction action{};
-        action.sa_handler=failed; sigemptyset(&action.sa_mask);
-        for(int s : {SIGALRM,SIGSEGV,SIGBUS,SIGFPE,SIGABRT}) sigaction(s,&action,nullptr);
+        if(!prepared) {
+            struct sigaction current{};sigaction(SIGALRM,nullptr,&current);
+            if(current.sa_handler!=failed)install();
+        }
         active=m; decision=act; tick=current_tick; m->status=0;
         if(act) ++m->calls;
         started=now();

@@ -1,4 +1,4 @@
-"""Recorded browser frames; native action verification is an explicit audit API."""
+"""Compact action logs; the native backend materializes browser frames on demand."""
 import copy
 import gzip
 from hashlib import sha256
@@ -17,11 +17,14 @@ def _bytes(value):
 
 
 def encode_native_trace(trace, forfeits=()):
-    value = dict(trace, schema=4, rules=RULES_VERSION)
+    # The native writer already serialized the action log. Keep it as bytes
+    # across this boundary instead of decoding and re-encoding the whole game.
+    payload = trace if isinstance(trace, bytes) else _bytes(trace)
+    payload = payload[:-1] + b',"schema":5,"rules":' + _bytes(RULES_VERSION)
     if forfeits:
-        value['forfeits'] = list(forfeits)
-    value['checksum'] = sha256(_bytes(value)).hexdigest()
-    return gzip.compress(_bytes(value), mtime=0)
+        payload += b',"forfeits":' + _bytes(list(forfeits))
+    checksum = sha256(payload+b'}').hexdigest().encode()
+    return gzip.compress(payload+b',"checksum":"'+checksum+b'"}', compresslevel=1, mtime=0)
 
 
 def encode_replay(initial, actions, digests, forfeits=()):
@@ -36,19 +39,42 @@ def encode_replay(initial, actions, digests, forfeits=()):
 
 
 def _trace(blob, value):
-    trace = json.loads(gzip.decompress(blob))
-    if (trace['schema'] not in (3, 4) or trace['rules'] != RULES_VERSION or
-            len(trace['actions']) != value['ticks'] or len(trace['digests']) != len(trace['actions'])):
+    payload = gzip.decompress(blob)
+    trace = json.loads(payload)
+    if (trace['schema'] not in (3, 4, 5) or trace['rules'] != RULES_VERSION or
+            len(trace['actions']) != value['ticks']):
         raise ValueError('invalid replay length or schema')
     if trace.get('forfeits', []) != value.get('forfeits', []):
         raise ValueError('replay forfeit mismatch')
-    if trace['schema'] == 4:
+    if trace['schema'] in (4, 5):
         checksum = trace.pop('checksum', None)
-        if checksum != sha256(_bytes(trace)).hexdigest():
+        if trace['schema'] == 5:
+            body, separator, tail = payload.rpartition(b',"checksum":"')
+            checked = body+b'}' if separator and tail == str(checksum).encode()+b'"}' else b''
+        else:
+            checked = _bytes(trace)
+        if checksum != sha256(checked).hexdigest():
             raise ValueError('replay checksum mismatch')
-        if len(trace['frames']) != len(trace['actions']) + 1:
+        if trace['schema'] == 4 and len(trace['frames']) != len(trace['actions']) + 1:
             raise ValueError('invalid replay frame count')
+    if trace['schema'] in (3, 4) and len(trace['digests']) != len(trace['actions']):
+        raise ValueError('invalid replay digest count')
+    if trace['schema'] == 5 and (trace.get('action_encoding') != 'generals-v1'
+                                or trace.get('final_digest') != value['final_digest']):
+        raise ValueError('invalid replay action encoding or final digest')
     return trace
+
+
+def action_codes(trace, players):
+    rows = trace['actions']
+    if trace.get('action_encoding') != 'generals-v1':
+        rows = [[Action(*a).encode() for a in row] for row in rows]
+    actions = np.asarray(rows, np.int64)
+    if actions.size == 0:
+        return actions.reshape(0, players)
+    if actions.ndim != 2 or actions.shape[1] != players:
+        raise ValueError('invalid replay action shape')
+    return np.ascontiguousarray(actions)
 
 
 def _audit(trace, value, *, capture):
@@ -58,13 +84,13 @@ def _audit(trace, value, *, capture):
         raise ValueError('replay initial digest mismatch')
     p = state.player_count
     plan = dict(entrant_ids=[str(i) for i in range(p)], controller_seeds=[0]*p, map={}, map_seed=0)
-    game = RecordedGame(plan, SimpleNamespace(max_ticks=max(1, value['ticks'])), [None]*p,
-                        trace.get('forfeits', []), initial=state)
+    game = RecordedGame(plan, SimpleNamespace(max_ticks=max(1, value['ticks']+1)), [None]*p,
+                        trace.get('forfeits', []), initial=state, record=2)
     try:
-        actions = np.asarray([[Action(*a).encode() for a in row] for row in trace['actions']], np.int64).reshape(-1,p)
+        actions = action_codes(trace, p)
         game.restore(actions, capture=capture)
         actual = game.trace()
-        if actual['digests'] != trace['digests']:
+        if 'digests' in trace and actual['digests'] != trace['digests']:
             raise ValueError('replay diverged: committed digest mismatch')
         if game.summary()['final_digest'] != value['final_digest']:
             raise ValueError('replay final digest mismatch')
@@ -79,12 +105,13 @@ def verified_replay(blob, value):
     trace = _trace(blob, value)
     actual, audit = _audit(trace, value, capture=True)
     frames = _expanded(actual['frames'])
+    codes = action_codes(trace, len(value['entrant_ids']))
     previous = None
     for index, (data, moves) in enumerate(zip(audit['states'], audit['moves'], strict=True)):
         state = state_from_dict(data)
         outcome = None
         if moves is not None:
-            encoded = [Action(*a).encode() for a in trace['actions'][index-1]]
+            encoded = codes[index-1]
             receipts = tuple(move for seat, row in enumerate(moves)
                              if (move := _move(row, seat, encoded[seat])) is not None)
             # Verification DTOs are outside the execution path. Totals are already recorded.
@@ -114,7 +141,7 @@ def _expanded(frames):
 
 
 def replay_frames(blob, value, stride=1, compact=False):
-    """Playback only reads recorded frames. Legacy traces are converted natively."""
+    """Materialize action logs with the native backend; Web caches these frames."""
     trace = _trace(blob, value)
     frames = trace['frames'] if trace['schema'] == 4 else _audit(trace, value, capture=False)[0]['frames']
     if compact and stride == 1:

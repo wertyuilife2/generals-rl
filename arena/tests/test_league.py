@@ -243,7 +243,7 @@ def test_all_supported_seat_counts_can_finish_and_replay(tmp_path, players):
     assert len(replay_frames(blob, result)[-1]['alive']) == players
     assert store.leaderboard()['completed_games'] == 1
     corrupted = json.loads(gzip.decompress(blob))
-    corrupted['digests'][-1] = 'wrong'
+    corrupted['actions'][-1][0] = 1
     with pytest.raises(ValueError, match='checksum'):
         replay_frames(gzip.compress(json.dumps(corrupted).encode()), result)
 

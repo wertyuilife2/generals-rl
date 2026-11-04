@@ -128,12 +128,13 @@ extern "C" void generals_depart(Batch *s, Outputs *out, int batch, int h, int w,
 // Public observation construction belongs to env, never to a policy adapter.
 // Outputs are caller-owned snapshots. This loop uses no extra worker threads.
 using ObservationOutputs = GeneralsObservation;
-extern "C" void generals_observe(const Batch *source, const i64 *stats, const bool *done,
+static void observe_batch(const Batch *source, const i64 *stats, const bool *done,
                                   const i64 *ids, ObservationOutputs *out,
-                                  int batch, int h, int w, int players) {
+                                  int batch, int h, int w, int players, const bool *selected) {
     const auto &s=*source;
     const int n=h*w;
     for (int lane=0;lane<batch;++lane) {
+        if(selected && !selected[lane]) {out->active[lane]=false;continue;}
         const size_t base=size_t(lane)*n, pb=size_t(lane)*players;
         const bool full=ids[lane]<0;
         const int pid=full?int(-ids[lane]-2):int(ids[lane]);
@@ -178,6 +179,12 @@ extern "C" void generals_observe(const Batch *source, const i64 *stats, const bo
     }
 }
 
+extern "C" void generals_observe(const Batch *source, const i64 *stats, const bool *done,
+                                  const i64 *ids, ObservationOutputs *out,
+                                  int batch, int h, int w, int players) {
+    observe_batch(source,stats,done,ids,out,batch,h,w,players,nullptr);
+}
+
 // Same kernels with geometry and storage bound once by the backend owner.
 // Observation masking remains exclusively in generals_observe above.
 struct BoundCPU {
@@ -191,9 +198,16 @@ extern "C" void generals_bound_step(void *context, const i64 *actions) {
     generals_step(b.state,b.initial,b.out,actions,b.count,b.height,b.width,b.players,
                   b.threads,b.auto_reset,b.horizon);
 }
-extern "C" void generals_bound_observe(void *context, const i64 *ids, GeneralsObservation *out) {
+extern "C" void generals_bound_observe(void *context, const i64 *ids, const bool *selected, GeneralsObservation *out) {
     auto &b=*static_cast<BoundCPU *>(context);
-    generals_observe(b.state,b.out->stats,b.out->done,ids,out,b.count,b.height,b.width,b.players);
+    observe_batch(b.state,b.out->stats,b.out->done,ids,out,b.count,b.height,b.width,b.players,selected);
+}
+
+extern "C" void generals_bound_snapshot(void *context, GeneralsStateView *out) {
+    const auto &s=*static_cast<BoundCPU *>(context)->state;
+    *out={s.terrain,s.structure,s.owner,s.army,s.alive,s.general_pos,s.tick,s.terminated,s.winner,
+          s.idle_ticks,s.afk_turn,s.end_reason,s.leave_tick,s.death_order,s.kills,s.damage,
+          s.spawn_pos,s.city_known,s.capture_mask,s.warn_afk};
 }
 
 extern "C" void generals_bound_depart(void *context,int pid,const bool *mask) {

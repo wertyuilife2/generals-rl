@@ -51,6 +51,22 @@ def capture_inputs(controller):
     return captured
 
 
+def test_frozen_actor_shared_but_episode_memory_and_rng_independent(policy_files):
+    weights, config_path, _ = policy_files
+    first = create_controller(weights=weights, config_path=config_path, seed=11)
+    second = create_controller(weights=weights, config_path=config_path, seed=17)
+    assert first.actor is second.actor
+    assert not first.actor.training and all(not p.requires_grad for p in first.actor.parameters())
+    first.act(observe(battle_state(), 0))
+    assert first.history.frames.data_ptr() != second.history.frames.data_ptr()
+    assert first._counter.data_ptr() != second._counter.data_ptr()
+    assert first.knowledge is not second.knowledge
+    assert first._initialized.any() and not second._initialized.any()
+    assert not second.history.frames.any()
+    first.reset(0, 11)
+    assert not first._initialized.any() and not second._initialized.any()
+
+
 def battle_state():
     """Visible combat, a wall, a neutral city and one-army growth boundaries."""
     terrain = np.zeros((9, 9), np.uint8)

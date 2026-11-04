@@ -1,14 +1,14 @@
 """Resumable persistent jobs with ordered commits through the shared runner."""
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 import json
-import multiprocessing
 import os
 import threading
 import time
 from types import SimpleNamespace
 
 from generals_arena.util import integer, process_lock
-from generals_arena.matches.runner import MatchRunner, resolve_geometries
+from generals_arena.matches.runner import MatchRunner, resolve_geometries, _batch_key
 from generals_arena.matches.worker import MatchWorker
 from generals_arena.policies.native import PolicyError
 from generals_arena.competitions.matchmaking import choose_player_count, make_block
@@ -142,7 +142,6 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
     if limit is not None:
         integer("limit", limit, 1)
     workers = worker_count(workers)
-    has_cpp = any(e['kind'] == 'cpp' for e in store.entrants().values())
     # Compile native libraries once before spawning, avoiding concurrent builds
     # on a cold cache. Workers still load their own library and RNG instances.
     from generals.backends.cpu.env import _library as cpu_library
@@ -153,7 +152,7 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
             store.retry()
         if workers > 1:
             return _run_parallel(store, workers, limit, progress, job_id)
-        native_worker = MatchWorker() if has_cpp else None
+        native_worker = MatchWorker()
         try:
             while limit is None or completed < limit:
                 count = run_next(store, job_id=job_id, cpp_worker=native_worker,
@@ -172,10 +171,7 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
     completed = 0
     # Keep adaptation at the same persistent window as sequential execution.
     # Spawn works on macOS and does not inherit SQLite connections or locks.
-    native = any(e['kind'] == 'cpp' for e in store.entrants().values())
-    pool = NativeMatchPool(workers) if native else ProcessPoolExecutor(
-        workers, mp_context=multiprocessing.get_context('spawn'))
-    with pool as executor:
+    with NativeMatchPool(workers) as executor:
         while limit is None or completed < limit:
             job = next((j for j in store.jobs() if j["status"] == "queued"
                         and (job_id is None or j['id'] == job_id)), None)
@@ -187,30 +183,36 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
             if limit is not None:
                 plans = plans[:limit - completed]
             directory = str(store.directory.resolve())
-            # One match per task lets an idle process immediately take another
-            # game, instead of waiting for an assigned chunk's longest game.
-            # Resolve repeated map geometries once before dispatching threads.
+            # Small compatible batches amortize model inference and IPC while
+            # retaining at least four tasks per worker for dynamic load balance.
+            # The window and rating order remain independent of worker count.
             plans = resolve_geometries(plans)
-            futures = {(executor.submit_native(directory, [plan]) if native else
-                        executor.submit(simulate_batch, directory, [plan])): index
-                       for index, plan in enumerate(plans)}
+            size = max(1, min(8, len(plans)//(workers*4)))
+            buckets = defaultdict(list)
+            for index, plan in enumerate(plans):
+                buckets[_batch_key(plan)].append(index)
+            chunks = [indices[start:start+size] for indices in buckets.values()
+                      for start in range(0, len(indices), size)]
+            chunks.sort(key=lambda indices: indices[0])
+            futures = {executor.submit_native(directory, [plans[i] for i in indices]): indices
+                       for indices in chunks}
             first_error, ready, next_index = None, {}, 0
             for future in as_completed(futures):
-                index = futures[future]
+                indices = futures[future]
                 try:
                     if future.cancelled():
-                        ready[index] = None
+                        ready.update((index, None) for index in indices)
                     else:
                         records = future.result()
-                        if len(records) != 1:
+                        if len(records) != len(indices):
                             raise RuntimeError('match worker returned an incomplete task')
-                        ready[index] = records[0]
-                        result = records[0][0]
-                        if 'policy_error' in result:
-                            first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
+                        ready.update(zip(indices, records, strict=True))
+                        for result, _ in records:
+                            if 'policy_error' in result:
+                                first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
                 except Exception as exc:
                     first_error = first_error or exc
-                    ready[index] = None
+                    ready.update((index, None) for index in indices)
                 # Completion order never becomes rating order. Commit any
                 # contiguous ready prefix while the other processes keep going.
                 while next_index in ready:

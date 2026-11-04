@@ -58,7 +58,7 @@ def _library():
 
 class CPUEnv:
     def __init__(self, initial, *, width, height, threads=0,
-                 auto_reset=False, episode_ticks=0, seed=42):
+                 auto_reset=False, episode_ticks=0, seed=42, _validated=False):
         self._closed = False
         self.seed = _integer("seed", seed, 0)
         self.width, self.height = _integer("width", width, 1), _integer("height", height, 1)
@@ -88,7 +88,8 @@ class CPUEnv:
             self.initial[name] = np.array(value, copy=True, order="C")
         self.state = {name: value.copy() for name, value in self.initial.items()}
         # Reuse the independent CPU state's invariant checks only at construction.
-        self.to_states(validate=True)
+        if not _validated:
+            self.to_states(validate=True)
         self._initial_stats = np.zeros((self.batch_size, self.players, 3), dtype=np.int64)
         for lane in range(self.batch_size):
             for pid in range(self.players):
@@ -128,7 +129,7 @@ class CPUEnv:
     def from_states(cls, states, **kwargs):
         from generals.core.batch import pack_states
         arrays, width, height = pack_states(states)
-        return cls(arrays, width=width, height=height, **kwargs)
+        return cls(arrays, width=width, height=height, _validated=True, **kwargs)
 
     @classmethod
     def from_config(cls, config, batch_size=1, *, seed=42, **kwargs):
@@ -163,7 +164,7 @@ class CPUEnv:
         finish execution before closing/resetting this environment or editing
         its storage. The public step/observer APIs keep their existing checks.
         """
-        from generals.protocol.native import ABI_VERSION, BackendABI, BackendBinding, address
+        from generals.protocol.native import ABI_VERSION, HOST_BUFFERS, BackendABI, BackendBinding, address
         if self._closed:
             raise RuntimeError('CPU environment is closed')
         if self.auto_reset:
@@ -176,7 +177,8 @@ class CPUEnv:
         abi = BackendABI(ABI_VERSION, ctypes.addressof(context), address(self._lib.generals_bound_observe),
             address(self._lib.generals_bound_step), self.state['alive'].ctypes.data, self.done.ctypes.data,
             self.state['tick'].ctypes.data, self.last_moves.ctypes.data, self.errors.ctypes.data,
-            address(self._lib.generals_bound_depart), ctypes.addressof(self._state), self.stats.ctypes.data, address(self._lib.generals_bound_legal))
+            address(self._lib.generals_bound_depart), address(self._lib.generals_bound_snapshot),
+            self.stats.ctypes.data, address(self._lib.generals_bound_legal), HOST_BUFFERS, 0, None)
         return BackendBinding(abi, (self, context, self._state, self._initial, self._out,
             *self._array_refs, self.stats, self.last_moves, self.done, self.errors,
             self._current_stats, self._growth_cells, self._growth_count, self._cache_valid, self._owned_structures))

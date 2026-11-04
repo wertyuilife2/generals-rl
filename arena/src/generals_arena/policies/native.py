@@ -415,7 +415,7 @@ class NativeController:
         if not self._children or np.any(self._seats < 0) or np.any(self._seats >= players):
             raise ValueError('reset_batch with valid player ids before binding')
         self._previous[:, 1] = self._seats
-        context = _BoundPolicy(self._handles.ctypes.data, self._children[0]._act_address,
+        context = _BoundPolicy(self._handles.ctypes.data, address(self._children[0].lib.arena_host_decide),
             self._previous.ctypes.data, self._metrics.ctypes.data, self._headers.ctypes.data,
             self._active_lane.ctypes.data)
         library = _bound_library()
@@ -436,6 +436,14 @@ class NativeController:
             self.lib.arena_host_destroy(instance, self.values.ctypes.data_as(C.POINTER(C.c_int64)))
             self._idle()
             self._check(tick, 'destruction')
+
+    def release_batch(self):
+        # Retain verified code/parameters, but run user destructors while this
+        # match's journal is still bound. No user instance crosses a game boundary.
+        self.close()
+        self.values = np.zeros(8, dtype=np.int64)
+        for name in ('_handles', '_metrics', '_headers', '_active_lane'):
+            self.__dict__.pop(name, None)
 
 
 def create_controller(*, bundle, player_id, seed):
