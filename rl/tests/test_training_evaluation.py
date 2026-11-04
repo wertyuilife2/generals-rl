@@ -108,6 +108,7 @@ def test_dedicated_gpu_requires_disjoint_training_visibility():
             settings.validate_training_devices('cuda:0')
     settings.validate_training_devices('cpu')
     shared = TrainingEvalConfig(device='cuda', cuda_visible_devices='0', allow_shared_gpus=True)
+    assert shared.synchronous
     with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1'}):
         shared.validate_training_devices('cuda:0')
 
@@ -316,10 +317,7 @@ def test_gpu_worker_routing_without_cuda_context(tmp_path, dedicated):
     job = enqueue(evaluator, 2)
     process = SimpleNamespace(pid=123, poll=lambda: None)
     with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1', 'PYTHONPATH': 'preserved'}), \
-         patch('generals_rl.training_evaluation.subprocess.Popen', return_value=process) as popen, \
-         patch('generals_rl.training_evaluation.torch.cuda.is_initialized', return_value=True), \
-         patch('generals_rl.training_evaluation.torch.cuda.synchronize') as sync, \
-         patch('generals_rl.training_evaluation.torch.cuda.empty_cache') as empty:
+         patch('generals_rl.training_evaluation.subprocess.Popen', return_value=process) as popen:
         evaluator.poll()
     command = popen.call_args.args[0]
     assert command[command.index('-m') + 1:command.index('-m') + 3] == ['generals_arena', 'evaluate']
@@ -328,7 +326,6 @@ def test_gpu_worker_routing_without_cuda_context(tmp_path, dedicated):
     env = popen.call_args.kwargs['env']
     assert env['CUDA_VISIBLE_DEVICES'] == ('7' if dedicated else '0,1')
     assert env['PYTHONPATH'] == 'preserved' and env['OPENBLAS_NUM_THREADS'] == '1'
-    assert sync.call_count == empty.call_count == int(not dedicated)
     evaluator.running = None  # This is a routing stub, never a live process.
 
 

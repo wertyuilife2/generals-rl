@@ -232,6 +232,10 @@ def evaluation_wait_worker(rank, directory):
                 config['task']['opponent'] = 'current_self_play'
                 config['evaluation'] = {'enabled': True, 'every_n_updates': 2, 'final_top_k': 0,
                                         'device': 'cpu' if phase == 'final' else 'cuda:0'}
+                if phase == 'periodic':
+                    # An explicitly selected shared card needs the same pauses
+                    # as the implicit default, including another rank's card.
+                    config['evaluation'].update(cuda_visible_devices='1', allow_shared_gpus=True)
                 environment = {'WORLD_SIZE': '2', 'RANK': str(rank), 'LOCAL_RANK': str(rank)}
                 with patch.dict(os.environ, environment), redirect_stdout(io.StringIO()), \
                         patch('generals_rl.train.PeriodicEvaluator', Evaluator), \
@@ -252,6 +256,7 @@ class DistributedTrainEntrypointTests(unittest.TestCase):
     def test_evaluation_waits_on_cpu_at_each_boundary_and_propagates_errors(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': ''}):
             mp.spawn(evaluation_wait_worker, args=(directory,), nprocs=2, join=True)
+            expected_waits = {'initialization': (6, 2), 'periodic': (6, 4), 'final': (1, 1)}
             for rank in range(2):
                 results = json.loads((Path(directory) / f'evaluation_rank_{rank}.json').read_text())
                 for phase in ('initialization', 'periodic', 'final'):
@@ -260,8 +265,7 @@ class DistributedTrainEntrypointTests(unittest.TestCase):
                         self.assertEqual(success['status'], 'completed')
                         self.assertIn(f'injected {phase} evaluation failure', failure['status'])
                         # No CPU wait on update 1, when evaluation is not due.
-                        self.assertEqual(success['waits'], 1 if phase == 'final' else 3)
-                        self.assertEqual(failure['waits'], 2 if phase == 'periodic' else 1)
+                        self.assertEqual((success['waits'], failure['waits']), expected_waits[phase])
 
     def test_full_training_resume_partial_budget_rank_zero_stop_and_file_ownership(self):
         self._assert_lifecycle("current_self_play")

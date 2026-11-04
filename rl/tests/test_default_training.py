@@ -1,15 +1,36 @@
 """The selected recipe works as a CLI default and a small real CPU run."""
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from copy import deepcopy
 import io
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 import torch
 
 from generals_rl.config import DEFAULT_ITERATIONS, default_training_config
 from generals_rl.train import main, train
+
+
+@pytest.mark.parametrize('device,initialized,environment,expected', [
+    ('cuda', False, {}, {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'}),
+    ('cuda', False, {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:False'},
+     {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:False'}),
+    ('cuda', False, {'PYTORCH_ALLOC_CONF': 'backend:cudaMallocAsync'},
+     {'PYTORCH_ALLOC_CONF': 'backend:cudaMallocAsync'}),
+    ('cuda', True, {}, {}),
+    ('cpu', False, {}, {}),
+])
+def test_allocator_defaults_preserve_explicit_settings_and_initialized_cuda(device, initialized, environment, expected):
+    with patch.dict(os.environ, environment, clear=True), \
+            patch('generals_rl.train.torch.cuda.is_initialized', return_value=initialized), \
+            patch('generals_rl.train.distributed_process_group', return_value=nullcontext()), \
+            patch('generals_rl.train._train'):
+        train({'task': {'device': device}}, 'unused', iterations=1)
+        assert {key: value for key, value in os.environ.items()
+                if key in ('PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF')} == expected
 
 
 def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():

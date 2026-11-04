@@ -16,7 +16,7 @@ from generals_rl.training_evaluation import PeriodicEvaluator, TrainingEvalConfi
 @pytest.fixture
 def harness(tmp_path):
     value = Mock()
-    value.clock, value.copy_seconds, value.cache_seconds = 100.0, 0.0, 0.0
+    value.clock, value.copy_seconds, value.export_seconds = 100.0, 0.0, 0.0
     value.source = tmp_path / 'checkpoint.pt'
     value.source.write_bytes(b'immutable synthetic checkpoint, not a model')
     value.process = Mock(pid=123)
@@ -29,11 +29,9 @@ def harness(tmp_path):
         value.clock += value.copy_seconds
         return result
 
-    def timed_cache():
-        value.clock += value.cache_seconds
-
     def export(checkpoint, output, **kwargs):
         Path(output).mkdir()
+        value.clock += value.export_seconds
         return Path(output)
 
     with ExitStack() as stack:
@@ -44,9 +42,6 @@ def harness(tmp_path):
                                   side_effect=lambda bundle: {'policy_id': sha256(str(bundle).encode()).hexdigest()}))
         value.popen = stack.enter_context(patch('generals_rl.training_evaluation.subprocess.Popen', return_value=value.process))
         value.killpg = stack.enter_context(patch('generals_rl.training_evaluation.os.killpg'))
-        stack.enter_context(patch('generals_rl.training_evaluation.torch.cuda.is_initialized', return_value=True))
-        value.synchronize = stack.enter_context(patch('generals_rl.training_evaluation.torch.cuda.synchronize'))
-        value.empty_cache = stack.enter_context(patch('generals_rl.training_evaluation.torch.cuda.empty_cache', side_effect=timed_cache))
 
         def make(name='run', **kwargs):
             settings = TrainingEvalConfig(every_n_updates=1, final_top_k=0, **kwargs)
@@ -69,32 +64,32 @@ def test_insufficient_budget_has_no_copy_export_job_or_worker(harness):
     assert not harness.schedule(evaluator, 10)
     assert evaluator.budget_exhausted and not evaluator.jobs and not evaluator.pending
     assert (evaluator.directory / 'index.json').read_bytes() == index
-    for function in (harness.copy, harness.export, harness.popen, harness.synchronize, harness.empty_cache):
+    for function in (harness.copy, harness.export, harness.popen):
         function.assert_not_called()
 
 
-@pytest.mark.parametrize('configured,remaining,estimate,copy,cache,deadline,timeout,reason', [
+@pytest.mark.parametrize('configured,remaining,estimate,copy,export,deadline,timeout,reason', [
     (30., 80., 30., 20., 3., 130., 30., 'evaluation_timeout'),
     (100., 50., 35., 3., 2., 140., 40., 'wall_budget'),
 ])
-def test_absolute_deadline_includes_copy_export_and_cache(harness, configured, remaining, estimate,
-                                                        copy, cache, deadline, timeout, reason):
+def test_absolute_deadline_includes_copy_and_export(harness, configured, remaining, estimate,
+                                                  copy, export, deadline, timeout, reason):
     evaluator = harness.make(device='cuda:0', timeout_seconds=configured)
-    harness.copy_seconds, harness.cache_seconds = copy, cache
+    harness.copy_seconds, harness.export_seconds = copy, export
     with patch.object(evaluator, '_estimated_worker_budget_seconds', return_value=estimate):
         assert harness.schedule(evaluator, remaining)
     job, process, started = evaluator.running
     assert job['deadline'] == deadline and job['timeout_seconds'] == timeout
     assert job['deadline_reason'] == reason
-    assert started == 100 + copy + cache and started < deadline
+    assert started == 100 + copy + export and started < deadline
     assert process is harness.process
     evaluator.running = None
 
 
-@pytest.mark.parametrize('copy,cache,expected_cache_calls', [(41., 0., 0), (2., 39., 2)])
-def test_copy_or_cache_exhaustion_cancels_without_worker_and_bounds_retention(harness, copy, cache, expected_cache_calls):
+@pytest.mark.parametrize('copy,export', [(41., 0.), (2., 39.)])
+def test_copy_or_export_exhaustion_cancels_without_worker_and_bounds_retention(harness, copy, export):
     evaluator = harness.make(device='cuda:0', timeout_seconds=100, keep_snapshots=1)
-    harness.copy_seconds, harness.cache_seconds = copy, cache
+    harness.copy_seconds, harness.export_seconds = copy, export
     with patch.object(evaluator, '_estimated_worker_budget_seconds', return_value=35):
         for updates in (1, 2):
             assert harness.schedule(evaluator, 50, updates)
@@ -106,7 +101,6 @@ def test_copy_or_cache_exhaustion_cancels_without_worker_and_bounds_retention(ha
     assert Path(second['checkpoint']).exists() and second['checkpoint_retained'] is True
     assert Path(second['bundle']).is_dir()
     assert not evaluator.pending and evaluator.running is None
-    assert harness.empty_cache.call_count == expected_cache_calls
     harness.popen.assert_not_called()
 
 
@@ -117,14 +111,12 @@ def test_cpu_evaluation_ignores_learner_remaining_budget_and_runs_async(harness)
     assert job['deadline'] is None and job['timeout_seconds'] is None
     assert process is harness.process and not evaluator.budget_exhausted
     assert harness.popen.call_args.kwargs['env']['CUDA_VISIBLE_DEVICES'] == ''
-    harness.synchronize.assert_not_called()
-    harness.empty_cache.assert_not_called()
     evaluator.running = None
 
 
 def test_running_worker_is_reaped_at_absolute_deadline(harness):
     evaluator = harness.make(device='cuda:0', timeout_seconds=100)
-    harness.copy_seconds, harness.cache_seconds = 38., 1.
+    harness.copy_seconds, harness.export_seconds = 38., 1.
     with patch.object(evaluator, '_estimated_worker_budget_seconds', return_value=35):
         assert harness.schedule(evaluator, 50)
     job, _, started = evaluator.running

@@ -6,6 +6,7 @@ from datetime import datetime
 from hashlib import sha256
 import json
 import math
+import os
 from pathlib import Path
 import resource
 import shutil
@@ -29,6 +30,12 @@ from .training_control import TrainingControlConfig, TrainingController, Trainin
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
     """Use equal torchrun environment shards; only rank zero writes artifacts."""
     distributed = DistributedConfig.from_env(config.get("task", {}).get("device", "cpu"))
+    # Valid-token batches allocate slightly different sizes. Configure before
+    # CUDA initialization, preserving either allocator variable from callers.
+    if (distributed.device.type == "cuda" and not torch.cuda.is_initialized()
+            and "PYTORCH_ALLOC_CONF" not in os.environ
+            and "PYTORCH_CUDA_ALLOC_CONF" not in os.environ):
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     with distributed_process_group(distributed):
         return _train(config, output_dir, iterations=iterations, steps_per_env=steps_per_env,
                       resume=resume, warm_start=warm_start, distributed=distributed)
@@ -227,6 +234,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
                 task.opponent.attach_policy(runner.alg.policy, stochastic=opponent_settings.stochastic,
                                             seed=distributed.rank_seed(opponent_settings.seed))
+        if evaluation_settings.enabled and evaluation_settings.synchronous:
+            distributed.prepare_for_evaluation()
         evaluator, evaluation_error = None, None
         if distributed.is_main and evaluation_settings.enabled:
             try:
@@ -309,6 +318,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             original_log(**kwargs)
             absolute_updates = kwargs["it"] + 1
             due = evaluation_settings.due(absolute_updates)
+            if due and evaluation_settings.synchronous:
+                distributed.prepare_for_evaluation()
             hook_error = None
             if distributed.is_main:
                 try:
@@ -395,6 +406,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     runner.current_learning_iteration, source={"kind": "final_learner"}))
             elif self_play is not None:
                 self_play.publish(runner.current_learning_iteration, source={"kind": "final_learner"})
+            if evaluation_settings.enabled and evaluation_settings.synchronous:
+                distributed.prepare_for_evaluation()
             final_evaluation_error = None
             if evaluator is not None:
                 try:

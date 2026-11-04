@@ -145,6 +145,23 @@ class DistributedTrainingTests(unittest.TestCase):
                 barrier.assert_called_once_with(group=group)
                 destroy.assert_called_once_with(group)
 
+    def test_shared_evaluation_releases_the_local_rank_cache_before_waiting(self):
+        config = DistributedConfig(rank=1, local_rank=1, world_size=2, device="cuda:1")
+        order = []
+        with patch.object(torch.cuda, "is_initialized", return_value=True), \
+                patch.object(torch.cuda, "device") as device, \
+                patch.object(torch.cuda, "synchronize", side_effect=lambda value: order.append(("sync", value))), \
+                patch.object(torch.cuda, "empty_cache", side_effect=lambda: order.append(("release",))), \
+                patch.object(DistributedConfig, "wait_on_cpu", side_effect=lambda: order.append(("wait",))):
+            config.prepare_for_evaluation()
+        device.assert_called_once_with(torch.device("cuda:1"))
+        self.assertEqual(order, [("sync", torch.device("cuda:1")), ("release",), ("wait",)])
+        with patch.object(torch.cuda, "empty_cache") as release, \
+                patch.object(DistributedConfig, "wait_on_cpu") as wait:
+            DistributedConfig(device="cpu").prepare_for_evaluation()
+        release.assert_not_called()
+        wait.assert_called_once_with()
+
     @unittest.skipUnless(dist.is_available() and dist.is_gloo_available(), "CPU Gloo is unavailable")
     def test_two_ranks_share_control_reduce_timings_and_clean_up_groups(self):
         with TemporaryDirectory() as directory, patch.dict(os.environ, {"CUDA_VISIBLE_DEVICES": "",

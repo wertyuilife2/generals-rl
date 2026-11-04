@@ -116,6 +116,19 @@ class DistributedConfig:
         dist.all_reduce(value, op=dist.ReduceOp.MIN)
         return bool(value.item())
 
+    def prepare_for_evaluation(self):
+        """Release every learner's idle CUDA cache before shared-GPU evaluation.
+
+        The evaluator can target another rank's GPU. Rank zero must not start
+        it until all ranks have finished CUDA work and returned unused blocks
+        to the driver. Live rollout/model tensors stay in place.
+        """
+        if self.device.type == "cuda" and torch.cuda.is_initialized():
+            with torch.cuda.device(self.device):
+                torch.cuda.synchronize(self.device)
+                torch.cuda.empty_cache()
+        self.wait_on_cpu()
+
     def wait_on_cpu(self):
         """Wait for rank zero's background work without a spinning NCCL kernel.
 

@@ -198,7 +198,13 @@ RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续
 `generals-arena evaluate` 是接受 bundle/profile 的 CLI。纯 env.step 性能指标与含决策的批评估 wall throughput 分开报告。
 
 训练默认与训练卡共用 `cuda:0`，在 PPO 更新间同步批评估；CPU 或显式独立单卡评估可异步。
-设置 `evaluation.cuda_visible_devices="7"` 时训练须通过 `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6` 排除该卡，
+共享 GPU 时，所有 rank 先完成 CUDA 工作、释放空闲缓存并在 CPU 同步，评估结束后一起恢复训练；
+显式设置 `allow_shared_gpus=true` 也遵循这一顺序。rollout 和模型仍驻留显存，容量需容纳它们与评估峰值。
+CUDA 初始化前未显式配置 allocator 时，训练入口默认启用
+[`expandable_segments:True`](https://docs.pytorch.org/docs/2.8/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)，
+减少变长 token 张量的显存预留。已有 `PYTORCH_ALLOC_CONF` 或 `PYTORCH_CUDA_ALLOC_CONF` 优先；
+启动前设置 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False` 可关闭，嵌入式调用也需在 CUDA 初始化前设置。
+独立 GPU 评估可设置 `evaluation.cuda_visible_devices="7"`，训练通过 `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6` 排除该卡，
 worker 中仍用 `cuda:0`。当前批评估只使用一个 device，不保留旧多卡分片执行器；可增大单卡 batch。
 `evaluation.profile` 可指定新规则的 JSON 文件或配置对象，`every_n_updates/maps_per_opponent/backend/batch_size`
 控制频率、预算及执行；显式 `profile` 内的地图／对手／局数覆盖默认 profile 的生成参数。推理模式由顶层 `inference.mode` 指定。

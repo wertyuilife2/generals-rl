@@ -114,7 +114,8 @@ class TrainingEvalConfig:
 
     @property
     def synchronous(self):
-        return torch.device(self.device).type == 'cuda' and self.cuda_visible_devices is None
+        return (torch.device(self.device).type == 'cuda'
+                and (self.cuda_visible_devices is None or self.allow_shared_gpus))
 
     def due(self, completed_updates):
         return self.enabled and completed_updates > 0 and completed_updates % self.every_n_updates == 0
@@ -162,7 +163,8 @@ class PeriodicEvaluator:
 
     The persistent key is (policy_id, profile_id), never a transient history-pool
     index. CPU and dedicated GPU evaluation run asynchronously. Shared CUDA
-    pauses between complete PPO updates. Only the parent writes training logs.
+    pauses between complete PPO updates, after the caller releases every rank's
+    idle CUDA cache. Only the parent writes training logs.
     """
 
     def __init__(self, settings, run_config, output_dir, writer, *, on_complete=None,
@@ -466,9 +468,6 @@ class PeriodicEvaluator:
             environment['CUDA_VISIBLE_DEVICES'] = ''
         elif self.settings.cuda_visible_devices is not None:
             environment['CUDA_VISIBLE_DEVICES'] = self.settings.cuda_visible_devices
-        elif torch.cuda.is_initialized():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
         return environment
 
     def _complete(self, job):
