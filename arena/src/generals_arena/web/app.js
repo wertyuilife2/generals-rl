@@ -139,7 +139,7 @@ async function loadRank() {
     ['kill_index','击杀指数','亲自击杀的席位数 ÷ 其余席位数；重复席位先平均，再对各局平均'],
   ];
   $('ranking-head').replaceChildren(...[
-    ['排名 / 选手',''],['Elo','Elo ± 95% 估计区间半宽'],['▲','当前 Elo 减去同系列上一版本的当前 Elo'],
+    ['排名 / 选手',''],['Elo Rating','Elo ± 95% 估计区间半宽'],['▲','当前 Elo 减去同系列上一版本的当前 Elo'],
     ...metrics.map(([,label,title])=>[label,title]),
   ].map(([label,title])=>{const th=el('th','',label);th.scope='col';th.title=title;return th;}));
   $('ranking').replaceChildren();
@@ -176,7 +176,7 @@ async function loadRank() {
         previousTier = tier;
         previousTierRow = tr;
       }
-    } else {
+    } else if (mode === '1v1') {
       detail.append(el('div', 'player-sub', [row.kind === 'human' ? '人类玩家' : row.kind === 'baseline' || row.anchor ? 'Baseline' : 'Algorithm', row.disqualified ? '策略违规 · 已停用' : row.anchor ? '零分基准' : row.provisional ? '定级中' : '已定级'].join(' · ')));
     }
     const place = unrankedHuman ? null : ++rankedPosition;

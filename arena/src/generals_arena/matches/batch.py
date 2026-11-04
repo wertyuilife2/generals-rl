@@ -154,7 +154,7 @@ def _instances(entries, plans):
 @cpu_bounded
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
                   record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True,
-                  initial_states=None):
+                  initial_states=None, prepared_states=None):
     """Schedule one homogeneous batch in the native Arena executor.
 
     native=False benchmarks the public policy bridge, not a second match loop.
@@ -179,7 +179,9 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
         for instance, entry, seats, seeds in roles:
             groups.append(_PolicyGroup(entry, rules, seats, seeds, scalar=scalar,
                                        cache=runtime_cache, slot=instance))
-        with VecEnv.from_states(states, device='cpu', threads=cpu_threads,
+        packed = ([prepared_states[(MapConfig(**plan['map']), plan['map_seed'])] for plan in plans]
+                  if prepared_states is not None else states)
+        with VecEnv.from_states(packed, device='cpu', threads=cpu_threads,
                                 auto_reset=False, episode_ticks=max_ticks) as env:
             active = np.ones(count, bool)
             joint, invalid = np.zeros((count, players), np.int64), np.zeros((count, players), np.int64)

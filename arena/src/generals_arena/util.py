@@ -1,5 +1,6 @@
 """Stable identities and atomic JSON reports."""
 from hashlib import sha256
+from functools import lru_cache
 from contextlib import contextmanager
 import fcntl
 from importlib.util import find_spec
@@ -16,9 +17,26 @@ def digest(value):
     return sha256(canonical(value).encode()).hexdigest()
 
 
+def _file_version(stat):
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+@lru_cache(maxsize=4096)
+def _file_digest(path, version):
+    with open(path, 'rb') as stream:
+        if _file_version(os.fstat(stream.fileno())) != version:
+            raise ValueError(f'file changed during verification: {path}')
+        result = sha256_file(stream)
+        if _file_version(os.fstat(stream.fileno())) != version:
+            raise ValueError(f'file changed during verification: {path}')
+        return result
+
+
 def file_digest(path):
-    with Path(path).open("rb") as stream:
-        return sha256_file(stream)
+    # Keep boundary checks, but read unchanged bytes only once per process.
+    # ctime catches edits with a restored mtime; inode catches atomic replacement.
+    path = os.path.abspath(path)
+    return _file_digest(path, _file_version(os.stat(path)))
 
 
 def sha256_file(stream):

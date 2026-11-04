@@ -124,19 +124,6 @@ def run_next(store, stop=None, job_id=None, cpp_worker=None, *, max_games=1, pro
     return False
 
 
-def simulate_batch(directory, plans):
-    """Worker processes execute windows; the coordinator commits in schedule order."""
-    store = CompetitionStore(directory)
-    records = []
-    start = time.monotonic()
-    with MatchRunner(store.entrants(), max_ticks=store.config.max_ticks,
-                     execution="isolated", record_replays=True) as runner:
-        runner.run(plans, on_result=lambda result, blob: records.append((result, blob)))
-    elapsed = (time.monotonic() - start) / max(1, len(records))
-    return [(result if 'policy_error' in result else {**result, 'simulation_seconds': elapsed}, blob)
-            for result, blob in records]
-
-
 def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id=None):
     store.verify_execution()
     if limit is not None:
@@ -147,7 +134,7 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
     from generals.backends.cpu.env import _library as cpu_library
     cpu_library()
     completed = 0
-    with process_lock(store.directory, ".worker.lock"):
+    with process_lock(store.directory, ".worker.lock"), store.session():
         if retry:
             store.retry()
         if workers > 1:
@@ -171,7 +158,7 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
     completed = 0
     # Keep adaptation at the same persistent window as sequential execution.
     # Spawn works on macOS and does not inherit SQLite connections or locks.
-    with NativeMatchPool(workers) as executor:
+    with NativeMatchPool(workers, store.config.max_ticks) as executor:
         while limit is None or completed < limit:
             job = next((j for j in store.jobs() if j["status"] == "queued"
                         and (job_id is None or j['id'] == job_id)), None)
@@ -182,7 +169,7 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
                 break
             if limit is not None:
                 plans = plans[:limit - completed]
-            directory = str(store.directory.resolve())
+            entries = store.entrants()
             # Small compatible batches amortize model inference and IPC while
             # retaining at least four tasks per worker for dynamic load balance.
             # The window and rating order remain independent of worker count.
@@ -194,7 +181,9 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
             chunks = [indices[start:start+size] for indices in buckets.values()
                       for start in range(0, len(indices), size)]
             chunks.sort(key=lambda indices: indices[0])
-            futures = {executor.submit_native(directory, [plans[i] for i in indices]): indices
+            futures = {executor.submit_native(
+                {key: entries[key] for i in indices for key in plans[i]['entrant_ids']},
+                [plans[i] for i in indices]): indices
                        for indices in chunks}
             first_error, ready, next_index = None, {}, 0
             for future in as_completed(futures):
@@ -246,26 +235,26 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
 class NativeMatchPool:
     """Coordinator threads reuse independent native match processes."""
 
-    def __init__(self, workers):
+    def __init__(self, workers, max_ticks):
+        self.max_ticks = max_ticks
         self.executor = ThreadPoolExecutor(max_workers=workers)
         self.local, self.workers = threading.local(), []
 
     def __enter__(self):
         return self
 
-    def _run(self, directory, plans):
+    def _run(self, entries, plans):
         if not hasattr(self.local, 'worker'):
             self.local.worker = MatchWorker()
             self.workers.append(self.local.worker)
-        store = CompetitionStore(directory)
         completed = []
-        with MatchRunner(store.entrants(), max_ticks=store.config.max_ticks, execution="isolated",
+        with MatchRunner(entries, max_ticks=self.max_ticks, execution="isolated",
                          worker=self.local.worker, record_replays=True) as runner:
             runner.run(plans, on_result=lambda result, blob: completed.append((result, blob)))
         return completed
 
-    def submit_native(self, directory, plans):
-        return self.executor.submit(self._run, directory, plans)
+    def submit_native(self, entries, plans):
+        return self.executor.submit(self._run, entries, plans)
 
     def __exit__(self, *exc):
         self.executor.shutdown(wait=True, cancel_futures=True)

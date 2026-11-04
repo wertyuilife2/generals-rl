@@ -58,6 +58,7 @@ struct Match {
     std::vector<I> seats,actions,moves,measured;
     std::unique_ptr<bool[]> feedback_active;
     Storage storage;
+    std::vector<Storage> policy_storage;
     int remaining;
     std::unique_ptr<bool[]> forfeited,selection;
     std::vector<I> spectators;
@@ -86,6 +87,8 @@ struct Match {
         feedback_active(new bool[c.count]),storage(c.count,c.height*c.width,c.players),remaining(c.count),
         forfeited(new bool[std::size_t(c.count)*c.players]{}),selection(new bool[c.count]),spectators(c.count,-1) {
         synchronize();
+        policy_storage.reserve(c.players);
+        for(int g=0;g<c.players;++g)policy_storage.emplace_back(c.count,c.height*c.width,c.players);
         for(int l=0;l<c.count;++l)traces.emplace_back(lane(l),c.topologies[l],c.record);
         if(c.record==2){observe_full();for(int l=0;l<c.count;++l)traces[l].frame(lane(l),storage.view(),forfeited.get());}
     }
@@ -100,8 +103,8 @@ struct Match {
             total+=std::chrono::duration<double>(Clock::now()-start).count();
         };
         for(I iter=0;iter<limit && remaining;++iter) {
-            auto obs=storage.view();
             for(int g=0;g<c.players;++g) {
+                auto obs=policy_storage[g].view();
                 const I *ids=seats.data()+std::size_t(g)*c.count;
                 if(recorded&&!warm) {
                     for(int l=0;l<c.count;++l)c.joint[std::size_t(l)*c.players+ids[l]]=

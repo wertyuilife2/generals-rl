@@ -33,7 +33,21 @@ class _Observation(ctypes.Structure):
 class _BoundCPU(ctypes.Structure):
     _fields_ = [(name, ctypes.c_void_p) for name in ('state', 'initial', 'out')] + [
         (name, ctypes.c_int) for name in ('count', 'height', 'width', 'players', 'threads', 'auto_reset')
-    ] + [('horizon', ctypes.c_int64)]
+    ] + [('horizon', ctypes.c_int64), ('observations', ctypes.c_void_p)]
+
+
+class _ObservationCache:
+    """The native lease owns observer caches independently of live state arrays."""
+    def __init__(self, lib, state, batch, height, width, players):
+        self.lib = lib
+        self.handle = lib.generals_observation_cache_create(ctypes.byref(state), batch, height, width, players)
+        if not self.handle:
+            raise MemoryError('could not allocate native observation cache')
+
+    def __del__(self):
+        if getattr(self, 'handle', None):
+            self.lib.generals_observation_cache_destroy(self.handle)
+            self.handle = None
 
 
 @lru_cache(maxsize=1)
@@ -53,12 +67,16 @@ def _library():
     lib.generals_legal.argtypes = [*([ctypes.c_void_p] * 4), *([ctypes.c_int] * 3)]
     lib.omp_get_num_procs.argtypes = []
     lib.omp_get_num_procs.restype = ctypes.c_int
+    lib.generals_observation_cache_create.argtypes = [ctypes.POINTER(_Batch), *([ctypes.c_int]*4)]
+    lib.generals_observation_cache_create.restype = ctypes.c_void_p
+    lib.generals_observation_cache_destroy.argtypes = [ctypes.c_void_p]
+    lib.generals_observation_cache_destroy.restype = None
     return lib, metadata
 
 
 class CPUEnv:
     def __init__(self, initial, *, width, height, threads=0,
-                 auto_reset=False, episode_ticks=0, seed=42, _validated=False):
+                 auto_reset=False, episode_ticks=0, seed=42, _validated=False, _take_initial=False):
         self._closed = False
         self.seed = _integer("seed", seed, 0)
         self.width, self.height = _integer("width", width, 1), _integer("height", height, 1)
@@ -85,7 +103,7 @@ class CPUEnv:
             value = initial[name]
             if not isinstance(value, np.ndarray) or value.shape != shape or value.dtype != np.dtype(dtype):
                 raise ValueError(f"{name} must be {dtype} {shape}")
-            self.initial[name] = np.array(value, copy=True, order="C")
+            self.initial[name] = value if _take_initial else np.array(value, copy=True, order="C")
         self.state = {name: value.copy() for name, value in self.initial.items()}
         # Reuse the independent CPU state's invariant checks only at construction.
         if not _validated:
@@ -129,7 +147,7 @@ class CPUEnv:
     def from_states(cls, states, **kwargs):
         from generals.core.batch import pack_states
         arrays, width, height = pack_states(states)
-        return cls(arrays, width=width, height=height, _validated=True, **kwargs)
+        return cls(arrays, width=width, height=height, _validated=True, _take_initial=True, **kwargs)
 
     @classmethod
     def from_config(cls, config, batch_size=1, *, seed=42, **kwargs):
@@ -171,15 +189,16 @@ class CPUEnv:
             raise ValueError('native match execution requires auto_reset=False')
         if tuple(map(id, self.state.values())) + tuple(map(id, self.initial.values())) != self._array_ids:
             raise ValueError('edit arrays in place; replacing their storage is unsupported')
+        observations = _ObservationCache(self._lib, self._state, self.batch_size, self.height, self.width, self.players)
         context = _BoundCPU(ctypes.addressof(self._state), ctypes.addressof(self._initial),
             ctypes.addressof(self._out), self.batch_size, self.height, self.width, self.players,
-            self.threads, 0, self.episode_ticks)
+            self.threads, 0, self.episode_ticks, observations.handle)
         abi = BackendABI(ABI_VERSION, ctypes.addressof(context), address(self._lib.generals_bound_observe),
             address(self._lib.generals_bound_step), self.state['alive'].ctypes.data, self.done.ctypes.data,
             self.state['tick'].ctypes.data, self.last_moves.ctypes.data, self.errors.ctypes.data,
             address(self._lib.generals_bound_depart), address(self._lib.generals_bound_snapshot),
             self.stats.ctypes.data, address(self._lib.generals_bound_legal), HOST_BUFFERS, 0, None)
-        return BackendBinding(abi, (self, context, self._state, self._initial, self._out,
+        return BackendBinding(abi, (self, context, observations, self._state, self._initial, self._out,
             *self._array_refs, self.stats, self.last_moves, self.done, self.errors,
             self._current_stats, self._growth_cells, self._growth_count, self._cache_valid, self._owned_structures))
 

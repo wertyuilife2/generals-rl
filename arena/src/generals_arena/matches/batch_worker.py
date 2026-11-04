@@ -77,13 +77,15 @@ def _child(connection):
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
     from .batch import execute_batch
-    from .cache import RuntimeCache
+    from .cache import RuntimeCache, initial_map
     from generals import MapConfig
+    from generals.core.batch import PreparedState
     from collections import OrderedDict
-    runtimes, maps = RuntimeCache(), OrderedDict()
+    runtimes, maps, prepared = RuntimeCache(), OrderedDict(), {}
     try:
         while (request := connection.recv()) is not None:
-            maps.update(request.pop('initial_states', {}))
+            received = request.pop('initial_states', {})
+            maps.update(received)
             for plan in request['plans']:
                 key = (MapConfig(**plan['map']), plan['map_seed'])
                 if key in maps:
@@ -92,11 +94,20 @@ def _child(connection):
                                    request['max_ticks'], len(request['plans'][0]['entrant_ids']))
             native.DIAGNOSTICS = journal
             try:
+                for key in received:
+                    prepared.pop(key, None)
+                for plan in request['plans']:
+                    key = (MapConfig(**plan['map']), plan['map_seed'])
+                    if key not in maps:
+                        maps[key] = initial_map(*key)
+                    if key not in prepared:
+                        prepared[key] = PreparedState.from_state(maps[key])
                 records, timing = execute_batch(**request, journal=journal,
-                    runtime_cache=runtimes, initial_states=maps)
+                    runtime_cache=runtimes, initial_states=maps, prepared_states=prepared)
                 runtimes.trim()
                 while len(maps) > 256:
-                    maps.popitem(last=False)
+                    key, _ = maps.popitem(last=False)
+                    prepared.pop(key, None)
                 connection.send({'records': records, 'timing': timing, 'maps': list(maps)})
             except Exception as exc:
                 details = getattr(exc, 'details', {})
