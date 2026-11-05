@@ -1,6 +1,6 @@
 # Generals PPO self-play
 
-本优化 worktree 默认训练使用 **纯 ViT Actor／Critic、H4/K11、current-vs-current 双座训练与 gamma 课程**，运行官网 31.4.5 规则及随机 1v1 地图。双方使用同一 actor 的独立局部输入，双方轨迹都用于 PPO；Actor／Critic 权重仍独立。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。本次执行优化的短训与 4090 测量不能替代长期棋力验收，历史 recent8/F03 结果保留为对照。
+本优化 worktree 默认训练使用 **纯 ViT Actor／Critic、H4/K11、current-vs-current 双座训练与 gamma 课程**，运行官网 31.4.5 规则及随机 1v1 地图。双方使用同一 actor 的独立局部输入，双方轨迹都用于 PPO；Actor／Critic默认共享局部信息ViT；Critic通过独立的小型特权encoder读取当前完整棋盘，可分别关闭共享或特权分支。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。本次执行优化的短训与 4090 测量不能替代长期棋力验收，历史 recent8/F03 结果保留为对照。
 
 新输入与地图尚未进行大规模效果／吞吐实验，不能把旧 F03 的胜率和最优 batch 结论当作新默认的验证。旧模型需用对应冻结源码与旧规则运行，不提供静默兼容转换。
 
@@ -33,10 +33,10 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 | 项目 | 默认值 |
 | --- | --- |
 | 游戏与输入 | 官方随机 18–23 格长方形、2 人；RL 填充到 23×23，13 通道局部 H4 combat 历史＋K11；独立 `valid_cells` 布尔掩码；特权 critic |
-| 模型 | 纯 ViT 1M dense，Actor／Critic 参数独立；23×23 配置实际共 1,142,154 参数 |
+| 模型 | ViT1M总参数量级：共享主干128维／4层／4头，独立主干各96维／4层／3头；特权ViT为64维／1层／4头 |
 | 采样 | 每 rank 8,192 个真实对局、16,384 条玩家轨迹；八卡共65,536局、131,072条轨迹；T=32 |
 | PPO | E=4，每 epoch 64 个逻辑 minibatch；全局 B=65,536，每 rank B=8,192 |
-| 激活内存 | 物理 minibatch=512，梯度累积为原逻辑 minibatch；推理 chunk=1024；独立 actor/critic 分开反向 |
+| 激活内存 | 物理 minibatch=512，梯度累积为原逻辑 minibatch；推理 chunk=1024；共享主干联合反向，独立主干分开反向 |
 | Rollout存储 | H4历史去重＋二值位打包；连续特征与公开统计保持FP32，取样恢复原观察 |
 | 预算 | 224轮，八卡合计939,524,096个fresh玩家transitions、469,762,048个真实棋盘tick |
 | 对手／快照 | live current；没有训练对手池或逐轮发布；训练checkpoint保留2个，评测保留最近2个及top3候选 |
@@ -44,7 +44,7 @@ torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/r
 | 课程 | gamma 与 PBRS gamma 从 .99 线性到 .999，iteration=112 到达终值；tick 惩罚在 iteration=125 衰减至 0 |
 | 数值执行 | 双方合并推理与 PPO 使用 BF16，`compile_forward=true`；概率、GAE、loss归约及主参数/Adam状态保持FP32 |
 
-iteration从0起算。每次PPO轮包含一次采样、GAE和完整E4；双方的独立动作/奖励计入fresh玩家样本，重复epoch不计新样本。`task.num_envs`始终是真实对局数；`task.train_both_sides=true`时RSL看到两倍数量的玩家轨迹，顺序固定为game0/seat0、game0/seat1、game1/seat0……。例如4096局×32tick产生262144条玩家transitions及131072个棋盘tick。TensorBoard和summary同时记录`player_transitions`和`board_ticks`，地图课程按真实棋盘tick推进。物理microbatch仅改变执行内存；独立actor/critic各自反向，全部逻辑batch累积后仍只做一次梯度裁剪和Adam step；共享参数的模型回退到联合反向。
+iteration从0起算。每次PPO轮包含一次采样、GAE和完整E4；双方的独立动作/奖励计入fresh玩家样本，重复epoch不计新样本。`task.num_envs`始终是真实对局数；`task.train_both_sides=true`时RSL看到两倍数量的玩家轨迹，顺序固定为game0/seat0、game0/seat1、game1/seat0……。例如4096局×32tick产生262144条玩家transitions及131072个棋盘tick。TensorBoard和summary同时记录`player_transitions`和`board_ticks`，地图课程按真实棋盘tick推进。物理microbatch控制执行内存；共享模式复用一次局部编码并联合反向，独立模式复制同一encoder并分别反向；全部逻辑batch累积后只做一次梯度裁剪和Adam step。
 
 纯模式不再创建`history_pool/`。周期评测直接使用已有checkpoint导出策略，按原有更新间隔触发，不依赖模型快照发布。保留旧单座current作消融可设`train_both_sides=false`；历史对手模式需同时设`opponent="self_play"`和`train_both_sides=false`，按需提供原`self_play.pool_size/snapshot_interval`。双座训练必须使用student-only StudentPPO和采样策略。4090前后测量与实现说明见[双座纯自对弈对照](../doc/current_self_play_4090.md)。
 
@@ -64,7 +64,7 @@ rollout 历史：每 tick 只存当前帧，额外保留 rollout 起点的三帧
 
 默认 `runner.storage_codec` 为
 `"storage_codec": "generals_rl.rollout_codec.GeneralsObservationCodec"`，
-可将当前 P2 十三通道观察中的二值地图／K11 标志，以及 action mask／valid_cells 分别按位打包；
+局部地图保留13通道，特权地图为11通道；二值地图／K11标志及action mask／valid_cells按位打包。特权地图的8个二值通道使用uint8；
 连续特征及公开统计保留FP32，minibatch取样时恢复原观察。
 该选项与历史去重独立，当前默认启用，只影响训练采样缓存，不进入env／Arena协议或导出策略包。
 可将 `storage_codec` 设为 `null` 关闭位打包，将 `storage_history` 设为 `null` 关闭历史去重。
@@ -78,15 +78,40 @@ Actor只接收该座位的局部观测、历史、知识和公开统计；critic
 
 Dense ViT 默认开启 `runner.policy.mask_padding_tokens=true`：Actor／Critic 的 Transformer 排除填充格，空间汇聚只使用有效格点。`valid_cells` 是 `[batch, cells]` 的独立布尔输入，不作为可学习地图通道，不堆叠到 H4 历史。训练、自对弈、rollout 取样与导出推理共同传递此字段；每次终局观察保留其自己的掩码。CUDA 混合精度通过 PyTorch 的变长 Flash Attention 打包有效 token，CPU/FP32 使用 attention mask，保留原画布位置编码与动作编码。
 
-Actor 的空间输入为局部 H4（52 通道）、K11 和将军相对坐标（2 通道）；Critic 为完整当前地图（13 通道）、同一份局部 H4 与 K11。两者直接进入同一份 ViT 编码实现，各自实例化权重，随后使用动作头／价值头及公开统计。Critic 不再使用 history projection、32 通道中间瓶颈或 `3×3` spatial stem；`critic_projection_channels` 参数已删除。旧 checkpoint 使用对应的归档源码，新架构标识为 `official_p2_cells13_hist4_knowledge11_direct_backbone_v1`，本worktree训练默认运行名为 `official-31.4.5-current-dual`。
+局部encoder的空间输入为H4（52通道）、K11和将军相对坐标（2通道）。Actor与Critic共享局部encoder的特征，独立模式则复制同一实现。ViT `model_size="1m"`按总参数量级配置：共享模式使用128维／4层／4头，独立模式的两份encoder各为96维／4层／3头；两种规格每头均为32维。策略头始终只依赖局部信息；价值损失可训练共享encoder，特权信息只在价值分支融合。10M／100M及ResNet规格维持原值，本次仅调整ViT1M共享主干。
 
-本机改造对照（2026-11-04，RTX 4090、PyTorch 2.13.0+cu130）：官方随机地图填充至 23×23，ViT1M、N128/T8、E4、逻辑 minibatch256／物理128，当前模型自对弈，BF16＋编译。完整 PPO 先预热3轮、测量5轮，包含采样、GAE和更新，排除评估、checkpoint／日志I/O及另跑的profile。网络分项固定同一批观察，预热后取9组中位数。
+23×23画布、H4/K11、head_channels=128的实际总参数（共享权重计一次）为：
+
+| share_backbone | critic_privileged | patch=1（默认） | patch=3 |
+|---|---|---:|---:|
+| false | true | 1,250,954 | 1,250,250 |
+| false | false | 1,139,722 | 1,163,146 |
+| true | true | 1,102,090 | 1,096,330 |
+| true | false | 990,858 | 1,009,226 |
+
+特权开关不改变主干尺寸，关闭时直接省去该分支。这里的1M是约百万参数的规格，不保证不同几何或head设置恰好为1,000,000。
+
+`runner.policy.share_backbone`与`runner.policy.critic_privileged`默认均为true，支持上述四种组合。独立模式的Critic使用局部encoder的独立副本；两个模式都可关闭特权分支。
+
+例如以下稀疏覆盖开启共享、关闭特权：
+
+```json
+{"runner": {"policy": {"share_backbone": true, "critic_privileged": false}}}
+```
+
+训练入口和基准会自动同步task、obs_groups与storage_obs_keys，无需手动修改这些派生字段。关闭特权时，不构造、不存储`critic`张量，也不创建特权encoder。开启时，特权观测为`[B,11*H*W+13]`：保留当前完整棋盘的地形、建筑、归属、兵力与combat特征，删除全图可见性和迷雾障碍提示；`valid_cells`继续负责padding。Actor仍保留原13通道局部特征。
+
+特权encoder采用同尺寸patch网格、64维／1层／4头的ViT；其特征与局部encoder特征按空间位置拼接，经1×1投影、有效token池化及统计量融合得到价值。无特权配置的Critic只使用局部统计。Scaled策略不再使用`critic_actor_information`参数，H4/K11始终是价值输入的一部分。
+
+PPO采样和共享模式更新使用联合前向，不缓存上一次Actor计算图。独立模式保留分开反向的显存优化，共享主干只在`actor.encoder`注册一次，Critic复用其特征；所有参数只更新一次。导出只包含Actor的encoder及策略头；模型配置的`network.vit_config`记录实际`[width, depth, heads]`，训练用的两个开关不进入Arena模型推理配置。新结构需要重新训练；历史checkpoint使用各自固定源码续训。模型语义标识为`official_p2_hist4_local13_priv11_encoder_v1`，后缀记录共享、特权、patch等设置。
+
+以下为共享改造前的历史对照（2026-11-04，RTX 4090、PyTorch 2.13.0+cu130），不代表当前默认架构：官方随机地图填充至 23×23，ViT1M、N128/T8、E4、逻辑 minibatch256／物理128，当前模型自对弈，BF16＋编译。完整 PPO 先预热3轮、测量5轮，包含采样、GAE和更新，排除评估、checkpoint／日志I/O及另跑的profile。网络分项固定同一批观察，预热后取9组中位数。
 
 | 实现 | Actor 推理 ms/批 | Critic 前向 ms/批 | Actor＋Critic 前向反向 ms/批 | 完整 PPO transitions/s |
 |---|---:|---:|---:|---:|
 | 改造前默认，未屏蔽 padding | 2.586 | 2.610 | 20.718 | 1231 |
 | 改造前，仅开启 padding mask | 2.025 | 2.053 | 13.999 | 1747 |
-| 当前纯 ViT＋独立 mask | 1.969 | 1.831 | 13.606 | 1778 |
+| 独立 ViT＋独立 mask（旧架构） | 1.969 | 1.831 | 13.606 | 1778 |
 
 完整 PPO 相对旧默认快约44%，相对旧 masked 版本约1.8%；本次主要速度收益来自排除padding，去除前置CNN的额外收益较小。Profile 中更新窗口的 Flash Attention 反向自用GPU时间从7.68ms降至3.94ms，`aten::mm`从7.99ms降至4.68ms；当前主要计算仍在Transformer。另用记录输入形状的critic profile确认：两个3×3卷积已消失，只剩patch embedding和输出投影的1×1映射。
 

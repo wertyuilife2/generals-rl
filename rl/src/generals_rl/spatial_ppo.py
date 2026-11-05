@@ -17,12 +17,12 @@ class PrivilegedCritic(nn.Module):
     def __init__(self, channels, blocks, trunk_factory=SpatialTrunk, *, layout):
         super().__init__()
         self.layout = layout
-        self.trunk = trunk_factory(layout.map_planes, channels, blocks)
+        self.trunk = trunk_factory(layout.privileged_planes, channels, blocks)
         self.context = nn.Sequential(nn.Linear(channels + layout.public_dim, channels), nn.ELU())
         self.value_head = nn.Sequential(nn.Linear(2 * channels, channels), nn.ELU(), nn.Linear(channels, 1))
 
     def forward(self, privileged):
-        maps = self.layout.current_maps(privileged)
+        maps = self.layout.privileged_maps(privileged)
         pooled = self.trunk(maps).mean(dim=(-2, -1))
         context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:]), dim=-1))
         return self.value_head(torch.cat((pooled, context), dim=-1))
@@ -33,7 +33,7 @@ class SpatialPPOPolicy(CategoricalActorCritic):
     The base supplies sampling, log probabilities and the runner lifecycle.
     Observation normalization, BatchNorm, Dropout and recurrence are unsupported.
     """
-    semantics = "spatial_p2_hist4_cells13_current_public13_v2"
+    semantics = "spatial_p2_hist4_cells13_priv11_public13_v3"
     trunk_factory = staticmethod(SpatialTrunk)
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=32,
@@ -59,7 +59,7 @@ class SpatialPPOPolicy(CategoricalActorCritic):
                 raise ValueError("spatial channels and residual blocks must be positive integers")
         if obs_groups != {"policy": ["policy"], "critic": ["critic"]}:
             raise ValueError("spatial policy requires exact local-policy/privileged-critic groups")
-        for key, size in (("policy", history_length * self.layout.frame_dim), ("single_obs", self.layout.frame_dim), ("critic", self.layout.frame_dim)):
+        for key, size in (("policy", history_length * self.layout.frame_dim), ("single_obs", self.layout.frame_dim), ("critic", self.layout.privileged_dim)):
             if key not in obs or obs[key].ndim != 2 or obs[key].shape[-1] != size:
                 raise ValueError(f"spatial policy requires {key} shape [B,{size}]")
         if not isinstance(wait_move_factorization, bool):
@@ -69,7 +69,7 @@ class SpatialPPOPolicy(CategoricalActorCritic):
         self.semantics = self.semantics.replace("hist4", f"hist{history_length}")
         self.obs_groups = deepcopy(obs_groups)
         self.num_actions, self.num_actor_obs, self.num_single_obs = self.layout.num_actions, history_length * self.layout.frame_dim, self.layout.frame_dim
-        self.num_critic_obs = self.layout.frame_dim
+        self.num_critic_obs = self.layout.privileged_dim
         self.action_distribution, self.state_dependent_std = "categorical", False
         self.actor_obs_normalization = self.critic_obs_normalization = False
         self.actor = SpatialActor(spatial_channels, residual_blocks, self.trunk_factory,
@@ -110,7 +110,7 @@ class SpatialPPOPolicy(CategoricalActorCritic):
 
 class LightSpatialPPOPolicy(SpatialPPOPolicy):
     """Two standard convolutions, with optional own-general coordinates."""
-    semantics = "light_spatial_p2_hist4_cells13_current_public13_standard2_v2"
+    semantics = "light_spatial_p2_hist4_cells13_priv11_public13_standard2_v3"
 
     def __init__(self, obs, obs_groups, num_actions, *, spatial_channels=16,
                  own_king_geometry=False, **kwargs):

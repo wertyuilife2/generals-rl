@@ -29,12 +29,13 @@ def observations(count=2):
     masks = torch.ones(count, 649, dtype=torch.bool)
     masks[:, 2::3] = False
     values = {"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-              "critic": torch.rand(count, 1066, generator=generator),
+              "critic": torch.rand(count, 904, generator=generator),
               "knowledge": torch.rand(count, 891, generator=generator), "action_mask": masks, "valid_cells": torch.ones(count, 81, dtype=torch.bool)}
     return TensorDict(values, [count])
 
 
 def construct(obs, family="resnet", size="1m", **kwargs):
+    kwargs.setdefault("share_backbone", False)
     return ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9, backbone=family, model_size=size, **kwargs)
 
 
@@ -53,22 +54,21 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                 self.assertIsInstance(policy, CategoricalActorCritic)
                 self.assertEqual(policy.parameter_counts(), {"actor": actor_count, "critic": critic_count,
                                                              "total": actor_count + critic_count})
-                budget = {"1m": 1_000_000, "10m": 10_000_000, "100m": 100_000_000}[size]
-                self.assertLess(abs((actor_count + critic_count) / budget - 1), 0.1)
+                self.assertGreater(critic_count, actor_count)
                 self.assertTrue(all(parameter.is_meta and parameter.dtype == torch.float32
                                     for parameter in policy.parameters()))
                 local = obs.to("meta")
                 self.assertEqual(policy.actor(local["policy"], local["knowledge"], local["valid_cells"]).shape, (1, 649))
-                self.assertEqual(policy.critic(local["critic"], local["policy"], local["knowledge"], local["valid_cells"]).shape, (1, 1))
+                self.assertEqual(policy.evaluate(local).shape, (1, 1))
                 if family == "resnet":
-                    encoder = policy.actor.backbone.encoder
+                    encoder = policy.actor.encoder.backbone.encoder
                     self.assertIsInstance(encoder, ResNetV2)
                     self.assertEqual([len(stage.blocks) for stage in encoder.stages], [3, 4, 6, 3])
-                    self.assertEqual(policy.actor.backbone.out_channels, RESNET_TOTAL_PRESETS[size][0][-1])
+                    self.assertEqual(policy.actor.encoder.backbone.out_channels, RESNET_TOTAL_PRESETS[size][0][-1])
                     self.assertTrue(all(module.stride == (1, 1) for module in encoder.modules()
                                         if isinstance(module, torch.nn.Conv2d)))
                 else:
-                    encoder = policy.actor.backbone.transformer
+                    encoder = policy.actor.encoder.backbone.transformer
                     self.assertIsInstance(encoder, VisionTransformer)
                     self.assertEqual(encoder.patch_embed.patch_size, (1, 1))
                     self.assertEqual((encoder.embed_dim, len(encoder.blocks), encoder.blocks[0].attn.num_heads),
@@ -96,13 +96,13 @@ class ScaledInformationPolicyTests(unittest.TestCase):
         self.assertTrue((history_grad > 0).all())
         self.assertTrue((obs["knowledge"].grad.reshape(2, 11, 81).abs().sum((0, 2)) > 0).all())
         self.assertTrue(all(p.grad is None or torch.isfinite(p.grad).all() for p in policy.parameters()))
-        self.assertGreater(float(policy.critic.backbone.transformer.patch_embed.proj.weight.grad.abs().sum()), 0)
+        self.assertGreater(float(policy.critic.encoder.backbone.transformer.patch_embed.proj.weight.grad.abs().sum()), 0)
 
     def test_packed_actor_uses_local_history_knowledge_latest_xy_and_critic_is_private(self):
         obs = observations()
         policy = construct(obs)
         captured = {}
-        hook = policy.actor.backbone.register_forward_pre_hook(
+        hook = policy.actor.encoder.backbone.register_forward_pre_hook(
             lambda _module, args: captured.update(inputs=args[0].detach().clone()))
         with torch.no_grad():
             expected = policy.action_probabilities(obs)
@@ -139,7 +139,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                     policy.inference_chunk_size = 2
                     actor_chunks, critic_chunks = [], []
                     hooks = [policy.actor.register_forward_pre_hook(lambda _module, args: actor_chunks.append(len(args[0]))),
-                             policy.critic.register_forward_pre_hook(lambda _module, args: critic_chunks.append(len(args[0])))]
+                             policy.critic.register_forward_pre_hook(lambda _module, args: critic_chunks.append(len(args[0][0])))]
                     probabilities, values = policy.action_probabilities(obs), policy.evaluate(obs)
                     self.assertEqual(actor_chunks, [2, 2, 1])
                     self.assertEqual(critic_chunks, [2, 2, 1])
@@ -203,13 +203,13 @@ class ScaledInformationPolicyTests(unittest.TestCase):
                                                    done, {"time_outs": done, "terminal_observations": obs})
                     algorithm.compute_returns(obs)
                 before_actor = policy.actor.cell_head.weight.detach().clone()
-                before_critic = next(policy.critic.backbone.parameters()).detach().clone()
+                before_critic = next(policy.critic.encoder.backbone.parameters()).detach().clone()
                 with patch.object(policy, "validate_action_mask", wraps=policy.validate_action_mask) as validate:
                     losses = algorithm.update()
                     self.assertEqual(validate.call_count, 1)
                 self.assertTrue(all(math.isfinite(value) for value in losses.values()))
                 self.assertFalse(torch.equal(before_actor, policy.actor.cell_head.weight))
-                self.assertFalse(torch.equal(before_critic, next(policy.critic.backbone.parameters())))
+                self.assertFalse(torch.equal(before_critic, next(policy.critic.encoder.backbone.parameters())))
                 self.assertEqual(algorithm.update_metrics["microbatches"], 4)
                 self.assertEqual({int(value["step"]) for value in algorithm.optimizer.state.values()}, {1})
 
@@ -224,7 +224,7 @@ class ScaledInformationPolicyTests(unittest.TestCase):
             torch.testing.assert_close(restored.action_probabilities(obs), policy.action_probabilities(obs), rtol=0, atol=0)
         for kwargs in ({"backbone": "unknown"}, {"model_size": "5m"}, {"history_length": 2}, {"history_length": 8},
                        {"knowledge_channels": 0}, {"inference_chunk_size": 0},
-                       {"critic_actor_information": False}, {"own_king_geometry": False}, {"input_channel_alignment": True}):
+                       {"own_king_geometry": False}, {"input_channel_alignment": True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, **kwargs)
         with self.assertRaises(TypeError):

@@ -13,15 +13,16 @@ class RolloutCodecTests(unittest.TestCase):
         self.generator = torch.Generator().manual_seed(79)
         self.n, self.cells, self.history = 8, 6, 4
 
-    def frame(self):
-        maps = torch.randint(2, (self.n, 13, self.cells), generator=self.generator).float()
-        maps[:, 9:12] = torch.randn(self.n, 3, self.cells, generator=self.generator) * 1000
+    def frame(self, planes=13):
+        maps = torch.randint(2, (self.n, planes, self.cells), generator=self.generator).float()
+        start = 8 if planes == 11 else 9
+        maps[:, start:start+3] = torch.randn(self.n, 3, self.cells, generator=self.generator) * 1000
         return torch.cat((maps.flatten(1), torch.randn(self.n, 13, generator=self.generator)), -1)
 
     def observations(self, frames):
         knowledge = torch.randint(2, (self.n, 11, self.cells), generator=self.generator).float()
         knowledge[:, 10] = torch.randint(2001, (self.n, self.cells), generator=self.generator).float() / 2000
-        return TensorDict(dict(policy=frames.flatten(1), critic=self.frame(), knowledge=knowledge.flatten(1),
+        return TensorDict(dict(policy=frames.flatten(1), critic=self.frame(11), knowledge=knowledge.flatten(1),
             action_mask=torch.randint(2, (self.n, 1 + self.cells * 8), generator=self.generator).bool(),
             valid_cells=torch.randint(2, (self.n, self.cells), generator=self.generator).bool(),
             auxiliary=torch.arange(self.n, dtype=torch.int32)[:, None]), [self.n])
@@ -79,18 +80,26 @@ class RolloutCodecTests(unittest.TestCase):
                                 sum(v.untyped_storage().nbytes() for v in reference.observations.values()) / 2)
 
     def test_all_flag_combinations_and_signed_zero_are_exact(self):
-        flags = torch.arange(1024, dtype=torch.int16)
-        maps = torch.zeros(1024, 13, 1)
-        for bit, channel in enumerate((*range(9), 12)):
-            maps[:, channel, 0] = ((flags >> bit) & 1).float()
-        maps[:, 9:12] = -0.
-        public = torch.randn(1024, 13, generator=self.generator)
-        original = torch.cat((maps.flatten(1), public), -1)
-        obs = TensorDict(dict(policy=original, action_mask=torch.ones(1024, 9, dtype=torch.bool)), [1024])
-        codec = GeneralsObservationCodec(obs)
-        encoded = codec.encode('policy', original).unsqueeze(0)
-        actual = codec.gather('policy', encoded, torch.zeros(1024, dtype=torch.long), torch.arange(1024))
-        self.assertTrue(torch.equal(original.view(torch.int32), actual.view(torch.int32)))
+        for planes in (13, 11):
+            with self.subTest(planes=planes):
+                private = planes == 11
+                count = 256 if private else 1024
+                flags = torch.arange(count, dtype=torch.int16)
+                maps = torch.zeros(count, planes, 1)
+                binary = range(8) if private else (*range(9), 12)
+                for bit, channel in enumerate(binary):
+                    maps[:, channel, 0] = ((flags >> bit) & 1).float()
+                offset = 8 if private else 9
+                maps[:, offset:offset+3] = -0.
+                public = torch.randn(count, 13, generator=self.generator)
+                original = torch.cat((maps.flatten(1), public), -1)
+                key = 'critic' if private else 'policy'
+                obs = TensorDict({key: original, 'action_mask': torch.ones(count, 9, dtype=torch.bool)}, [count])
+                codec = GeneralsObservationCodec(obs)
+                encoded = codec.encode(key, original).unsqueeze(0)
+                actual = codec.gather(key, encoded, torch.zeros(count, dtype=torch.long), torch.arange(count))
+                self.assertTrue(torch.equal(original.view(torch.int32), actual.view(torch.int32)))
+
 
 
 if __name__ == '__main__':

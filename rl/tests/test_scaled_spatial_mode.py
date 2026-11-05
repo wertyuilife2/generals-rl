@@ -16,20 +16,20 @@ def test_pyramid_preserves_every_dense_parameter_and_full_local_resolution(famil
     with torch.device('meta'):
         obs = observations(1).to('meta')
         pyramid = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family, model_size=size,
-                                                    mask_padding_tokens=False, spatial_mode='pyramid', map_width=9, map_height=9)
+                                                    share_backbone=False, mask_padding_tokens=False, spatial_mode='pyramid', map_width=9, map_height=9)
         dense = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family, model_size=size,
-                                                  mask_padding_tokens=False, map_width=9, map_height=9)
+                                                  share_backbone=False, mask_padding_tokens=False, map_width=9, map_height=9)
         assert pyramid.parameter_counts()['total'] > dense.parameter_counts()['total']
         dense_params, pyramid_params = dict(dense.named_parameters()), dict(pyramid.named_parameters())
         assert all(pyramid_params[key].shape == value.shape for key, value in dense_params.items())
         assert set(pyramid_params) - set(dense_params) == {
-            f'{branch}.local_skip.{suffix}' for branch in ('actor', 'critic') for suffix in ('weight', 'bias')}
-        for branch in (pyramid.actor, pyramid.critic):
+            f'{branch}.encoder.local_skip.{suffix}' for branch in ('actor', 'critic') for suffix in ('weight', 'bias')}
+        for branch in (pyramid.actor.encoder, pyramid.critic.encoder):
             local, deep = branch.backbone.forward_pyramid(torch.zeros(1, branch.backbone.in_channels, 9, 9))
             assert local.shape == (1, branch.backbone.local_channels, 9, 9)
             assert deep.shape[-2:] == ((2, 2) if family == 'resnet' else (3, 3))
         assert pyramid.actor(obs['policy'], obs['knowledge']).shape == (1, 649)
-        assert pyramid.critic(obs['critic'], obs['policy'], obs['knowledge']).shape == (1, 1)
+        assert pyramid.evaluate(obs).shape == (1, 1)
         assert pyramid.semantics.endswith('_spatial_pyramid_v1')
         assert dense.spatial_mode == 'dense' and 'pyramid' not in dense.semantics
 
@@ -39,10 +39,10 @@ def test_pyramid_decoder_and_critic_keep_local_information_and_fp32_mask_boundar
     torch.set_num_threads(1)
     obs = observations()
     policy = ScaledInformationSpatialPPOPolicy(obs, GROUPS, 649, backbone=family,
-                    mask_padding_tokens=False, spatial_mode='pyramid', inference_chunk_size=1, map_width=9, map_height=9)
+                    share_backbone=False, mask_padding_tokens=False, spatial_mode='pyramid', inference_chunk_size=1, map_width=9, map_height=9)
     coarse, local = [], []
-    hooks = [policy.actor.projection.register_forward_hook(lambda module, args, output: coarse.append(tuple(output.shape))),
-             policy.actor.local_skip.register_forward_hook(lambda module, args, output: local.append(tuple(output.shape)))]
+    hooks = [policy.actor.encoder.projection.register_forward_hook(lambda module, args, output: coarse.append(tuple(output.shape))),
+             policy.actor.encoder.local_skip.register_forward_hook(lambda module, args, output: local.append(tuple(output.shape)))]
     with torch.no_grad():
         expected = policy.action_probabilities(obs)
         changed = obs.clone()

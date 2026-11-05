@@ -29,7 +29,7 @@ def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory
     maps[:, :, 4:6].zero_()
     maps[:, :, 4:6, width + 1] = 1
     values = {"policy": frames.flatten(1), "single_obs": frames[:, -1].clone(),
-              "critic": frames[:, -1].clone(),
+              "critic": torch.cat((frames[:, -1, layout.cells:12 * layout.cells], frames[:, -1, 13 * layout.cells:]), -1),
               "action_mask": torch.ones(count, layout.num_actions, dtype=torch.bool),
               "valid_cells": torch.ones(count, layout.cells, dtype=torch.bool)}
     if memory:

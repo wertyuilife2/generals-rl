@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 import torch
 
-from generals_rl.config import DEFAULT_ITERATIONS, default_training_config
+from generals_rl.config import DEFAULT_ITERATIONS, configure_observations, default_training_config
 from generals_rl.train import main, train
 
 
@@ -117,7 +117,8 @@ def test_selected_vit_recipe_completes_cpu_updates_and_resumes(tmp_path):
         checkpoint = tmp_path / "first/checkpoint.pt"
         continued = train(config, tmp_path / "resumed", iterations=1, resume=str(checkpoint))
     saved = json.loads((tmp_path / "first/run_config.json").read_text())
-    assert config == original == saved
+    assert config == original
+    assert saved == configure_observations(original)
     assert saved['task']['train_both_sides'] is True
     assert not (tmp_path / 'first/history_pool').exists()
     assert summary["iterations"] == 2

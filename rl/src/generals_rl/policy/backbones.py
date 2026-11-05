@@ -27,10 +27,11 @@ class ResNetBackbone(nn.Module):
 
 
 class ViTBackbone(nn.Module):
-    """One-token-per-cell ViT forward; construction lives in scaled_ppo."""
+    """Non-overlapping patch-grid ViT forward; construction lives in policy.scaled."""
 
     def forward(self, x: Tensor) -> Tensor:
         _check_input(x, self.in_channels)
         n, _, h, w = x.shape
+        h, w = self.transformer.patch_embed.dynamic_feat_size((h, w))
         tokens = self.transformer.forward_features(x)
         return tokens.transpose(1, 2).reshape(n, self.out_channels, h, w)

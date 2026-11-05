@@ -98,7 +98,8 @@ class StudentPPO(PPO):
         critic_ids = {id(p) for p in policy.critic.parameters()}
         # Independent towers do not need to retain both activation graphs at
         # once. Shared/outside parameters use the original joint backward.
-        self._separate_backward = (not actor_ids.intersection(critic_ids)
+        self._separate_backward = (not getattr(policy, 'share_backbone', False)
+                                   and not actor_ids.intersection(critic_ids)
                                    and {id(p) for p in parameters} <= actor_ids | critic_ids)
         # Keep the default single group, including parameter ordering and Adam
         # execution, identical to the original implementation.
@@ -123,10 +124,18 @@ class StudentPPO(PPO):
             raise ValueError("checkpoint actor LR is outside configured adaptive LR bounds")
 
     def act(self, obs):
-        # Every row is a student in canonical trajectory order. Upstream PPO
-        # records this batch directly; CTS would gather and concatenate the
-        # complete (potentially multi-GB) history despite an empty teacher group.
-        return PPO.act(self, obs)
+        # Keep canonical student rows and obtain logits/value together. The
+        # shared policy encodes each row once; CTS teacher gathers are avoided.
+        if self.policy.is_recurrent:
+            self.transition.hidden_states = self.policy.get_hidden_states()
+        _, values = self.policy.action_probabilities_and_value(obs)
+        self.transition.actions = self.policy.distribution.sample().unsqueeze(-1).detach()
+        self.transition.values = values.detach()
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
+        self.transition.action_mean = self.policy.action_mean.detach()
+        self.transition.action_sigma = self.policy.action_std.detach()
+        self.transition.observations = obs
+        return self.transition.actions
 
     def _adapt_learning_rate(self, kl_mean):
         """Actor KL drives the shared actor/critic learning rate."""
@@ -156,12 +165,13 @@ class StudentPPO(PPO):
         self.update_metrics = {}
         try:
             self.monitor.begin(self)
-            # The disabled path remains upstream PPO.update, including its RNG
-            # draws, reduction order and observer lifecycle.
+            # Independent, unchunked execution retains upstream PPO.update.
+            # Shared encoders need the explicit joint-forward update below.
             # Distributed minibatch normalization uses the same adapter with
             # one physical chunk when memory splitting is disabled. Upstream
             # PPO would otherwise normalize each rank's advantages locally.
             use_adapter = (self._chunked_update or self._custom_learning_rates
+                           or getattr(self.policy, 'share_backbone', False)
                            or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch))
             losses = self._update_microbatched() if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
@@ -214,12 +224,13 @@ class StudentPPO(PPO):
                     # Unlike act(), probability evaluation consumes no policy
                     # sampling RNG. One full-batch draw below preserves the
                     # upstream update's otherwise-unused sample call.
-                    if mask_validator is None:
+                    if not self._separate_backward:
+                        _, values = self.policy.action_probabilities_and_value(
+                            obs[sl], validate_mask=mask_validator is None)
+                    elif mask_validator is None:
                         self.policy.action_probabilities(obs[sl])
                     else:
                         self.policy.action_probabilities(obs[sl], validate_mask=False)
-                    if not self._separate_backward:
-                        values = self.policy.evaluate(obs[sl])
                 if self.policy.distribution.logits.dtype != torch.float32:
                     self.policy.distribution = Categorical(
                         logits=self.policy.distribution.logits.float(), validate_args=False)

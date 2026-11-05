@@ -25,13 +25,15 @@ def unpad(state, valid):
 
 
 @pytest.mark.parametrize('backend',['cpu','gpu'])
-def test_exported_actor_matches_random_shape_training(tmp_path,backend):
+@pytest.mark.parametrize('patch_size',[1,3])
+def test_exported_actor_matches_random_shape_training(tmp_path,backend,patch_size):
     if backend=='gpu' and not torch.cuda.is_available():pytest.skip('CUDA unavailable')
     torch.set_num_threads(1)
     device='cuda:0' if backend=='gpu' else 'cpu'
     config=json.loads((Path(__file__).parents[1]/'src/generals_rl/default.json').read_text())
     config['task'].update(num_envs=3,backend=backend,device=device,map_pool_size=16,opponent='wait',train_both_sides=False,seed=84)
     config['runner']['policy']['amp_bfloat16']=False
+    config['runner']['policy']['patch_size']=patch_size
     tc={k:v for k,v in config['task'].items() if k!='reward'}
     with GeneralsTask(TaskConfig(**tc)) as task:
         options=deepcopy(config['runner']['policy']);cls=resolve_callable(options.pop('class_name'))
@@ -53,7 +55,7 @@ def test_exported_actor_matches_random_shape_training(tmp_path,backend):
             observations=[observe(s,int(task.player_ids[lane])) for lane,s in enumerate(states)]
             selected=runtime.act_batch(observations)
             expected=task.get_observations()
-            for name in ('policy','single_obs','knowledge','action_mask'):
+            for name in ('policy','single_obs','knowledge','action_mask','valid_cells'):
                 torch.testing.assert_close(captured[-1][name],expected[name],rtol=0,atol=0,msg=f'{backend} {tick} {name}')
             with torch.no_grad():encoded=policy.act_inference(TensorDict(expected,[3])).flatten()
             widths=torch.tensor([s.layout.width for s in states],device=device)

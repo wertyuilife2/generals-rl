@@ -39,7 +39,7 @@ class LightSpatialPPOTests(unittest.TestCase):
         self.assertEqual([(m.in_channels,m.out_channels,m.kernel_size,m.groups) for m in actor_convs],
                          [(52,16,(3,3),1),(16,16,(3,3),1)])
         self.assertEqual([(m.in_channels,m.out_channels,m.kernel_size,m.groups) for m in critic_convs],
-                         [(13,16,(3,3),1),(16,16,(3,3),1)])
+                         [(11,16,(3,3),1),(16,16,(3,3),1)])
         original=policy.action_probabilities(obs).detach().clone()
         changed=obs.clone()
         for key in ('critic','single_obs'):

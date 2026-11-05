@@ -40,10 +40,14 @@ def make_policy_spec(run_config):
     common = ('spatial_channels', 'residual_blocks', 'own_king_geometry', 'knowledge_channels',
               'input_channel_alignment', 'wait_move_factorization', 'amp_bfloat16')
     keys = (('backbone', 'model_size', 'spatial_mode', 'head_channels', 'input_channel_alignment',
-             'wait_move_factorization', 'amp_bfloat16', 'mask_padding_tokens') if network['family'] == 'scaled' else common)
+             'wait_move_factorization', 'amp_bfloat16', 'mask_padding_tokens', 'patch_size') if network['family'] == 'scaled' else common)
     network.update({key: options[key] for key in keys if key in options})
     if 'model_size' in network and isinstance(network['model_size'], str):
         network['model_size'] = network['model_size'].lower()
+    if network['family'] == 'scaled' and network.get('backbone', 'vit') == 'vit':
+        from .policy.scaled import vit_configuration
+        network['vit_config'] = list(vit_configuration(network.get('model_size', '1m'),
+                                                       options.get('share_backbone', True)))
     network.setdefault('wait_move_factorization', network['family'] == 'scaled')
     network.setdefault('amp_bfloat16', False)
     if network['family'] in ('information', 'optimized'):

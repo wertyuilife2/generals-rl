@@ -12,6 +12,7 @@ from tensordict import TensorDict
 
 from generals import VecEnv
 from generals_rl.mdp import GameBatch, make_observation_encoder
+from generals_rl.mdp.observations import encode_privileged
 from generals_rl.policy.actions import make_action_space
 from generals_rl.self_play import HistoricalPolicyPool
 from generals_rl.self_play_training import prepare_self_play
@@ -62,7 +63,7 @@ class OwnKingGeometryTests(unittest.TestCase):
         local = encoder.encode(batch, ids)
         obs = TensorDict({'policy': local[:, None].expand(-1, 4, -1).reshape(2, -1),
                           'single_obs': local.clone(),
-                          'critic': encoder.encode(batch, ids, privileged=True),
+                          'critic': encode_privileged(encoder, batch, ids),
                           'action_mask': make_action_space(cfg).mask(batch, ids)}, [2])
         return obs, cfg, encoder
 

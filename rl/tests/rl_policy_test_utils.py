@@ -24,6 +24,7 @@ def make_checkpoint(directory, seed=7, filename="checkpoint.pt", family="informa
         options["class_name"] = "generals_rl.optimized_ppo.OptimizedInformationSpatialPPOPolicy"
     elif family == "scaled":
         options.pop("spatial_channels")
+        options.pop("critic_actor_information")
         options.update(class_name="generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy",
                        backbone="vit", model_size="1m", spatial_mode="dense")
         config["runner"]["obs_groups"]["policy"].append("valid_cells")

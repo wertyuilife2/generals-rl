@@ -8,7 +8,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 from .backbones import RESNET_DEPTHS, ResNetBackbone, ViTBackbone
 from .layout import own_king_coordinates
-from .tokens import prepare_tokens, valid_mean, valid_token_features
+from .tokens import patch_mask, prepare_tokens, valid_mean, valid_token_features
 
 
 RESNET_TOTAL_PRESETS = {
@@ -19,6 +19,11 @@ RESNET_TOTAL_PRESETS = {
 
 
 VIT_TOTAL_PRESETS = {"1m": (96, 4, 3), "10m": (224, 8, 7), "100m": (640, 10, 10)}
+
+
+def vit_configuration(size, shared=True):
+    """Widen shared ViT1M to keep total policy capacity near one million."""
+    return (128, 4, 4) if shared and size == "1m" else VIT_TOTAL_PRESETS[size]
 
 
 class _TotalResNetBackbone(ResNetBackbone):
@@ -59,25 +64,28 @@ class _TotalResNetBackbone(ResNetBackbone):
         return local, self.encoder.norm(x)
 
 
-class _TotalViTBackbone(ViTBackbone):
-    """Existing one-token-per-cell timm adapter at balanced total budgets."""
-    def __init__(self, in_channels, size, spatial_mode="dense", map_shape=(23, 23)):
+class _ViTBackbone(ViTBackbone):
+    """Non-overlapping ViT with an explicit width/depth/head configuration."""
+    def __init__(self, in_channels, configuration, spatial_mode="dense", map_shape=(23, 23), patch_size=1):
         nn.Module.__init__(self)
+        if (len(configuration) != 3 or any(type(value) is not int or value < 1 for value in configuration)
+                or configuration[0] % configuration[2]):
+            raise ValueError("vit_config requires positive width/depth/heads with width divisible by heads")
         if spatial_mode not in ("dense", "pyramid"):
             raise ValueError("spatial_mode must be dense or pyramid")
         self.spatial_mode = spatial_mode
         self.in_channels = in_channels
-        self.out_channels, self.depth, self.num_heads = VIT_TOTAL_PRESETS[size]
+        self.out_channels, self.depth, self.num_heads = configuration
         self.local_channels = self.out_channels
+        canvas = tuple((side + patch_size - 1) // patch_size * patch_size for side in map_shape)
         self.transformer = VisionTransformer(
-            img_size=map_shape, patch_size=1, in_chans=in_channels,
+            img_size=canvas, patch_size=patch_size, in_chans=in_channels,
             num_classes=0, global_pool="", class_token=False,
             embed_dim=self.out_channels, depth=self.depth, num_heads=self.num_heads,
             mlp_ratio=4.0, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),
-            init_values=1e-4, dynamic_img_size=True,
+            init_values=1e-4, dynamic_img_size=True, dynamic_img_pad=patch_size > 1,
             drop_rate=0.0, pos_drop_rate=0.0, patch_drop_rate=0.0,
             proj_drop_rate=0.0, attn_drop_rate=0.0, drop_path_rate=0.0)
-
 
     def forward_pyramid(self, x):
         """Keep cell-resolution block zero, then pool spatial tokens twice.
@@ -87,7 +95,7 @@ class _TotalViTBackbone(ViTBackbone):
         """
         if self.spatial_mode != "pyramid":
             raise ValueError("forward_pyramid requires spatial_mode=pyramid")
-        if x.ndim != 4 or x.shape[1] != self.in_channels :
+        if x.ndim != 4 or x.shape[1] != self.in_channels:
             raise ValueError("ViT pyramid requires packed NCHW inputs")
         transformer = self.transformer
         count, height, width = x.shape[0], x.shape[2], x.shape[3]
@@ -109,15 +117,22 @@ class _TotalViTBackbone(ViTBackbone):
         return local, deep
 
 
-def _build_total_backbone(kind, size, inputs, spatial_mode="dense", map_shape=(23, 23)):
+def _build_total_backbone(kind, size, inputs, spatial_mode="dense", map_shape=(23, 23), patch_size=1,
+                          vit_config=None):
+    if type(patch_size) is not int or patch_size < 1:
+        raise ValueError("patch_size must be a positive integer")
+    if patch_size != 1 and (kind != "vit" or spatial_mode != "dense"):
+        raise ValueError("patch_size > 1 requires a dense ViT")
     if kind == "vit":
-        return _TotalViTBackbone(inputs, size, spatial_mode, map_shape)
+        configuration = vit_configuration(size) if vit_config is None else vit_config
+        return _ViTBackbone(inputs, configuration, spatial_mode, map_shape, patch_size)
     return _TotalResNetBackbone(inputs, size, spatial_mode)
 
 
-class _ScaledInformationActor(nn.Module):
+class _ScaledObservationEncoder(nn.Module):
+    """The same local-information encoder serves policy and value learning."""
     def __init__(self, layout, kind, size, alignment, head_channels, spatial_mode="dense",
-                 mask_padding_tokens=None):
+                 mask_padding_tokens=None, patch_size=1, vit_config=None):
         super().__init__()
         if mask_padding_tokens is None:
             mask_padding_tokens = kind == "vit" and spatial_mode == "dense"
@@ -126,14 +141,12 @@ class _ScaledInformationActor(nn.Module):
         self.layout = layout
         self.spatial_mode = spatial_mode
         self.mask_padding_tokens = mask_padding_tokens
-        self.knowledge_channels = layout.knowledge_channels
-        self.logical_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels + 2
-        padding = (-self.logical_inputs) % alignment if alignment else 0
-        self.backbone = _build_total_backbone(kind, size, self.logical_inputs + padding, spatial_mode, (layout.height, layout.width))
+        self.patch_size = patch_size
+        logical_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels + 2
+        padding = (-logical_inputs) % alignment if alignment else 0
+        self.backbone = _build_total_backbone(kind, size, logical_inputs + padding, spatial_mode,
+                                              (layout.height, layout.width), patch_size, vit_config)
         self.projection = nn.Conv2d(self.backbone.out_channels, head_channels, 1)
-        self.context = nn.Sequential(nn.Linear(head_channels + layout.public_dim, head_channels), nn.SiLU())
-        self.cell_head = nn.Conv2d(head_channels, 8, 1)
-        self.wait_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
         self.register_buffer("_input_zero_padding", self.projection.weight.new_zeros(
             1, padding, layout.height, layout.width), persistent=False)
         if spatial_mode == "pyramid":
@@ -141,19 +154,20 @@ class _ScaledInformationActor(nn.Module):
 
     def forward(self, history, knowledge=None, valid_cells=None, tokens=None):
         layout, count = self.layout, history.shape[0]
-        frames = layout.frames(history)
-        if not count:
-            layout.memory_maps(knowledge, 0)
-            return history.new_empty((0, layout.num_actions))
         maps = layout.history_maps(history)
-        valid = valid_cells if self.mask_padding_tokens else None
+        valid = None
         if self.mask_padding_tokens:
-            tokens = prepare_tokens(valid) if tokens is None else tokens
+            if tokens is None:
+                tokens = prepare_tokens(patch_mask(valid_cells, layout.height, layout.width, self.patch_size))
+            valid = tokens[0]
         parts = [maps, layout.memory_maps(knowledge, count), own_king_coordinates(maps[:, -layout.map_planes:], valid_cells)]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
+        inputs = torch.cat(parts, 1)
+        if self.mask_padding_tokens and self.patch_size > 1:
+            inputs = inputs.masked_fill(~valid_cells.reshape(count, 1, layout.height, layout.width), 0)
         if self.spatial_mode == "pyramid":
-            local, deep = self.backbone.forward_pyramid(torch.cat(parts, 1))
+            local, deep = self.backbone.forward_pyramid(inputs)
             coarse = self.projection(deep)
             if (coarse.is_cuda and torch.is_grad_enabled()
                     and isinstance(self.backbone, _TotalResNetBackbone)):
@@ -161,13 +175,40 @@ class _ScaledInformationActor(nn.Module):
             spatial = F.silu(F.interpolate(coarse, size=(layout.height, layout.width),
                                           mode="bilinear", align_corners=False) + self.local_skip(local))
         elif self.mask_padding_tokens:
-            features = valid_token_features(self.backbone.transformer, torch.cat(parts, 1), valid, tokens)
+            features = valid_token_features(self.backbone.transformer, inputs, valid, tokens)
             spatial = F.silu(self.projection(features))
         else:
-            spatial = F.silu(self.projection(self.backbone(torch.cat(parts, 1))))
+            spatial = F.silu(self.projection(self.backbone(inputs)))
         pooled = valid_mean(spatial, valid) if self.mask_padding_tokens else spatial.mean(dim=(-2, -1))
-        context = self.context(torch.cat((pooled, frames[:, -1, -layout.public_dim:]), -1))
+        return spatial, pooled
+
+
+class _ScaledInformationActor(nn.Module):
+    def __init__(self, layout, kind, size, alignment, head_channels, spatial_mode="dense",
+                 mask_padding_tokens=None, patch_size=1, vit_config=None):
+        super().__init__()
+        self.layout = layout
+        self.encoder = _ScaledObservationEncoder(layout, kind, size, alignment, head_channels,
+                                                 spatial_mode, mask_padding_tokens, patch_size, vit_config)
+        self.context = nn.Sequential(nn.Linear(head_channels + layout.public_dim, head_channels), nn.SiLU())
+        self.cell_head = nn.Conv2d(head_channels, 8 * patch_size * patch_size, 1)
+        self.wait_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
+
+    def decode(self, encoded, public):
+        spatial, pooled = encoded
+        layout, count = self.layout, spatial.shape[0]
+        context = self.context(torch.cat((pooled, public), -1))
         fused = F.silu(spatial + context[..., None, None])
-        moves = self.cell_head(fused).permute(0, 2, 3, 1).reshape(count, 8 * layout.cells)
+        moves = self.cell_head(fused)
+        if self.encoder.patch_size > 1:
+            moves = F.pixel_shuffle(moves, self.encoder.patch_size)[..., :layout.height, :layout.width]
+        moves = moves.permute(0, 2, 3, 1).reshape(count, 8 * layout.cells)
         wait = self.wait_head(torch.cat((pooled, context), -1))
         return torch.cat((wait, moves), -1)
+
+    def forward(self, history, knowledge=None, valid_cells=None, tokens=None):
+        if not history.shape[0]:
+            return history.new_empty((0, self.layout.num_actions))
+        encoded = self.encoder(history, knowledge, valid_cells, tokens)
+        public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+        return self.decode(encoded, public)

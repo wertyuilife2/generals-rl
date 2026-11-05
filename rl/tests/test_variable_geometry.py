@@ -165,7 +165,7 @@ class VariableGeometryTests(unittest.TestCase):
             result = task.step(torch.zeros(1, dtype=torch.long))
             cells = width * height
             self.assertEqual(tuple(result.observations["policy"].shape), (1, 4 * (13 * cells + 13)))
-            self.assertEqual(tuple(result.observations["critic"].shape), (1, 13 * cells + 13))
+            self.assertEqual(tuple(result.observations["critic"].shape), (1, 11 * cells + 13))
             self.assertEqual(tuple(result.observations["action_mask"].shape), (1, 1 + 8 * cells))
             self.assertEqual(tuple(result.observations["knowledge"].shape), (1, 11 * cells))
             self.assertIn("official_31_4_5", task.observation_encoder.semantics)

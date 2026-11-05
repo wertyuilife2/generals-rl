@@ -30,6 +30,14 @@ class ObservationLayout:
         return self.map_planes * self.cells + self.public_dim
 
     @property
+    def privileged_planes(self):
+        return self.map_planes - 2
+
+    @property
+    def privileged_dim(self):
+        return self.privileged_planes * self.cells + self.public_dim
+
+    @property
     def history_dim(self):
         return self.history_length * self.frame_dim
 
@@ -56,6 +64,12 @@ class ObservationLayout:
             raise ValueError("single observation shape does not match observation layout")
         return frame[:, :self.map_planes * self.cells].reshape(
             frame.shape[0], self.map_planes, self.height, self.width)
+
+    def privileged_maps(self, frame):
+        if frame.ndim != 2 or frame.shape[-1] != self.privileged_dim:
+            raise ValueError("privileged observation shape does not match observation layout")
+        return frame[:, :self.privileged_planes * self.cells].reshape(
+            frame.shape[0], self.privileged_planes, self.height, self.width)
 
     def memory_maps(self, knowledge, batch_size):
         if knowledge is None or knowledge.shape != (batch_size, self.knowledge_dim):

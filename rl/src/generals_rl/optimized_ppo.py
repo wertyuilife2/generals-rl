@@ -32,10 +32,10 @@ class _PackedHistoryCritic(nn.Module):
     def forward(self, privileged, history, knowledge=None, *, unpacked=None):
         frames, local = unpacked if unpacked is not None else _unpack_history(history, self.layout)
         count = history.shape[0]
-        if privileged.shape != (count, self.layout.frame_dim):
+        if privileged.shape != (count, self.layout.privileged_dim):
             raise ValueError("critic privileged observation shape does not match history batch")
         memory = [_knowledge_maps(knowledge, self.knowledge_channels, count, "critic", self.layout)] if self.knowledge_channels else []
-        maps = privileged[:, :-self.layout.public_dim].reshape(count, self.layout.map_planes, self.layout.height, self.layout.width)
+        maps = self.layout.privileged_maps(privileged)
         inputs = torch.cat((maps, local, *memory, *_padding_part(self, "_input_zero_padding", count)), 1)
         pooled = self.trunk(inputs).mean(dim=(-2, -1))
         context = self.context(torch.cat((pooled, privileged[:, -self.layout.public_dim:], frames[:, -1, -self.layout.public_dim:]), -1))

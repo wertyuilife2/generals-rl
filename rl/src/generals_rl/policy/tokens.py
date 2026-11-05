@@ -8,18 +8,26 @@ import torch
 from torch.nn import functional as F
 
 
+def patch_mask(valid, height, width, patch_size=1):
+    """Keep every patch containing a real cell, including partial edge patches."""
+    if patch_size == 1:
+        return valid
+    return F.max_pool2d(valid.reshape(-1, 1, height, width).float(),
+                        patch_size, stride=patch_size, ceil_mode=True).flatten(1).bool()
+
+
 def prepare_tokens(valid):
     """Resolve the variable output shape before entering a compiled network."""
     if valid is None:
         raise ValueError("masked ViT requires valid_cells")
     if not valid.is_cuda:
-        return None
+        return valid, None, None
     indices = valid.flatten().nonzero().flatten()
     offsets = F.pad(valid.sum(1, dtype=torch.int32).cumsum(0, dtype=torch.int32), (1, 0))
     # Frozen actors retain static batch buckets, but live maps and opponent
     # assignments change the number of valid tokens even within one bucket.
     torch._dynamo.mark_dynamic(indices, 0)
-    return indices, offsets
+    return valid, indices, offsets
 
 
 class _PackedAttention(torch.autograd.Function):
@@ -42,13 +50,14 @@ class _PackedAttention(torch.autograd.Function):
 
 def valid_token_features(transformer, inputs, valid, tokens):
     count, _, height, width = inputs.shape
+    height, width = transformer.patch_embed.dynamic_feat_size((height, width))
     x = transformer.patch_embed(inputs)
     # Keep the original canvas position table: resizing it to a smaller board
     # would change position semantics in addition to removing padding.
     x = transformer.norm_pre(transformer.patch_drop(transformer._pos_embed(x)))
     packed = x.is_cuda and (torch.is_autocast_enabled('cuda') or x.dtype in (torch.float16, torch.bfloat16))
     if packed:
-        indices, offsets = tokens
+        _, indices, offsets = tokens
         x = x.flatten(0, 1).index_select(0, indices)
         for block in transformer.blocks:
             attention = block.attn

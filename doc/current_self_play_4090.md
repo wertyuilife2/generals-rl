@@ -2,6 +2,8 @@
 
 日期：2026-11-05。本实现位于独立 worktree `outputs/worktrees/current-selfplay-dual`，分支 `perf/current-selfplay-dual`；原`codex_dev_clean`的代码与配置未改，测试产物保存在主工作区忽略的`outputs/`目录。
 
+本页记录`60e5d33`的独立Actor／Critic基准；后续共享主干、可选特权encoder和priv11布局见[当前RL说明](../rl/README.md)。下述历史测量保持其原始网络配置。
+
 ## 实现范围
 
 基线为 `123730107ac1364f7f195a266034316f57939a28` 加任务开始时工作区的未提交改动，包括stride=3支持及地图课程。逐文件 SHA256、原始 diff 与完整源码冻结在主工作区的 `outputs/analysis/current_selfplay_dual_4090_20261105/`。对比使用相同网络与 MDP，实际patch_size均为1。

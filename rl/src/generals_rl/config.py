@@ -36,6 +36,25 @@ def task_config(values):
     return TaskConfig(**values)
 
 
+def configure_observations(config):
+    """Resolve the scaled policy's single privilege switch into task/storage."""
+    config = deepcopy(config)
+    runner = config['runner']
+    policy = runner['policy']
+    if policy['class_name'] == 'generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy':
+        privileged = policy.get('critic_privileged', True)
+        if type(privileged) is not bool:
+            raise TypeError('critic_privileged must be boolean')
+        config['task']['critic_privileged'] = privileged
+        local = ['policy', 'knowledge', 'valid_cells']
+        runner['obs_groups'] = {'policy': local, 'critic': (['critic'] if privileged else []) + local}
+        keys = runner.get('storage_obs_keys')
+        if keys is not None:
+            keys = [key for key in keys if key != 'critic']
+            runner['storage_obs_keys'] = keys + (['critic'] if privileged else [])
+    return config
+
+
 def seed_everything(seed):
     random.seed(seed)
     np.random.seed(seed)

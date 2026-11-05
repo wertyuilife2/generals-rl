@@ -33,7 +33,7 @@ def build_actor(network, features):
     if "wait_move_factorization" in network and type(network["wait_move_factorization"]) is not bool:
         raise TypeError("wait_move_factorization must be boolean")
     if family == "scaled":
-        allowed = common | {"backbone", "model_size", "spatial_mode", "head_channels", "input_channel_alignment", "knowledge_channels", "mask_padding_tokens"}
+        allowed = common | {"backbone", "model_size", "spatial_mode", "head_channels", "input_channel_alignment", "knowledge_channels", "mask_padding_tokens", "patch_size", "vit_config"}
         if set(network) - allowed:
             raise ValueError(f"unsupported scaled actor options: {sorted(set(network) - allowed)}")
         if layout.history_length != 4 or layout.knowledge_channels != 11 or feature_values.get("persistent_knowledge", True) is not True:
@@ -43,6 +43,8 @@ def build_actor(network, features):
         kind = network.get("backbone", "vit")
         if kind not in ("vit", "resnet"):
             raise ValueError("scaled backbone must be vit or resnet")
+        if kind != "vit" and network.get("vit_config") is not None:
+            raise ValueError("vit_config requires a ViT backbone")
         size, mode = network.get("model_size", "1m"), network.get("spatial_mode", "dense")
         if size not in ("1m", "10m", "100m") or mode not in ("dense", "pyramid"):
             raise ValueError("unsupported scaled model_size or spatial_mode")
@@ -52,7 +54,8 @@ def build_actor(network, features):
                 raise ValueError(f"{name} must be an integer >= {minimum}")
         from .scaled import _ScaledInformationActor
         return _ScaledInformationActor(layout, kind, size, alignment, head, mode,
-                                       network.get("mask_padding_tokens"))
+                                       network.get("mask_padding_tokens"), network.get("patch_size", 1),
+                                       network.get("vit_config"))
     if family not in ("spatial", "lightcnn", "information", "optimized"):
         raise ValueError("unsupported actor family")
     allowed = common | {"spatial_channels", "residual_blocks", "own_king_geometry", "knowledge_channels", "input_channel_alignment"}

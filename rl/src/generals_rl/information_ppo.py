@@ -41,10 +41,10 @@ class HistoryStateCritic(nn.Module):
     def forward(self, privileged, history, knowledge=None):
         if history.ndim != 2 or history.shape[-1] != self.history_length * self.layout.frame_dim:
             raise ValueError("critic history shape does not match history_length")
-        if privileged.shape != (history.shape[0], self.layout.frame_dim):
+        if privileged.shape != (history.shape[0], self.layout.privileged_dim):
             raise ValueError("critic privileged observation shape does not match history batch")
         frames = history.reshape(-1, self.history_length, self.layout.frame_dim)
-        maps = privileged[:, :-self.layout.public_dim].reshape(-1, self.layout.map_planes, self.layout.height, self.layout.width)
+        maps = self.layout.privileged_maps(privileged)
         local = frames[..., :-self.layout.public_dim].reshape(-1, self.history_length * self.layout.map_planes, self.layout.height, self.layout.width)
         inputs = [maps, local]
         if self.knowledge_channels:

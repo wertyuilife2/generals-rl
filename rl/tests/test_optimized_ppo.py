@@ -35,7 +35,7 @@ def observations(count=4, history_length=4, knowledge_channels=11):
     if count > 1:
         masks[1, 0] = False
     values = {"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-              "critic": torch.rand(count, FRAME_DIM, generator=generator), "action_mask": masks}
+              "critic": torch.rand(count, 11 * 81 + PUBLIC_DIM, generator=generator), "action_mask": masks}
     if knowledge_channels:
         values["knowledge"] = torch.rand(count, knowledge_channels * MAP_SIZE * MAP_SIZE, generator=generator)
     return TensorDict(values, batch_size=[count])
@@ -98,7 +98,7 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         policy.load_state_dict(baseline.state_dict(), strict=True)
         baseline.load_state_dict(policy.state_dict(), strict=True)
         self.assertEqual((policy.actor.trunk[1].in_channels, policy.actor.trunk[1].compute_in_channels), (65, 68))
-        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (76, 76))
+        self.assertEqual((policy.critic.trunk[0].in_channels, policy.critic.trunk[0].compute_in_channels), (74, 76))
 
     def test_learned_fp32_logits_masks_values_and_parameter_gradients_are_equivalent(self):
         # Disable the CPU backend's lower-precision/reordered kernels so this
@@ -134,7 +134,7 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
                         torch.testing.assert_close(actual, parameter.grad, rtol=3e-6, atol=3e-7, msg=name)
                     first_actor = baseline.actor.trunk[int(geometry)].weight.grad
                     self.assertGreater(float(first_actor[:, history_length * MAP_PLANES:history_length * MAP_PLANES + 11].abs().sum()), 0)
-                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 13:].abs().sum()), 0)
+                    self.assertGreater(float(baseline.critic.trunk[0].weight.grad[:, 11:].abs().sum()), 0)
 
     def test_learned_fp32_input_gradients_cover_each_history_and_knowledge_plane(self):
         obs = observations(history_length=8)
@@ -186,10 +186,10 @@ class OptimizedInformationPolicyTests(unittest.TestCase):
         self.assertEqual(tuple(captured["critic"].shape), (4, 76, 9, 9))
         torch.testing.assert_close(captured["actor"][:, :52], local, rtol=0, atol=0)
         torch.testing.assert_close(captured["actor"][:, 52:63], memory, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 13:65], local, rtol=0, atol=0)
-        torch.testing.assert_close(captured["critic"][:, 65:76], memory, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 11:63], local, rtol=0, atol=0)
+        torch.testing.assert_close(captured["critic"][:, 63:74], memory, rtol=0, atol=0)
         self.assertEqual(float(captured["actor"][:, 65:].abs().sum()), 0)
-        self.assertEqual(float(captured["critic"][:, 76:].abs().sum()), 0)
+        self.assertEqual(float(captured["critic"][:, 74:].abs().sum()), 0)
         torch.testing.assert_close(captured["actor"][0, 63], ((torch.arange(9.) - 3) / 8)[None, :].expand(9, 9))
         torch.testing.assert_close(captured["actor"][0, 64], ((torch.arange(9.) - 3) / 8)[:, None].expand(9, 9))
         self.assertEqual(float(captured["actor"][-1, 63:65].abs().sum()), 0)

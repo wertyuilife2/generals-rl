@@ -10,6 +10,7 @@ from .mdp import ActionMetrics, GameBatch, RewardConfig, ShapedReward, make_obse
 from .policy.actions import make_action_space
 from .policy.knowledge import KnowledgeState
 from .policy.observations import ObservationHistory
+from .mdp.observations import encode_privileged
 from .opponents import make_opponent
 
 
@@ -35,6 +36,7 @@ class TaskConfig:
     king_threat_distance: bool = False
     critic_potential: bool = False
     persistent_knowledge: bool = False
+    critic_privileged: bool = True
     map_pool_size: int = 256
     random_maps: bool = True
     reward: RewardConfig = field(default_factory=RewardConfig)
@@ -65,6 +67,8 @@ class TaskConfig:
             raise ValueError("analytic critic_potential inputs are retired; potential rewards remain supported")
         if not isinstance(self.persistent_knowledge, bool):
             raise TypeError("persistent_knowledge must be boolean")
+        if not isinstance(self.critic_privileged, bool):
+            raise TypeError("critic_privileged must be boolean")
         if self.combat_features and self.players != 2:
             raise ValueError("combat features require two players")
         if not isinstance(self.king_threat_distance, bool):
@@ -190,10 +194,11 @@ class GeneralsTask:
             # valid until PPO has encoded the transition (including timeouts).
             "policy": self.history.frames.flatten(1),
             "single_obs": self.history.frames[:, -1],
-            "critic": self.observation_encoder.encode(batch, self.player_ids, privileged=True),
             "action_mask": self.action_space.mask(batch, self.player_ids),
             "valid_cells": batch.valid_cells.clone(),
         }
+        if self.config.critic_privileged:
+            observations["critic"] = encode_privileged(self.observation_encoder, batch, self.player_ids)
         if self.knowledge is not None:
             observations["knowledge"] = self.knowledge.encode(
                 batch.state["tick"], self.player_ids,

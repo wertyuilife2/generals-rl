@@ -43,7 +43,7 @@ def observations(count=3):
     if count > 2:
         mask[2, 0] = False
     return TensorDict({"policy": frames.flatten(1).clone(), "single_obs": frames[:, -1].clone(),
-                       "critic": torch.rand(count, 1066, generator=generator),
+                       "critic": torch.rand(count, 904, generator=generator),
                        "knowledge": torch.rand(count, 891, generator=generator),
                        "action_mask": mask, "valid_cells": torch.ones(count, 81, dtype=torch.bool)}, [count])
 
@@ -74,7 +74,7 @@ class PolicyActorTests(unittest.TestCase):
         self.assertTrue(frozen.training)
         self.assertTrue(all(parameter.requires_grad for parameter in frozen.parameters()))
         self.assertFalse(any("critic" in key for key in frozen.state_dict()))
-        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 527_369)
+        self.assertEqual(sum(value.numel() for value in frozen.parameters()), 882_313)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "synthetic_training_checkpoint.pt"
             torch.save({"model_state_dict": original.state_dict()}, path)

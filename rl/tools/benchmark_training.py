@@ -22,7 +22,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
 from rsl_rl.utils import resolve_callable
 
-from generals_rl.config import merge_config, seed_everything, task_config
+from generals_rl.config import configure_observations, merge_config, seed_everything, task_config
 from generals_rl.cts import GeneralsCTSVecEnv, runner_config
 from generals_rl.curriculum import CurriculumConfig, RolloutCurriculum
 from generals_rl.distributed_training import DistributedConfig
@@ -357,7 +357,9 @@ def resolve_config(args, context):
         raise ValueError("benchmark requires student-only PPO with four complete epochs")
     if run["algorithm"]["num_mini_batches"] < 1 or total % run["algorithm"]["num_mini_batches"]:
         raise ValueError("NT must divide the number of PPO minibatches exactly")
-    settings = task_config(task)
+    config = configure_observations(config)
+    task, run = config['task'], config['runner']
+    settings = task_config(config['task'])
     if settings.reward.potential_gamma is not None and settings.reward.potential_gamma != run["algorithm"].get("gamma"):
         raise ValueError("reward potential_gamma and algorithm.gamma must match")
     config["evaluation"] = {"enabled": False}

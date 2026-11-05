@@ -16,7 +16,7 @@ import torch
 import torch.distributed as dist
 from rsl_rl.runners import OnPolicyRunnerCTS
 
-from .config import DEFAULT_ITERATIONS, default_training_config, merge_config, seed_everything, task_config
+from .config import DEFAULT_ITERATIONS, configure_observations, default_training_config, merge_config, seed_everything, task_config
 from .cts import GeneralsCTSVecEnv
 from .curriculum import CurriculumConfig, RolloutCurriculum
 from .distributed_training import DistributedConfig, distributed_process_group
@@ -80,6 +80,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     if "baseline_league" in config:
         raise ValueError("baseline_league training has been removed; use pure historical self-play. "
                          "Replay legacy v6-v8 experiments with their frozen source.")
+    config = configure_observations(config)
     if resume is not None and warm_start is not None:
         raise ValueError("resume and warm_start are mutually exclusive")
     precision = config.get("matmul_precision")
@@ -464,7 +465,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 "truncated_episodes": truncated_episodes,
                 "teacher_envs": runner.alg.teacher_num_envs * distributed.world_size,
                 "student_envs": runner.alg.student_num_envs * distributed.world_size,
-                "last_losses": last_losses, "resume": resume,
+                "last_losses": last_losses, "resume": str(resume) if resume is not None else None,
                 "stop_reason": stop_reason or "budget",
                 "evaluation": evaluator.describe() if evaluator is not None else None,
             }
