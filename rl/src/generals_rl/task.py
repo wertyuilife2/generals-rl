@@ -28,6 +28,7 @@ class TaskConfig:
     learner_seat: int = 0
     rotate_seats: bool = True
     opponent: str = "random"
+    train_both_sides: bool = False
     mountain_density: float = 0.5
     city_density: float = 0.5
     combat_features: bool = False
@@ -54,6 +55,10 @@ class TaskConfig:
             raise ValueError("learner seat is out of range")
         if self.opponent == "current_self_play" and self.players != 2:
             raise ValueError("current self-play requires two players")
+        if not isinstance(self.train_both_sides, bool):
+            raise TypeError("train_both_sides must be boolean")
+        if self.train_both_sides and self.opponent != "current_self_play":
+            raise ValueError("train_both_sides requires current_self_play")
         if not isinstance(self.combat_features, bool):
             raise TypeError("combat_features must be boolean")
         if self.critic_potential is not False:
@@ -81,7 +86,7 @@ class TaskStep:
 
 
 class GeneralsTask:
-    """One learner per lane, replaceable opponent and MDP components.
+    """Physical games with one or both player trajectories exposed to PPO.
 
     All decisions precede ordered combat and subsequent growth. Reset is explicitly
     owned here so terminal rewards and next observations precede reset.
@@ -91,7 +96,12 @@ class GeneralsTask:
                  observation_encoder=None, reward_model=None, opponent=None):
         self.config = config
         self.device = torch.device(config.device)
-        self.num_envs = config.num_envs
+        self.num_games = config.num_envs
+        self.train_both_sides = config.train_both_sides
+        self.num_envs = self.num_games * (2 if self.train_both_sides else 1)
+        self._batch_cache = None
+        self._rows = torch.arange(self.num_envs, device=self.device)
+        self._game_rows = self._rows // 2 if self.train_both_sides else self._rows
         sim_device = "cpu" if config.backend == "cpu" else config.device
         options = {"threads": config.threads} if config.backend == "cpu" else {"kernel_backend": "cuda"}
         from .map_sampling import pad_state
@@ -123,28 +133,32 @@ class GeneralsTask:
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
-        self.action_metrics = ActionMetrics(config.num_envs, self.device)
+        self.action_metrics = ActionMetrics(self.num_envs, self.device)
         self.observation_encoder = observation_encoder or make_observation_encoder(config)
         self.reward_model = reward_model or ShapedReward(config.reward)
-        self.opponent = opponent or make_opponent(config.opponent, history_length=config.history_length,
-                                                  seed=config.seed,
-                                                  persistent_knowledge=config.persistent_knowledge)
+        self.opponent = None if self.train_both_sides else opponent or make_opponent(
+            config.opponent, history_length=config.history_length, seed=config.seed,
+            persistent_knowledge=config.persistent_knowledge)
         self.history = ObservationHistory(config.history_length)
         self.knowledge = None
         self.generator = torch.Generator(device=self.device).manual_seed(config.seed)
-        self.player_ids = torch.full((config.num_envs,), config.learner_seat,
-                                     dtype=torch.long, device=self.device)
-        if config.rotate_seats:
-            self.player_ids = (self.player_ids + torch.arange(config.num_envs, device=self.device)) % config.players
-        self.episode_length_buf = torch.zeros(config.num_envs, dtype=torch.long, device=self.device)
-        self.episode_return = torch.zeros(config.num_envs, device=self.device)
+        if self.train_both_sides:
+            # Fixed (game0/seat0, game0/seat1, game1/seat0, ...) identity across
+            # every rollout and reset. Both seats are already represented.
+            self.player_ids = self._rows % 2
+        else:
+            self.player_ids = torch.full_like(self._rows, config.learner_seat)
+            if config.rotate_seats:
+                self.player_ids = (self.player_ids + self._rows) % config.players
+        self.episode_length_buf = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self.episode_return = torch.zeros(self.num_envs, device=self.device)
         self.completed_episodes = 0
         self.truncated_episodes = 0
         self.terminated_episodes = 0
         if config.persistent_knowledge:
             self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
                                             config.players, self.device)
-            self.knowledge.update(self.batch(), self.player_ids)
+            self._update_knowledge(self.batch())
         bind_knowledge = getattr(self.opponent, "bind_knowledge", None)
         if bind_knowledge is not None:
             bind_knowledge(self.knowledge)
@@ -153,20 +167,37 @@ class GeneralsTask:
         self.observations = self._observations()
 
     def batch(self):
+        if self._batch_cache is not None:
+            return self._batch_cache
         valid = self.map_sampler.valid if self.map_sampler is not None else self._valid
-        return GameBatch.from_backend(self.backend, self.device, valid)
+        batch = GameBatch.from_backend(self.backend, self.device, valid)
+        if not self.train_both_sides:
+            return batch
+        self._batch_cache = GameBatch(
+            {key: value.repeat_interleave(2, 0) for key, value in batch.state.items()},
+            batch.stats.repeat_interleave(2, 0), batch.width, batch.height,
+            valid=batch.valid_cells.repeat_interleave(2, 0))
+        return self._batch_cache
+
+    def _update_knowledge(self, batch, mask=None):
+        self.knowledge.update(batch, self.player_ids, mask=mask,
+                              lane_ids=self._game_rows if self.train_both_sides else None)
 
     def _observations(self):
         batch = self.batch()
         observations = {
-            "policy": self.history.flattened(),
-            "single_obs": self.history.frames[:, -1].clone(),
+            # History push/reset replace storage, so these immutable views are
+            # valid until PPO has encoded the transition (including timeouts).
+            "policy": self.history.frames.flatten(1),
+            "single_obs": self.history.frames[:, -1],
             "critic": self.observation_encoder.encode(batch, self.player_ids, privileged=True),
             "action_mask": self.action_space.mask(batch, self.player_ids),
             "valid_cells": batch.valid_cells.clone(),
         }
         if self.knowledge is not None:
-            observations["knowledge"] = self.knowledge.encode(batch.state["tick"], self.player_ids).flatten(1)
+            observations["knowledge"] = self.knowledge.encode(
+                batch.state["tick"], self.player_ids,
+                lane_ids=self._game_rows if self.train_both_sides else None).flatten(1)
         return observations
 
     def get_observations(self):
@@ -187,19 +218,28 @@ class GeneralsTask:
     def reset(self, mask=None, *, rotate=False):
         if mask is None:
             mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-        backend_mask = self._backend_mask(mask)
+        game_mask = mask
+        if self.train_both_sides:
+            paired = mask.reshape(self.num_games, 2)
+            if self.device.type == 'cuda':
+                torch._assert_async((paired[:, 0] == paired[:, 1]).all(), 'both seats must reset together')
+            elif not torch.equal(paired[:, 0], paired[:, 1]):
+                raise ValueError('both seats must reset together')
+            game_mask = paired[:, 0]
+        backend_mask = self._backend_mask(game_mask)
         if self.map_sampler is None:
             self.backend.reset(backend_mask)
         else:
             self.map_sampler.reset(backend_mask)
-        if rotate and self.config.rotate_seats:
+        self._batch_cache = None
+        if rotate and self.config.rotate_seats and not self.train_both_sides:
             self.player_ids[mask] = (self.player_ids[mask] + 1) % self.config.players
         self.episode_length_buf[mask] = 0
         self.episode_return[mask] = 0
         self.action_metrics.reset(mask)
         if self.knowledge is not None:
-            self.knowledge.reset(mask)
-            self.knowledge.update(self.batch(), self.player_ids, mask=mask)
+            self.knowledge.reset(game_mask)
+            self._update_knowledge(self.batch(), mask=mask)
         self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids), mask)
         self._notify_opponent("on_reset", mask)
         self.observations = self._observations()
@@ -209,7 +249,9 @@ class GeneralsTask:
         batch = self.batch()
         learner_actions = self.action_space.validate(actions.to(self.device), self.observations["action_mask"])
         before = batch.learner_stats(self.player_ids)
-        if hasattr(self.opponent, "joint_actions"):
+        if self.train_both_sides:
+            joint = learner_actions.reshape(self.num_games, 2)
+        elif hasattr(self.opponent, "joint_actions"):
             joint = self.opponent.joint_actions(batch, self.player_ids, self.action_space,
                                                 self.observation_encoder)
         else:
@@ -218,20 +260,25 @@ class GeneralsTask:
                 seats = torch.full_like(self.player_ids, pid)
                 joint[:, pid] = self.opponent.act(batch, seats, self.action_space,
                                                  self.observation_encoder, self.generator)
-        rows = torch.arange(self.num_envs, device=self.device)
-        joint[rows, self.player_ids] = learner_actions
+        if not self.train_both_sides:
+            joint[self._rows, self.player_ids] = learner_actions
         submitted = joint.cpu().numpy() if str(self.backend.device) == "cpu" else joint.to(self.backend.device)
         result = self.backend.step(submitted)
+        self._batch_cache = None
         # Check simulator overflow/numerical errors before using its outputs.
         self.backend.check_errors()
         result_hook = getattr(self.opponent, "on_result", None)
         if result_hook is not None:
             result_hook(result, submitted, self.batch(), self.player_ids)
         batch = self.batch()
-        raw_done = torch.as_tensor(result.done, device=self.device).clone()
+        raw_done = torch.as_tensor(result.done, device=self.device)
+        if self.train_both_sides:
+            raw_done = raw_done.repeat_interleave(2, 0)
+        else:
+            raw_done = raw_done.clone()
         action_metrics = self.action_metrics.update(
-            torch.as_tensor(result.moves, device=self.device)[rows, self.player_ids])
-        alive = batch.state["alive"][rows, self.player_ids]
+            torch.as_tensor(result.moves, device=self.device)[self._game_rows, self.player_ids])
+        alive = batch.state["alive"][self._rows, self.player_ids]
         terminated = raw_done[:, 0] | ~alive
         truncated = raw_done[:, 1] & ~terminated
         done = terminated | truncated
@@ -241,7 +288,7 @@ class GeneralsTask:
         self.episode_length_buf += 1
         self.episode_return += reward.total
         if self.knowledge is not None:
-            self.knowledge.update(batch, self.player_ids)
+            self._update_knowledge(batch)
         self.history.push(self.observation_encoder.encode(batch, self.player_ids))
         self._notify_opponent("on_step")
         terminal_obs = self._observations()
@@ -256,9 +303,10 @@ class GeneralsTask:
                         "Episode/length": self.episode_length_buf[done].float().clone(),
                         "Episode/win": (batch.state["winner"][done] == self.player_ids[done]).float(),
                         "Episode/truncated": truncated[done].float()})
-        self.completed_episodes += int(done.sum())
-        self.truncated_episodes += int(truncated.sum())
-        self.terminated_episodes += int(terminated.sum())
+        stride = 2 if self.train_both_sides else 1
+        self.completed_episodes += int(done[::stride].sum())
+        self.truncated_episodes += int(truncated[::stride].sum())
+        self.terminated_episodes += int(terminated[::stride].sum())
         if bool(done.any()):
             obs = self.reset(done, rotate=True)
         else:

@@ -124,6 +124,10 @@ class OnPolicyRunnerCTS:
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg_cfg["rnd_cfg"] else None
                     # Book keeping
                     self.logger.process_env_step(rewards, dones, extras, intrinsic_rewards)
+                    # Bootstrap and logging have consumed this potentially large
+                    # reset-before-next-state payload; do not pin it through PPO.
+                    if self.cfg.get("release_terminal_observations", False):
+                        extras.pop("terminal_observations", None)
 
                 stop = time.time()
                 collect_time = stop - start

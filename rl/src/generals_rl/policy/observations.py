@@ -115,7 +115,8 @@ class ObservationHistory:
         if self.frames is None or mask is None:
             self.frames = repeated.clone()
         else:
-            self.frames[mask] = repeated[mask]
+            # Copy-on-write preserves terminal and pre-step observation views.
+            self.frames = torch.where(mask[:, None, None], repeated, self.frames)
 
     def push(self, current):
         self.frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)

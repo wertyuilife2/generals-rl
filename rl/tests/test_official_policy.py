@@ -30,7 +30,7 @@ def test_exported_actor_matches_random_shape_training(tmp_path,backend):
     torch.set_num_threads(1)
     device='cuda:0' if backend=='gpu' else 'cpu'
     config=json.loads((Path(__file__).parents[1]/'src/generals_rl/default.json').read_text())
-    config['task'].update(num_envs=3,backend=backend,device=device,map_pool_size=16,opponent='wait',seed=84)
+    config['task'].update(num_envs=3,backend=backend,device=device,map_pool_size=16,opponent='wait',train_both_sides=False,seed=84)
     config['runner']['policy']['amp_bfloat16']=False
     tc={k:v for k,v in config['task'].items() if k!='reward'}
     with GeneralsTask(TaskConfig(**tc)) as task:

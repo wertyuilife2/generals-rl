@@ -43,8 +43,10 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert expected['evaluation']['profile'] is None
     assert expected['runner']['storage_history'] == {'policy': 4}
     assert expected['runner']['storage_codec'] == 'generals_rl.rollout_codec.GeneralsObservationCodec'
-    assert expected['runner']['algorithm']['physical_minibatch_size'] == 4096
-    assert 8 * expected["task"]["num_envs"] * expected["runner"]["num_steps_per_env"] * 224 == 939_524_096
+    assert expected['runner']['algorithm']['physical_minibatch_size'] == 512
+    assert expected['task']['opponent'] == 'current_self_play'
+    assert expected['task']['train_both_sides'] is True
+    assert 8 * expected["task"]["num_envs"] * 2 * expected["runner"]["num_steps_per_env"] * 224 == 939_524_096
     with patch("generals_rl.train.train") as execute:
         main(["--output", "unused-ticks", "--steps-per-env", "64"])
     assert execute.call_args.kwargs["iterations"] is None
@@ -116,14 +118,15 @@ def test_selected_vit_recipe_completes_cpu_updates_and_resumes(tmp_path):
         continued = train(config, tmp_path / "resumed", iterations=1, resume=str(checkpoint))
     saved = json.loads((tmp_path / "first/run_config.json").read_text())
     assert config == original == saved
-    assert saved["self_play"]["pool_size"] == 8
-    assert saved["self_play"]["snapshot_interval"] == 1
+    assert saved['task']['train_both_sides'] is True
+    assert not (tmp_path / 'first/history_pool').exists()
     assert summary["iterations"] == 2
-    assert summary["self_play"]["episode_assignments"] > 0
+    assert summary['self_play']['new_publications'] == 0
+    assert summary['player_transitions'] == 2 * summary['board_ticks']
     assert saved["runner"]["algorithm"]["adaptive_lr_max"] == 1e-3
     weights = torch.load(tmp_path / "resumed/checkpoint.pt", weights_only=False, map_location="cpu")
     assert weights["iter"] == 2
     assert len(weights["optimizer_state_dict"]["param_groups"]) == 1
     assert 1e-5 <= weights["optimizer_state_dict"]["param_groups"][0]["lr"] <= 1e-3
     assert continued["iterations"] == 1
-    assert max(continued["self_play"]["pool_ids"]) > max(summary["self_play"]["pool_ids"])
+    assert continued['self_play']['pool_ids'] == summary['self_play']['pool_ids'] == []

@@ -12,6 +12,7 @@ doc/*
 !doc/README.md
 !doc/auto_research.md
 !doc/averagejoe_paper_comparison.md
+!doc/current_self_play_4090.md
 !doc/h200_scaling.md
 !doc/f03_ablation.md
 !doc/official_rules_alignment.md

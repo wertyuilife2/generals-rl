@@ -194,6 +194,8 @@ def complete_update(runner, obs, *, profile=None):
             obs, rewards, dones = obs.to(device), rewards.to(device), dones.to(device)
             with torch.profiler.record_function("Benchmark/store_and_timeout_bootstrap") if marked else nullcontext():
                 alg.process_env_step(obs, rewards, dones, extras)
+            if runner.cfg.get('release_terminal_observations', False):
+                extras.pop('terminal_observations', None)
             if profile and step + 1 == profile.ticks:
                 profile.stop()
         synchronize(device)
@@ -338,7 +340,7 @@ def resolve_config(args, context):
         raise ValueError("historical_pool_fill requires historical self_play")
     if args.rollout_steps is not None:
         run["num_steps_per_env"] = args.rollout_steps
-    total = task["num_envs"] * run["num_steps_per_env"]
+    total = task["num_envs"] * run["num_steps_per_env"] * (2 if task.get('train_both_sides') else 1)
     if args.logical_batch_size is not None:
         if total % args.logical_batch_size:
             raise ValueError("per-rank NT must divide logical_batch_size exactly")
@@ -410,6 +412,9 @@ def benchmark(args):
                 if estimated["total_storage_bytes"] > free * args.max_storage_fraction:
                     raise MemoryError(f"rollout storage alone needs {estimated['total_storage_bytes']} bytes, "
                                       f"exceeding {args.max_storage_fraction:.0%} of currently free CUDA memory ({free})")
+            # Shapes are now recorded. Retaining this initial full H4 batch
+            # throughout timing adds GBs that the real train() entry never owns.
+            del observations, codec
             with redirect_stdout(io.StringIO()) if context["rank"] else nullcontext():
                 runner = BenchmarkRunner(env, deepcopy(config["runner"]), log_dir=None, device=str(task.device))
                 historical = None
@@ -418,7 +423,7 @@ def benchmark(args):
                         task, runner, rank_config, output, distributed, fill=args.historical_pool_fill)
                 elif context["rank"] == 0:
                     prepare_self_play(task, runner, rank_config, output)
-                elif settings.opponent == "current_self_play":
+                elif settings.opponent == "current_self_play" and not task.train_both_sides:
                     selfplay = SelfPlayConfig(**config.get("self_play", {}))
                     task.opponent.attach_policy(runner.alg.policy, stochastic=selfplay.stochastic,
                                                 seed=selfplay.seed + context["rank"])
@@ -478,6 +483,13 @@ def benchmark(args):
             algorithm = config["runner"]["algorithm"]
             performance = aggregate_ranks(ranks, task.num_envs, runner.cfg["num_steps_per_env"],
                                           algorithm["num_learning_epochs"], algorithm["num_mini_batches"])
+            player_count = task.num_envs // task.num_games
+            performance.update(
+                physical_games_per_rank=task.num_games, training_trajectories_per_rank=task.num_envs,
+                player_transitions_per_second=performance['transitions_per_second'],
+                board_ticks_per_second=performance['transitions_per_second'] / player_count,
+                board_ticks_measured_global=performance['fresh_transitions_measured_global'] // player_count,
+                train_both_sides=task.train_both_sides)
             minimum = args.minimum_tps if args.minimum_tps is not None else (
                 20000 if config["runner"]["policy"].get("model_size", "").lower() == "100m" else 50000)
             report = {"kind": "complete_student_ppo_benchmark", "config": config, "ranks": ranks,

@@ -3,7 +3,7 @@
     "width": 23,
     "height": 23,
     "players": 2,
-    "num_envs": 16384,
+    "num_envs": 8192,
     "backend": "gpu",
     "device": "cuda:0",
     "max_episode_steps": 2000,
@@ -12,7 +12,7 @@
     "threads": 1,
     "learner_seat": 0,
     "rotate_seats": true,
-    "opponent": "self_play",
+    "opponent": "current_self_play",
     "mountain_density": 0.5,
     "city_density": 0.5,
     "combat_features": true,
@@ -29,7 +29,8 @@
       "tick": -0.001,
       "potential_gamma": 0.99
     },
-    "random_maps": true
+    "random_maps": true,
+    "train_both_sides": true
   },
   "runner": {
     "num_steps_per_env": 32,
@@ -70,7 +71,7 @@
       "wait_move_factorization": true,
       "input_channel_alignment": 4,
       "head_channels": 128,
-      "inference_chunk_size": 2048,
+      "inference_chunk_size": 1024,
       "amp_bfloat16": true,
       "spatial_mode": "dense",
       "compile_forward": true,
@@ -91,7 +92,7 @@
       "ppo_monitor": true,
       "ppo_probe_samples": 8192,
       "ppo_probe_batch_size": 1024,
-      "physical_minibatch_size": 4096,
+      "physical_minibatch_size": 512,
       "amp_bfloat16": true,
       "adaptive_lr_min": 1e-05,
       "adaptive_lr_max": 0.001
@@ -104,15 +105,11 @@
       "action_mask",
       "knowledge",
       "valid_cells"
-    ]
+    ],
+    "release_terminal_observations": true
   },
   "self_play": {
-    "pool_size": 8,
-    "snapshot_interval": 1,
-    "stochastic": true,
-    "seed": 120261013,
-    "sampling": "uniform",
-    "retain_seed": false
+    "stochastic": true
   },
   "evaluation": {
     "enabled": true,
@@ -121,7 +118,7 @@
     "max_ticks": 2000,
     "seed": 271828,
     "cpu_threads": 1,
-    "keep_snapshots": null,
+    "keep_snapshots": 2,
     "device": "cuda:0",
     "timeout_seconds": 1800,
     "every_n_updates": 14,
@@ -131,7 +128,7 @@
     "final_games_multiplier": 2
   },
   "torch_threads": 1,
-  "run_id": "official-31.4.5-vit1m-direct",
+  "run_id": "official-31.4.5-current-dual",
   "matmul_precision": "high",
   "training_control": {
     "max_seconds": null,

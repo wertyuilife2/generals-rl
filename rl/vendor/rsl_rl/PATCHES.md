@@ -16,6 +16,11 @@
 | `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。可选 `storage_obs_keys` 仅筛选 rollout 存储键，默认完整保存；构造策略和实时 obs 保持完整。 |
 
 `runner.storage_history` 可指定堆叠观测的帧数，例如 `{"policy": 4}`。
+`runner.release_terminal_observations=true`可在每步timeout bootstrap与logger消费完成后，
+释放extras中的终局观测引用，避免把已不再使用的H4 payload保留到PPO更新期间。
+该选项默认false以保留上游行为；Generals双座默认启用，benchmark采用相同生命周期。
+不改变返回值、reward、bootstrap、GAE、采样或优化公式，旧配置缺省行为不变。
+
 CTS storage 对这些键仅保存每 tick 的当前帧、rollout 起点的 H−1 帧上下文和 episode 边界；
 采样时通过 `observation_batch(time_indices, env_indices, keys=...)` 无损重建完整观测。
 `storage.observations` 是物理存储，历史键的最后一维仅为单帧；算法与诊断工具统一通过上述方法读取。

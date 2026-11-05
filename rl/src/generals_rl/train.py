@@ -105,8 +105,14 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     evaluation_settings.validate_training_devices(distributed.device)
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
-    if settings.opponent in ("self_play", "current_self_play"):
-        SelfPlayConfig(**config.get("self_play", {}))
+    opponent_settings = (SelfPlayConfig(**config.get("self_play", {}))
+                         if settings.opponent in ("self_play", "current_self_play") else None)
+    if settings.train_both_sides:
+        if not opponent_settings.stochastic:
+            raise ValueError("both-player PPO requires stochastic current self-play")
+        if (config["runner"]["algorithm"]["class_name"] != "generals_rl.student_ppo.StudentPPO"
+                or config["runner"]["algorithm"].get("teacher_env_ratio", 0) != 0):
+            raise ValueError("both-player current self-play requires student-only StudentPPO")
     if rollout_steps < 1:
         raise ValueError("rollout steps must be positive")
     if steps_per_env is not None:
@@ -195,7 +201,6 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             # the same initial learner on every rank before publishing its seed.
             runner.alg.broadcast_parameters()
             self_play, history_error = None, None
-            opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
             if distributed.is_main:
                 try:
                     self_play = prepare_self_play(
@@ -230,8 +235,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             self_play = (prepare_self_play(task, runner, config, output, resume=resume,
                                            initial_iteration=runner.current_learning_iteration - 1,
                                            initial_source=warm_source) if distributed.is_main else None)
-            if not distributed.is_main:
-                opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
+            if not distributed.is_main and not task.train_both_sides:
                 task.opponent.attach_policy(runner.alg.policy, stochastic=opponent_settings.stochastic,
                                             seed=distributed.rank_seed(opponent_settings.seed))
         if evaluation_settings.enabled and evaluation_settings.synchronous:
@@ -352,7 +356,11 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 for name, value in curriculum_metrics.items():
                     writer.add_scalar(f"Curriculum/{name}", value, kwargs["it"])
                 global_transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
+                board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
                 writer.add_scalar("Perf/environment_steps", global_transitions, kwargs["it"])
+                writer.add_scalar("Perf/player_transitions", global_transitions, kwargs["it"])
+                writer.add_scalar("Perf/board_ticks", board_ticks, kwargs["it"])
+                writer.add_scalar("Perf/board_ticks_per_second", board_ticks / elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_fps", global_transitions / elapsed, kwargs["it"])
                 writer.add_scalar("Resource/peak_process_rss_bytes", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024, kwargs["it"])
@@ -427,6 +435,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     raise final_evaluation_error
                 raise RuntimeError(f"rank-zero final Arena evaluation failed: {finalized['error']}")
             transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
+            board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
             wall_seconds, = distributed.max_timings(perf_counter() - started)
             completed_episodes, terminated_episodes, truncated_episodes = distributed.sum_counts(
                 task.completed_episodes, task.terminated_episodes, task.truncated_episodes)
@@ -439,12 +448,17 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 "environment_transitions_per_second": transitions / (collection_seconds + update_seconds),
                 "wall_seconds": wall_seconds,
                 "wall_environment_transitions_per_second": transitions / wall_seconds,
+                "board_ticks_per_second": board_ticks / (collection_seconds + update_seconds),
+                "wall_board_ticks_per_second": board_ticks / wall_seconds,
                 "gpu_peak_allocated_bytes": int(peak_allocated) if task.device.type == "cuda" else None,
                 "gpu_peak_reserved_bytes": int(peak_reserved) if task.device.type == "cuda" else None,
             }
             summary = {
                 "iterations": completed_updates, "steps_per_environment": sampled_ticks,
                 "environment_steps": transitions, "performance": performance,
+                "player_transitions": transitions, "board_ticks": board_ticks,
+                "physical_games_per_rank": task.num_games,
+                "training_trajectories_per_rank": task.num_envs,
                 "completed_episodes": completed_episodes,
                 "terminated_episodes": terminated_episodes,
                 "truncated_episodes": truncated_episodes,
@@ -460,25 +474,25 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,
                 }
-                if settings.opponent == "self_play":
-                    assignments = task.opponent.episode_assignments
-                    counts = {str(k): v for k, v in task.opponent.snapshot_counts().items()}
-                    if shared_history:
-                        ranks = [None] * distributed.world_size
-                        dist.all_gather_object(ranks, {"assignments": assignments, "counts": counts})
-                        assignments, counts = 0, {}
-                        for rank in ranks:
-                            assignments += rank["assignments"]
-                            for key, value in rank["counts"].items():
-                                counts[key] = counts.get(key, 0) + value
-                        summary["self_play"]["counts_scope"] = "global"
-                    summary["self_play"].update(
-                        episode_assignments=assignments,
-                        active_snapshot_counts=counts,
-                    )
-                else:
-                    summary["self_play"].update(mode="current_self_play", training_opponent="live_learner",
-                                                snapshots_used_for_training=False)
+                assignments = task.opponent.episode_assignments
+                counts = {str(k): v for k, v in task.opponent.snapshot_counts().items()}
+                if shared_history:
+                    ranks = [None] * distributed.world_size
+                    dist.all_gather_object(ranks, {"assignments": assignments, "counts": counts})
+                    assignments, counts = 0, {}
+                    for rank in ranks:
+                        assignments += rank["assignments"]
+                        for key, value in rank["counts"].items():
+                            counts[key] = counts.get(key, 0) + value
+                    summary["self_play"]["counts_scope"] = "global"
+                summary["self_play"].update(
+                    episode_assignments=assignments,
+                    active_snapshot_counts=counts,
+                )
+            elif settings.opponent == 'current_self_play':
+                summary['self_play'] = dict(mode='current_self_play', training_opponent='live_learner',
+                    train_both_sides=task.train_both_sides, pool_ids=[], new_publications=0,
+                    snapshots_used_for_training=False)
             if distributed.is_distributed:
                 summary["distributed"] = {"world_size": distributed.world_size,
                                           "num_envs_per_rank": task.num_envs,

@@ -113,26 +113,42 @@ def train_worker(rank, directory, opponent="current_self_play"):
                 patch.object(HistoricalPolicyPool, "_write_manifest", write_manifest):
             config = small_config()
             config["task"]["opponent"] = opponent
+            config['task']['train_both_sides'] = opponent == 'current_self_play'
             if opponent == "self_play":
                 config["self_play"].update(snapshot_interval=2, pool_size=3)
+            else:
+                invalid = deepcopy(config)
+                invalid["self_play"]["stochastic"] = False
+                try:
+                    train(invalid, root / "invalid", iterations=1)
+                    raise AssertionError("greedy both-player PPO accepted")
+                except ValueError as error:
+                    assert "stochastic" in str(error)
+                dist.barrier()  # Both ranks rejected before learner collectives.
+                assert not (root / "invalid").exists()
+                results["invalid_self_play_rejected"] = True
             original = deepcopy(config)
             results["fresh"] = train(config, root / "fresh", steps_per_env=6)
             assert config == original
             assert dist.is_initialized()  # The outer test still owns this group.
             if opponent == "current_self_play":
-                assert observed["runner"].env.task.opponent.policy is observed["runner"].alg.policy
+                assert observed['runner'].env.task.opponent is None
             assert observed["runner"].logger.disable_logs == (rank != 0)
             verify_weights()
             record_history("fresh")
             results["same_weights"] = True
             dist.barrier()  # Checkpoint is a rank-zero artifact, not an all-reduce output.
-            source_pool = {path.name: path.read_bytes() for path in (root / "fresh/history_pool").iterdir()}
+            source_pool = ({path.name: path.read_bytes() for path in (root / "fresh/history_pool").iterdir()}
+                           if opponent == 'self_play' else {})
             selected = root / "fresh/model_1.pt" if opponent == "self_play" else root / "fresh/checkpoint.pt"
             selected_iteration = (torch.load(selected, map_location="cpu", weights_only=True))["iter"]
             results["resume"] = train(config, root / "resume", iterations=1,
                                        resume=str(selected))
             assert observed["runner"].current_learning_iteration == selected_iteration + 1
-            assert {path.name: path.read_bytes() for path in (root / "fresh/history_pool").iterdir()} == source_pool
+            if opponent == 'self_play':
+                assert {path.name: path.read_bytes() for path in (root / "fresh/history_pool").iterdir()} == source_pool
+            else:
+                assert not (root / 'fresh/history_pool').exists()
             verify_weights()
             record_history("resume")
             dist.barrier()
@@ -290,12 +306,16 @@ class DistributedTrainEntrypointTests(unittest.TestCase):
             root = Path(directory)
             ranks = [json.loads((root / f"rank_{rank}.json").read_text()) for rank in range(2)]
             for rank in ranks:
+                seats = 2 if opponent == 'current_self_play' else 1
+                if opponent == "current_self_play":
+                    self.assertTrue(rank["invalid_self_play_rejected"])
                 self.assertTrue(rank["same_weights"])
-                self.assertEqual(rank["fresh"]["environment_steps"], 4 * 6 * 2)
-                self.assertEqual(rank["fresh"]["student_envs"], 8)
+                self.assertEqual(rank["fresh"]["environment_steps"], 4 * 6 * 2 * seats)
+                self.assertEqual(rank['fresh']['board_ticks'], 4 * 6 * 2)
+                self.assertEqual(rank["fresh"]["student_envs"], 8 * seats)
                 self.assertEqual(rank["fresh"]["iterations"], 2)
-                self.assertEqual(rank["resume"]["environment_steps"], 4 * 4 * 2)
-                self.assertEqual(rank["stop"]["environment_steps"], 4 * 4 * 2)
+                self.assertEqual(rank["resume"]["environment_steps"], 4 * 4 * 2 * seats)
+                self.assertEqual(rank["stop"]["environment_steps"], 4 * 4 * 2 * seats)
                 self.assertEqual(rank["stop"]["stop_reason"], "requested_stop")
                 self.assertIn("training output already exists", rank["output_error"])
             for name in ("fresh", "resume", "stop"):
@@ -305,6 +325,7 @@ class DistributedTrainEntrypointTests(unittest.TestCase):
                 self.assertEqual(summary["distributed"]["world_size"], 2)
                 if opponent == "current_self_play":
                     self.assertFalse(summary["self_play"]["snapshots_used_for_training"])
+                    self.assertFalse((root / name / 'history_pool').exists())
                 else:
                     self.assertEqual(summary["self_play"]["counts_scope"], "global")
                     self.assertEqual(ranks[0][name]["self_play"], ranks[1][name]["self_play"])
@@ -322,7 +343,7 @@ class DistributedTrainEntrypointTests(unittest.TestCase):
                             counts[key] = counts.get(key, 0) + value
                     self.assertEqual(summary["self_play"]["active_snapshot_counts"], counts)
                     self.assertEqual(sum(counts.values()), 8)
-            self.assertTrue(ranks[0]["pool_writes"])
+            self.assertEqual(bool(ranks[0]['pool_writes']), opponent == 'self_play')
             self.assertEqual(ranks[1]["pool_writes"], [])
             if opponent == "self_play":
                 manifest = json.loads((root / "resume/history_pool/manifest.json").read_text())

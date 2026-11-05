@@ -94,6 +94,12 @@ class StudentPPO(PPO):
             raise ValueError("PPO epoch and minibatch counts must be positive")
         self._check_sample_count()
         parameters = [parameter for parameter in policy.parameters() if parameter.requires_grad]
+        actor_ids = {id(p) for p in policy.actor.parameters()}
+        critic_ids = {id(p) for p in policy.critic.parameters()}
+        # Independent towers do not need to retain both activation graphs at
+        # once. Shared/outside parameters use the original joint backward.
+        self._separate_backward = (not actor_ids.intersection(critic_ids)
+                                   and {id(p) for p in parameters} <= actor_ids | critic_ids)
         # Keep the default single group, including parameter ordering and Adam
         # execution, identical to the original implementation.
         self.optimizer = torch.optim.Adam(parameters, lr=learning_rate, betas=betas, weight_decay=weight_decay)
@@ -115,6 +121,12 @@ class StudentPPO(PPO):
         if (self._custom_learning_rates and self.schedule == "adaptive"
                 and not self.adaptive_lr_min <= self.learning_rate <= self.adaptive_lr_max):
             raise ValueError("checkpoint actor LR is outside configured adaptive LR bounds")
+
+    def act(self, obs):
+        # Every row is a student in canonical trajectory order. Upstream PPO
+        # records this batch directly; CTS would gather and concatenate the
+        # complete (potentially multi-GB) history despite an empty teacher group.
+        return PPO.act(self, obs)
 
     def _adapt_learning_rate(self, kl_mean):
         """Actor KL drives the shared actor/critic learning rate."""
@@ -206,7 +218,8 @@ class StudentPPO(PPO):
                         self.policy.action_probabilities(obs[sl])
                     else:
                         self.policy.action_probabilities(obs[sl], validate_mask=False)
-                    values = self.policy.evaluate(obs[sl])
+                    if not self._separate_backward:
+                        values = self.policy.evaluate(obs[sl])
                 if self.policy.distribution.logits.dtype != torch.float32:
                     self.policy.distribution = Categorical(
                         logits=self.policy.distribution.logits.float(), validate_args=False)
@@ -218,6 +231,15 @@ class StudentPPO(PPO):
                 surrogate = -advantage * ratio
                 clipped_surrogate = -advantage * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
                 surrogate_loss = torch.maximum(surrogate, clipped_surrogate).mean()
+                entropy_loss = entropy.mean()
+                weight = (end - start) / count
+                actor_loss = surrogate_loss - self.entropy_coef * entropy_loss
+                if self._separate_backward:
+                    if actor_loss.requires_grad:
+                        (actor_loss * weight).backward()
+                    with (torch.autocast('cuda', dtype=torch.bfloat16)
+                          if self.amp_bfloat16 else nullcontext()):
+                        values = self.policy.evaluate(obs[sl])
                 values = values.float()
                 target, old_value = returns[sl].float(), old_values[sl].float()
                 value_losses = (values - target).pow(2)
@@ -225,10 +247,11 @@ class StudentPPO(PPO):
                     clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
                     value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
                 value_loss = value_losses.mean()
-                entropy_loss = entropy.mean()
-                weight = (end - start) / count
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_loss
-                (loss * weight).backward()
+                if self._separate_backward:
+                    if value_loss.requires_grad:
+                        (self.value_loss_coef * value_loss * weight).backward()
+                else:
+                    ((actor_loss + self.value_loss_coef * value_loss) * weight).backward()
                 for key, value in (("value", value_loss), ("surrogate", surrogate_loss),
                                    ("entropy", entropy_loss)):
                     batch_losses[key] += value.detach() * weight
@@ -261,6 +284,7 @@ class StudentPPO(PPO):
             "physical_minibatch_size": float(self.physical_minibatch_size or logical_batch_size),
             "logical_minibatch_size": float(logical_batch_size),
             "microbatches": float(physical_batches), "amp_bfloat16": float(self.amp_bfloat16),
+            "separate_actor_critic_backward": float(self._separate_backward),
         }
         return {key: value / updates for key, value in mean_losses.items()}
 
