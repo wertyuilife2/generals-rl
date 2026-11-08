@@ -13,10 +13,10 @@ class CPUEngine:
     only rules implementation here; Python maps the public action/result types.
     State arrays are borrowed views; call invalidate_cache after direct edits.
     """
-    def __init__(self, state):
+    def __init__(self, state, debug=False):
         if not isinstance(state, GameState):
             raise TypeError('state must be GameState')
-        self.state = state
+        self.state, self.debug = state, debug
         self.env = cpu.CPUEnv.from_states([state], threads=1)
         self.actions = np.zeros((1, state.player_count), dtype=np.int64)
         shape = state.owner.shape
@@ -47,12 +47,9 @@ class CPUEngine:
         before_alive = state.alive.copy()
         result = self.env.step(self.actions)
         self.env.check_errors()
-        state.tick = int(self.env.state['tick'][0])
-        for name in ('idle_ticks', 'afk_turn', 'end_reason'):
-            setattr(state, name, int(self.env.state[name][0]))
-        state.terminated = bool(self.env.state['terminated'][0])
-        winner = int(self.env.state['winner'][0])
-        state.winner_id = None if winner < 0 else winner
+        self._sync()
+        if self.debug:
+            state.validate()
         stats = result.stats[0]
         stats = PlayerStats(stats[:, 0], stats[:, 1], stats[:, 2])
         moves = []
@@ -77,7 +74,17 @@ class CPUEngine:
             self.env.state[name][0] = getattr(self.state, name)
         self.env.invalidate_cache()
 
+    def _sync(self):
+        for name in ('tick', 'idle_ticks', 'afk_turn', 'end_reason'):
+            setattr(self.state, name, int(self.env.state[name][0]))
+        self.state.terminated = bool(self.env.state['terminated'][0])
+        winner = int(self.env.state['winner'][0])
+        self.state.winner_id = None if winner < 0 else winner
+
     def surrender(self, pid):
-        from generals.core.engine import surrender
-        surrender(self.state, pid)
-        self.invalidate_cache()
+        self.env.surrender(pid)
+        self._sync()
+
+    def neutralize(self, pid):
+        self.env.depart(pid, neutralize=True)
+        self._sync()

@@ -1,4 +1,4 @@
-"""Common batch interface over the existing native CPU and CUDA backends.
+"""Common batch interface over native CPU, CUDA and Metal backends.
 
 Device selection and method binding happen once, at construction. step and
 synchronize are the backend's own bound methods: there is no forwarding call,
@@ -12,8 +12,15 @@ from .protocol.vector import BatchStep
 
 def _backend(device, backend=None):
     name = str(device)
-    if backend not in (None, "cpu", "gpu"):
-        raise ValueError("backend must be cpu or gpu")
+    if backend not in (None, "cpu", "gpu", "mps"):
+        raise ValueError("backend must be cpu, gpu, or mps")
+    if name in ("mps", "mps:0"):
+        if backend not in (None, "gpu", "mps"):
+            raise ValueError("MPS simulation requires backend=mps or gpu")
+        from .backends.mps import MPSEnv
+        return MPSEnv, {"device": device}
+    if backend == "mps":
+        raise ValueError("MPS backend requires device=mps")
     if name == "cpu":
         if backend not in (None, "cpu"):
             raise ValueError("GPU backend requires a CUDA device")
@@ -24,11 +31,11 @@ def _backend(device, backend=None):
             raise ValueError("CPU backend requires device=cpu")
         from .backends.gpu import GPUEnv
         return GPUEnv, {"device": device}
-    raise ValueError("device must be cpu, cuda, or cuda:N")
+    raise ValueError("device must be cpu, cuda, cuda:N, or mps")
 
 
 class VecEnv:
-    """Identical batch contract with NumPy on CPU or torch tensors on CUDA.
+    """Identical batch contract with NumPy on CPU or torch tensors on CUDA/MPS.
 
     Common state attributes are live backend views. Use unwrapped for
     backend-specific capabilities and configuration; replacing storage remains

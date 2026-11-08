@@ -1,14 +1,14 @@
 """Resumable persistent jobs with ordered commits through the shared runner."""
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 import json
-import multiprocessing
 import os
 import threading
 import time
 from types import SimpleNamespace
 
 from generals_arena.util import integer, process_lock
-from generals_arena.matches.runner import MatchRunner
+from generals_arena.matches.runner import MatchRunner, resolve_geometries, _batch_key
 from generals_arena.matches.worker import MatchWorker
 from generals_arena.policies.native import PolicyError
 from generals_arena.competitions.matchmaking import choose_player_count, make_block
@@ -24,19 +24,39 @@ def worker_count(value):
 
 
 def eligible_schedule(store, job, *, coverage=None, **options):
-    disabled = store.disabled_policy_ids()
+    opponents = options.pop('opponents', None)
+    if opponents is not None:
+        if not options.get('human') or not isinstance(opponents, list) or not 1 <= len(opponents) <= 7:
+            raise ValueError('opponents must contain 1–7 bot IDs or null for random seats')
+        if options.get('players') is None:
+            options['players'] = len(opponents) + 1
+        if len(opponents) != options['players'] - 1:
+            raise ValueError('opponent count must equal players minus one')
+    retired = store.retired_entrant_ids()
+    if job["entrant_id"] in retired:
+        raise ValueError("entrant is retired; restore it before scheduling")
+    disabled = store.disabled_policy_ids() | retired
     if job['entrant_id'] in disabled:
         raise ValueError('C++ policy is disqualified after a recorded violation')
     if not options.get('human') and options.get('players') is None:
         options['players'] = choose_player_count(store.config, job)
     # WAIT follows the same opponent selection and repeat rules as every bot.
     entries = {key: entry for key, entry in store.entrants().items() if key not in disabled}
+    if opponents is not None:
+        for key in opponents:
+            if key is not None and (not isinstance(key, str) or key not in entries or entries[key]['kind'] == 'human'):
+                raise ValueError('opponent must be an active, eligible bot')
     proxy = SimpleNamespace(config=store.config, manifest=store.manifest,
         entrants=lambda: entries, ratings=store.ratings,
         pair_counts=lambda target, mode=None: (coverage[mode] if coverage is not None
                                                else store.pair_counts(target, mode=mode)))
     plans = make_block(proxy, job, **options)
     for plan in plans:
+        if opponents is not None:
+            seats = [seat for seat, key in enumerate(plan['entrant_ids']) if key != job['entrant_id']]
+            for seat, key in zip(seats, opponents):
+                if key is not None:
+                    plan['entrant_ids'][seat] = key
         plan['rating_policy'] = POLICY
         plan['rating_mode'] = rating_mode(plan)
         plan['rating_group_size'] = len(plans)
@@ -73,7 +93,7 @@ def prepare_batch(store, job):
     return plans
 
 
-def run_next(store, stop=None, job_id=None, cpp_worker=None):
+def run_next(store, stop=None, job_id=None, cpp_worker=None, *, max_games=1, progress=None):
     """Caller holds the worker lock. A failed game never becomes a rated loss."""
     for job in store.jobs():
         if job["status"] != "queued" or (job_id is not None and job['id'] != job_id):
@@ -83,34 +103,25 @@ def run_next(store, stop=None, job_id=None, cpp_worker=None):
             if not plans:
                 continue
 
+            committed = 0
             def commit(result, blob):
+                nonlocal committed
                 if 'policy_error' in result:
                     store.fail_game(result, blob)
                     raise PolicyError(result['policy_error'], details=result.get('error_detail'))
                 store.complete_result(result, blob)
+                committed += 1
+                if progress is not None:
+                    progress(committed)
 
             with MatchRunner(store.entrants(), max_ticks=store.config.max_ticks,
-                             execution="isolated", worker=cpp_worker) as runner:
-                results, _ = runner.run(plans[:1], on_result=commit, stop=stop)
-            return bool(results)
+                             execution="batch", worker=cpp_worker, record_replays=True) as runner:
+                results, _ = runner.run(plans[:max_games], on_result=commit, stop=stop)
+            return len(results)
         except Exception as exc:
             store.fail(job["id"], exc)
             raise
     return False
-
-
-def simulate(directory, plan):
-    """Worker processes simulate only. The coordinator commits in schedule order."""
-    store = CompetitionStore(directory)
-    records = []
-    start = time.monotonic()
-    with MatchRunner(store.entrants(), max_ticks=store.config.max_ticks,
-                     execution="isolated") as runner:
-        runner.run([plan], on_result=lambda result, blob: records.append((result, blob)))
-    result, blob = records[0]
-    if 'policy_error' not in result:
-        result = {**result, "simulation_seconds": time.monotonic() - start}
-    return result, blob
 
 
 def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id=None):
@@ -118,28 +129,25 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
     if limit is not None:
         integer("limit", limit, 1)
     workers = worker_count(workers)
-    has_cpp = any(e['kind'] == 'cpp' for e in store.entrants().values())
     # Compile native libraries once before spawning, avoiding concurrent builds
     # on a cold cache. Workers still load their own library and RNG instances.
     from generals.backends.cpu.env import _library as cpu_library
     cpu_library()
-    if any(e['kind'] == 'baseline' for e in store.entrants().values()):
-        from generals_baselines.base import _library as baseline_library
-        baseline_library()
     completed = 0
-    with process_lock(store.directory, ".worker.lock"):
+    with process_lock(store.directory, ".worker.lock"), store.session():
         if retry:
             store.retry()
         if workers > 1:
             return _run_parallel(store, workers, limit, progress, job_id)
-        native_worker = MatchWorker() if has_cpp else None
+        native_worker = MatchWorker()
         try:
             while limit is None or completed < limit:
-                if not run_next(store, job_id=job_id, cpp_worker=native_worker):
+                count = run_next(store, job_id=job_id, cpp_worker=native_worker,
+                    max_games=None if limit is None else limit-completed,
+                    progress=(lambda count: progress(completed+count)) if progress is not None else None)
+                if not count:
                     break
-                completed += 1
-                if progress is not None:
-                    progress(completed)
+                completed += count
         finally:
             if native_worker is not None:
                 native_worker.close()
@@ -150,10 +158,7 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
     completed = 0
     # Keep adaptation at the same persistent window as sequential execution.
     # Spawn works on macOS and does not inherit SQLite connections or locks.
-    native = any(e['kind'] == 'cpp' for e in store.entrants().values())
-    pool = NativeMatchPool(workers) if native else ProcessPoolExecutor(
-        workers, mp_context=multiprocessing.get_context('spawn'))
-    with pool as executor:
+    with NativeMatchPool(workers, store.config.max_ticks) as executor:
         while limit is None or completed < limit:
             job = next((j for j in store.jobs() if j["status"] == "queued"
                         and (job_id is None or j['id'] == job_id)), None)
@@ -164,24 +169,59 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
                 break
             if limit is not None:
                 plans = plans[:limit - completed]
-            directory = str(store.directory.resolve())
-            futures = [executor.submit_native(directory, plan) if native else executor.submit(simulate, directory, plan)
-                       for plan in plans]
-            first_error = None
-            for future in futures:
-                if future.cancelled():
-                    continue
+            entries = store.entrants()
+            # Small compatible batches amortize model inference and IPC while
+            # retaining at least four tasks per worker for dynamic load balance.
+            # The window and rating order remain independent of worker count.
+            plans = resolve_geometries(plans)
+            size = max(1, min(8, len(plans)//(workers*4)))
+            buckets = defaultdict(list)
+            for index, plan in enumerate(plans):
+                buckets[_batch_key(plan)].append(index)
+            chunks = [indices[start:start+size] for indices in buckets.values()
+                      for start in range(0, len(indices), size)]
+            chunks.sort(key=lambda indices: indices[0])
+            futures = {executor.submit_native(
+                {key: entries[key] for i in indices for key in plans[i]['entrant_ids']},
+                [plans[i] for i in indices]): indices
+                       for indices in chunks}
+            first_error, ready, next_index = None, {}, 0
+            for future in as_completed(futures):
+                indices = futures[future]
                 try:
-                    result, blob = future.result()
-                    if 'policy_error' in result:
-                        store.fail_game(result, blob)
-                        raise PolicyError(result['policy_error'], details=result.get('error_detail'))
-                    store.complete_result(result, blob)
-                    completed += 1
-                    if progress is not None:
-                        progress(completed)
+                    if future.cancelled():
+                        ready.update((index, None) for index in indices)
+                    else:
+                        records = future.result()
+                        if len(records) != len(indices):
+                            raise RuntimeError('match worker returned an incomplete task')
+                        ready.update(zip(indices, records, strict=True))
+                        for result, _ in records:
+                            if 'policy_error' in result:
+                                first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
                 except Exception as exc:
                     first_error = first_error or exc
+                    ready.update((index, None) for index in indices)
+                # Completion order never becomes rating order. Commit any
+                # contiguous ready prefix while the other processes keep going.
+                while next_index in ready:
+                    record = ready.pop(next_index)
+                    next_index += 1
+                    if record is None:
+                        continue
+                    result, blob = record
+                    try:
+                        if 'policy_error' in result:
+                            store.fail_game(result, blob)
+                            first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
+                        else:
+                            store.complete_result(result, blob)
+                            completed += 1
+                            if progress is not None:
+                                progress(completed)
+                    except Exception as exc:
+                        first_error = first_error or exc
+                if first_error is not None:
                     for queued in futures:
                         queued.cancel()
                     # Drain started games and preserve their results/violations.
@@ -195,26 +235,26 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
 class NativeMatchPool:
     """Coordinator threads reuse independent native match processes."""
 
-    def __init__(self, workers):
+    def __init__(self, workers, max_ticks):
+        self.max_ticks = max_ticks
         self.executor = ThreadPoolExecutor(max_workers=workers)
         self.local, self.workers = threading.local(), []
 
     def __enter__(self):
         return self
 
-    def _run(self, directory, plan):
+    def _run(self, entries, plans):
         if not hasattr(self.local, 'worker'):
             self.local.worker = MatchWorker()
             self.workers.append(self.local.worker)
-        store = CompetitionStore(directory)
         completed = []
-        with MatchRunner(store.entrants(), max_ticks=store.config.max_ticks, execution="isolated",
-                         worker=self.local.worker) as runner:
-            runner.run([plan], on_result=lambda result, blob: completed.append((result, blob)))
-        return completed[0]
+        with MatchRunner(entries, max_ticks=self.max_ticks, execution="batch",
+                         worker=self.local.worker, record_replays=True) as runner:
+            runner.run(plans, on_result=lambda result, blob: completed.append((result, blob)))
+        return completed
 
-    def submit_native(self, directory, plan):
-        return self.executor.submit(self._run, directory, plan)
+    def submit_native(self, entries, plans):
+        return self.executor.submit(self._run, entries, plans)
 
     def __exit__(self, *exc):
         self.executor.shutdown(wait=True, cancel_futures=True)

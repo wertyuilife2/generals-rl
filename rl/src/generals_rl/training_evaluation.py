@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 from time import perf_counter
+import warnings
 
 import torch
 
@@ -95,8 +96,8 @@ class TrainingEvalConfig:
         if device.type not in ('cpu', 'cuda'):
             raise ValueError('evaluation.device must be a CPU or CUDA device string')
         object.__setattr__(self, 'device', str(device))
-        if self.backend != 'cpu':
-            raise ValueError('evaluation.backend must be cpu; evaluation.device selects CPU or CUDA model inference')
+        from generals_arena.matches.runner import native_backend
+        object.__setattr__(self, 'backend', native_backend(self.backend, self.device))
         if self.timeout_seconds is not None and (isinstance(self.timeout_seconds, bool)
                 or not isinstance(self.timeout_seconds, (int, float))
                 or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
@@ -180,6 +181,7 @@ class PeriodicEvaluator:
         self.latest_completed = self.best_completed = None
         self.budget_exhausted = False
         self.confirmation = None
+        self.migration = None
         if settings.profile is None:
             from generals_arena.policies.references import training_opponents
             task = run_config['task']
@@ -215,6 +217,16 @@ class PeriodicEvaluator:
         saved = json.loads(index.read_text())
         if saved.get('schema_version') != 1:
             raise ValueError('unsupported training Arena evaluation index; preserve old reports in their original run')
+        if imported and saved.get('deployment', {}).get('backend') == 'gpu':
+            # A checkpoint can resume learning, but scores from the retired executor
+            # must not enter the new panel's best-model selection or TensorBoard.
+            self.migration = {'kind': 'gpu_to_native_cpu', 'source_index': str(index),
+                              'source_index_sha256': _hash(index),
+                              'source_profile_id': saved['profile_id']}
+            warnings.warn('Starting a fresh native CPU evaluation history for the resumed checkpoint; '
+                          f'legacy GPU reports remain unchanged at {index}.', FutureWarning, stacklevel=2)
+            return
+        self.migration = saved.get('migration')
         if saved['profile_id'] != self.profile_id:
             raise ValueError('resumed Arena evaluation profile differs; use the original fixed evaluation profile')
         expected_deployment = self._deployment()
@@ -605,6 +617,7 @@ class PeriodicEvaluator:
                     'directory': str(self.directory),
                     'profile_id': self.profile_id,
                     'deployment': self._deployment(), 'selection': self._selection(),
+                    'migration': self.migration,
                     'jobs': self.jobs, 'best': self.best_completed, 'confirmation': self.confirmation})
 
     def _deployment(self):

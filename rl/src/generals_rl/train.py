@@ -103,6 +103,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         if isinstance(algorithm_gamma, bool) or algorithm_gamma != potential_gamma:
             raise ValueError("reward potential_gamma requires an explicit matching runner.algorithm.gamma")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
+    if config.get('evaluation', {}).get('backend') == 'gpu':
+        config['evaluation']['backend'] = evaluation_settings.backend
     evaluation_settings.validate_training_devices(distributed.device)
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)

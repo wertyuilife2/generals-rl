@@ -22,19 +22,19 @@ def initial(case):
                      np.ones(len(s['generals']),bool),np.array(s['generals'],np.int32),tick=s['tick'])
 
 
-@pytest.mark.parametrize('backend',['reference','cpu','gpu'])
+@pytest.mark.parametrize('backend',['reference','cpu','gpu','mps'])
 def test_official_priority_combat_and_trades(backend):
-    if backend=='gpu':
+    if backend in ('gpu','mps'):
         torch=pytest.importorskip('torch')
-        if not torch.cuda.is_available():pytest.skip('CUDA unavailable')
+        if not (torch.cuda.is_available() if backend=='gpu' else torch.backends.mps.is_available() and hasattr(torch.mps, 'compile_shader')):pytest.skip('GPU unavailable')
     for case in CASES:
         state=initial(case)
         if backend=='reference':
             CoreEngine(state,debug=True).step([Action.decode(a) for a in case['actions']])
         else:
-            with VecEnv.from_states([state],backend=backend,device='cuda' if backend=='gpu' else 'cpu') as env:
+            with VecEnv.from_states([state],backend=backend,device='cuda' if backend=='gpu' else backend) as env:
                 actions=np.array([case['actions']],np.int64)
-                if backend=='gpu':actions=torch.as_tensor(actions,device='cuda')
+                if backend in ('gpu','mps'):actions=torch.as_tensor(actions,device=env.device)
                 env.step(actions);env.check_errors();state=env.to_states()[0]
         for key,expected in case['expected'].items():
             np.testing.assert_array_equal(getattr(state,key).reshape(np.shape(expected)),expected,
@@ -89,13 +89,13 @@ def test_departure_grace_credit_and_public_city_memory():
     finally:engines[1].close()
 
 
-@pytest.mark.parametrize('backend', ['reference', 'cpu', 'gpu'])
+@pytest.mark.parametrize('backend', ['reference', 'cpu', 'gpu', 'mps'])
 def test_live_afk_rechecks_warning_and_retains_last_survivor(backend):
     """Live 31.4.5 checkAfks/killPlayer, unlike the replay UI, caches winners."""
-    if backend == 'gpu':
+    if backend in ('gpu', 'mps'):
         torch = pytest.importorskip('torch')
-        if not torch.cuda.is_available():
-            pytest.skip('CUDA unavailable')
+        if not (torch.cuda.is_available() if backend == 'gpu' else torch.backends.mps.is_available() and hasattr(torch.mps, 'compile_shader')):
+            pytest.skip('GPU unavailable')
     shape = (20, 20)
     owner = np.full(shape, -1, np.int16)
     army = np.zeros(shape, np.int64)
@@ -109,9 +109,9 @@ def test_live_afk_rechecks_warning_and_retains_last_survivor(backend):
         if backend == 'reference':
             CoreEngine(state, debug=True).step([Action.wait()] * 2)
             return state
-        with VecEnv.from_states([state], device='cuda' if backend == 'gpu' else 'cpu') as env:
+        with VecEnv.from_states([state], device='cuda' if backend == 'gpu' else backend) as env:
             actions = np.zeros((1, 2), np.int64)
-            env.step(torch.as_tensor(actions, device='cuda') if backend == 'gpu' else actions)
+            env.step(torch.as_tensor(actions, device=env.device) if backend in ('gpu', 'mps') else actions)
             env.check_errors()
             result = env.to_states()[0]
             result.validate()
@@ -133,24 +133,24 @@ def test_live_afk_rechecks_warning_and_retains_last_survivor(backend):
     assert final.warn_afk.tolist() == [0, 0]
 
 
-@pytest.mark.parametrize('device', ['cpu', 'cuda'])
+@pytest.mark.parametrize('device', ['cpu', 'cuda', 'mps'])
 @pytest.mark.parametrize('players', [2, 3])
 @pytest.mark.parametrize('tick', [0, 1, 47])
 def test_batched_surrender_matches_reference_through_grace(device, players, tick):
     from generals import MapConfig
     from generals.core.batch import generate_states
-    if device == 'cuda':
+    if device != 'cpu':
         torch = pytest.importorskip('torch')
-        if not torch.cuda.is_available(): pytest.skip('CUDA unavailable')
+        if not (torch.cuda.is_available() if device == 'cuda' else torch.backends.mps.is_available() and hasattr(torch.mps, 'compile_shader')): pytest.skip('GPU unavailable')
     states = generate_states(MapConfig(players=players), 3, seed=84)
     for state in states: state.tick = tick
     references = [CoreEngine(state.copy()) for state in states]
     with VecEnv.from_states(states, device=device, auto_reset=False) as env:
         mask = np.array([True, False, True])
-        env.surrender(0, torch.as_tensor(mask, device=device) if device == 'cuda' else mask)
+        env.surrender(0, torch.as_tensor(mask, device=device) if device != 'cpu' else mask)
         for lane in (0, 2): references[lane].surrender(0)
         actions = np.zeros((3, players), np.int64)
-        if device == 'cuda': actions = torch.as_tensor(actions, device=device)
+        if device != 'cpu': actions = torch.as_tensor(actions, device=device)
         for step in range(52):
             actual = env.to_states()
             assert [state_digest(s) for s in actual] == [state_digest(e.state) for e in references], step
@@ -160,3 +160,32 @@ def test_batched_surrender_matches_reference_through_grace(device, players, tick
             env.step(actions)
             for engine in references:
                 if not engine.state.terminated: engine.step([Action.wait()] * players)
+
+
+@pytest.mark.parametrize('packed', [False, True])
+@pytest.mark.parametrize('horizon', [0, 1])
+def test_cuda_surrender_keeps_state_on_device_and_respects_mask_and_horizon(monkeypatch, packed, horizon):
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA unavailable')
+    from generals import MapConfig
+    from generals.core.batch import generate_states
+    states = generate_states(MapConfig(9, 9, 2), 3, seed=84)
+    for index, state in enumerate(states):
+        state.tick = index
+    with VecEnv.from_states(states, device='cpu', episode_ticks=horizon) as cpu, \
+            VecEnv.from_states(states, device='cuda', episode_ticks=horizon) as gpu:
+        gpu.unwrapped.configure_step(packed_metadata=packed)
+        mask = torch.tensor([True, False, False, False, True, False], device='cuda')[::2]
+        assert not mask.is_contiguous()
+        pointers = {name: value.data_ptr() for name, value in gpu.state.items()}
+        with monkeypatch.context() as guard:
+            guard.setattr(torch.Tensor, 'cpu', lambda *a, **kw: pytest.fail('surrender copied state to CPU'))
+            gpu.surrender(0, mask)
+        cpu.surrender(0, np.array([True, False, True]))
+        assert pointers == {name: value.data_ptr() for name, value in gpu.state.items()}
+        for _ in range(2):
+            assert [state_digest(s) for s in gpu.to_states()] == [state_digest(s) for s in cpu.to_states()]
+            np.testing.assert_array_equal(gpu.done.cpu().numpy(), cpu.done)
+            cpu.step(np.zeros((3, 2), np.int64))
+            gpu.step(torch.zeros((3, 2), dtype=torch.int64, device='cuda'))

@@ -17,6 +17,28 @@ def plans_for(entry, *, width=9, count=3):
              "map": asdict(MapConfig(width, 9, 2, 0, 0))} for index in range(count)]
 
 
+def test_legacy_gpu_selector_preserves_cuda_inference():
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        with MatchRunner({}, max_ticks=4, backend='gpu', device='cuda:2') as runner:
+            assert runner.backend == 'cpu' and runner.device == 'cuda:2'
+
+
+def test_explicit_isolated_execution_never_enters_batch_worker(monkeypatch):
+    entry = prepare_entrant({'name': 'random', 'kind': 'baseline', 'policy': 'random'})
+    plans = plans_for(entry, count=2)
+    calls = []
+    def isolated(self, plan, stop):
+        calls.append(plan['game_id'])
+        return dict(plan), b'replay'
+    monkeypatch.setattr(MatchRunner, '_isolated', isolated)
+    from generals_arena.matches.batch_worker import BatchWorker
+    monkeypatch.setattr(BatchWorker, '__init__', lambda *a, **kw: pytest.fail('isolated requested'))
+    with MatchRunner({entry['entrant_id']: entry}, max_ticks=4, execution='isolated') as runner:
+        results, _ = runner.run(plans)
+        assert runner.execution_modes == {'isolated'}
+    assert calls == ['0', '1'] and len(results) == 2
+
+
 def test_ordered_callbacks_homogeneous_chunks_and_controller_ownership(in_process_batch, monkeypatch):
     entry = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
     plans = plans_for(entry)

@@ -167,7 +167,7 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
 
 def refresh_publications(store):
     """Explicit re-rating replaces published score snapshots, not simulations."""
-    boards = store.leaderboards()
+    boards = store.leaderboards(include_retired=True)
     write_json(store.directory/'leaderboard.json', boards)
     entrants = store.entrants()
     for path in (store.directory/'commits').glob('*/publication.json'):

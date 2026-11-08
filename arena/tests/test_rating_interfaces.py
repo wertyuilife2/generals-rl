@@ -90,7 +90,7 @@ def test_api_and_web_use_explicit_rating_pools_without_changing_game_controls(le
         app = request('/app.js').decode()
         assert 'id="rating-mode"' in html
         assert '/api/leaderboard?mode=${mode}' in app
-        assert '1v1 / FFA 分池' in html
+        assert '1v1 / FFA' in html and '独立评级' in html
         assert 'MoveInput' in app and 'play-players' in html
     finally:
         server.shutdown()

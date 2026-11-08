@@ -1,6 +1,6 @@
 # Generals 游戏环境
 
-2–8 人 Generals 对战，支持 Tk 桌面游玩、四种基础 AI、无界面模拟及 CPU/CUDA 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`，跨策略/版本的对战与 Elo 排名位于 `arena/`。
+2–8 人 Generals 对战，支持 Arena 网页游玩、四种基础 AI、无界面模拟及 CPU/CUDA/MPS 批量环境。游戏环境位于 `env/`，四种手写策略独立放在 `baselines/`，强化学习代码位于 `rl/`，跨策略/版本的对战与 Elo 排名位于 `arena/`。
 
 当前规则固定为 2026-10-28 核查的官网 **31.4.5 普通 1v1 / FFA**；默认使用官方随机地图。RL 暂限 1v1，训练和评估均默认在 2000 tick 截断。规则变化及验证范围见[实施记录](doc/official_rules_alignment.md)。历史模型、Elo 和性能报告对应旧规则，不能直接沿用到当前版本。
 
@@ -8,12 +8,12 @@
 
 ```bash
 conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
-conda run -n generals-rl python -m generals play --players 4 --seed 42
+conda run -n generals-rl python -m generals simulate --players 4 --max-ticks 2000 --seed 42
 ```
 
-基础运行依赖 NumPy；GUI 需要 Tk 和图形桌面，内置 AI 需要 Linux/macOS 与 C++17 编译器。CPU 原生后端使用 C++/OpenMP，GPU 使用可选的 PyTorch/CUDA；具体平台与依赖见下方环境文档。
+基础运行依赖 NumPy；内置 AI 需要 Linux/macOS 与 C++17 编译器。CPU 原生后端使用 C++/OpenMP，GPU 使用可选的 PyTorch/CUDA 或 Apple Silicon 的原生 Metal 内核；具体平台与依赖见下方环境文档。
 
-没有图形桌面时可运行 AI 模拟：
+多局 AI 模拟：
 
 ```bash
 conda run -n generals-rl python -m generals simulate --players 4 --games 10 --max-ticks 20000 --seed 42
@@ -21,7 +21,7 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 
 统一文档：[环境开发与使用说明](doc/README.md)，包含：
 
-- [安装、不安装运行与 GUI 操作](doc/README.md#quickstart)
+- [安装与不安装运行](doc/README.md#quickstart)
 - [游戏规则与地图生成](doc/README.md#rules)
 - [代码架构](doc/README.md#architecture)和 [CPU/GPU API](doc/README.md#api)
 - [逐 tick benchmark 与 profiling](doc/README.md#benchmark)

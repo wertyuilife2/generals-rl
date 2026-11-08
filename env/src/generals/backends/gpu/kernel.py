@@ -84,6 +84,8 @@ def _library(capability, nvcc, group_threads, envs_per_block, shape, packed_meta
     lib = ctypes.CDLL(str(target))
     lib.generals_launch.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
     lib.generals_launch.restype = ctypes.c_int
+    lib.generals_surrender.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+    lib.generals_surrender.restype = ctypes.c_int
     lib.generals_error.argtypes = [ctypes.c_int]
     lib.generals_error.restype = ctypes.c_char_p
     metadata = {"cuda_source_sha256": sha256(source.read_bytes()).hexdigest(),
@@ -171,6 +173,15 @@ class StepKernel:
             self.dirty = False
             self._versions = versions
         self.args.auto_reset, self.args.horizon = env.auto_reset, env.episode_ticks
+
+    def surrender(self, player_id, mask=None):
+        """Run the shared departure rules on the current stream without readback."""
+        with torch.cuda.device(self.env.device):
+            self.prepare()
+            mask = mask.contiguous() if mask is not None else None
+            _check(self.lib, self.lib.generals_surrender(
+                self._args_ptr, player_id, mask.data_ptr() if mask is not None else None,
+                torch.cuda.current_stream(self.env.device).cuda_stream))
 
     def metadata(self):
         resources = (ctypes.c_int * 4)()

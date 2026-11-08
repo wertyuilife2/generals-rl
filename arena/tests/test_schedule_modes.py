@@ -126,8 +126,10 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
             native_games += 1
         assert len(list(verified_replay(Path(game['replay']).read_bytes(),game)))==4
     assert native_games == 4
-    with pytest.raises(ValueError,match='CPU'):
-        tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),backend='gpu',device='cuda:0')
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        migrated = tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),
+                              backend='gpu',device='cuda:0')
+    assert migrated['backend'] == 'cpu' and migrated['device'] == 'cuda:0'
 
 
 def test_duel_reference_name_cannot_be_reassigned_to_another_policy():

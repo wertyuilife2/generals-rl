@@ -60,7 +60,7 @@ def tournament(entrants, rules=None, output=None, *, maps_per_group=1, seed=42, 
               "expected_games": len(plans), "results": results, "errors": [],
               'reference_identities': {entry['name']: reference_identity(entry) for entry in prepared},
               "wall_seconds": perf_counter() - started, "timing": timing,
-              "backend": backend, "device": str(device), "batch_size": batch_size,
+              "backend": runner.backend, "device": str(device), "batch_size": batch_size,
               "cpu_threads": cpu_threads, "execution": next(iter(runner.execution_modes)) if len(runner.execution_modes) == 1 else "mixed",
               "execution_modes": sorted(runner.execution_modes),
               "timing_basis": "host_dispatch_wall_with_cuda_sync_in_transfer"}

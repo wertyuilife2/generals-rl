@@ -249,10 +249,12 @@ CI 是给定固定参考分数后的局部 Fisher 近似，不包含参考校准
 profile schema 为 3，内容绑定规则、地图、预算和对手身份；已有 run 保留原始报告和冻结源码。策略包和权重通过本地文件共享，仓库不跟踪权重；`policy_id` 校验完整内容。缺少显式指定的对手包会报错，不会替换为其他策略。
 Arena 将训练评估、固定 round-robin 和持久 league 作为不同赛程模式，共用比赛执行、结果、录像和评分规则。
 RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续调用 `generals_arena.competitions.evaluation`；通用比赛入口见 [Arena 文档](../arena/README.md)。
-`--record-replays` 保存可由 Arena 逐 tick 验证的录像；
+`--record-replays` 保存初始状态、逐 tick 动作与外部事件，可由 Arena 原生重建并校验最终状态；
 `generals-arena evaluate` 是接受 bundle/profile 的 CLI。纯 env.step 性能指标与含决策的批评估 wall throughput 分开报告。
 
 评估默认 `backend=cpu, device=cuda:0, batch_size=128`：原生 CPU 批量链推进环境与 C++ 对手，NN 在 CUDA 上批推理，适用于启发式、RL 混合对局。训练自身仍使用 GPU 环境。评估默认与训练卡共用 `cuda:0`，在 PPO 更新间同步运行；CPU 推理或显式独立单卡评估可异步。
+旧配置的 `evaluation.backend="gpu"`（以及 Arena CLI 的 `--backend gpu`）会提示弃用并映射为原生 CPU 环境，`device`、batch、显式 profile 和采样方式保持原配置；新 `run_config.json` 写入实际 backend。用旧 GPU 评估 run 的 checkpoint 续训到新目录时，训练状态照常恢复，评估从新面板重新开始；旧报告保持原样，新 `evaluations/index.json` 的 `migration` 记录来源与摘要，旧 Elo 不参与新 best 选择。旧校准 profile 仍需按当前执行版本重新校准。
+
 共享 GPU 时，所有 rank 先完成 CUDA 工作、释放空闲缓存并在 CPU 同步，评估结束后一起恢复训练；
 显式设置 `allow_shared_gpus=true` 也遵循这一顺序。rollout 和模型仍驻留显存，容量需容纳它们与评估峰值。
 CUDA 初始化前未显式配置 allocator 时，训练入口默认启用

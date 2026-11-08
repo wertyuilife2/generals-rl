@@ -1,6 +1,6 @@
-"""Small public API; optional backends and GUI load only when selected.
+"""Small public API; optional backends load only when selected.
 
-Reference rules, controllers and diagnostics use explicit submodule imports.
+Native adapters, controllers and diagnostics use explicit submodule imports.
 """
 from .api import make_engine, make_env
 from .protocol import Action, ActionKind, Direction, MapConfig, MoveMode

@@ -187,9 +187,9 @@ class MovementTests(unittest.TestCase):
         state.army.flat[0] = 2
         state.owner.flat[1] = 0
         state.army.flat[1] = np.iinfo(np.int64).max
-        engine = CoreEngine(state)
+        # The native boundary rejects an unrepresentable total before binding.
         with self.assertRaises(OverflowError):
-            engine.step([Action.move(0, Direction.RIGHT), Action.wait()])
+            CoreEngine(state)
         self.assertEqual(state.army.flat[0], 2)
 
 

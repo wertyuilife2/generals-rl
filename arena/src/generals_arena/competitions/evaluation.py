@@ -214,7 +214,7 @@ def evaluate(bundle, profile, output=None, *, device='cpu', batch_size=128, back
               "profile_id": identity, "profile": profile, **scoring, 'candidates': summaries,
               "reference": profile["reference"], "expected_games": expected, "errors": [],
               "results": games, "wall_seconds": perf_counter() - started, "timing": timings,
-              "device": str(device), "backend": backend, "batch_size": batch_size,
+              "device": str(device), "backend": runner.backend, "batch_size": batch_size,
               "cpu_threads": cpu_threads, "timing_basis": "host_dispatch_wall_with_cuda_sync_in_transfer",
               "execution": next(iter(runner.execution_modes)) if len(runner.execution_modes) == 1 else "mixed",
               "execution_modes": sorted(runner.execution_modes)}

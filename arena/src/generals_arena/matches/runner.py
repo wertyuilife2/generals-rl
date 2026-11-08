@@ -5,6 +5,7 @@ lifetimes and emits the same completed result/replay pair for either executor.
 """
 import json
 import time
+import warnings
 from collections import defaultdict, deque
 from dataclasses import replace
 from types import SimpleNamespace
@@ -17,6 +18,18 @@ from generals_arena.util import integer
 from generals_arena.util import source_digest
 from generals_arena.matches.resources import cpu_slot
 from generals_arena.matches.cache import initial_map
+
+
+def native_backend(backend, device):
+    """Migrate the former CUDA evaluation selector without moving inference."""
+    if backend == 'gpu' and (str(device) == 'cuda' or str(device).startswith('cuda:')):
+        warnings.warn("backend='gpu' is deprecated for evaluation; using native CPU matches "
+                      f"with model inference on {device}. Training VecEnv is unchanged.",
+                      FutureWarning, stacklevel=2)
+        return 'cpu'
+    if backend != 'cpu':
+        raise ValueError('Arena requires native CPU execution; legacy gpu evaluation requires a CUDA model device')
+    return backend
 
 
 def _verify_implementations(entries):
@@ -92,10 +105,9 @@ class MatchRunner:
         integer("batch_size", batch_size)
         integer("cpu_threads", cpu_threads, 1)
         device = str(device)
-        if backend != 'cpu':
-            raise ValueError('Arena requires native CPU execution; GPU/MPS training uses VecEnv')
         if device != "cpu" and device != "cuda" and not (device.startswith("cuda:") and device[5:].isdigit()):
             raise ValueError("device must be cpu, cuda, or cuda:N")
+        backend = native_backend(backend, device)
         if execution not in ("batch", "isolated"):
             raise ValueError("execution must be 'batch' or 'isolated'")
         self.entries, self.max_ticks = entries, max_ticks

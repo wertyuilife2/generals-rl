@@ -293,8 +293,9 @@ class StudentPPOTests(unittest.TestCase):
                 jobs = json.loads((run / "evaluations/index.json").read_text())["jobs"]
                 self.assertEqual(jobs[0]["status"], "completed")
                 report = json.loads(Path(jobs[0]["report"]).read_text())
-                self.assertEqual((report["games"], report["device"]), (10, "cpu"))
-                self.assertEqual(set(report["by_opponent"]), {*AI_KINDS, "WAIT"})
+                self.assertEqual((report["games"], report["device"]), (16, "cpu"))
+                self.assertEqual(set(report["by_opponent"]),
+                                 {*AI_KINDS, "kestrel-v7", "razor-v8", "aegis-v2", "WAIT"})
                 self.assertTrue(all(metrics["games"] == 2 for metrics in report["by_opponent"].values()))
                 self.assertEqual(report["status"], "completed")
                 self.assertTrue(math.isfinite(report["elo"]))

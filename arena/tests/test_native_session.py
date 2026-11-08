@@ -50,10 +50,11 @@ def test_single_game_and_recovery_never_dispatch_python_rules_or_observations(mo
         game.close()
 
 
-def test_action_log_materializes_natively_without_python_rules(monkeypatch):
+def test_action_log_materializes_once_in_web_cache_without_python_rules(monkeypatch):
     import generals_arena.matches.replay as replay
     from generals.backends.cpu.env import CPUEnv
-    from unittest.mock import patch
+    from generals_arena.web.replays import ReplayResponses
+    from unittest.mock import Mock, patch
     game = RecordedGame(plan(2), SimpleNamespace(max_ticks=5), [WaitController(), WaitController()])
     try:
         game.run()
@@ -65,10 +66,14 @@ def test_action_log_materializes_natively_without_python_rules(monkeypatch):
             raise AssertionError('playback attempted Python rules or observations')
         monkeypatch.setattr(CPUEnv, 'step', forbidden)
         monkeypatch.setattr(CPUEnv, 'observer', forbidden)
+        store = Mock()
+        store.replay.return_value = result, blob
+        cache = ReplayResponses(store)
         with patch.object(replay, '_audit', wraps=replay._audit) as audit:
-            frames = replay_frames(blob, result, compact=True)
+            first = cache.get('game')
+            assert cache.get('game') == first
             assert audit.call_count == 1
-        assert len(frames) == 6
+        assert len(json.loads(gzip.decompress(first))['frames']) == 6
     finally:
         game.close()
 
@@ -88,14 +93,19 @@ def test_legacy_replay_is_converted_with_same_native_frames():
         game.close()
 
 
-def test_baseline_and_wait_both_supply_decision_time():
+def test_baseline_and_wait_both_supply_leaderboard_decision_time():
+    from generals_arena.competitions.leaderboard import DuelStatistics
     game = RecordedGame(plan(2), SimpleNamespace(max_ticks=4),
                         [create_controller(kind='random'), WaitController()])
     try:
         game.run()
         result = game.result()
         assert [row['calls'] for row in result['decision_timing']] == [4,4]
-        assert all(row['total_ns'] > 0 for row in result['decision_timing'])
+        statistics = DuelStatistics()
+        statistics.add(result)
+        rows = [{'entrant_id':key} for key in result['entrant_ids']]
+        statistics.annotate(rows)
+        assert all(row['timed_games'] == 1 and row['mean_decision_ms'] is not None for row in rows)
     finally:
         game.close()
 

@@ -93,10 +93,12 @@ def test_incompatible_capability_and_bad_profile_do_not_produce_results(tmp_path
         profile_id(dict(profile(), rating_policy='invented'))
 
 
-def test_arena_gpu_environment_requires_native_execution_binding(tmp_path):
+def test_legacy_gpu_evaluation_reports_native_cpu_and_keeps_model_device(tmp_path):
     bundle = make_bundle(tmp_path/'bundle')
-    with pytest.raises(ValueError, match='native CPU'):
-        evaluate(bundle, profile(maps=1,ticks=8), backend='gpu', device='cuda:0')
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        report = evaluate(bundle, profile(maps=1,ticks=8), backend='gpu', device='cuda:0')
+    assert report['backend'] == 'cpu' and report['device'] == 'cuda:0'
+    assert not report['errors']
 
 
 def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(in_process_batch, tmp_path,monkeypatch):

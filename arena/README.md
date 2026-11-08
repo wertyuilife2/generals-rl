@@ -61,6 +61,55 @@ generals-arena league rebuild outputs/arena/main
 AI 可以重复入场，即使只登记一个 baseline 也能生成八人局。每个席位拥有独立控制器和随机种子。
 同一算法出现多次时，对局数只加 1，出场数按实例数增加。
 
+## 策略退役、缓存与线上接入
+
+```bash
+generals-arena league retire outputs/arena/main @旧策略 --reason '由新版本替代'
+generals-arena league leaderboard outputs/arena/main --all
+generals-arena league restore outputs/arena/main @旧策略
+```
+
+退役隐藏榜单条目并排除未来配对，保留历史评分、对局、策略工件和回放；
+不会重算其余选手的评分。评分参考不能退役，涉及未完成任务或已安排比赛的选手需先完成这些任务。
+历史 FFA 评分仍在完整参赛池中归一化，隐藏后的活动榜单不保证平均值恰好为 1000。
+
+批量、单局、人类对战和故障恢复共用 C++ 对局执行器。Python 管理赛程、进程、工件、
+动作日志和对局元数据；Web 管理输入队列、展示和录像播放。原生层调用 backend 构建观测，
+执行策略、环境推进、投降、反馈、终局统计和动作记录。没有独立的 Python 规则引擎；
+旧 `CoreEngine` 名称仅兼容调用原生 CPU backend，`backend="reference"` 已移除。
+
+baseline、WAIT、C++ SDK 都通过相同的原生席位入口执行、计时、校验动作并接受 10ms 限额，
+在同一种比赛子进程中运行。新对局均写入各席位的决策耗时，历史无计时的比赛不会补造数据。
+纯 Python/NN 策略通过通用策略适配器接收 backend 构建的观测，批推理耗时标为每个活动 lane
+的摊销时间，不施加原生策略的 10ms 限额；对局循环仍在 C++，保留 NN 批推理能力。
+
+恢复由 Python 调度进程重启，向原生层提交已确认的动作前缀和投降事件。C++ 重建环境及
+存活策略记忆，恢复成功不重复计入决策耗时。人类输入也作为命令进入同一执行器。
+新录像（schema 5）仅保存初始完整状态、规则版本、每 tick 各席位的编码动作、投降事件、
+最终状态摘要和日志校验。对局热路径不生成画面帧或逐 tick 状态摘要；序列化一次，低级别压缩。
+Web 首次打开时请求原生 backend 重建播放帧并校验最终状态，然后缓存压缩响应；浏览器只播放帧。
+仍兼容 schema 3 动作日志和 schema 4 帧录像。显式 `verified_replay` 可导出每 tick 状态／动作回执，
+旧日志保留逐 tick 摘要校验，新日志通过动作日志校验和最终状态摘要验证重建。
+
+Arena 现在要求原生 CPU 对局 backend，移除了 Python 逐 tick 协调 GPU 环境的分支。
+NN 策略仍可在 CUDA 上推理；env 包的 CUDA/MPS VecEnv 训练接口保持独立。
+绑定期间独占策略实例、随机数和缓冲区，公开入口保留一次性的边界校验。
+原生 ABI 3 使用只读状态快照接口，录像不再依赖 CPU backend 的内部结构；设备类型、host-buffer
+能力和可选同步回调显式声明。当前 Arena 需要 host 可访问的同步视图，不会把设备指针当作 CPU 指针。
+原生执行器统一持有决策 watchdog，信号处理器在执行入口安装，初始化／析构也保留原有保护。
+原生策略的各席位保留独立的借用观测缓冲区，CPU backend 在规则变更时记录变化格，增量维护
+九宫格视野覆盖计数及脱敏后的棋盘。兵力增长、归属变化、视野消失和将军发现都会更新相关字段；
+变化密集、终局、离场或输出缓冲区切换时完整刷新。Python 不参与增量状态维护。
+完整公开快照接口仍独立构建快照；只重放动作而不调用策略时不启用增量观测跟踪。
+`python arena/benchmarks/native_loop.py --output outputs/native-loop.json` 对比同一原生执行器中的
+直接策略绑定与公开策略桥接；`--replays` 逐字节验证录像。该口径与 env step benchmark 不同，
+也不再是原来 Python 对局循环的性能对比。
+临时编译工件被系统清理后会在下次加载时恢复；无策略责任归属的基础设施失败可用 `--retry` 重试，
+失败尝试和原始种子仍保留。网页回放使用容量上限 32 MiB 的 gzip 缓存，同一回放的并发加载共用验证结果。
+
+官方线上接入使用同一策略包选择入口，见[接入说明](../env/src/generals/backends/online/README.md)。
+线上传输仅增加可选 `env[online]` 依赖，不改变离线比赛和训练流程。
+
 ## 随机地图
 
 默认人数为 `[2,3,4,5,6,7,8]`，可配置 2–8 中的任意人数。宽、高分别按官方二次随机分布采样，使用 env 的出生距离、城市公平性与可达性约束：
@@ -88,9 +137,9 @@ AI 可以重复入场，即使只登记一个 baseline 也能生成八人局。�
   完成窗口后再更新配对。窗口持久化，单进程和多进程使用相同赛程；重启优先执行已有赛程。
 
 前 6 场包含其他算法的有效对局用于快速定级，全同算法对局不推进定级；该标签不是统计置信区间。
-C++ 策略决策超过 10ms 时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
+原生策略（包括 baseline、WAIT）决策超过 10ms 时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
 按环境弃权规则停止行动，领土保留 50 tick 并继续增长、可被夺取，到期后才转中立；将军转城市。损伤领先者／最后存活者的击杀归属同样由 env 结算，Arena 不额外模拟投降规则。
-C++ 硬超时退出比赛进程后，Arena 从动作日志重建存活策略状态并继续比赛；事件与计时保存在回放中。
+原生策略硬超时退出比赛进程后，Arena 从动作日志重建存活策略状态并继续比赛；事件与计时保存在回放中。
 初始化、析构、崩溃和非法返回值仍作为策略错误处理。
 
 ## 独立评分池
@@ -121,7 +170,7 @@ generals-arena league rebuild outputs/arena/main
 ```
 
 网页可以切换两个评分池；排名、版本变化、夺冠率、存活和击杀指标均只读取该池的比赛。
-夺冠率为同策略任一席位夺冠的局数除以参赛局数；存活指数按存活 tick 比例计算，击杀指数使用环境记录的击杀归属，包含官方离场结算。
+夺冠率为同策略任一席位夺冠的局数除以参赛局数；存活指数为（席位数 − 官方最终名次）÷（席位数 − 1），并列取平均名次，同策略席位先取平均，击杀指数使用环境记录的击杀归属，包含官方离场结算。
 同策略重复席位先在局内取平均，展示指标不参与评分。置信区间按当前评分模型及独立地图作局部近似；
 样本不足或相对分数尚不能识别时显示 `—`，不承诺精确覆盖率，也不使用它重排榜单。
 
@@ -150,7 +199,7 @@ generals-arena league rebuild outputs/arena/main
 这是本机实验服务，默认且仅监听 `127.0.0.1` / `localhost`，不作为公网多人游戏服务部署。
 游戏进行中 API 只返回该人类的允许观测，不发送地图种子、敌方主城位置或完整棋盘；
 迷雾中的山与城市仅以同一种 `fog_obstacles` 布尔标记显示为山，不能区分类型，归属、兵力和敌方主城继续隐藏；进入视野后恢复真实地形。
-算法、RL、桌面与浏览器共享上述原始观测边界；自然终局开放全图。完整回放只在比赛结束后可读取。自定义算法是管理员从 CLI 装载的可信本地 Python 代码，不是隔离的代码沙箱。C++ SDK ABI 已更新为 2，新增混淆障碍、击杀／AFK／离场字段，源码包需重新编译。
+算法、RL 与浏览器共享上述原始观测边界；自然终局开放全图。完整回放只在比赛结束后可读取。自定义算法是管理员从 CLI 装载的可信本地 Python 代码，不是隔离的代码沙箱。C++ SDK ABI 已更新为 2，新增混淆障碍、击杀／AFK／离场字段，源码包需重新编译。
 
 ## 接入算法版本
 
@@ -198,7 +247,7 @@ RL 先自动导出完整策略目录，再 `commit 目录`。Arena 只读取通�
 
 `outputs/arena/main/league.sqlite3` 保存不可变规则、版本信息、任务、已排赛程、所有已完成结果、
 压缩动作录像和排名。结果、录像、任务进度与分数在同一个 SQLite 事务提交，避免只更新一半。
-原始录像包含初始完整状态、每 tick 的结构化动作以及状态摘要；回放由环境重演并逐 tick 校验，
+原始录像包含初始完整状态、每 tick 的编码动作、外部事件和最终状态摘要；首次播放由原生 backend 重建并校验，
 浏览器接收压缩后的差量帧，可以暂停、拖动时间轴、改变速度。棋盘支持滚轮缩放和拖动平移。
 高倍速播放逐 tick 绘制，25× 对应默认时钟的每秒 50 tick；显示器或浏览器跟不上时降低实际速度，不跳帧追赶。
 渲染只重绘变化格，统计面板复用节点并按兵力降序排列（同兵力按领地、席位排序）。
@@ -239,40 +288,95 @@ generals_arena/
 `competitions/tournament.py` 是固定循环赛入口，`competitions/evaluation.py` 是训练用固定面板入口，持续联赛使用增量匹配与持久任务。
 各模式共用 `matches.MatchRunner` 执行、终局格式和 GoR/Codeforces 评分。单局与批量执行保留各自必要的性能和生命周期边界。
 策略工件层不依赖赛事数据库；比赛 worker 不依赖赛事存储；文件锁统一接收目录。评分重建完成后由发布工作流刷新报告。
-WAIT 在各模式中使用同一个可信内置策略和身份，并提供原生批接口。
-Python 调用方使用 `competitions.*`、`policies.*` 等正式路径。
+WAIT 在各模式中使用同一个可信内置策略和身份，通过公共原生策略入口执行，支持标量与批量接口。
+旧模块、导入路径和类名已删除，没有转发壳或旧别名。Python 调用方使用 `competitions.*`、`policies.*` 等正式路径。
 单局与批执行均通过 `generals.VecEnv` 绑定 env CPU 内核，由原生循环执行推进、观测与策略调用；Arena 不另写游戏规则。
 `baselines/` 的四种策略在 `policy.cpp` 中执行记忆、候选评分、BFS、路径跟踪和随机动作评估，
 Python 只负责绑定和控制器生命周期，保留 RNG 顺序及动作轨迹。前端复用 `../bzy-nya.github.io/gen` 的全屏布局、地形 SVG 图标、
 玩家颜色、浮动统计面板和底部控制设计；`board.js` 适配服务器观测，不复制客户端游戏规则或 AI。
 
 模拟复用引擎每 tick 已计算的全局统计；env CPU 后端增量更新观测与视野，复用变化地块记录。
-策略只接收所属玩家的局部观测，敌方城市数仍隐藏；与环境参考观测逐字段比较保持一致。
+每个玩家的棋盘仍是独立的只读副本，敌方城市数仍隐藏；与环境的原始观测逐字段比较保持一致。
 单局使用一个 OpenMP 线程，C++ 策略在同一对局进程内串行调用。
-Arena 的环境执行使用 CPU，策略包推理可使用 CPU/CUDA；特征、模型与推理实现属于策略包，录像启用时保留完整 tick。
+Arena 的单局和批执行均复用 env CPU 内核，策略推理可选 CPU/CUDA；特征、模型与推理实现属于策略包，录像启用时记录全部 tick 的动作。
 
-新联赛使用 schema 7，新录像使用 schema 5 的紧凑动作日志与校验和，并可读取 schema 3/4；固定规则 ID，独立保存各池的分数。源码摘要绑定赛程、执行与评分实现，旧联赛不能直接使用新代码追加比赛，
+新联赛使用 schema 7，录像使用 schema 5 并固定规则 ID；独立保存各池的分数，不维护旧击杀回填缓存。源码摘要绑定赛程、执行与评分实现，旧联赛不能直接使用新代码追加比赛，
 需要使用其归档源码，或创建新联赛。不会静默改写旧 manifest 或评分历史。
 
 ```bash
-python -m pytest arena/tests baselines/tests -q
+python -m pytest arena/tests -q
+python -m pytest baselines/tests -q
 node --test arena/tests/web/*.test.mjs
-python arena/benchmarks/simulation.py
+python arena/benchmarks/execution_pipeline.py --output outputs/arena/performance/pipeline.json
 python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 ```
 
 主要 CLI 为 `commit / run / status`，模式入口为 `tournament / evaluate / league`，网页为 `serve`。
 `run` 显式指定各席位，复用持久化比赛基础，但写入独立私有结果，不更新正式榜单。
-固定对手的原生批评估使用 `generals_arena.competitions.evaluation`，发布策略使用 `commit`。
+固定对手的 CPU/CUDA 批评估使用 `generals_arena.competitions.evaluation`，发布策略使用 `commit`。
 
 | 入口 | 当前执行方式 | GPU 与批推理 |
 | --- | --- | --- |
-| `commit / run / league` | CPU 单局执行；任务 worker 可并行不同对局，保存 SQLite 结果和录像 | 策略包可配置 CUDA 推理，环境仍是 CPU；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置；不做跨对局神经网络批推理 |
-| `tournament / evaluate` | 按相同地图配置与策略实例组合分组，调用共享 `MatchRunner` 与原生 CPU 批循环 | C++ 策略与 baseline 原生批执行；NN 支持 CPU/CUDA 跨对局批推理 |
+| `commit / run / league` | 所有策略使用常驻 worker；在已持久化窗口内领取小批兼容任务，完成即回传，按原赛程序写入 SQLite 和录像 | 环境是 CPU；策略包可配置 CUDA 推理；`commit/run` 提供 `--device`，`league add` 在 entrant JSON 中设置 |
+| `tournament / evaluate` | 按相同地图配置与策略实例组合分组，调用共享 `MatchRunner` | 原生 CPU 对局；支持 `reset_batch/act_batch` 的策略按组批推理 |
 
-独立 C++ 策略包（`kind="cpp"`）保留进程隔离和决策超时边界，可与 CUDA NN 在同一个批次执行。
-四个内置 baseline 属于 `kind="baseline"`，2–8 人均支持原生批执行。
-`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 不受 C++ SDK 的 10ms 决策计时约束。
+独立 C++ 策略包（`kind="cpp"`）在 CPU 隔离进程内批执行，宿主原生循环逐 lane 调用现有 SDK；
+无需改写策略源码，不增加策略线程，每个席位的每次决策仍有独立的 10ms 限制。环境推进统一在 CPU，策略推理设备单独指定。
+硬超时通过共享动作记录恢复对应对局并判该席位投降；同批未发布的其他对局按原种子重试，按赛程序结算。
+四个内置 baseline 和普通策略共用 `reset_batch/act_batch/on_result_batch` 接口，2–8 人均批执行，
+接收 env 的公开观测。`kind="baseline"` 与 `baseline/名称` 保留为注册快捷方式，不决定批执行方式。
+仅提供标量接口的 Python Controller 使用通用逐 lane 适配；神经网络包已有批接口时直接使用。
+`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 记录批调用摊销耗时，不受原生策略的 10ms 决策限额约束。
+
+worker 缓存有容量上限的策略控制器和初始地图；每场通过 `reset_batch` 重置策略记忆和随机流。
+部署模型在同一进程、相同权重与设备下共享冻结 actor，history/knowledge/RNG 保持实例独立。
+原生 SDK 策略仍在每场结束时析构用户实例，仅复用已验证代码和参数。自定义控制器可实现
+`release_batch()` 释放本场资源；无反馈需求的批控制器可声明 `needs_feedback=False`。
+初始地图按配置与种子缓存，传给 worker 后复用；对局状态始终单独分配。赛程一次分桶，避免反复扫描。
+worker 将初始地图校验并打包一次，缓存只读数组；创建对局时合并到独立存储，省去再次校验和一次
+多余复制。文件身份校验在边界保留，SHA-256 按设备、inode、大小、mtime 和 ctime 缓存；
+相同大小且恢复 mtime 的修改、原子替换或删除仍会失效，内容未变时只检查文件元数据。
+调度窗口读取一次 entrant 表，小批请求只携带参赛者。调度期间复用 SQLite 连接，评分只查询
+本局参赛者；每局结果、录像、评分和任务进度仍单独原子提交，提交顺序和故障恢复语义保持一致。
+
+2026-11-03 本机对照：25×25、每组 32 局、160 tick 上限、CPU 单线程、关闭录像，取 3 次完整执行耗时中位数。
+baseline 1v1 为 0.186→0.189 秒，4 人局为 0.983→0.321 秒；轻量 C++ 策略对 expansion 的
+1v1 为 1.244→0.310 秒，4 人局为 1.790→0.461 秒。128 局的逐局最终状态摘要全部一致。
+原始测量保存于 `outputs/benchmarks/unified-policy-batch.json`；此结果覆盖上述策略和批大小。
+
+2026-11-04 对照 `70c232a`：`arena/benchmarks/execution_pipeline.py` 使用实际 baseline 对局，
+排除编译，取预热后 5 次中位数。25×25、4 人、32 局、256 tick、开启录像的完整执行
+从 1.386 秒降至 0.323 秒（4.29×），压缩录像从 853,114 降至 104,764 字节；关闭录像为
+0.414→0.317 秒（1.31×）。16 局、2 worker、128 tick 的持久调度含启动、IPC 和 SQLite
+提交从 1.443 降至 0.236 秒（6.12×）。逐 tick 动作、回放帧、比赛结果和最终评分均一致。
+原始报告为 `outputs/arena/performance/pipeline-before-70c232a.json` 与 `pipeline-after.json`。
+这是 Arena 端到端口径，不是 `env/src/generals/benchmarks` 的纯环境 step/s。
+
+同日对照 `96618cd`，沿用上述脚本、阵容、预热和 5 次中位数口径：增量观测使 32 局开启录像的
+观测构建从 54.32 降至 3.84 ms（14.15×）；变化跟踪使 step 从 1.32 增至 2.96 ms，
+完整执行仍从 314.91 降至 270.43 ms（1.16×）。关闭录像为 309.80→263.37 ms（1.18×），
+单局开启录像为 8.85→8.56 ms（1.03×）。含启动的 16 局持久调度为 231.02→240.17 ms，
+本次小样本未体现调度加速。逐 tick 动作、回放帧、比赛结果和评分全部一致。
+原始报告为 `outputs/arena/performance/incremental-before-96618cd.json` 与 `incremental-after.json`。
+
+### 并行评测调度
+
+多 worker 共用待执行队列，在固定赛程窗口内领取小批兼容对局，并保留足够任务供空闲 worker 领取。已完成结果按赛程顺序缓冲和结算，因此完成快慢不改变 rating。正常停止、异常恢复仍保留已经落盘的对局。
+
+所有本用户启动的 Arena CPU 批评测共用进程间 CPU 配额，默认上限为可用 CPU 数减 2，至少为 1。每次重计算领取一个配额，结束或进程退出时释放，等待配额不计入策略的决策时间。CPU 环境仍使用一个 OpenMP 线程。实时人类对局不进入批评测等待队列，预留的 CPU 用于服务和交互。策略的 CUDA 推理不由此配额分配显存。
+
+自适应匹配仍在固定的约 32 局窗口完成后更新。窗口末尾可能仍需等待尚未结束的长局，这是按已有计分和匹配顺序运行的依赖，不是数据库锁。未修改游戏规则、策略决策预算或 rating 公式。
+
+2026-11-03，本机同一批真实 128 局、8 workers、完整回放和官方结束条件，包含一局 50,002 ticks 的长局：30.15 → 23.09 秒，约 **1.31×**。每局动作回放、结果和 rating 更新的摘要全部一致。这是该工作负载的一次对照，不代表所有阵容都有相同加速。
+
+可复用 `arena/benchmarks/scheduling.py` 对已记录工作负载做临时联赛测试，测试不会写入正式榜单：
+
+```bash
+python arena/benchmarks/scheduling.py outputs/benchmarks/arena-scheduling/fixture.json \
+  --workers 8 --output /tmp/scheduling.json \
+  --compare outputs/benchmarks/arena-scheduling/before.json
+```
+
 
 这条原生执行链选取自 `origin/neko-dev` 的 `f85e36dbda15da7c473682d7332c5d0f44b2f93d`：
 包含 CPU 增量观测、原生 ABI／执行循环、批 worker、紧凑录像、控制器／地图缓存与文件摘要缓存。
@@ -281,7 +385,6 @@ python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 [`policies/reference_sources/provenance.json`](src/generals_arena/policies/reference_sources/provenance.json)。
 Aegis v2 对应上游 `heristic/gpt-6-aegis-v1` 根目录的最新源码，目录名不代表版本号。
 `training_opponents(directory)` 编译并冻结该面板；固定版本不随远端更新自动变化，详见 [RL 评估配置](../rl/README.md#模型导出与-arena-评估)。
-
 
 ## 历史结果
 
@@ -311,7 +414,7 @@ Aegis v2 对应上游 `heristic/gpt-6-aegis-v1` 根目录的最新源码，目�
 ```bash
 generals-arena tournament --entrants roster.json --config rules.json \
   --maps-per-group 20 --seed 42 --record-replays --output outputs/arena/rr
-# 对支持 CUDA 推理的包，可附加 --backend cpu --device cuda:0
+# 对支持 CUDA 推理的包与 baseline，可附加 --backend cpu --device cuda:0
 # batch-size=0 表示同一兼容策略组全量并行
 ```
 
@@ -324,9 +427,9 @@ generals-arena tournament --entrants roster.json --config rules.json \
 
 `generals_arena.competitions.evaluation.make_profile` 固定地图配置、人数、对手声明、种子、换位和预算；
 `profile_id()` 解析并绑定对手工件版本、赛程、执行源码、校准数据与评分规则。
-`evaluate(bundle, profile, backend="cpu", device=..., batch_size=...)` 运行批量比赛。
-支持 `reset_batch/act_batch` 的策略接收原始局部数组观测；实现 `native_batch` 的 C++ 策略直接接入原生循环，
-其他 Controller 使用标量适配。Arena 不构造神经网络特征。`record_replays=True` 输出可逐 tick 校验的 Arena 录像。
+`evaluate(bundle, profile, backend="cpu", device=..., batch_size=...)` 运行批量比赛。旧 `backend="gpu"` / `--backend gpu` 在指定 CUDA 推理设备时保留为带提示的兼容入口，实际报告记录 `backend="cpu"`。
+所有策略通过统一批执行入口接收 backend 原生构建的局部数组观测；C++ 与 baseline 的逐 lane 决策循环在原生层执行，
+只实现标量接口的 Controller 由通用适配器逐 lane 调用。Arena 不构造神经网络特征。`record_replays=True` 输出可重建、验证最终状态的 Arena 动作日志。
 
 1v1 评估使用 `gor-batch-fit-v1`：保留 GoR 胜率函数，将整批结果联合拟合，消除逐局计分的顺序依赖。每个已观测策略对平滑一局虚拟平局，换座比赛各计半份权重。校准 profile 固定所有参考的原始分数；未校准 profile 固定 WAIT 为 0 后拟合当前面板。FFA 周期评估仍使用 Codeforces 均分 1000 的规则。
 `evaluate([...], profile, ...)` 或 CLI `--candidates JSON` 执行共同候选复评：候选挑战参考，同时候选相互循环赛，一次联合评分。当前共同复评要求 1v1。无需重复参考之间的校准对局。

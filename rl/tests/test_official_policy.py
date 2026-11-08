@@ -136,7 +136,7 @@ def test_short_training_saves_exports_and_evaluates_official_maps(tmp_path):
     best = json.loads((tmp_path/'run/best_model.json').read_text())
     assert Path(best['checkpoint']).is_file() and Path(best['bundle']).is_dir()
     report = json.loads(Path(best['report']).read_text())
-    assert report['games'] == 10
+    assert report['games'] == 16
     for result in report['results']:
         assert result['map']['width'] is None and result['map']['height'] is None
         assert result['ticks'] <= 2000

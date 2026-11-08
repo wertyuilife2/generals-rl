@@ -53,7 +53,7 @@ def decode_actions(frame, state):
 
 
 @pytest.mark.parametrize('path', sorted((FIXTURES / 'replays').glob('*.json')), ids=lambda p: p.stem)
-@pytest.mark.parametrize('backend', ['reference', 'cpu'])
+@pytest.mark.parametrize('backend', ['mutable_adapter', 'cpu'])
 def test_official_replay(path, backend):
     data = json.loads(path.read_text())
     state = replay_state(data)
@@ -83,14 +83,15 @@ def test_official_replay(path, backend):
 
 
 @pytest.mark.parametrize('name', ['IZSpNMqIS', 'WtLgBl5yB', 'twdUV3dVM'])
-def test_official_replay_cuda(name):
+@pytest.mark.parametrize('device', ['cuda', 'mps'])
+def test_official_replay_gpu(name, device):
     torch = pytest.importorskip('torch')
-    if not torch.cuda.is_available():
-        pytest.skip('CUDA unavailable')
-    from generals.backends.gpu.env import GPUEnv
+    if not (torch.cuda.is_available() if device == 'cuda' else torch.backends.mps.is_available() and hasattr(torch.mps, 'compile_shader')):
+        pytest.skip('GPU unavailable')
+    from generals import VecEnv
     data = json.loads((FIXTURES / 'replays' / (name + '.json')).read_text())
     state = replay_state(data)
-    env = GPUEnv.from_states([state])
+    env = VecEnv.from_states([state], device=device)
     try:
         for frame in data['ticks']:
             actions = decode_actions(frame, state)

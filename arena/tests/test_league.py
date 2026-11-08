@@ -255,13 +255,13 @@ def test_source_change_cannot_silently_change_existing_league(tmp_path):
             add(store)
 
 
-def test_failure_is_unrated_and_retryable_and_workers_exclusive(tmp_path):
+def test_failure_is_unrated_and_retryable_and_workers_exclusive(in_process_batch, tmp_path):
     store = league(tmp_path)
     add(store, games=2)
     with process_lock(store.directory, '.worker.lock'):
         with pytest.raises(RuntimeError, match='another process'):
             run_jobs(store)
-    with patch('generals_arena.matches.worker.MatchWorker.begin', side_effect=RuntimeError('bad policy')):
+    with patch('generals_arena.matches.batch.load_controller', side_effect=RuntimeError('bad policy')):
         with pytest.raises(RuntimeError, match='bad policy'):
             run_jobs(store)
     assert store.jobs()[0]['status'] == 'failed'

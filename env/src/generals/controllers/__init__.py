@@ -1,19 +1,17 @@
-"""Interactive controller assembly; baseline implementations are optional."""
+"""Simulation controller assembly; baseline implementations are optional."""
 
 import numpy as np
 
 from generals.protocol.controller import Controller
-from generals.controllers.human import HumanController
+
 
 def create_controller(kind: str, player_id: int = 0, seed: int = 0) -> Controller:
-    if kind.lower() == "human":
-        return HumanController(player_id=player_id, seed=seed)
     try:
         from generals_baselines import create_controller as create_baseline
     except ModuleNotFoundError as exc:
         if exc.name != "generals_baselines":
             raise
-        raise ImportError("AI play requires generals-baselines; install with: pip install -e ./baselines") from exc
+        raise ImportError("AI simulation requires generals-baselines; install with: pip install -e ./baselines") from exc
     return create_baseline(kind, player_id=player_id, seed=seed)
 
 
@@ -24,4 +22,4 @@ def make_controllers(kinds: list[str] | tuple[str, ...], seed: int = 0) -> list[
             for pid, (kind, stream) in enumerate(zip(kinds, streams))]
 
 
-__all__ = ["Controller", "HumanController", "create_controller", "make_controllers"]
+__all__ = ["Controller", "create_controller", "make_controllers"]

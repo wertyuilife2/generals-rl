@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "generals-env"
 version = "0.1.0"
-description = "Generals environment with CPU/CUDA vector simulation and Tk desktop play"
+description = "Generals environment with CPU/CUDA/Metal vector simulation"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.24"]
 
@@ -18,8 +18,9 @@ where = ["src"]
 include = ["generals", "generals.*"]
 
 [project.optional-dependencies]
+online = ["python-socketio[client]>=5.11,<6"]
 gpu = ["torch>=2.6"]
-play = ["generals-baselines"]
+simulate = ["generals-baselines"]
 
 [tool.setuptools.package-data]
 "generals.protocol" = ["*.h"]
@@ -27,3 +28,6 @@ play = ["generals-baselines"]
 "generals.backends.cpu" = ["step.cpp", "*.h"]
 "generals.benchmarks" = ["native.cpp"]
 "generals.backends.gpu" = ["kernel.cu", "host.cpp"]
+"generals.backends.mps" = ["kernel.metal"]
+
+"generals.backends.online" = ["README.md"]

@@ -1,8 +1,10 @@
 # Generals 环境开发与使用说明
 
-更新日期：2026-10-28。本文说明 CPU/OpenMP 和 GPU/CUDA 单步实现，以及 GUI、规则和测量方法；历史性能结果仍对应旧规则下的实验环境。当前 RL 默认 Actor／Critic 均直接使用 ViT，地图为 13 通道，`valid_cells` 是独立辅助 mask；训练、策略导出见 [RL README](../rl/README.md)，统一比赛管理见 [Arena README](../arena/README.md)。
+更新日期：2026-11-03。本文说明 CPU/OpenMP、CUDA 和 MPS 单步实现，以及规则和测量方法；历史性能结果仍对应旧规则下的实验环境。训练、策略导出见 [RL README](../rl/README.md)，统一比赛管理与网页游玩见 [Arena README](../arena/README.md)。
+`neko-dev` 新增功能的选择性集成范围与验证见[集成记录](neko_integration.md)。
+2026-11-08 的完整合并、实验存档排除及 RL 兼容性验证见[本次合并记录](neko_merge_20261108.md)。
 
-项目提供 2–8 人 Generals 对战、单个人类与 AI 的桌面游玩、无界面模拟，以及 CPU/OpenMP 和 GPU/CUDA 批量环境。规则固定为本次核查时官网部署的 **31.4.5 普通 1v1 / FFA**，协议 ID 为 `generals.io-31.4.5-classic-v1`，不含团队、modifier 和活动模式。官方版本、真实回放及边界验证范围见[实施记录](official_rules_alignment.md)。随机数算法和种子协议属于本项目，不承诺与官网用同一数字种子生成逐格相同的地图。
+项目提供 2–8 人 Generals 对战、Arena 网页游玩、无界面模拟，以及 CPU/OpenMP、CUDA 和 MPS 批量环境。规则固定为 2026-10-28 核查时官网部署的 **31.4.5 普通 1v1 / FFA**，协议 ID 为 `generals.io-31.4.5-classic-v1`，不含团队、modifier 和活动模式。官方版本、真实回放及边界验证范围见[实施记录](official_rules_alignment.md)。随机数算法和种子协议属于本项目，不承诺与官网用同一数字种子生成逐格相同的地图。
 
 完整尺寸训练的历史缓存显存优化与八卡物理批测试见 [2026-11-03 历史去重测试](history_storage_20261103.md)。
 
@@ -10,7 +12,7 @@
 
 - [安装与运行](#quickstart)
 - [游戏规则、地图与 AI](#rules)
-- [GUI 操作](#gui)
+- [网页游玩](#web-play)
 - [架构与依赖边界](#architecture)
 - [批量环境 API](#api)
 - [观测、路径与 RL 扩展](#features)
@@ -27,33 +29,32 @@
 |---|---|
 | 参考引擎 | Python ≥3.11、NumPy ≥1.24；不需要 PyTorch/CUDA |
 | AI 策略 / 无界面 AI 模拟 | 额外需要 Linux/macOS 与 C++17 编译器，baseline 在 C++ 中执行 |
-| GUI | 额外需要 Tk 和图形桌面；Linux/X11 已实测，内置 AI 目前要求 Linux/macOS |
 | CPU 单局 / 批量模拟 | 支持 Linux/macOS；需要 C++17/OpenMP，macOS 需 clang 与 libomp；编译器可用 `CXX` 指定 |
-| GPU 批量模拟 | Linux、PyTorch ≥2.6、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件；H200 已用 PyTorch 2.8.0+cu129 实训验证 |
+| CUDA 批量模拟 | Linux、PyTorch ≥2.6、CUDA 设备、nvcc/CUDA 开发库、C++ 编译器和 Python 开发头文件；H200 已用 PyTorch 2.8.0+cu129 实训验证 |
+| MPS 批量模拟 | Apple Silicon、启用 MPS 且提供 `torch.mps.compile_shader` 的 PyTorch；测试使用 macOS 15.7.7、PyTorch 2.14.1 |
 
 在仓库根目录安装到现有 conda 环境：
 
 ```bash
 conda run -n generals-rl python -m pip install -e ./env -e ./baselines --no-deps --no-build-isolation
-conda run -n generals-rl python -m generals play --players 4 --seed 42
+conda run -n generals-rl python -m generals simulate --players 4 --max-ticks 2000 --seed 42
 ```
 
-`--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。`python -m tkinter` 可检查 Tk 窗口。
+`--no-deps --no-build-isolation` 适用于依赖和 setuptools 已齐备的本机环境。新环境可使用 `python -m pip install -e ./env`；GPU 可选依赖入口为 `python -m pip install -e './env[gpu]'`，仍需准备适配的驱动和编译器。
 
 不安装包时，可在仓库根目录设置源码路径运行（以下使用 Bash 等 POSIX shell）：
 
 ```bash
-PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals play --players 4 --seed 42
+PYTHONPATH=env/src:baselines/src conda run -n generals-rl python -m generals simulate --players 4 --max-ticks 2000 --seed 42
 ```
 
-同一写法也适用于其他 `generals` 子命令。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。当前内置 AI 和 CPU 原生后端仅支持 Linux/macOS，Windows 的 Tk 可用不等于完整 GUI 对战已受支持。
+同一写法也适用于其他 `generals` 子命令。基准脚本会自行加入源码搜索路径，可直接从仓库根目录运行。当前内置 AI 和 CPU 原生后端仅支持 Linux/macOS。
 
 ### 常用命令
 
 安装后在仓库根目录运行：
 
 ```bash
-conda run -n generals-rl python -m generals watch --players 8 --size 35 --speed 10
 conda run -n generals-rl python -m generals simulate --players 4 --size 25 --games 10 --max-ticks 20000 --seed 42
 conda run -n generals-rl python -m generals simulate --players 2 --ais aggressive,random --games 1 --max-ticks 2000 --record outputs/game.jsonl
 conda run -n generals-rl python -m generals replay outputs/game.jsonl
@@ -61,7 +62,7 @@ conda run -n generals-rl python -m generals replay outputs/game.jsonl
 
 `simulate` 没有实时等待，输出对局数量、胜者、截断和吞吐等 JSON 统计。`replay` 校验初态、已记录动作及逐 tick 摘要，不调用 AI，也不是图形录像播放器。输出/录像使用新路径，避免覆盖已有结果。
 
-默认 4 玩家、按人数随机宽高。可用 `--players 2..8` 改人数，`--size` 或 `--width/--height` 显式指定自定义尺寸。山脉和城市参数均为官方滑块的归一化值，默认 0.5、范围 0–1，**不是格点占比**。`--visibility local|full` 控制策略视野，`--seed` 为非负整数。`--ais` 按 AI 席位填写逗号分隔的策略名；GUI 人类席位通过 `--human-seat` 指定。完整参数可用各子命令的 `--help` 查看。
+默认 4 玩家、按人数随机宽高。可用 `--players 2..8` 改人数，`--size` 或 `--width/--height` 显式指定自定义尺寸。山脉和城市参数均为官方滑块的归一化值，默认 0.5、范围 0–1，**不是格点占比**。`--visibility local|full` 控制策略视野，`--seed` 为非负整数。`--ais` 按 AI 席位填写逗号分隔的策略名。完整参数可用各子命令的 `--help` 查看。
 
 <a id="rules"></a>
 ## 2. 游戏规则、地图与 AI
@@ -101,28 +102,12 @@ conda run -n generals-rl python -m generals replay outputs/game.jsonl
 
 策略保留 JS 的行为倾向，使用有界候选搜索和独立随机流；不保证与 JS 每步选同一动作。路径失效、来源丢失或攻击未占领时会清除/重新规划，策略可能僵持，模拟用时间上限截断。benchmark 的随机动作生成器与这里的 `RandomAI` 是不同工作负载。
 
-<a id="gui"></a>
-## 3. GUI 操作
+<a id="web-play"></a>
+## 3. 网页游玩
 
-GUI 使用 Tk、参考引擎和 `Runner`，支持一个人类对抗其余 AI，或全 AI 观战。启动后先预览地图，设置人数、策略、地图和视野，再点击“开始”。暂停时可规划队列和完整 tick 单步。
+人类对局、账号和对手选择、榜单及录像统一由 Arena WebUI 提供。安装、服务启动和操作见 [Arena 使用说明](../arena/README.md#快速开始)与[人类参赛](../arena/README.md#人类参赛)。
 
-| 鼠标／按键 | 操作 |
-|---|---|
-| 左键己方格 | 选择来源 |
-| 左键规划光标相邻格、WASD、方向键 | 追加一步移动/攻击，规划光标前移 |
-| 重复点击规划光标、Z、半兵按钮 | 下一条入队指令使用半兵，入队后恢复普通模式 |
-| Shift+左键；取消选择后再点己方格 | 强制换来源，清除旧队列 |
-| Q、清空队列 | 清空尚未执行的指令 |
-| E、撤销末步 | 删除最后一条尚未执行的指令 |
-| 空格、取消选择 | 取消选择，已排队指令继续执行 |
-| H、选择主城 | 选中自己的主城 |
-| 中键/右键拖动；滚轮或 +/− | 平移；缩放 |
-| Home、适应窗口 | 居中并适配地图 |
-| P、暂停；单步按钮 | 暂停/继续；暂停时推进一个完整 tick |
-
-队列最多 64 步，逐格输入，不自动寻路到远处点击目标。无效项在同 tick 跳过，不等待来源积兵。未占领目标时会清除失效的后续路径。所有基本操作都有鼠标入口；“弃权”按环境的 50 tick 离场规则处理，关闭正在进行的人类对局也会先记录弃权。
-
-“同图重开”恢复初始地图和种子，“新地图”使用新种子；人类淘汰后可继续全图观战。人类模式窗口失焦自动暂停。滚轮按 Tk 窗口系统适配，缺中文字体时使用英文标签。高吞吐模拟使用无界面模式；GUI 的有限 tick 追赶用于保持交互响应。
+Python Tk 桌面界面已移除；`generals play`、`generals watch` 和 `make_env(mode="realtime")` 不再提供。
 
 <a id="architecture"></a>
 ## 4. 架构与依赖边界
@@ -137,12 +122,11 @@ env/
       batch_observation.py   CPU/GPU 共用的原始局部观测接口
     backends/cpu/            C++/OpenMP 单 tick 执行、NumPy/ctypes 缓冲区
     backends/gpu/            CUDA 单 tick 内核、Torch 状态与原生启动桥
-    controllers/             人类队列及按需加载 baseline 的交互工厂
-    runtime/                 Runner 与 PlaySession
-    gui/                     Tk 展示与输入
+    controllers/             按需加载 baseline 的模拟控制器工厂
+    runtime/                 无界面 Runner 与线上对局客户端
     benchmarks/              workload、step 计时、CPU/CUDA profiling
   benchmarks/                benchmark_step.py、profile_step.py 两个入口
-  tests/                     规则、设备、接口、GUI 和工具测试
+  tests/                     规则、设备、接口和工具测试
 baselines/                   独立的手写策略包 generals_baselines
 arena/                       policies / matches / competitions / web：策略接入、执行、赛程评分、界面
 rl/                          训练与评估调度；policy/ 统一特征、actor 和导出包推理
@@ -150,13 +134,13 @@ outputs/                     运行结果与本地历史归档
 doc/README.md                本文，统一文档入口
 ```
 
-依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；Arena 使用内置基础策略时还需安装 baselines，加载神经网络包时由包声明自身推理依赖。env 与 Arena 不导入 RL 训练实现。交互工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则、四种 AI、GUI 不并入优化内核。
+依赖方向是 `baselines → generals`、`arena → generals`、`rl → generals + baselines + arena`；Arena 使用内置基础策略时还需安装 baselines，加载神经网络包时由包声明自身推理依赖。env 与 Arena 不导入 RL 训练实现。控制器工厂仅在创建 AI 时加载 baselines，规则和批量环境不依赖策略实现。CPU/GPU 共用数据协议、`VecEnv` 和冷初始化工具，热路径保留独立实现以便互相校验。参考规则和四种 AI 不并入优化内核。
 
-CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部按官方行动依赖与优先级结算。CPU/CUDA 共用 `backends/rules.h` 中的行动和生命周期逻辑，Python 参考实现独立交叉验证。增量统计及结构增长索引继续保留，周期性全图增长、继承、重置和缓存重建执行必要扫描。
+CPU 每次 native 调用推进一个 tick，ctypes 释放 GIL，OpenMP 静态分配环境并行；每局内部按官方行动依赖与优先级结算。CPU/CUDA/MPS 共用 `backends/rules.h` 中的行动和生命周期逻辑，Python 参考实现独立交叉验证。增量统计及结构增长索引继续保留，周期性全图增长、继承、重置和缓存重建执行必要扫描。
 
 GPU 使用 CUDA 单 tick 内核：棋盘常驻设备张量，统计和增长索引跨调用缓存；默认根据 batch 选择 32×4（B≤2048）、8×16（2048<B<32768）、32×8（B≥32768），组内 leader 执行顺序行动。共享库与 launch 参数持久保存，正常 step 经 CPython 原生桥更新动作指针和当前 stream；宽高/玩家数为编译常量，缓存已占领结构的增长索引、统计和计数，总格点数至少 2000 万时还使用 32 位格点元数据缓存。不发生逐 tick CPU 地图处理或状态上传。
 
-`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。GPU 只有 CUDA 实现，`kernel_backend` 可省略或设为 `"cuda"`。
+`VecEnv.step/synchronize` 在构造时直接绑定后端方法，不增加每步转发层。CUDA 编译器可用 `GENERALS_NVCC` 显式指定，否则优先查当前 Python 环境，再查 PATH。编译结果按源码、工具链及形状/线程配置缓存到用户私有临时目录；首次编译不计入基准。缺少依赖时明确报错。CUDA 的 `kernel_backend` 可省略或设为 `"cuda"`。Apple Silicon 选择 `device="mps"`，`kernel_backend` 可省略或设为 `"metal"`；Metal 保留 16 字节格点记录和字段优先缓存，直接编译同一份 `rules.h`，每 tick 不回退到 CPU。
 
 公开根包为 `make_engine, make_env, VecEnv, MapConfig, Action, ActionKind, Direction, MoveMode, BatchStep`。其他功能从所属子模块导入；旧 `generals_env/generals_cpu/generals_gpu/generals_protocol` 包名已停用。发行包名仍是 `generals-env`，控制台命令可用 `generals` 或 `generals-env`。
 
@@ -212,7 +196,9 @@ with make_env(MapConfig(25, 25, 4), device="cuda", batch_size=10000,
     env.check_errors()
 ```
 
-默认 `mode="vector"`，返回 `VecEnv`。实时入口为 `make_env(MapConfig(players=4), mode="realtime", seed=42).run()`，返回的类型是 `generals.runtime.play.PlaySession`；`watch=True` 启用观战，实时模式使用 CPU 参考引擎。
+Apple Silicon 使用同样的入口，将上例设为 `device="mps"` 并省略 `kernel_backend`。MPS 的批量观察支持相同迷雾、击杀、挂机警告与离场进度字段；浮点离场进度使用 float32，整数/布尔状态逐项精确对齐 CPU。示例和对照基准见 [env/README.md](../env/README.md)。
+
+`make_env` 返回 `VecEnv`，仅支持默认的 `mode="vector"`；实时人类对局由 Arena 管理。
 
 批量后端支持每图最多 4096 格、2–8 玩家，同批次宽、高和人数相同，各自地形/初态可以不同。`VecEnv.from_states(states, device=...)` 导入已有 `GameState`；`VecEnv(initial, width=..., height=..., device=...)` 接受对应 NumPy/Torch 字段字典；`to_states()` 显式导出独立 CPU 状态副本。
 
@@ -264,7 +250,7 @@ mode: 全部留一=0，半兵=1
 
 默认 `auto_reset=False`，自然结束或达到有效 `episode_ticks` 上限后冻结对应环境；0 表示不设时限。开启自动重置后，step 内恢复各环境缓存的初态，**`state` 已是新局，而 `stats/done/moves` 仍描述结束 tick**。需要终止棋盘或终止观测时，关闭自动重置，读取后再 `reset(mask)`。`mask` 为对应设备的 `bool[B]`；显式 reset 恢复初态及初始 RNG，清空所选环境诊断和计数，未选环境不变。
 
-`env.surrender(player_id, mask=None)` 在选定环境的当前边界执行指定座位的弃权，不推进 tick、不自动重置。CPU/CUDA 均支持；CUDA 生命周期数组在设备上更新。tick 0 的离场和后续 50 tick 宽限期由正常 `step` 处理。批量同一边界多次调用有明确调用顺序，已终局 lane 不再接收新离场。
+`env.surrender(player_id, mask=None)` 在选定环境的当前边界执行指定座位的弃权，不推进 tick、不自动重置。CPU/CUDA/MPS 均支持；GPU 生命周期数组在设备上更新。tick 0 的离场和后续 50 tick 宽限期由正常 `step` 处理。批量同一边界多次调用有明确调用顺序，已终局 lane 不再接收新离场。
 
 CPU step 同步完成，CUDA 在当前 stream 上异步提交。计时使用 `synchronize()` 等待完成；`check_errors()` 检查协议错误字段并可能同步，不由 `synchronize()` 代替。CPU 数值错误冻结受影响环境，失败 tick 不保证完整，检查后显式重置；GPU 不再提供溢出检查或相应冻结保证。实例的 step/reset 串行调用；跨 CUDA stream 使用时调用方负责建立依赖。
 
@@ -279,7 +265,7 @@ CPU/GPU 的统一批量接口为 `env.observe(player_ids)`；反复读取固定�
 
 返回字典包含局部棋盘 `state`、`visible[B,N]`、`stats[B,P,3]`、`player_ids[B]`、自身 `general_pos[B]`、`active[B]` 及尺寸信息。`state` 中四种棋盘字段为 `[B,N]`，并含 `alive/tick/terminated/winner_id`、`fog_obstacles[B,N]` 和 `has_kill/warn_afk/neutralize_in[B,P]`。`neutralize_in` 为离场宽限期已完成比例 0–1，未处于宽限期为 −1。数组与后端状态、observer 的席位绑定相互独立，可保存；这里不构造神经网络特征或动作掩码。
 
-单局参考接口位于 `generals.core.observation`：`observe`、`snapshot`、`legal_action_mask` 返回独立观测/掩码。GPU 专用的 `env.unwrapped.observe(player_id=0, mode="local")` 保留 `[B,H,W]` 棋盘接口，`env.unwrapped.legal_action_mask(player_id=0)` 返回 `[B,N,4,2]` 移动掩码及 `[B]` WAIT 掩码。0/1 兵来源不可行动；预期打不赢仍可移动，未知障碍也不能直接当作确定的山封锁。CPU、CUDA、原生 C++ 策略、RL、桌面和浏览器读取同一公开信息边界。
+单局参考接口位于 `generals.core.observation`：`observe`、`snapshot`、`legal_action_mask` 返回独立观测/掩码。GPU 专用的 `env.unwrapped.observe(player_id=0, mode="local")` 保留 `[B,H,W]` 棋盘接口，`env.unwrapped.legal_action_mask(player_id=0)` 返回 `[B,N,4,2]` 移动掩码及 `[B]` WAIT 掩码。0/1 兵来源不可行动；预期打不赢仍可移动，未知障碍也不能直接当作确定的山封锁。CPU、CUDA、原生 C++ 策略、RL 和浏览器读取同一公开信息边界。
 
 路径工具在 `generals.core.pathfinding`：`neighbors`、`single_source_distances`、`shortest_path`、`DistanceCache`、`prepare_map`、`all_pairs_distances`。距离为四邻接非山脉图上的边数，不包含留兵、攻城或动态威胁；不可达距离为 −1，路径为 `None`。全点对距离显式计算为 `int32[N,N]`，默认输出预算 128 MiB，需要约 `4N²` 字节；单源缓存按地形内容、尺寸、未知格策略和来源区分，并限制容量。
 

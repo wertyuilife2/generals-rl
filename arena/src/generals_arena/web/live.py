@@ -43,7 +43,7 @@ class LiveArena:
                 close_game(value['game'])
         self.store.abort_live()
 
-    def create_game(self, human, players=None):
+    def create_game(self, human, players=None, opponents=None):
         if players is not None:
             integer("players", players, 2)
         with self.lock:
@@ -56,7 +56,7 @@ class LiveArena:
             if sum(not value["finished"] for value in self.games.values()) >= 16:
                 raise ValueError("too many active human games; try again later")
             job = {"id": uuid.uuid4().hex, "entrant_id": human, "done": 0, "budget": 1}
-            plans = eligible_schedule(self.store, job, human=True, players=players)
+            plans = eligible_schedule(self.store, job, human=True, players=players, opponents=opponents)
             if not plans:
                 raise ValueError("register more bots before starting this game")
             plan = plans[0]

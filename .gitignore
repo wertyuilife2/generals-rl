@@ -16,6 +16,12 @@ doc/*
 !doc/h200_scaling.md
 !doc/f03_ablation.md
 !doc/official_rules_alignment.md
+!doc/neko_integration.md
 !doc/assets/
 doc/assets/*
 !doc/assets/f03_ablation/
+
+config/secret/
+
+# Heuristic trial archives stay on neko-dev; keep versioned policy sources here.
+heristic/**/experiments/

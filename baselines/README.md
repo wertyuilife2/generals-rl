@@ -22,16 +22,27 @@ players = make_controllers(["expansion", "defensive"], seed=42)
 
 公共生命周期为 `generals.protocol.controller.Controller`：
 `reset(player_id, seed)`、`act(observation) -> Action`、`on_result(move_result)`。
-策略只接收该玩家可见的观测。人类输入和混合人类/AI 工厂仍在 `generals.controllers`；
-该工厂在需要 AI 时加载本包。
+策略只接收该玩家可见的观测。`generals.controllers` 提供无界面模拟的控制器工厂，
+在创建 AI 时加载本包；人类输入由 Arena 网页界面处理。
 
 四种策略的记忆、候选评估、最近目标选择、BFS、路径生命周期、半兵规则和随机动作评分都在
 `src/generals_baselines/policy.cpp` 中实现；`base.py` 是生命周期与数组绑定，不保留另一套 Python 规划器。
 每个控制器独立持有原生状态，仅接收允许的观测。调试用的 `terrain/owner/army/path` 返回独立快照。
 
-同一控制器提供 `reset_batch(player_ids, seeds)` / `act_batch(observations)` 批接口，支持 2–8 人对局，
-每个 lane 独立持有记忆和 RNG。`native_batch(height, width, players)` 将该批次绑定到 Arena 的原生执行链，
-省去逐 tick 的 Python 控制器调用；标量接口与批接口复用同一个 C++ 策略实现。
+每个控制器都实现通用 `reset_batch(player_ids, seeds)`、`act_batch(raw)`、`on_result_batch(results)` 接口，
+支持 2–8 人。`raw` 直接来自 env 的公开批量观测；策略不接收完整环境状态，也不再自己生成迷雾。
+一次原生调用串行处理所有 lane，每局的规划记忆和随机流独立，返回借用的 `[B] int64` 动作数组。
+Arena 按与其他策略相同的能力检测、缓存和回执路径执行，无 baseline 专用批执行分支。
+
+```python
+policy = create_controller("aggressive")
+policy.reset_batch([0, 1], [42, 43])  # 最终席位种子，不再次派生
+actions = policy.act_batch(env.observe([0, 1]))
+```
+
+需要回执时，`on_result_batch` 接收本组席位的 `moves[B,9]`、`actions[B]`、`active[B]` 和 `player_ids[B]`。
+`batch_device="cpu"` 声明原始数组在 CPU 上，Arena 会整批转换；不增加策略线程。
+`requires_move_results=True` 声明对精确移动回执的依赖，线上运行器按此能力拒绝不兼容接入。
 
 C++ 在持有 NumPy BitGenerator 锁时直接调用其原生随机函数，保持原有种子派生、洗牌和抽样顺序，
 不预取随机数，不跨席位共享随机流。优化前后的完整动作与逐 tick 状态通过黄金轨迹及 1000 局对照校验。

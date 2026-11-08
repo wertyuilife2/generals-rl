@@ -82,6 +82,44 @@ def test_settings_use_one_based_updates_and_only_configure_evaluation_execution(
     assert TrainingEvalConfig(device='cuda').worker_timeout_seconds == 1800
 
 
+def test_default_evaluation_uses_native_cpu_environment_and_independent_model_device():
+    from importlib.resources import files
+    config = json.loads(files('generals_rl').joinpath('default.json').read_text())
+    settings = TrainingEvalConfig(**config['evaluation'])
+    assert settings.backend == 'cpu' and settings.device == 'cuda:0'
+
+
+def test_legacy_gpu_evaluation_keeps_inference_device_and_explicit_profile():
+    profile = {'explicit': 'unchanged'}
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        settings = TrainingEvalConfig(backend='gpu', device='cuda:3', profile=profile, batch_size=256)
+    assert asdict(settings)['backend'] == 'cpu'
+    assert settings.device == 'cuda:3' and settings.batch_size == 256
+    assert settings.profile == profile and settings.synchronous
+
+
+def test_resume_legacy_gpu_starts_new_scores_and_preserves_original_index(evaluator, tmp_path):
+    job = enqueue(evaluator, 2)
+    complete(evaluator, job, elo=800)
+    index = evaluator.directory / 'index.json'
+    old = json.loads(index.read_text())
+    old['deployment'].update(backend='gpu', device='cuda:0')
+    old['profile_id'] = 'retired-executor-profile'
+    index.write_text(json.dumps(old))
+    original = index.read_bytes()
+    with pytest.warns(FutureWarning, match='legacy GPU reports remain unchanged'):
+        resumed = PeriodicEvaluator(evaluator.settings, small_config(), tmp_path / 'new', None,
+                                    resume=job['checkpoint'], resume_updates=2)
+    assert not resumed.jobs and not resumed.pending and resumed.best_completed is None
+    assert index.read_bytes() == original
+    migrated = json.loads((resumed.directory / 'index.json').read_text())
+    assert migrated['deployment']['backend'] == 'cpu' and migrated['best'] is None
+    assert migrated['migration']['source_index_sha256'] == sha256(original).hexdigest()
+    assert migrated['migration']['source_profile_id'] == 'retired-executor-profile'
+    reloaded = PeriodicEvaluator(evaluator.settings, small_config(), tmp_path / 'new', None)
+    assert reloaded.migration == resumed.migration
+
+
 @pytest.mark.parametrize('values', [
     {'enabled': 'yes'}, {'every_n_updates': 0}, {'maps_per_opponent': True}, {'batch_size': -1},
     {'max_ticks': 0}, {'seed': -1}, {'cpu_threads': 0}, {'final_top_k': -1},
@@ -494,6 +532,7 @@ def test_real_cpu_training_runs_joint_confirmation_and_resumes(tmp_path):
     restored.close()
 
 
+@pytest.mark.skipif(not Path('/proc/self/stat').exists(), reason='process-tree liveness assertion requires Linux /proc')
 def test_worker_group_cleanup_kills_surviving_child(tmp_path):
     ready = tmp_path / 'child_pid'
     child = ("import os,signal,sys,time;from pathlib import Path;"

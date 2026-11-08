@@ -44,7 +44,11 @@ def harness(tmp_path):
         value.killpg = stack.enter_context(patch('generals_rl.training_evaluation.os.killpg'))
 
         def make(name='run', **kwargs):
-            settings = TrainingEvalConfig(every_n_updates=1, final_top_k=0, **kwargs)
+            from generals_arena.competitions.evaluation import make_profile
+            # These tests mock worker creation; keep opponent compilation outside
+            # that mock and exercise the explicit fixed-profile path.
+            settings = TrainingEvalConfig(every_n_updates=1, final_top_k=0,
+                profile=make_profile({'width': 9, 'height': 9, 'players': 2}), **kwargs)
             config = {'task': {'width': 9, 'height': 9, 'players': 2}}
             return PeriodicEvaluator(settings, config, tmp_path / name, Mock())
 
