@@ -23,7 +23,8 @@ MODES = ('early_shared', 'post_attention')
 @pytest.mark.parametrize('mode', MODES)
 @pytest.mark.parametrize('patch_size', (1, 3))
 @pytest.mark.parametrize('privileged', (False, True))
-def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, privileged):
+@pytest.mark.parametrize('batched', (False, True))
+def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, privileged, batched):
     torch.set_num_threads(1)
     obs = observations()
     torch.manual_seed(91)
@@ -36,7 +37,7 @@ def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, pr
     from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
     model_options = deepcopy(configuration(True, privileged)['runner']['policy'])
     model_options.pop('class_name')
-    model_options.update(critic_fusion=mode, patch_size=patch_size)
+    model_options.update(critic_fusion=mode, patch_size=patch_size, batch_shared_forward=batched)
     model = ScaledInformationSpatialPPOPolicy(obs, options, 4233, **model_options)
     for key, value in original.actor.state_dict().items():
         torch.testing.assert_close(model.actor.state_dict()[key], value, rtol=0, atol=0)
@@ -50,10 +51,10 @@ def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, pr
         lambda *_: calls.append('shared'))
     probabilities, values = model.action_probabilities_and_value(obs)
     hook.remove()
-    assert len(calls) == (2 if mode == 'early_shared' else 1)
-    torch.testing.assert_close(probabilities, original.action_probabilities(obs), rtol=0, atol=0)
-    torch.testing.assert_close(probabilities, model.action_probabilities(obs), rtol=0, atol=0)
-    torch.testing.assert_close(values, model.evaluate(obs), rtol=0, atol=0)
+    assert len(calls) == (2 if mode == 'early_shared' and privileged and not batched else 1)
+    torch.testing.assert_close(probabilities, original.action_probabilities(obs), rtol=2e-5, atol=2e-7)
+    torch.testing.assert_close(probabilities, model.action_probabilities(obs), rtol=2e-5, atol=2e-7)
+    torch.testing.assert_close(values, model.evaluate(obs), rtol=2e-5, atol=2e-7)
 
     changed = obs.clone()
     changed['critic'] = torch.randn(len(obs), 11 * 529 + 13)
@@ -61,7 +62,7 @@ def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, pr
     torch.testing.assert_close(changed_probabilities, probabilities, rtol=0, atol=0)
     assert torch.equal(changed_values, values) != privileged
     torch.testing.assert_close(model.action_probabilities(obs.exclude('critic', 'single_obs')),
-                               probabilities, rtol=0, atol=0)
+                               probabilities, rtol=2e-5, atol=2e-7)
 
     model.zero_grad(set_to_none=True)
     model.action_probabilities(obs)[:, 0].log().mean().backward()
@@ -77,6 +78,42 @@ def test_actor_capacity_private_routing_and_shared_gradient(mode, patch_size, pr
         assert len(model.critic.blocks) == 2
         assert model.critic.blocks[0].attn.qkv.weight.grad.abs().sum() > 0
     assert all(p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters())
+
+
+@pytest.mark.parametrize('device', ('cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA required'))))
+@pytest.mark.parametrize('patch_size,masked', ((1, True), (3, True), (3, False)))
+@pytest.mark.parametrize('privileged', (False, True))
+@pytest.mark.parametrize('batched', (False, True))
+def test_joint_shared_matches_separate_outputs_and_gradients(device, patch_size, masked, privileged, batched):
+    torch.set_num_threads(1)
+    torch.manual_seed(91)
+    obs = observations(device)
+    config = configuration(True, privileged, device)
+    options = deepcopy(config['runner']['policy'])
+    options.pop('class_name')
+    options.update(critic_fusion='early_shared', patch_size=patch_size,
+                   mask_padding_tokens=masked, batch_shared_forward=batched)
+    if not privileged:
+        obs = obs.exclude('critic')
+    from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
+    model = ScaledInformationSpatialPPOPolicy(obs, config['runner']['obs_groups'], 4233, **options).to(device)
+    outputs, gradients = [], []
+    for joint in (False, True):
+        model.zero_grad(set_to_none=True)
+        logits, value = (model._forward(obs, joint=True) if joint else
+                         (model._forward(obs), model._forward(obs, critic=True)))
+        logits = logits[obs['action_mask']]
+        (logits.square().mean() + value.square().mean()).backward()
+        outputs.append((logits.detach(), value.detach()))
+        gradients.append({k: p.grad.clone() for k, p in model.named_parameters() if p.grad is not None})
+    rtol, atol = (.03, .003) if device == 'cuda' else (2e-5, 2e-7)
+    for actual, expected in zip(outputs[1], outputs[0], strict=True):
+        torch.testing.assert_close(actual, expected, rtol=rtol, atol=atol)
+    assert gradients[0].keys() == gradients[1].keys()
+    rtol, atol = (.06, 2e-4) if device == 'cuda' else (2e-5, 2e-7)
+    for name in gradients[0]:
+        torch.testing.assert_close(gradients[1][name], gradients[0][name], rtol=rtol, atol=atol, msg=name)
 
 
 @pytest.mark.parametrize('mode', MODES)
@@ -109,6 +146,7 @@ def test_cpu_ppo_checkpoint_resume_and_actor_export(tmp_path, mode, historical):
     torch.set_num_threads(1)
     config = configuration(True, True)
     config['runner']['policy']['critic_fusion'] = mode
+    config['runner']['policy']['batch_shared_forward'] = True
     if historical:
         config['task'].update(opponent='self_play', train_both_sides=False)
         config['self_play'].update(pool_size=2, snapshot_interval=1, retain_seed=False)
@@ -124,6 +162,7 @@ def test_cpu_ppo_checkpoint_resume_and_actor_export(tmp_path, mode, historical):
     bundle = export_policy(checkpoint, tmp_path/'bundle')
     spec = json.loads((bundle/'model_config.json').read_text())
     assert 'critic_fusion' not in spec['network']
+    assert 'batch_shared_forward' not in spec['network']
     assert spec['network']['vit_config'] == [128, 4, 4]
     actor = build_actor(spec['network'], spec['features'])
     actor.load_state_dict(torch.load(bundle/'actor.pt', weights_only=True)['actor_state_dict'])
@@ -155,7 +194,7 @@ def test_cuda_packed_fusion_matches_dense_outputs_and_gradients(mode, patch_size
     torch.set_num_threads(1)
     torch.manual_seed(91)
     obs = observations('cuda')
-    model = policy(obs, critic_fusion=mode, patch_size=patch_size, amp_bfloat16=True)
+    model = policy(obs, critic_fusion=mode, patch_size=patch_size, amp_bfloat16=True, batch_shared_forward=True)
     outputs, gradients = [], []
     for reference in (True, False):
         model.zero_grad(set_to_none=True)
@@ -176,13 +215,13 @@ def test_cuda_packed_fusion_matches_dense_outputs_and_gradients(mode, patch_size
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
-@pytest.mark.parametrize('mode', MODES)
+@pytest.mark.parametrize('mode,batched', (('early_shared', False), ('early_shared', True), ('post_attention', False)))
 @pytest.mark.parametrize('patch_size', (1, 3))
-def test_cuda_compiled_fusion_forward_backward(mode, patch_size):
+def test_cuda_compiled_fusion_forward_backward(mode, patch_size, batched):
     torch.set_num_threads(1)
     torch.manual_seed(91)
     obs = observations('cuda')
-    model = policy(obs, critic_fusion=mode, patch_size=patch_size, amp_bfloat16=True)
+    model = policy(obs, critic_fusion=mode, patch_size=patch_size, amp_bfloat16=True, batch_shared_forward=batched)
     expected = tuple(x.detach() for x in model._forward(obs, joint=True))
     model.compile_forward = True
     actual = model._forward(obs, joint=True)

@@ -84,6 +84,20 @@ def token_blocks(blocks, x, tokens, maximum):
     return x
 
 
+def paired_token_blocks(blocks, actor, critic, tokens, maximum):
+    """Batch two shared-weight passes, keeping every attention sequence separate."""
+    paired = None
+    if tokens is not None:
+        valid, _, offsets = tokens
+        if actor.ndim == 2:
+            # Concatenating packed tokens needs 2B sequence boundaries, not
+            # longer sequences that would expose privileged tokens to actor.
+            paired = (None, None, torch.cat((offsets, offsets[1:] + offsets[-1])))
+        else:
+            paired = (torch.cat((valid, valid)), None, None)
+    return token_blocks(blocks, torch.cat((actor, critic)), paired, maximum).chunk(2, dim=0)
+
+
 def spatial_features(x, shape, tokens):
     height, width = shape
     if x.ndim == 2:

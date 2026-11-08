@@ -13,7 +13,7 @@ from torch.nn import functional as F
 from .spatial_ppo import SpatialPPOPolicy
 from .policy.layout import ObservationLayout
 from .policy.scaled import _ScaledInformationActor, _ViTBackbone, RESNET_TOTAL_PRESETS, vit_configuration
-from .policy.tokens import (pack_tokens, patch_mask, prepare_tokens, spatial_features,
+from .policy.tokens import (pack_tokens, paired_token_blocks, patch_mask, prepare_tokens, spatial_features,
                             token_blocks, valid_mean, valid_token_features)
 
 
@@ -71,8 +71,7 @@ class _AttentionInformationCritic(nn.Module):
         self.fusion_norm = nn.LayerNorm(2 * width, eps=1e-6) if privileged and self.blocks is not None else None
         self.fusion = nn.Linear(2 * width, width) if self.fusion_norm is not None else None
 
-    def forward(self, local, public, privileged, valid_cells, tokens, transformer):
-        statistics = [public]
+    def embed(self, local, privileged, valid_cells, tokens):
         if self.privileged_embedding is not None:
             maps = self.layout.privileged_maps(privileged)
             if tokens is not None:
@@ -82,22 +81,32 @@ class _AttentionInformationCritic(nn.Module):
             extra = pack_tokens(self.privileged_embedding(maps).flatten(2).transpose(1, 2), tokens)
             local = (local + extra if self.fusion is None else
                      local + self.fusion(self.fusion_norm(torch.cat((local, extra), -1))))
-            statistics.append(privileged[:, -self.layout.public_dim:])
-        blocks = transformer.blocks if self.blocks is None else self.blocks
+        return local
+
+    def decode(self, x, public, privileged, tokens, transformer):
         norm = transformer.norm if self.norm is None else self.norm
-        x = token_blocks(blocks, local, tokens, self.grid_shape[0] * self.grid_shape[1])
         spatial = F.silu(self.projection(spatial_features(norm(x), self.grid_shape, tokens)))
         pooled = valid_mean(spatial, tokens[0]) if tokens is not None else spatial.mean((-2, -1))
+        statistics = [public]
+        if self.privileged_embedding is not None:
+            statistics.append(privileged[:, -self.layout.public_dim:])
         context = self.context(torch.cat((pooled, *statistics), -1))
         return self.value_head(torch.cat((pooled, context), -1))
 
+    def forward(self, local, public, privileged, valid_cells, tokens, transformer):
+        local = self.embed(local, privileged, valid_cells, tokens)
+        blocks = transformer.blocks if self.blocks is None else self.blocks
+        x = token_blocks(blocks, local, tokens, self.grid_shape[0] * self.grid_shape[1])
+        return self.decode(x, public, privileged, tokens, transformer)
+
 
 @lru_cache(maxsize=32)
-def _compiled_numeric_forward(mode, shared, privileged, fusion, max_autotune=False):
+def _compiled_numeric_forward(mode, shared, privileged, fusion, max_autotune=False, batch_shared=False):
     # Separate frame caches keep the three forward modes and architecture
     # choices from consuming one Dynamo frame's shape-recompilation budget.
     original = ScaledInformationSpatialPPOPolicy._numeric_forward
-    name = f"scaled_{mode}_shared{int(shared)}_priv{int(privileged)}_{fusion}_maxauto{int(max_autotune)}"
+    name = (f"scaled_{mode}_shared{int(shared)}_priv{int(privileged)}_{fusion}"
+            f"_maxauto{int(max_autotune)}_batched{int(batch_shared)}")
     forward = FunctionType(original.__code__.replace(co_name=name), original.__globals__, name,
                            original.__defaults__, original.__closure__)
     options = {"triton.cudagraphs": False, "freezing": False}
@@ -136,7 +145,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                  actor_obs_normalization=False, critic_obs_normalization=False,
                  wait_move_factorization=True, inference_chunk_size=128, amp_bfloat16=False,
                  compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1,
-                 critic_fusion="late", critic_attention_layers=2):
+                 critic_fusion="late", critic_attention_layers=2, batch_shared_forward=False):
         nn.Module.__init__(self)
         if backbone not in ("resnet", "vit"):
             raise ValueError("backbone must be resnet or vit")
@@ -163,7 +172,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             raise ValueError("scaled policy uses categorical actions and unnormalized explicit features")
         for name, value in (("share_backbone", share_backbone), ("critic_privileged", critic_privileged),
                             ("own_king_geometry", own_king_geometry), ("wait_move_factorization", wait_move_factorization),
-                            ("amp_bfloat16", amp_bfloat16), ("compile_forward", compile_forward)):
+                            ("amp_bfloat16", amp_bfloat16), ("compile_forward", compile_forward),
+                            ("batch_shared_forward", batch_shared_forward)):
             if type(value) is not bool:
                 raise TypeError(f"{name} must be boolean")
         if not own_king_geometry or not wait_move_factorization:
@@ -190,6 +200,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.input_channel_alignment = input_channel_alignment
         self.history_length, self.head_channels = history_length, head_channels
         self.critic_fusion = critic_fusion
+        self.batch_shared_forward = batch_shared_forward
         vit_config = vit_configuration(self.model_size, share_backbone) if backbone == "vit" else None
         self.actor = _ScaledInformationActor(self.layout, backbone, self.model_size, input_channel_alignment,
                                              head_channels, spatial_mode, mask_padding_tokens, patch_size, vit_config)
@@ -243,6 +254,18 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             transformer = encoder.backbone.transformer
             local = encoder.embed(history, knowledge, valid_cells, tokens)
             public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+            if (mode == "joint" and self.critic_fusion == "early_shared"
+                    and (self.batch_shared_forward or not self.critic_privileged)):
+                maximum = self.critic.grid_shape[0] * self.critic.grid_shape[1]
+                if self.critic_privileged:
+                    value_input = self.critic.embed(local, privileged, valid_cells, tokens)
+                    shared, value_features = paired_token_blocks(
+                        transformer.blocks, local, value_input, tokens, maximum)
+                else:
+                    shared = value_features = token_blocks(transformer.blocks, local, tokens, maximum)
+                logits = self.actor.decode(encoder.project_tokens(shared, tokens), public)
+                values = self.critic.decode(value_features, public, privileged, tokens, transformer)
+                return logits, values
             if mode == "joint" or self.critic_fusion == "post_attention":
                 shape = self.critic.grid_shape
                 shared = token_blocks(transformer.blocks, local, tokens, shape[0] * shape[1])
@@ -283,7 +306,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         args = (history, knowledge, valid, privileged, tokens, mode)
         if compile_network:
             return _compiled_numeric_forward(mode, self.share_backbone, self.critic_privileged,
-                                              self.critic_fusion, max_autotune)(self, *args)
+                                              self.critic_fusion, max_autotune, self.batch_shared_forward)(self, *args)
         return self._numeric_forward(*args)
 
     def _network_forward(self, part, mode):

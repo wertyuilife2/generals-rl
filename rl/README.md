@@ -105,6 +105,8 @@ Dense ViT 默认开启 `runner.policy.mask_padding_tokens=true`：Actor／Critic
 
 PPO采样和共享模式更新使用联合前向，不缓存上一次Actor计算图。独立模式保留分开反向的显存优化，共享主干只在`actor.encoder`注册一次，Critic复用其特征；所有参数只更新一次。导出只包含Actor的encoder及策略头；模型配置的`network.vit_config`记录实际`[width, depth, heads]`，训练用的两个开关不进入Arena模型推理配置。新结构需要重新训练；历史checkpoint使用各自固定源码续训。模型语义标识为`official_p2_hist4_local13_priv11_encoder_v1`，后缀记录共享、特权、patch等设置。
 
+`early_shared`在无特权时自动复用一次Transformer输出。有特权时可设置`runner.policy.batch_shared_forward=true`，沿batch维合并Actor/Critic的主干计算，同时保持各局、各分支的attention序列隔离；rollout和PPO更新均生效，参数与checkpoint格式不变。此选项默认关闭：大batch下不一定加速，需按训练设备实测；[性能与等价性验证](../doc/shared_forward_optimization_20261108.md)。
+
 以下为共享改造前的历史对照（2026-11-04，RTX 4090、PyTorch 2.13.0+cu130），不代表当前默认架构：官方随机地图填充至 23×23，ViT1M、N128/T8、E4、逻辑 minibatch256／物理128，当前模型自对弈，BF16＋编译。完整 PPO 先预热3轮、测量5轮，包含采样、GAE和更新，排除评估、checkpoint／日志I/O及另跑的profile。网络分项固定同一批观察，预热后取9组中位数。
 
 | 实现 | Actor 推理 ms/批 | Critic 前向 ms/批 | Actor＋Critic 前向反向 ms/批 | 完整 PPO transitions/s |
