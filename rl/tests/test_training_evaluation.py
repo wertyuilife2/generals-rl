@@ -58,7 +58,8 @@ def report_for(job, elo=100):
             'elo': elo, 'elo_ci': {'lower': elo - 20, 'upper': elo + 20, 'half_width': 20},
             'games': job['expected_games'], 'expected_games': job['expected_games'], 'errors': [],
             'device': job['device'], 'backend': job['backend'],
-            'by_opponent': {name: {'games': per_opponent} for name in opponents},
+            'by_opponent': {name: {'games': per_opponent, 'wins': 0, 'losses': 0,
+                                   'draws': per_opponent} for name in opponents},
             'results': [{'game_id': f'{name}-{index}', 'opponent': name}
                         for name in opponents for index in range(per_opponent)]}
 
@@ -296,7 +297,7 @@ def test_top_k_confirmation_is_one_joint_job_and_changes_best(tmp_path):
     final = evaluator.confirmation
     assert set(final['policies']) == {f'{2:064x}', f'{4:064x}'}
     assert final['profile_id'] != evaluator.profile_id
-    assert final['expected_games'] == 44  # 2*5 reference pairs + one finalist pair, 2 maps*2 seats.
+    assert final['expected_games'] == 68  # 2*8 reference pairs + one finalist pair, 2 maps*2 seats.
     assert evaluator.best_completed['completed_ppo_updates'] == 2
     assert evaluator.best_completed['stage'] == 'confirmation'
     assert evaluator.best_completed['report'] == final['report']
@@ -353,8 +354,32 @@ def test_real_training_evaluates_periodic_and_final_and_preserves_rng_and_optimi
         assert_nested_equal(unittest.TestCase(), actual[key], expected[key])
     events = EventAccumulator(str(tmp_path / 'enabled')).Reload()
     assert [point.step for point in events.Scalars('Arena/elo')] == [2, 3]
+    for name in ('aggressive', 'expansion', 'defensive', 'random', 'kestrel-v7', 'razor-v8', 'aegis-v2', 'WAIT'):
+        assert [p.step for p in events.Scalars(f'Arena/win_rate/{name}')] == [2, 3]
+    for metric in ('baseline4_mean_win_rate', 'heuristic3_mean_win_rate', 'mean_win_rate'):
+        assert [p.step for p in events.Scalars(f'Arena/{metric}')] == [2, 3]
+    assert all(job['expected_games'] == 16 for job in jobs)
+    assert len(list((tmp_path / 'enabled/evaluations/opponents').glob('*.zip'))) == 3
     best = json.loads((tmp_path / 'enabled/best_model.json').read_text())
     assert Path(best['bundle']).is_dir() and Path(best['checkpoint']).is_file()
+
+
+def test_outcome_metrics_keep_original_baselines_and_exclude_wait(evaluator):
+    from generals_arena.policies.references import BASELINE_NAMES, HEURISTIC_NAMES
+    logged = {}
+    evaluator.writer = SimpleNamespace(add_scalar=lambda tag, value, step: logged.update({tag: value}))
+    report = {'by_opponent': {
+        **{name: dict(games=10, wins=5, draws=2) for name in BASELINE_NAMES},
+        **{name: dict(games=10, wins=0, draws=4) for name in HEURISTIC_NAMES},
+        'WAIT': dict(games=10, wins=10, draws=0)},
+        'results': [dict(opponent='aegis-v2', candidate_seat=0,
+                         decision_timing=[dict(seat=1, timeouts=1)])]}
+    evaluator._log_outcomes(report, 'Arena', 1)
+    assert logged['Arena/baseline4_mean_win_rate'] == .5
+    assert logged['Arena/heuristic3_mean_win_rate'] == 0
+    assert logged['Arena/mean_win_rate'] == pytest.approx(2 / 7)
+    assert logged['Arena/win_rate/WAIT'] == 1
+    assert logged['Arena/timeouts/aegis-v2'] == 1
 
 
 def test_resume_into_new_output_recovers_pending_job_and_keeps_optimizer(tmp_path):
@@ -459,7 +484,7 @@ def test_real_cpu_training_runs_joint_confirmation_and_resumes(tmp_path):
     index = json.loads((output/'evaluations/index.json').read_text())
     report = json.loads(Path(index['confirmation']['report']).read_text())
     assert index['confirmation']['status'] == 'completed'
-    assert len(report['candidates']) == 2 and report['games'] == 44
+    assert len(report['candidates']) == 2 and report['games'] == 68
     a, b = [row['entrant_id'] for row in report['candidates']]
     assert report['win_matrix'][a][b]['games'] == 4
     assert json.loads((output/'best_model.json').read_text())['confirmation_complete']

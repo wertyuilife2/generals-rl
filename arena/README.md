@@ -277,6 +277,10 @@ python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 这条原生执行链选取自 `origin/neko-dev` 的 `f85e36dbda15da7c473682d7332c5d0f44b2f93d`：
 包含 CPU 增量观测、原生 ABI／执行循环、批 worker、紧凑录像、控制器／地图缓存与文件摘要缓存。
 本地保留 `execution="isolated"` 的单局路由，并适配原有网页调用；RL 的训练间隙评估同步逻辑保留。
+默认训练面板使用原四基线加 Kestrel v7、Razor v8、Aegis v2，源码与参数来源及 SHA-256 记录在
+[`policies/reference_sources/provenance.json`](src/generals_arena/policies/reference_sources/provenance.json)。
+Aegis v2 对应上游 `heristic/gpt-6-aegis-v1` 根目录的最新源码，目录名不代表版本号。
+`training_opponents(directory)` 编译并冻结该面板；固定版本不随远端更新自动变化，详见 [RL 评估配置](../rl/README.md#模型导出与-arena-评估)。
 
 
 ## 历史结果

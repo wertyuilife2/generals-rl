@@ -222,11 +222,13 @@ Arena 仅解析通用 manifest；features/history/knowledge/mask、网络和动�
 
 ```python
 import json
+from pathlib import Path
 from generals import MapConfig
 from generals_arena.competitions.evaluation import make_profile
-profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2000)
-# 可配置其他 package / baseline 对手；1v1 自动加入 WAIT 对照。
-# 独立 C++ 策略包使用原生 CPU 批执行，可与 CUDA NN 混合评估。
+from generals_arena.policies.references import training_opponents
+profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2000,
+                       opponents=training_opponents(Path("outputs/eval/opponents")))
+# 原四基线 + Kestrel v7 / Razor v8 / Aegis v2；1v1 自动加入 WAIT 对照。
 with open("profile.json", "w") as f:
     json.dump(profile, f)
 ```
@@ -236,7 +238,9 @@ python -m generals_arena evaluate --bundle outputs/models/nova-224 --profile pro
   --output outputs/eval/nova.json --backend cpu --device cuda:0 --batch-size 128
 ```
 
-默认 `evaluation.profile=null`，根据当前任务生成官方随机 1v1 地图、四个 baseline 和 WAIT 面板。周期评估默认每对手 100 张地图、交换座位，共 1000 局。可通过 `evaluation.profile` 指定外部校准配置文件；更换规则后必须重新校准参考分数，旧 F03 9×9 的分数不沿用。新规则的校准留待后续实验。
+默认 `evaluation.profile=null`，根据当前任务生成地图面板，对手为原四基线 `aggressive / expansion / defensive / random`，以及各启发式系列的最新版本 `kestrel-v7 / razor-v8 / aegis-v2`。1v1 另加 WAIT 诊断与评分锚点。周期评估默认每对手 100 张地图、交换座位，共 1600 局（七个正式对手 1400 局）。三份启发式源码与参数随 Arena 安装，编译包冻结在每个 run 的 `evaluations/opponents/`，训练中不追踪远端新版本。
+
+TensorBoard 记录 `Arena/win_rate/<对手>`、`draw_rate/<对手>`、`games/<对手>`、`timeouts/<对手>`，以及 `baseline4_mean_win_rate`、`heuristic3_mean_win_rate`、`mean_win_rate`；总均值排除 WAIT，旧四基线均值可继续对比原曲线。超时指标统计对手席位的原生决策超时。显式 `evaluation.profile` 仍可覆盖默认面板；更换面板或执行源码后应新建 run，已有 run 使用其冻结源码与 profile，不能拼接新旧 Elo。旧 F03 9×9 的分数不沿用。
 
 1v1 采用 `gor-batch-fit-v1`：使用现有 GoR 胜率函数，对整批胜平负联合拟合，计分不依赖结果顺序。每个实际交手的策略对加入一局虚拟平局，避免全胜／全负导致无穷估计；换座对局各计半份信息。未校准面板固定 WAIT 原始分为 0；显式校准后可固定参考分数，只估计候选。公开联赛的逐局 GoR 更新及 FFA 的 Codeforces 评分仍独立，不能与训练面板分数直接混用。
 
@@ -248,7 +252,7 @@ RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续
 `--record-replays` 保存可由 Arena 逐 tick 验证的录像；
 `generals-arena evaluate` 是接受 bundle/profile 的 CLI。纯 env.step 性能指标与含决策的批评估 wall throughput 分开报告。
 
-评估默认 `backend=cpu, device=cuda:0, batch_size=128`：原生 CPU 批量链推进环境，NN 在 CUDA 上批推理。训练自身仍使用 GPU 环境。评估与训练卡共用 `cuda:0` 时在 PPO 更新间同步运行；CPU 推理或显式独立单卡评估可异步。
+评估默认 `backend=cpu, device=cuda:0, batch_size=128`：原生 CPU 批量链推进环境与 C++ 对手，NN 在 CUDA 上批推理，适用于启发式、RL 混合对局。训练自身仍使用 GPU 环境。评估默认与训练卡共用 `cuda:0`，在 PPO 更新间同步运行；CPU 推理或显式独立单卡评估可异步。
 共享 GPU 时，所有 rank 先完成 CUDA 工作、释放空闲缓存并在 CPU 同步，评估结束后一起恢复训练；
 显式设置 `allow_shared_gpus=true` 也遵循这一顺序。rollout 和模型仍驻留显存，容量需容纳它们与评估峰值。
 CUDA 初始化前未显式配置 allocator 时，训练入口默认启用

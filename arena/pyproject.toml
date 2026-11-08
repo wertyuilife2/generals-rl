@@ -20,4 +20,4 @@ where = ["src"]
 include = ["generals_arena*"]
 
 [tool.setuptools.package-data]
-generals_arena = ["web/*.html", "web/*.css", "web/*.js", "policies/*.cpp", "policies/*.h", "policies/sdk/*.h", "policies/sdk/*.cpp", "matches/*.cpp", "matches/*.h"]
+generals_arena = ["web/*.html", "web/*.css", "web/*.js", "policies/*.cpp", "policies/*.h", "policies/sdk/*.h", "policies/sdk/*.cpp", "matches/*.cpp", "matches/*.h", "policies/reference_sources/*/*.cpp", "policies/reference_sources/*/*.h", "policies/reference_sources/*/*.json", "policies/reference_sources/provenance.json"]

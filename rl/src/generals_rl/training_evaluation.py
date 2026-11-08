@@ -181,12 +181,14 @@ class PeriodicEvaluator:
         self.budget_exhausted = False
         self.confirmation = None
         if settings.profile is None:
+            from generals_arena.policies.references import training_opponents
             task = run_config['task']
             map_config = {key: task[key] for key in ('width', 'height', 'players', 'mountain_density', 'city_density') if key in task}
             if task.get('random_maps', True):
                 map_config.update(width=None, height=None)
             self.profile = make_profile(map_config, max_ticks=settings.max_ticks, seed=settings.seed,
-                                        maps_per_opponent=settings.maps_per_opponent)
+                                        maps_per_opponent=settings.maps_per_opponent,
+                                        opponents=training_opponents(self.directory / 'opponents'))
         else:
             from generals_arena.competitions.evaluation import load_profile
             self.profile = load_profile(settings.profile)
@@ -504,12 +506,33 @@ class PeriodicEvaluator:
                 self.writer.add_scalar(f'{prefix}/elo_upper95', interval['upper'], step)
             self.writer.add_scalar(f'{prefix}/games', job['expected_games'], step)
             self.writer.add_scalar(f'{prefix}/worker_seconds', job['worker_seconds'], step)
+            self._log_outcomes(report, prefix, step)
             self.writer.flush()
         if self.on_complete is not None and job['stage'] == 'periodic':
             self.on_complete(self._point(job))
         self._prune_snapshots()
         self._save_index()
         print(f"[arena] updates={job['completed_ppo_updates']} Elo={value:.1f} stage={job['stage']}", flush=True)
+
+    def _log_outcomes(self, report, prefix, step):
+        from generals_arena.policies.references import BASELINE_NAMES, HEURISTIC_NAMES
+        rates = {}
+        for name, row in report['by_opponent'].items():
+            games = row['games']
+            rates[name] = row['wins'] / games
+            for metric, value in (('win_rate', rates[name]), ('draw_rate', row['draws'] / games),
+                                  ('games', games)):
+                self.writer.add_scalar(f'{prefix}/{metric}/{name}', value, step)
+            timeouts = sum(timing.get('timeouts', 0) for game in report['results']
+                           if game.get('opponent') == name for timing in game.get('decision_timing', [])
+                           if timing['seat'] != game.get('candidate_seat'))
+            self.writer.add_scalar(f'{prefix}/timeouts/{name}', timeouts, step)
+        groups = {'baseline4_mean_win_rate': BASELINE_NAMES,
+                  'heuristic3_mean_win_rate': HEURISTIC_NAMES,
+                  'mean_win_rate': tuple(name for name in rates if name != 'WAIT')}
+        for metric, names in groups.items():
+            if names and all(name in rates for name in names):
+                self.writer.add_scalar(f'{prefix}/{metric}', sum(rates[name] for name in names) / len(names), step)
 
     def _point(self, job):
         return {'model_name': job.get('model_name'), **{key: job[key] for key in ('policy_id', 'profile_id', 'completed_ppo_updates', 'iteration',
