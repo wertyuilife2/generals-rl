@@ -13,7 +13,8 @@ from torch.nn import functional as F
 from .spatial_ppo import SpatialPPOPolicy
 from .policy.layout import ObservationLayout
 from .policy.scaled import _ScaledInformationActor, _ViTBackbone, RESNET_TOTAL_PRESETS, vit_configuration
-from .policy.tokens import patch_mask, prepare_tokens, valid_mean, valid_token_features
+from .policy.tokens import (pack_tokens, patch_mask, prepare_tokens, spatial_features,
+                            token_blocks, valid_mean, valid_token_features)
 
 
 class _ScaledInformationCritic(nn.Module):
@@ -47,12 +48,56 @@ class _ScaledInformationCritic(nn.Module):
         return self.value_head(torch.cat((pooled, context), -1))
 
 
+class _AttentionInformationCritic(nn.Module):
+    """Fuse state before shared attention, or before private post-attention."""
+    def __init__(self, layout, local_encoder, mode, privileged, layers):
+        super().__init__()
+        self.layout = layout
+        self.patch_size = local_encoder.patch_size
+        transformer = local_encoder.backbone.transformer
+        width = transformer.embed_dim
+        head_channels = local_encoder.projection.out_channels
+        self.grid_shape = transformer.patch_embed.dynamic_feat_size((layout.height, layout.width))
+        self.projection = deepcopy(local_encoder.projection)
+        # Common heads/embedding have identical initialization across both
+        # fusion variants. Shared modules are registered only under actor.
+        public_inputs = layout.public_dim * (2 if privileged else 1)
+        self.context = nn.Sequential(nn.Linear(head_channels + public_inputs, head_channels), nn.SiLU())
+        self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
+        self.privileged_embedding = (nn.Conv2d(layout.privileged_planes, width, self.patch_size,
+                                              stride=self.patch_size) if privileged else None)
+        self.blocks = deepcopy(transformer.blocks[-layers:]) if mode == "post_attention" else None
+        self.norm = deepcopy(transformer.norm) if self.blocks is not None else None
+        self.fusion_norm = nn.LayerNorm(2 * width, eps=1e-6) if privileged and self.blocks is not None else None
+        self.fusion = nn.Linear(2 * width, width) if self.fusion_norm is not None else None
+
+    def forward(self, local, public, privileged, valid_cells, tokens, transformer):
+        statistics = [public]
+        if self.privileged_embedding is not None:
+            maps = self.layout.privileged_maps(privileged)
+            if tokens is not None:
+                maps = maps.masked_fill(~valid_cells.reshape(-1, 1, self.layout.height, self.layout.width), 0)
+            maps = F.pad(maps, (0, -self.layout.width % self.patch_size,
+                                0, -self.layout.height % self.patch_size))
+            extra = pack_tokens(self.privileged_embedding(maps).flatten(2).transpose(1, 2), tokens)
+            local = (local + extra if self.fusion is None else
+                     local + self.fusion(self.fusion_norm(torch.cat((local, extra), -1))))
+            statistics.append(privileged[:, -self.layout.public_dim:])
+        blocks = transformer.blocks if self.blocks is None else self.blocks
+        norm = transformer.norm if self.norm is None else self.norm
+        x = token_blocks(blocks, local, tokens, self.grid_shape[0] * self.grid_shape[1])
+        spatial = F.silu(self.projection(spatial_features(norm(x), self.grid_shape, tokens)))
+        pooled = valid_mean(spatial, tokens[0]) if tokens is not None else spatial.mean((-2, -1))
+        context = self.context(torch.cat((pooled, *statistics), -1))
+        return self.value_head(torch.cat((pooled, context), -1))
+
+
 @lru_cache(maxsize=32)
-def _compiled_numeric_forward(mode, shared, privileged, max_autotune=False):
+def _compiled_numeric_forward(mode, shared, privileged, fusion, max_autotune=False):
     # Separate frame caches keep the three forward modes and architecture
     # choices from consuming one Dynamo frame's shape-recompilation budget.
     original = ScaledInformationSpatialPPOPolicy._numeric_forward
-    name = f"scaled_{mode}_shared{int(shared)}_priv{int(privileged)}_maxauto{int(max_autotune)}"
+    name = f"scaled_{mode}_shared{int(shared)}_priv{int(privileged)}_{fusion}_maxauto{int(max_autotune)}"
     forward = FunctionType(original.__code__.replace(co_name=name), original.__globals__, name,
                            original.__defaults__, original.__closure__)
     options = {"triton.cudagraphs": False, "freezing": False}
@@ -90,12 +135,18 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                  input_channel_alignment=4, head_channels=128, action_distribution="categorical",
                  actor_obs_normalization=False, critic_obs_normalization=False,
                  wait_move_factorization=True, inference_chunk_size=128, amp_bfloat16=False,
-                 compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1):
+                 compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1,
+                 critic_fusion="late", critic_attention_layers=2):
         nn.Module.__init__(self)
         if backbone not in ("resnet", "vit"):
             raise ValueError("backbone must be resnet or vit")
         if spatial_mode not in ("dense", "pyramid"):
             raise ValueError("spatial_mode must be dense or pyramid")
+        if critic_fusion not in ("late", "early_shared", "post_attention"):
+            raise ValueError("unsupported critic_fusion")
+        if critic_fusion in ("early_shared", "post_attention") and (
+                backbone != "vit" or spatial_mode != "dense" or share_backbone is not True):
+            raise ValueError("attention critic fusion requires a shared dense ViT")
         if mask_padding_tokens is None:
             mask_padding_tokens = backbone == "vit" and spatial_mode == "dense"
         if type(mask_padding_tokens) is not bool or mask_padding_tokens and (backbone != 'vit' or spatial_mode != 'dense'):
@@ -138,18 +189,30 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.mask_padding_tokens, self.patch_size = mask_padding_tokens, patch_size
         self.input_channel_alignment = input_channel_alignment
         self.history_length, self.head_channels = history_length, head_channels
+        self.critic_fusion = critic_fusion
         vit_config = vit_configuration(self.model_size, share_backbone) if backbone == "vit" else None
         self.actor = _ScaledInformationActor(self.layout, backbone, self.model_size, input_channel_alignment,
                                              head_channels, spatial_mode, mask_padding_tokens, patch_size, vit_config)
-        value_encoder = None if share_backbone else deepcopy(self.actor.encoder)
-        self.critic = _ScaledInformationCritic(self.layout, value_encoder, head_channels, patch_size,
-                                               mask_padding_tokens, critic_privileged)
+        if critic_fusion == "late":
+            value_encoder = None if share_backbone else deepcopy(self.actor.encoder)
+            self.critic = _ScaledInformationCritic(self.layout, value_encoder, head_channels, patch_size,
+                                                   mask_padding_tokens, critic_privileged)
+        else:
+            if critic_fusion == "post_attention" and (type(critic_attention_layers) is not int
+                    or not 1 <= critic_attention_layers <= self.actor.encoder.backbone.depth):
+                raise ValueError("critic_attention_layers must be between 1 and ViT depth")
+            self.critic = _AttentionInformationCritic(self.layout, self.actor.encoder, critic_fusion,
+                                                      critic_privileged, critic_attention_layers)
         self.distribution = None
         self.num_actions = self.layout.num_actions
         self.num_actor_obs = self.layout.history_dim + self.layout.knowledge_dim
         self.num_single_obs = self.layout.frame_dim
         self.num_critic_obs = self.num_actor_obs + (self.layout.privileged_dim if critic_privileged else 0)
         self.semantics += f"_{backbone}_{self.model_size}_head{head_channels}_shared{int(share_backbone)}_priv{int(critic_privileged)}"
+        if critic_fusion != "late":
+            self.semantics += f"_fusion_{critic_fusion}_v1"
+            if critic_fusion == "post_attention":
+                self.semantics += f"_layers{critic_attention_layers}"
         if spatial_mode == "pyramid":
             self.semantics += "_spatial_pyramid_v1"
         if mask_padding_tokens:
@@ -175,6 +238,19 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     def _numeric_forward(self, history, knowledge, valid_cells, privileged, tokens, mode):
         if mode == "actor":
             return self.actor(history, knowledge, valid_cells, tokens)
+        if self.critic_fusion != "late":
+            encoder = self.actor.encoder
+            transformer = encoder.backbone.transformer
+            local = encoder.embed(history, knowledge, valid_cells, tokens)
+            public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+            if mode == "joint" or self.critic_fusion == "post_attention":
+                shape = self.critic.grid_shape
+                shared = token_blocks(transformer.blocks, local, tokens, shape[0] * shape[1])
+            if mode == "joint":
+                logits = self.actor.decode(encoder.project_tokens(shared, tokens), public)
+            value_input = local if self.critic_fusion == "early_shared" else transformer.norm(shared)
+            values = self.critic(value_input, public, privileged, valid_cells, tokens, transformer)
+            return (logits, values) if mode == "joint" else values
         encoder = self.actor.encoder if self.share_backbone or mode == "joint" else self.critic.encoder
         encoded = encoder(history, knowledge, valid_cells, tokens)
         public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
@@ -206,7 +282,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         privileged = part["critic"] if mode != "actor" and self.critic_privileged else None
         args = (history, knowledge, valid, privileged, tokens, mode)
         if compile_network:
-            return _compiled_numeric_forward(mode, self.share_backbone, self.critic_privileged, max_autotune)(self, *args)
+            return _compiled_numeric_forward(mode, self.share_backbone, self.critic_privileged,
+                                              self.critic_fusion, max_autotune)(self, *args)
         return self._numeric_forward(*args)
 
     def _network_forward(self, part, mode):

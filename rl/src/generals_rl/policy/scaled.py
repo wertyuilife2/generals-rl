@@ -8,7 +8,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 from .backbones import RESNET_DEPTHS, ResNetBackbone, ViTBackbone
 from .layout import own_king_coordinates
-from .tokens import patch_mask, prepare_tokens, valid_mean, valid_token_features
+from .tokens import embed_tokens, patch_mask, prepare_tokens, spatial_features, valid_mean, valid_token_features
 
 
 RESNET_TOTAL_PRESETS = {
@@ -152,20 +152,35 @@ class _ScaledObservationEncoder(nn.Module):
         if spatial_mode == "pyramid":
             self.local_skip = nn.Conv2d(self.backbone.local_channels, head_channels, 1)
 
-    def forward(self, history, knowledge=None, valid_cells=None, tokens=None):
+    def input_maps(self, history, knowledge, valid_cells):
         layout, count = self.layout, history.shape[0]
         maps = layout.history_maps(history)
-        valid = None
-        if self.mask_padding_tokens:
-            if tokens is None:
-                tokens = prepare_tokens(patch_mask(valid_cells, layout.height, layout.width, self.patch_size))
-            valid = tokens[0]
         parts = [maps, layout.memory_maps(knowledge, count), own_king_coordinates(maps[:, -layout.map_planes:], valid_cells)]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
         inputs = torch.cat(parts, 1)
         if self.mask_padding_tokens and self.patch_size > 1:
             inputs = inputs.masked_fill(~valid_cells.reshape(count, 1, layout.height, layout.width), 0)
+        return inputs
+
+    def embed(self, history, knowledge, valid_cells, tokens):
+        return embed_tokens(self.backbone.transformer, self.input_maps(history, knowledge, valid_cells), tokens)
+
+    def project_tokens(self, x, tokens):
+        transformer = self.backbone.transformer
+        shape = transformer.patch_embed.dynamic_feat_size((self.layout.height, self.layout.width))
+        spatial = F.silu(self.projection(spatial_features(transformer.norm(x), shape, tokens)))
+        pooled = valid_mean(spatial, tokens[0]) if tokens is not None else spatial.mean((-2, -1))
+        return spatial, pooled
+
+    def forward(self, history, knowledge=None, valid_cells=None, tokens=None):
+        layout = self.layout
+        valid = None
+        if self.mask_padding_tokens:
+            if tokens is None:
+                tokens = prepare_tokens(patch_mask(valid_cells, layout.height, layout.width, self.patch_size))
+            valid = tokens[0]
+        inputs = self.input_maps(history, knowledge, valid_cells)
         if self.spatial_mode == "pyramid":
             local, deep = self.backbone.forward_pyramid(inputs)
             coarse = self.projection(deep)

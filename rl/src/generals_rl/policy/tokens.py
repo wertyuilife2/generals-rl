@@ -48,35 +48,59 @@ class _PackedAttention(torch.autograd.Function):
         return *gradients, None, None
 
 
-def valid_token_features(transformer, inputs, valid, tokens):
-    count, _, height, width = inputs.shape
-    height, width = transformer.patch_embed.dynamic_feat_size((height, width))
+def pack_tokens(x, tokens):
+    """Keep aligned local/state embeddings in the same valid-token order."""
+    if tokens is not None and x.is_cuda and (
+            torch.is_autocast_enabled('cuda') or x.dtype in (torch.float16, torch.bfloat16)):
+        return x.flatten(0, 1).index_select(0, tokens[1])
+    return x
+
+
+def embed_tokens(transformer, inputs, tokens):
     x = transformer.patch_embed(inputs)
     # Keep the original canvas position table: resizing it to a smaller board
     # would change position semantics in addition to removing padding.
     x = transformer.norm_pre(transformer.patch_drop(transformer._pos_embed(x)))
-    packed = x.is_cuda and (torch.is_autocast_enabled('cuda') or x.dtype in (torch.float16, torch.bfloat16))
-    if packed:
-        _, indices, offsets = tokens
-        x = x.flatten(0, 1).index_select(0, indices)
-        for block in transformer.blocks:
+    return pack_tokens(x, tokens)
+
+
+def token_blocks(blocks, x, tokens, maximum):
+    """Run a ViT stage with either packed Flash Attention or a dense mask."""
+    if x.ndim == 2:
+        offsets = tokens[2]
+        for block in blocks:
             attention = block.attn
             qkv = attention.qkv(block.norm1(x)).reshape(-1, 3, attention.num_heads, attention.head_dim)
             query, key, value = qkv.unbind(1)
             query, key = attention.q_norm(query), attention.k_norm(key)
-            attended = _PackedAttention.apply(query, key, value, offsets, height * width)
+            attended = _PackedAttention.apply(query, key, value, offsets, maximum)
             attended = attention.norm(attended.reshape(-1, attention.attn_dim))
             x = x + block.ls1(attention.proj(attended))
             x = x + block.ls2(block.mlp(block.norm2(x)))
-        x = transformer.norm(x)
+    else:
+        mask = tokens[0][:, None, None, :] if tokens is not None else None
+        for block in blocks:
+            x = block(x, attn_mask=mask)
+    return x
+
+
+def spatial_features(x, shape, tokens):
+    height, width = shape
+    if x.ndim == 2:
+        valid, indices, _ = tokens
+        count = valid.shape[0]
         x = x.new_zeros(count * height * width, x.shape[-1]).index_copy(0, indices, x)
         x = x.reshape(count, height * width, -1)
     else:
-        mask = valid[:, None, None, :]
-        for block in transformer.blocks:
-            x = block(x, attn_mask=mask)
-        x = transformer.norm(x)
+        count = x.shape[0]
     return x.transpose(1, 2).reshape(count, -1, height, width)
+
+
+def valid_token_features(transformer, inputs, valid, tokens):
+    shape = transformer.patch_embed.dynamic_feat_size(inputs.shape[-2:])
+    x = embed_tokens(transformer, inputs, tokens)
+    x = token_blocks(transformer.blocks, x, tokens, shape[0] * shape[1])
+    return spatial_features(transformer.norm(x), shape, tokens)
 
 
 def valid_mean(spatial, valid):
