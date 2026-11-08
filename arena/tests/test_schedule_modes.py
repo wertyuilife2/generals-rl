@@ -1,5 +1,6 @@
 """Schedule modes share execution, raw results, scoring evidence and replay."""
 import json
+from execution_test_utils import without_timing
 from math import comb
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def test_tournament_uses_common_execution_and_verified_replays(tmp_path):
         assert len(list(verified_replay(Path(game['replay']).read_bytes(),game))) == game['ticks']+1
     assert json.loads((tmp_path/'rr'/'report.json').read_text())['run_id'] == report['run_id']
     chunked = tournament(roster(),rules,maps_per_group=2,batch_size=1)
-    assert [{k:v for k,v in r.items() if k!='replay'} for r in report['results']] == chunked['results']
+    assert without_timing([{k:v for k,v in r.items() if k!='replay'} for r in report['results']]) == without_timing(chunked['results'])
     assert report['ranking'] == chunked['ranking']
 
 
@@ -67,9 +68,9 @@ def test_training_evaluation_uses_same_manager_and_coverage_protocol(tmp_path):
     plans = list(fixed_panel(profile,opponent,candidate))
     with MatchRunner({e['entrant_id']:e for e in (candidate,opponent)},max_ticks=8,batch_size=0) as runner:
         results, _ = runner.run(plans)
-    assert [{k:v for k,v in r.items() if k not in ('outcome','rating_changes','rating_mode','ranks')}
+    assert [{k:v for k,v in r.items() if k not in ('outcome','rating_changes','rating_mode','ranks','decision_timing')}
             for r in report['results'] if r['opponent']=='random'] == [
-                {k:v for k,v in r.items() if k!='ranks'} for r in results]
+                {k:v for k,v in r.items() if k not in ('ranks','decision_timing')} for r in results]
     with pytest.raises(RuntimeError,match='every scheduled'):
         validate_coverage(dict(report,results=results[:-1]),profile)
 
@@ -114,14 +115,14 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
     entries=[{'name':'cpp-wait','kind':'cpp','bundle':str(bundle)},roster()[0]]
     report=tournament(entries,MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3),
                       tmp_path/'cpp',record_replays=True)
-    assert report['games']==6 and report['execution']=='mixed'
-    assert set(report['execution_modes'])=={'isolated','policy_batch'}
+    assert report['games']==6 and report['execution']=='isolated_batch'
+    assert set(report['execution_modes'])=={'isolated_batch'}
     assert not list(tmp_path.rglob('league.sqlite3'))
     cpp_id = prepare_entrant(entries[0])['entrant_id']
     native_games = 0
     for game in report['results']:
         if cpp_id in game['entrant_ids']:
-            assert len(game['decision_timing']) == 1
+            assert len(game['decision_timing']) == 2
             native_games += 1
         assert len(list(verified_replay(Path(game['replay']).read_bytes(),game)))==4
     assert native_games == 4
@@ -137,7 +138,7 @@ def test_duel_reference_name_cannot_be_reassigned_to_another_policy():
         tournament([renamed,roster()[0]], MatchConfig(MapConfig(25, 25,2,.1,.05),max_ticks=3))
 
 
-def test_evaluation_cli_resolves_custom_artifacts_relative_to_entrant_file(tmp_path,monkeypatch):
+def test_evaluation_cli_resolves_custom_artifacts_relative_to_entrant_file(in_process_batch, tmp_path,monkeypatch):
     from types import SimpleNamespace
     import sys
     from generals import Action

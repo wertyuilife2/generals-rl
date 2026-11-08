@@ -95,8 +95,8 @@ def _execution_options(args):
 
 def _add_execution_options(parser):
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--backend", choices=("cpu", "gpu"), default="cpu")
-    parser.add_argument("--device", default="cpu", help="policy inference device; gpu backend requires cuda:N")
+    parser.add_argument("--backend", choices=("cpu",), default="cpu", help="native CPU match execution")
+    parser.add_argument("--device", default="cpu", help="policy inference device: cpu or cuda:N")
     parser.add_argument("--batch-size", type=int, default=128, help="zero runs a whole compatible group")
     parser.add_argument("--cpu-threads", type=int, default=1)
     parser.add_argument("--record-replays", action="store_true")

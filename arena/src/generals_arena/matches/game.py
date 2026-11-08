@@ -1,26 +1,13 @@
-"""Single-match state, controller lifecycle and incremental play/recovery."""
+"""Match handles: Python owns metadata; the native runtime owns execution."""
+from contextlib import ExitStack, contextmanager
+from types import SimpleNamespace
+import numpy as np
+
+from generals import Action, MapConfig, VecEnv
 from generals.core.mapgen import generate_map
-from generals.core.observation import observe
-from generals.core.recording import state_digest, state_to_dict
-from generals.core.state import Action, compute_stats
-from generals import MapConfig, make_engine
-
-from generals_arena.matches.observation import board_view
-from generals_arena.matches.results import EXECUTION_POLICY
-from generals_arena.matches.results import build_result
-
-
-def apply_forfeits(engine, events):
-    """Translate match departures into the environment's official surrender rule."""
-    state = engine.state
-    changed = False
-    for event in events:
-        seat = event['seat']
-        if event['tick'] == state.tick and state.alive[seat]:
-            engine.surrender(seat)
-            changed = True
-    return changed
-
+from generals.core.recording import state_from_dict
+from .native import bind_loop
+from .results import EXECUTION_POLICY
 
 
 def mark_forfeits(board, forfeits):
@@ -29,160 +16,166 @@ def mark_forfeits(board, forfeits):
 
 
 def timing(game):
-    return [{'seat': seat, 'entrant_id': game.plan['entrant_ids'][seat], **controller.decision_metrics}
-            for seat, controller in enumerate(game.controllers)
-            if hasattr(controller, 'decision_metrics')]
+    return game.decision_timing()
 
 
 def failure(game, error):
-    return {**game.plan, 'ticks': game.state.tick, 'initial_digest': game.initial_digest,
-            'final_digest': state_digest(game.state), 'reason': 'policy_error',
-            'policy_error': str(error), 'error_detail': getattr(error, 'details', {}),
-            'decision_timing': timing(game), **({'forfeits':game.forfeits} if game.forfeits else {})}
+    result = game.summary()
+    return {**result, 'reason': 'policy_error', 'policy_error': str(error),
+            'error_detail': getattr(error, 'details', {})}
 
 
 def close_game(game):
-    for controller in game.controllers:
-        close = getattr(controller, 'close', None)
-        if close is not None:
-            close()
-    close = getattr(game.engine, 'close', None)
-    if close is not None:
-        close()
+    game.close()
 
 
-class _RecordedAction:
-    """Restore a surviving controller's memory while replaying committed actions."""
-    def __init__(self, controller, action, warm):
-        self.controller, self.action, self.warm = controller, action, warm
+class _Input:
+    """Native external-action slot shared by human input and restoration."""
+    def __init__(self):
+        self.actions = np.zeros(1, np.int64)
 
-    def __getattr__(self, name):
-        return getattr(self.controller, name)
-
-    def act(self, observation):
-        if self.warm:
-            values = getattr(self.controller, 'values', None)
-            saved = values.copy() if values is not None else None
-            self.controller.act(observation)
-            # Successful restoration is not a new tournament decision. A new
-            # timeout still retains its diagnostic record and forfeits the seat.
-            if saved is not None:
-                values[:] = saved
-        return self.action
+    @contextmanager
+    def native_batch(self, height, width, players):
+        from generals.protocol.native import ABI_VERSION, PolicyABI, PolicyBinding, address
+        from generals_arena.policies.builtin import _native_library
+        library = _native_library()
+        yield PolicyBinding(PolicyABI(ABI_VERSION, self.actions.ctypes.data,
+            address(library.arena_wait_act), None, address(library.arena_input_one), 0), (self, library), None)
 
 
 class RecordedGame:
-    def __init__(self, plan, config, controllers, forfeits=()):
-        self.plan, self.config = plan, config
-        self.controllers = controllers  # None denotes a human seat.
-        count = len(plan["entrant_ids"])
-        bots = [controller for controller in controllers if controller is not None]
+    def __init__(self, plan, config, controllers, forfeits=(), *, initial=None, journal=None, record=True):
+        from .batch import _PolicyGroup
+        self.plan, self.config, self.controllers = plan, config, controllers
+        count = len(plan['entrant_ids'])
+        bots = [c for c in controllers if c is not None]
         if (len(controllers) != count or not 2 <= count <= 8 or
-                len({id(controller) for controller in bots}) != len(bots) or
-                len(plan["controller_seeds"]) != count):
-            raise ValueError("each seat requires an independent controller and RNG stream")
-        self.map_config = MapConfig(**plan["map"])
-        self.state = generate_map(self.map_config, plan["map_seed"])
-        self.engine = make_engine(self.state)
-        self.stats = compute_stats(self.state)
-        self.initial = state_to_dict(self.state)
-        self.initial_digest = state_digest(self.state)
-        self.actions, self.digests = [], []
-        self.eliminations = [None] * count
-        self.invalid = [0] * count
+                len({id(c) for c in bots}) != len(bots) or len(plan['controller_seeds']) != count):
+            raise ValueError('each seat requires an independent controller and RNG stream')
         self.forfeits = list(forfeits)
-        for seat, controller in enumerate(controllers):
-            if controller is not None:
-                controller.reset(player_id=seat, seed=plan["controller_seeds"][seat])
-        self._apply_forfeits()
+        state = generate_map(MapConfig(**plan['map']), plan['map_seed']) if initial is None else initial
+        self._stack = ExitStack()
+        self._closed = False
+        self._groups, self._inputs, self._views = [], {}, {}
+        self.engine = self  # Compatibility handle; contains no Python engine.
+        try:
+            self.env = self._stack.enter_context(VecEnv.from_states([state], device='cpu', threads=1,
+                                                   auto_reset=False, episode_ticks=config.max_ticks))
+            for seat, controller in enumerate(controllers):
+                group = _PolicyGroup.__new__(_PolicyGroup)
+                group.seats, group.lanes = np.array([seat], np.int64), np.arange(1)
+                group.cached = False
+                if controller is None or getattr(controller, 'inactive', False):
+                    controller = _Input()
+                    self._inputs[seat] = controller
+                    group.batch = True
+                else:
+                    group.batch = all(callable(getattr(controller, key, None))
+                                      for key in ('reset_batch', 'act_batch'))
+                    if group.batch:
+                        controller.reset_batch([seat], [plan['controller_seeds'][seat]])
+                    else:
+                        controller.reset(player_id=seat, seed=plan['controller_seeds'][seat])
+                group.controller = controller
+                group.controllers = [] if group.batch else [controller]
+                self._groups.append(group)
+            self._active = np.ones(1, bool)
+            self._joint = np.zeros((1,count), np.int64)
+            self._invalid = np.zeros((1,count), np.int64)
+            self._eliminations = np.full((1,count), -1, np.int64)
+            self.execution = self._stack.enter_context(bind_loop(self.env, self._groups, self._joint,
+                self._invalid, self._eliminations, self._active, journal,
+                topologies=[state.layout.topology_id], record=record))
+            self.initial_digest = self.execution.query(0)['initial_digest']
+            self.execution.events(self.forfeits)
+            self._timing = dict(observation_seconds=0., policy_seconds=0., step_seconds=0.)
+        except BaseException:
+            self._stack.close()
+            for group in self._groups:
+                group.close()
+            raise
+
+    @property
+    def state(self):
+        """Explicit compatibility snapshot; never read or mutated by the executor."""
+        return state_from_dict(self._state if self._closed else self.execution.query(2))
+
+    @property
+    def tick(self):
+        return self._summary['ticks'] if self._closed else int(self.env.state['tick'][0])
 
     @property
     def done(self):
-        return self.state.terminated or self.state.tick >= self.config.max_ticks
+        return not bool(self._active[0])
 
-    def _advance(self, human_actions=None):
-        if self.done:
-            raise ValueError("game already finished")
-        human_actions = human_actions or {}
-        actions = [Action.wait() if not self.state.alive[seat] else
-                   human_actions.get(seat, Action.wait()) if controller is None else
-                   controller.act(observe(self.state, seat, stats=self.stats))
-                   for seat, controller in enumerate(self.controllers)]
-        if not all(isinstance(action, Action) for action in actions):
-            raise TypeError("controller must return an Action")
-        result = self.engine.step(actions)
-        for pid in result.eliminated:
-            self.eliminations[pid] = self.state.tick
-        self.stats = result.stats
-        self.actions.append([[int(a.kind), a.source, int(a.direction), int(a.mode)] for a in actions])
-        self.digests.append(state_digest(self.state))
-        for move in result.moves:
-            self.invalid[move.player_id] += int(not move.valid)
-            controller = self.controllers[move.player_id]
-            if controller is not None:
-                controller.on_result(move)
-        for pid in result.eliminated:
-            eliminate = getattr(self.controllers[pid], "eliminate", None)
-            if eliminate is not None:
-                eliminate()
+    @property
+    def actions(self):
+        return self.trace()['actions']
 
-    def _apply_forfeits(self):
-        before = self.state.alive.copy()
-        if apply_forfeits(self.engine, self.forfeits):
-            self.stats = compute_stats(self.state)
-            for seat in range(self.state.player_count):
-                if before[seat] and not self.state.alive[seat]:
-                    self.eliminations[seat] = self.state.tick
-                    eliminate = getattr(self.controllers[seat], 'eliminate', None)
-                    if eliminate is not None:
-                        eliminate()
-
-    def surrender(self, seat):
-        self.forfeits.append({'seat': seat, 'tick': self.state.tick, 'reason': 'surrender'})
-        self._apply_forfeits()
+    @property
+    def digests(self):
+        return self.trace()['digests']
 
     def advance(self, human_actions=None):
-        actions = dict(human_actions or {})
-        controllers = self.controllers
-        self.controllers = list(controllers)
-        for event in self.forfeits:
-            if event['tick'] <= self.state.tick:
-                seat = event['seat']
-                self.controllers[seat] = None
-                actions[seat] = Action.wait()
-        try:
-            self._advance(actions)
-        finally:
-            self.controllers = controllers
-        self._apply_forfeits()
+        if self.done:
+            raise ValueError('game already finished')
+        for seat, controller in self._inputs.items():
+            controller.actions[0] = (human_actions or {}).get(seat, Action.wait()).encode()
+        self.execution.advance(1, self._timing)
+
+    def run(self):
+        if not self.done:
+            self.execution.advance(self.config.max_ticks, self._timing)
+
+    def restore(self, actions, *, warm=False, capture=False):
+        self.execution.restore(actions, warm=warm, capture=capture)
 
     def advance_recorded(self, actions, *, warm=False):
-        controllers = self.controllers
-        self.controllers = [_RecordedAction(c, actions[i], warm) if c is not None else None
-                            for i, c in enumerate(controllers)]
-        try:
-            self._advance(dict(enumerate(actions)))
-        finally:
-            self.controllers = controllers
-        self._apply_forfeits()
+        self.restore(np.array([[a.encode() for a in actions]], np.int64), warm=warm)
 
-    def result(self):
-        if not self.done:
-            raise ValueError("cannot score an unfinished game")
-        value = build_result(self.plan, state=self.state, stats=self.stats,
-                             elimination_ticks=self.eliminations, invalid_actions=self.invalid,
-                             initial_digest=self.initial_digest)
-        value["execution_policy"] = EXECUTION_POLICY
+    def surrender(self, seat):
+        self.execution.surrender(seat)
+        self.forfeits.append(dict(seat=seat, tick=self.tick, reason='surrender'))
+
+    def decision_timing(self):
+        rows = self._metrics if self._closed else self.execution.decision_timing()
+        return [{**row, 'entrant_id': self.plan['entrant_ids'][row['seat']]} for row in rows]
+
+    def summary(self):
+        value = dict(self._summary if self._closed else self.execution.query(0))
+        value.update(self.plan, execution_policy=EXECUTION_POLICY)
         if self.forfeits:
             value['forfeits'] = self.forfeits
-        metrics = timing(self)
+        metrics = self.decision_timing()
         if metrics:
             value['decision_timing'] = metrics
         return value
 
+    def result(self):
+        if not self.done:
+            raise ValueError('cannot score an unfinished game')
+        return self.summary()
+
+    def trace(self):
+        return self._trace if self._closed else self.execution.query(1)
+
     def replay_blob(self):
-        from .replay import encode_replay
-        return encode_replay(self.initial, self.actions, self.digests, self.forfeits)
+        from .replay import encode_native_trace
+        raw = self._trace if self._closed else self.execution.query_bytes(1)
+        return encode_native_trace(raw, self.forfeits)
 
     def view(self, seat=None):
-        return board_view(self.state, seat)
+        key = -1 if seat is None else seat
+        if not self._closed:
+            self._views[key] = self.execution.query(3, seat=key)
+        return self._views[key]
+
+    def close(self):
+        if self._closed:
+            return
+        self._summary, self._trace, self._state = (self.execution.query(i) for i in (0,1,2))
+        self._metrics = self.execution.decision_timing()
+        self._stack.close()
+        self._closed = True
+        for group in self._groups:
+            group.close()

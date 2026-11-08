@@ -96,17 +96,14 @@ def test_live_afk_cached_winner_scores_as_a_win():
         assert seat_outcome(result, 1) == 'win' and seat_outcome(result, 0) == 'loss'
 
 
-def test_random_maps_batch_scalar_and_gpu_results_agree():
-    import pytest
-    torch=pytest.importorskip('torch')
+def test_random_maps_batch_and_scalar_results_agree():
     roster=[{'name':n,'kind':'baseline','policy':n} for n in ('aggressive','expansion')]
     cfg=MatchConfig(MapConfig(players=2),max_ticks=55)
     results=[]
-    for options in ({'scalar':True},{'batch_size':0},*([{'backend':'gpu','device':'cuda:0','batch_size':0}] if torch.cuda.is_available() else [])):
+    for options in ({'scalar':True},{'batch_size':0}):
         report=tournament(roster,cfg,maps_per_group=12,seed=3,**options)
         results.append([(r['map_seed'],r['initial_digest'],r['final_digest'],r['placements']) for r in report['results']])
     assert results[0]==results[1]
-    if len(results)>2:assert results[0]==results[2]
 
 
 def test_default_map_distribution_persists_and_replays(tmp_path):

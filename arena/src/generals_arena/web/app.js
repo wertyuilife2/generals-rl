@@ -1,5 +1,6 @@
 import { Battlefield } from './board.js';
 import { Playback } from './playback.js';
+import { ReplayTimeline } from './replay.js';
 import { MoveInput } from './input.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
@@ -9,7 +10,7 @@ let historyRequest = 0;
 let token = '', tokenKey = null;
 let live = null, board = null, sending = false;
 const outbox = [];
-let replay = null, frame = 0, dialogMode = null, polling = false;
+let replay = null, replayTimeline = null, frame = 0, dialogMode = null, polling = false;
 const formatter = new Intl.NumberFormat('zh-CN');
 const number = n => formatter.format(n);
 function notice(message = '') { $('notice').hidden = !message; $('notice').textContent = message; }
@@ -271,6 +272,7 @@ async function openReplay(id) {
   notice('正在校验并读取回放…');
   const data = await api(`/api/replay/${id}`);
   replay = data; frame = 0;
+  replayTimeline = new ReplayTimeline(data.frames);
   showDialog('replay'); $('timeline').max = data.frames.length - 1;
   $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
   const reasons={surrender:'弃权结算',capture:'将军被占领',afk:'未扩张自动弃权',idle_limit:'长时间无有效行动',game_limit:'官方对局时限',tick_limit:'达到评估时限'};
@@ -278,15 +280,9 @@ async function openReplay(id) {
   $('board-status').textContent = `${initial.width} × ${initial.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : reasons[data.result.reason] || data.result.reason} · 已校验全部已执行动作与状态`;
   seek(0); notice();
 }
-function applyFrame(next) {
-  const f = replay.frames[next];
-  for (const [cell,owner,army,structure] of f.cells) { const y=Math.floor(cell/board.width),x=cell%board.width;board.owner[y][x]=owner;board.army[y][x]=army;board.structure[y][x]=structure; }
-  board.tick=f.tick;board.alive=f.alive;board.stats=f.stats;board.ranking=f.ranking;board.has_kill=f.has_kill;board.forfeited=f.forfeited;board.warn_afk=f.warn_afk;board.neutralize_in=f.neutralize_in;
-}
 function seek(next) {
   next=Math.max(0,Math.min(replay.frames.length-1,next));
-  if (!board || next < frame || next === 0 || frame === 0) {board=structuredClone(replay.frames[0]);frame=0;}
-  for (let i=frame+1;i<=next;i++) applyFrame(i);
+  board=replayTimeline.seek(next);
   frame=next;$('timeline').value=frame;$('replay-tick').textContent=`Tick ${board.tick} / ${replay.result.ticks}`;
   draw();renderGamePlayers(replay.result.entrant_ids.map(id=>({name:names.get(id)||id.slice(0,8)})));
 }

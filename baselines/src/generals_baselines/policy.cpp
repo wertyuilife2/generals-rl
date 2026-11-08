@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "generals_native.h"
+#include "decision.h"
 
 using i64 = std::int64_t;
 using wide = __int128;
@@ -267,44 +269,17 @@ public:
 
 static thread_local std::string error;
 
-// The adapter alone sees engine arrays. Policy::act always receives the same
-// local fogged arrays as Python observe(..., "local"), with no privileged data.
-// Scratch is reused across lanes/ticks; each Policy and NumPy stream stays owned
-// by its Python controller. A call is serialized by the Python batch owner.
+// Only public, already masked observations cross this boundary. One serial
+// native call handles independent planners and RNG streams for every lane.
 class PolicyBatch {
 public:
     int lanes, h, w, n, players;
     std::vector<Policy *> policies;
     std::vector<Options> options;
     std::vector<Random> random;
-    std::vector<std::uint8_t> terrain, structure, visible;
-    std::vector<std::int16_t> owner;
-    std::vector<i64> army;
     PolicyBatch(Policy *const *p,const Options *o,const Random *r,int count,int height,int width,int seats)
         :lanes(count),h(height),w(width),n(height*width),players(seats),
-         policies(p,p+count),options(o,o+count),random(r,r+count),
-         terrain(n),structure(n),visible(n),owner(n),army(n) {}
-    i64 act(int lane,const std::uint8_t *raw_terrain,const std::uint8_t *raw_structure,
-            const std::int16_t *raw_owner,const i64 *raw_army,const std::uint8_t *alive,
-            i64 tick,bool terminated) {
-        const int pid=policies[lane]->pid;
-        std::fill(visible.begin(),visible.end(),0);
-        for(int c=0;c<n;++c) if(raw_owner[c]==pid) {
-            int y=c/w,x=c%w;
-            for(int dy=std::max(0,y-1);dy<=std::min(h-1,y+1);++dy)
-                for(int dx=std::max(0,x-1);dx<=std::min(w-1,x+1);++dx)
-                    visible[dy*w+dx]=1;
-        }
-        for(int c=0;c<n;++c) {
-            terrain[c]=visible[c]?raw_terrain[c]:UNKNOWN;
-            structure[c]=visible[c]?raw_structure[c]:UNKNOWN;
-            owner[c]=visible[c]?raw_owner[c]:UNKNOWN_OWNER;
-            army[c]=visible[c]?raw_army[c]:-1;
-        }
-        Observation observation{terrain.data(),structure.data(),owner.data(),army.data(),
-                                visible.data(),alive,h,w,players,pid,tick,terminated};
-        return policies[lane]->act(observation,options[lane],random[lane]);
-    }
+         policies(p,p+count),options(o,o+count),random(r,r+count) {}
 };
 
 extern "C" {
@@ -354,30 +329,66 @@ void *baseline_batch_create(Policy *const *policies,const Options *options,const
 }
 void baseline_batch_destroy(PolicyBatch *batch) {delete batch;}
 int baseline_batch_act(PolicyBatch *batch,const std::uint8_t *terrain,const std::uint8_t *structure,
-                       const std::int16_t *owner,const i64 *army,const std::uint8_t *alive,
+                       const std::int16_t *owner,const i64 *army,const std::uint8_t *visible,const std::uint8_t *alive,
                        const i64 *tick,const std::uint8_t *terminated,const std::uint8_t *active,i64 *actions) {
     try {
         for(int lane=0;lane<batch->lanes;++lane) {
             actions[lane]=0;
             if(!active[lane]) continue;
             std::size_t base=std::size_t(lane)*batch->n;
-            actions[lane]=batch->act(lane,terrain+base,structure+base,owner+base,army+base,
-                                     alive+std::size_t(lane)*batch->players,tick[lane],terminated[lane]);
+            Observation observation{terrain+base,structure+base,owner+base,army+base,visible+base,
+                alive+std::size_t(lane)*batch->players,batch->h,batch->w,batch->players,
+                batch->policies[lane]->pid,tick[lane],terminated[lane]};
+            actions[lane]=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]);
         }
         return 0;
     } catch(const std::exception &e) {error=e.what(); return -1;}
 }
 void baseline_batch_result(PolicyBatch *batch,const i64 *moves,const i64 *actions,
-                          int action_stride,const std::uint8_t *active) {
+                          const std::uint8_t *active) {
     for(int lane=0;lane<batch->lanes;++lane) {
         if(active && !active[lane]) continue;
         Policy *policy=batch->policies[lane];
-        const i64 *row=moves+(std::size_t(lane)*batch->players+policy->pid)*9;
+        const i64 *row=moves+std::size_t(lane)*9;
         if(!row[0]) continue;
-        i64 action=actions[std::size_t(lane)*action_stride+(action_stride==1?0:policy->pid)];
+        i64 action=actions[lane];
         // WAIT's encoded source is canonical -1 even if an engine row uses 0.
         int source=action>0?int((action-1)/8):-1;
         baseline_result(policy,policy->pid,action,int(row[1]),int(row[7]),source,int(row[3]));
     }
+}
+i64 baseline_bound_act(void *context,const GeneralsBatchView *view,i64 *actions) {
+    auto *batch=static_cast<PolicyBatch *>(context);
+    const auto &o=view->observation;
+    for(int lane=0;lane<batch->lanes;++lane) {
+        actions[lane]=0;
+        if(!o.active[lane]) continue;
+        const std::size_t base=std::size_t(lane)*batch->n;
+        Observation observation{o.terrain+base,o.structure+base,o.owner+base,o.army+base,
+            reinterpret_cast<const std::uint8_t *>(o.visible)+base,
+            reinterpret_cast<const std::uint8_t *>(o.alive)+std::size_t(lane)*batch->players,
+            batch->h,batch->w,batch->players,batch->policies[lane]->pid,o.tick[lane],o.terminated[lane]};
+        try { actions[lane]=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]); }
+        catch(const std::exception &e) {error=e.what();return lane;}
+    }
+    return -1;
+}
+i64 baseline_bound_one(void *context,const GeneralsBatchView *view,int lane,i64 *metrics) {
+    auto *batch=static_cast<PolicyBatch *>(context);
+    const auto &o=view->observation;
+    const std::size_t base=std::size_t(lane)*batch->n;
+    Observation observation{o.terrain+base,o.structure+base,o.owner+base,o.army+base,
+        reinterpret_cast<const std::uint8_t *>(o.visible)+base,
+        reinterpret_cast<const std::uint8_t *>(o.alive)+std::size_t(lane)*batch->players,
+        batch->h,batch->w,batch->players,batch->policies[lane]->pid,o.tick[lane],o.terminated[lane]};
+    i64 action=0;int status=0;
+    try {action=batch->policies[lane]->act(observation,batch->options[lane],batch->random[lane]);}
+    catch(const std::exception &e){error=e.what();status=2;}
+    catch(...){error="native policy exception";status=2;}
+    metrics[7]=status;return action;
+}
+void baseline_bound_result(void *context,const GeneralsFeedback *result) {
+    baseline_batch_result(static_cast<PolicyBatch *>(context),result->moves,result->actions,
+                          reinterpret_cast<const std::uint8_t *>(result->active));
 }
 }

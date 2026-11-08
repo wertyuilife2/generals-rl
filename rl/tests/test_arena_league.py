@@ -125,6 +125,9 @@ extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
         result, blob = store.replay(plan['game_id'])
         assert result['entrant_ids'] == plan['entrant_ids']
         assert result['reason'] == 'tick_limit'
-        assert len(result['decision_timing']) == 1  # The native seat retained its deadline metrics.
-        assert result['decision_timing'][0]['timeouts'] == result['decision_timing'][0]['errors'] == 0
+        assert len(result['decision_timing']) == 2
+        native_timing = next(row for row in result['decision_timing'] if row['limit_ns'] is not None)
+        model_timing = next(row for row in result['decision_timing'] if row['limit_ns'] is None)
+        assert native_timing['timeouts'] == native_timing['errors'] == 0
+        assert model_timing['calls'] == result['ticks']
         assert replay_frames(blob, result)[-1]['tick'] == result['ticks']

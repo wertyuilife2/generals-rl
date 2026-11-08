@@ -17,7 +17,7 @@ def plans_for(entry, *, width=9, count=3):
              "map": asdict(MapConfig(width, 9, 2, 0, 0))} for index in range(count)]
 
 
-def test_ordered_callbacks_homogeneous_chunks_and_controller_ownership(monkeypatch):
+def test_ordered_callbacks_homogeneous_chunks_and_controller_ownership(in_process_batch, monkeypatch):
     entry = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
     plans = plans_for(entry)
     plans[1]["instance_ids"] = [1, 0]  # Rotation keeps the same instance assignment.
@@ -86,38 +86,25 @@ def test_invalid_schedule_suffix_is_rejected_before_first_callback(field, value)
     assert callbacks == []
 
 
-def test_isolated_stop_keeps_current_plan_uncommitted_and_closes_controllers(monkeypatch):
-    entry = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
+def test_isolated_stop_keeps_current_plan_uncommitted_and_closes_worker(monkeypatch):
+    from generals_arena.matches.worker import MatchWorker
+    entry = prepare_entrant({"name":"random", "kind":"baseline", "policy":"random"})
     plans = plans_for(entry, count=1)
     original = deepcopy(plans)
-    stop, closed, decisions = threading.Event(), [], []
-
-    class Controller:
-        def reset(self, player_id, seed):
-            pass
-
-        def act(self, observation):
-            decisions.append(observation.tick)
-            stop.set()
-            return Action.wait()
-
-        def on_result(self, result):
-            pass
-
-        def close(self):
-            closed.append(True)
-
-    monkeypatch.setattr("generals_arena.matches.runner.build_controllers",
-                        lambda *args: [Controller(), Controller()])
+    stop, closed = threading.Event(), []
+    def cancel(self, entries, plan, *, max_ticks, stop):
+        stop.set()
+        raise InterruptedError('scheduler cancellation')
+    monkeypatch.setattr(MatchWorker, 'run', cancel)
+    monkeypatch.setattr(MatchWorker, 'close', lambda self: closed.append(True))
     callbacks = []
-    with MatchRunner({entry["entrant_id"]: entry}, max_ticks=4, execution="isolated") as runner:
+    with MatchRunner({entry['entrant_id']:entry}, max_ticks=4, execution='isolated') as runner:
         results, _ = runner.run(plans, on_result=lambda *args: callbacks.append(args), stop=stop)
     assert not results and not callbacks
-    assert decisions == [0, 0] and closed == [True, True]
-    assert plans == original
+    assert closed == [True] and plans == original
 
 
-def test_callback_failure_closes_batch_runtime(monkeypatch):
+def test_callback_failure_closes_batch_runtime(in_process_batch, monkeypatch):
     entry = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
     closed = []
 

@@ -1,4 +1,5 @@
 """Arbitrary match plans share scalar records, seeds, replays and batch execution."""
+from execution_test_utils import without_timing
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -63,7 +64,7 @@ def test_rotated_mixed_and_repeated_entrants_match_recorded_games(tmp_path,lineu
     batch,timing = execute_batch(entries,plans,max_ticks=24,record_replays=True)
     scalar,_ = execute_batch(entries,plans,max_ticks=24,record_replays=True,scalar=True)
     reference = [scalar_record(entries,plan,24) for plan in plans]
-    assert batch == scalar == reference
+    assert without_timing(batch) == without_timing(scalar) == without_timing(reference)
     assert all(value >= 0 for value in timing.values())
     for record,blob in batch:
         assert record['custom_metadata'] == {'preserve':'unchanged'}
@@ -78,8 +79,8 @@ def test_chunking_and_cached_runtime_keep_instance_seeds_and_output_order(tmp_pa
         for plan in plans:
             rows,_ = execute_batch(entries,[plan],max_ticks=10,record_replays=True,runtime_cache=cache)
             chunked.extend(rows)
-        assert chunked == full
-        assert len(cache) == 2
+        assert without_timing(chunked) == without_timing(full)
+        assert len(cache) == 3
     finally:
         for controller in cache.values():
             close = getattr(controller,'close',None)
@@ -87,14 +88,10 @@ def test_chunking_and_cached_runtime_keep_instance_seeds_and_output_order(tmp_pa
                 close()
 
 
-def test_cuda_matches_cpu_records_and_replay_bytes(tmp_path):
-    import torch
-    if not torch.cuda.is_available():
-        pytest.skip('CUDA unavailable')
+def test_arena_rejects_python_gpu_fallback(tmp_path):
     entries,plans = entrants_and_plans(tmp_path,['package-a','random'],maps=1)
-    cpu,_ = execute_batch(entries,plans,max_ticks=18,record_replays=True)
-    gpu,_ = execute_batch(entries,plans,max_ticks=18,record_replays=True,backend='gpu',device='cuda:0')
-    assert gpu == cpu
+    with pytest.raises(ValueError, match='native CPU'):
+        execute_batch(entries, plans, max_ticks=18, backend='gpu', device='cuda:0')
 
 
 def test_empty_batch_and_incompatible_instance_assignments(tmp_path):

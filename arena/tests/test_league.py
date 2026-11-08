@@ -243,8 +243,8 @@ def test_all_supported_seat_counts_can_finish_and_replay(tmp_path, players):
     assert len(replay_frames(blob, result)[-1]['alive']) == players
     assert store.leaderboard()['completed_games'] == 1
     corrupted = json.loads(gzip.decompress(blob))
-    corrupted['digests'][-1] = 'wrong'
-    with pytest.raises(ValueError, match='diverged'):
+    corrupted['actions'][-1][0] = 1
+    with pytest.raises(ValueError, match='checksum'):
         replay_frames(gzip.compress(json.dumps(corrupted).encode()), result)
 
 
@@ -261,7 +261,7 @@ def test_failure_is_unrated_and_retryable_and_workers_exclusive(tmp_path):
     with process_lock(store.directory, '.worker.lock'):
         with pytest.raises(RuntimeError, match='another process'):
             run_jobs(store)
-    with patch('generals_arena.matches.runner.build_controllers', side_effect=RuntimeError('bad policy')):
+    with patch('generals_arena.matches.worker.MatchWorker.begin', side_effect=RuntimeError('bad policy')):
         with pytest.raises(RuntimeError, match='bad policy'):
             run_jobs(store)
     assert store.jobs()[0]['status'] == 'failed'
@@ -462,8 +462,11 @@ def test_single_bot_can_fill_eight_independent_seats(tmp_path):
     assert len(set(map(id, bots))) == 7
     assert len(set(plan['controller_seeds'])) == 8
     game = RecordedGame(plan, store.config, controllers)
-    assert all(c.player_id == seat for seat,c in enumerate(controllers) if c is not None)
-    assert not game.done
+    try:
+        assert game.execution.seats[:,0].tolist() == list(range(8))
+        assert not game.done
+    finally:
+        game.close()
 
 
 def test_mixed_player_counts_have_independent_ratings_and_duplicate_accounting(tmp_path):
@@ -599,9 +602,9 @@ def test_human_queue_is_idempotent_ordered_and_clock_driven(tmp_path):
     store=league(tmp_path, min_side=25,max_side=25,max_ticks=10,tick_seconds=.1)
     human=store.account('queue')['entrant']['entrant_id']
     arena=LiveArena(store);view=arena.create_game(human,2);gid=view['game_id']
-    value=arena.games[gid];state=value['game'].state
-    source=view['board']['general_pos'];y,x=divmod(source,state.layout.width)
-    direction=Direction.RIGHT if x+2<state.layout.width else Direction.LEFT
+    value=arena.games[gid];board=view['board']
+    source=view['board']['general_pos'];y,x=divmod(source,board['width'])
+    direction=Direction.RIGHT if x+2<board['width'] else Direction.LEFT
     target=source+(1 if direction==Direction.RIGHT else -1)
     # Future territory is intentionally not owned at submission time.
     commands=[{'id':1,'op':'append','action':Action.move(source,direction).encode()},
@@ -624,15 +627,15 @@ def test_human_queue_is_idempotent_ordered_and_clock_driven(tmp_path):
     assert arena.command(gid,human,{'id':4,'op':'clear'})['queue']==[]
     # Rapid input must never advance the game faster than the authoritative clock.
     for i in range(5,15):arena.command(gid,human,{'id':i,'op':'append','action':0})
-    assert state.tick==0 and len(value['queue'])==10
+    assert value['game'].tick==0 and len(value['queue'])==10
     arena.thread.start()
     try:
         deadline=time.monotonic()+2
-        while state.tick<2 and time.monotonic()<deadline:time.sleep(.01)
+        while value['game'].tick<2 and time.monotonic()<deadline:time.sleep(.01)
         with arena.lock:
-            assert state.tick==2 and len(value['queue'])==8
+            assert value['game'].tick==2 and len(value['queue'])==8
     finally:
-        arena.stop.set();arena.thread.join(1)
+        arena.close()
 
 
 def test_human_fog_merges_cities_and_mountains_without_changing_policy_observations():

@@ -15,7 +15,7 @@ def test_recorded_games_use_shared_native_environment():
             'map': {'height':15, 'width':15, 'players':2}}
     game = RecordedGame(plan, LeagueConfig(max_ticks=2), [None,None])
     try:
-        assert isinstance(game.engine, CPUEngine)
+        assert game.execution.handle and game.env.unwrapped.__class__.__name__ == 'CPUEnv'
         game.advance()
         assert game.engine.env.state['tick'][0] == game.state.tick == 1
     finally:
@@ -32,7 +32,7 @@ def test_native_sources_are_part_of_registered_version_identity(tmp_path, monkey
     assert before != util.source_digest('policy')
 
 
-@pytest.mark.parametrize('filename', ['native.py', 'worker.py'])
+@pytest.mark.parametrize('filename', ['native.py', 'worker.py', 'host.cpp'])
 def test_native_runtime_changes_invalidate_registered_execution(tmp_path, monkeypatch, filename):
     from generals_arena.policies import native
     from generals_arena.policies.artifacts import snapshot_policy

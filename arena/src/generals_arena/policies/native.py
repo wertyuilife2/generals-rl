@@ -4,12 +4,15 @@ This is a policy host, not a game backend. Native code is trusted local code;
 the match process contains crashes/hangs but is not an OS security sandbox.
 """
 from functools import lru_cache
+from contextlib import contextmanager
 from hashlib import sha256
 import io
+import fcntl
 import ctypes as C
 import json
 import os
 from pathlib import Path, PurePosixPath
+from generals.protocol.native import INCLUDE as PROTOCOL_INCLUDE
 import platform
 import re
 import shutil
@@ -39,9 +42,16 @@ def decision_timeout(details):
 
 def execution_fingerprint():
     """Bind the binary controller to its Python ABI and recovery process host."""
+    from generals.backends._build import source_bytes
+    from generals.protocol.native import INCLUDE
     root = Path(__file__).resolve().parents[1]
     return digest({'native_sha256': file_digest(Path(__file__)),
-                   'worker_sha256': file_digest(root/'matches'/'worker.py')})
+                   'host_sha256': file_digest(Path(__file__).with_name('host.cpp')),
+                   'host_includes_sha256': sha256(source_bytes(Path(__file__).with_name('host.cpp'),
+                                                              include_dirs=[INCLUDE])).hexdigest(),
+                   'loop_sha256': sha256(source_bytes(root/'matches'/'native.cpp', include_dirs=[INCLUDE, INCLUDE.parent/'backends'])).hexdigest(),
+                   **{name: file_digest(root/'matches'/name) for name in
+                      ('native.py', 'batch.py', 'batch_worker.py', 'worker.py')}})
 
 
 def _private_cache():
@@ -113,7 +123,7 @@ def source_identity(directory, parameters=None):
     identity = {'protocol': PROTOCOL, 'platform': [platform.system(), platform.machine()],
                 'compiler': version, 'compiler_path': compiler, 'flags': flags,
                 'sources': {name: sha256(data).hexdigest() for name, data in files.items()},
-                'sdk': {name: file_digest(SDK/name) for name in ('arena_policy.h', 'adapter.cpp')},
+                'sdk': {name: file_digest((PROTOCOL_INCLUDE if name == "decision.h" else SDK)/name) for name in ('arena_policy.h', 'adapter.cpp', 'decision.h')},
                 'parameters': parameters, 'decision_limit_ns': DECISION_NS}
     # Validate parameters before creating any registered artifact.
     return digest(identity), identity, files
@@ -130,8 +140,8 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
             target = source/name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(contents)
-        for name in ('arena_policy.h', 'adapter.cpp'):
-            (root/name).write_bytes((SDK/name).read_bytes())
+        for name in ('arena_policy.h', 'adapter.cpp', 'decision.h'):
+            (root/name).write_bytes(((PROTOCOL_INCLUDE if name == "decision.h" else SDK)/name).read_bytes())
         result = subprocess.run([metadata['compiler_path'], *metadata['flags'], '-I', str(root),
             '-I', str(source), str(root/'adapter.cpp'),
             *(str(source/name) for name in files if name.endswith('.cpp')),
@@ -144,6 +154,7 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
                 'policy.so': (root/'policy.so').read_bytes(),
                 'sdk/arena_policy.h': (root/'arena_policy.h').read_bytes(),
                 'sdk/adapter.cpp': (root/'adapter.cpp').read_bytes(),
+                'sdk/decision.h': (root/'decision.h').read_bytes(),
                 **{'source/'+name: content for name, content in files.items()}}
         output = io.BytesIO()
         with ZipFile(output, 'w', compression=ZIP_DEFLATED) as archive:
@@ -168,13 +179,34 @@ def bundle_info(bundle):
     return metadata
 
 
-@lru_cache(maxsize=128)
 def _unpack(bundle, expected):
+    # The OS may purge its temporary directory while a long-running Arena
+    # process is still alive.  Re-check the extracted artifact on every new
+    # controller instead of caching a Path that may no longer exist.
     if file_digest(bundle) != expected:
         raise ValueError('policy bundle changed')
     metadata = bundle_info(bundle)
-    target = _private_cache()/expected
-    if not target.exists():
+    parent = _private_cache()
+    target = parent/expected
+
+    def valid():
+        try:
+            return (target.is_dir() and not target.is_symlink()
+                    and file_digest(target/'policy.so') == metadata['library_sha256']
+                    and (target/'params.json').read_text() == canonical(metadata['parameters']))
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+
+    # Cache eviction can leave an empty directory behind. Serialize validation
+    # and replacement so several match workers never consume a partial repair.
+    with (parent/f'.{expected}.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if valid():
+            return target
+        if target.is_symlink() or target.is_file():
+            target.unlink()
+        elif target.exists():
+            shutil.rmtree(target)
         with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
             root = Path(temporary)/'artifact'
             root.mkdir(mode=0o700)
@@ -199,30 +231,15 @@ def _unpack(bundle, expected):
             except OSError:
                 if not target.is_dir():
                     raise
-    if file_digest(target/'policy.so') != metadata['library_sha256']:
-        raise ValueError('cached policy executable changed')
+        if not valid():
+            raise ValueError('cached policy artifact changed')
     return target
+
 
 
 # Set only inside Arena's single match process. No policy runs in the web server.
 DIAGNOSTICS = None
 METRIC_FIELDS = ('calls', 'total_ns', 'max_ns', 'max_tick', 'timeouts', 'errors', 'last_ns', 'status')
-
-
-class Move(C.Structure):
-    _fields_ = [(key, C.c_int64) for key in
-                ('player', 'action', 'valid', 'source', 'target', 'moved', 'captured', 'eliminated', 'target_owned')]
-
-
-class Observation(C.Structure):
-    _fields_ = [(key, C.c_int) for key in ('width', 'height', 'players', 'player')] + [
-        ('tick', C.c_int64), ('general_pos', C.c_int)] + [
-        (key, C.POINTER(kind)) for key, kind in (
-            ('terrain', C.c_uint8), ('structure', C.c_uint8), ('owner', C.c_int16),
-            ('army', C.c_int64), ('visible', C.c_uint8), ('alive', C.c_uint8),
-            ('total_army', C.c_int64), ('total_land', C.c_int64), ('total_cities', C.c_int64),
-            ('fog_obstacles', C.c_uint8), ('has_kill', C.c_uint8), ('warn_afk', C.c_uint8), ('neutralize_in', C.c_double))] + [
-        ('previous', C.POINTER(Move))]
 
 
 @lru_cache(maxsize=128)
@@ -231,32 +248,60 @@ def _library(path):
     metric = C.POINTER(C.c_int64)
     lib.arena_host_create.argtypes = [C.c_int, C.c_uint64, C.c_char_p, metric]
     lib.arena_host_create.restype = C.c_void_p
-    lib.arena_host_act.argtypes = [C.c_void_p, C.POINTER(Observation), metric]
+    lib.arena_host_act.argtypes = [C.c_void_p, C.c_void_p, metric]
     lib.arena_host_act.restype = C.c_int64
     lib.arena_host_destroy.argtypes = [C.c_void_p, metric]
     lib.arena_host_destroy.restype = None
     return lib
 
 
+@lru_cache(maxsize=1)
+def _host():
+    from generals.backends._build import build_extension
+    from generals.protocol.native import INCLUDE
+    return build_extension(Path(__file__).with_name('host.cpp'), name='_generals_arena_host',
+                           include_dirs=[INCLUDE])[0]
+
+
+@lru_cache(maxsize=1)
+def _bound_library():
+    return C.CDLL(_host().__file__)
+
+
+class _BoundPolicy(C.Structure):
+    _fields_ = [(name, C.c_void_p) for name in
+                ('handles', 'call', 'previous', 'metrics', 'headers', 'cursor')]
+
+
 def metrics(values):
     data = {name: int(values[i]) for i, name in enumerate(METRIC_FIELDS)}
     return {key: data[key] for key in METRIC_FIELDS[:6]} | {
         'limit_ns': DECISION_NS, 'native_max_ns': data['max_ns'],
-        'measurement': 'single-thread C++ arena_act wall time; excludes Arena and IPC'}
+        'measurement': 'serial native policy decision wall time; excludes observations and IPC'}
 
 
 class NativeController:
     """Direct C ABI call. All policies and the env CPU engine share one match process."""
-    def __init__(self, *, bundle, player_id=0, seed=0):
-        self.bundle = str(Path(bundle).resolve())
-        self.bundle_sha256 = file_digest(self.bundle)
-        self.root = _unpack(self.bundle, self.bundle_sha256)
+    batch_device = 'cpu'
+    requires_isolation = True
+    def __init__(self, *, bundle, player_id=0, seed=0, _source=None):
+        if _source is None:
+            self.bundle = str(Path(bundle).resolve())
+            self.bundle_sha256 = file_digest(self.bundle)
+            self.root = _unpack(self.bundle, self.bundle_sha256)
+            self._params = (self.root/'params.json').read_bytes()
+        else:
+            self.bundle, self.bundle_sha256, self.root, self._params = (
+                _source.bundle, _source.bundle_sha256, _source.root, _source._params)
         self.lib, self.instance = None, None
         self.previous, self.player_id = None, player_id
         self.values = np.zeros(8, dtype=np.int64)
+        self._children = []
 
     def _activate(self, stage, tick=0):
         if DIAGNOSTICS is not None:
+            if hasattr(self, '_batch_lane'):
+                DIAGNOSTICS.select(self._batch_lane)
             DIAGNOSTICS.header[1:4] = [self.player_id, tick, stage]
 
     def _idle(self):
@@ -270,19 +315,25 @@ class NativeController:
                        'tick': int(tick), 'elapsed_ns': int(self.values[6]),
                        'limit_ns': DECISION_NS if phase == 'decision' else 2_000_000_000,
                        'bundle_sha256': self.bundle_sha256, 'phase': phase}
+            if hasattr(self, '_batch_lane'):
+                details['lane'] = self._batch_lane
             raise PolicyError(f'C++ policy {phase} {details["kind"]}: '
                               f'{details["elapsed_ns"]/1e6:.3f} ms', details=details)
 
     def reset(self, player_id, seed):
         self.close()
         self.player_id, self.previous = int(player_id), None
+        if DIAGNOSTICS is not None and hasattr(self, '_batch_lane'):
+            DIAGNOSTICS.select(self._batch_lane)
         self.values = (DIAGNOSTICS.records[self.player_id] if DIAGNOSTICS is not None
                        else np.zeros(8, dtype=np.int64))
         self.values[:] = 0
         self._activate(1)
         self.lib = _library(self.root/'policy.so')
+        self._native_act = _host().act
+        self._act_address = C.cast(self.lib.arena_host_act, C.c_void_p).value
         self.instance = self.lib.arena_host_create(self.player_id, int(seed),
-            (self.root/'params.json').read_bytes(), self.values.ctypes.data_as(C.POINTER(C.c_int64)))
+            self._params, self.values.ctypes.data_as(C.POINTER(C.c_int64)))
         self._idle()
         self._check(0, 'initialization')
 
@@ -293,22 +344,11 @@ class NativeController:
     def act(self, obs):
         if self.instance is None:
             raise RuntimeError('policy must be reset before acting')
-        fields = [(obs.terrain, np.uint8, C.c_uint8), (obs.structure, np.uint8, C.c_uint8),
-                  (obs.owner, np.int16, C.c_int16), (obs.army, np.int64, C.c_int64),
-                  (obs.visible, np.uint8, C.c_uint8), (obs.alive, np.uint8, C.c_uint8),
-                  (obs.stats.army, np.int64, C.c_int64), (obs.stats.territory, np.int64, C.c_int64),
-                  (obs.stats.cities, np.int64, C.c_int64), (obs.fog_obstacles, np.uint8, C.c_uint8),
-                  (obs.has_kill, np.uint8, C.c_uint8), (obs.warn_afk, np.uint8, C.c_uint8), (obs.neutralize_in, np.float64, C.c_double)]
-        arrays = [np.ascontiguousarray(value, dtype=dtype) for value, dtype, _ in fields]
-        previous = Move(*self.previous) if self.previous is not None else None
-        native_obs = Observation(obs.width, obs.height, len(obs.alive), obs.player_id,
-            obs.tick, obs.general_pos,
-            *(array.ctypes.data_as(C.POINTER(kind)) for array, (_, _, kind) in zip(arrays, fields)),
-            C.pointer(previous) if previous is not None else None)
         self._activate(2, obs.tick)
-        encoded = self.lib.arena_host_act(self.instance, C.byref(native_obs),
-                                         self.values.ctypes.data_as(C.POINTER(C.c_int64)))
-        self._idle()
+        try:
+            encoded = self._native_act(self.instance, self._act_address, obs, self.previous, self.values)
+        finally:
+            self._idle()
         self._check(obs.tick, 'decision')
         if not 0 <= encoded <= obs.size*8:
             self.values[5] += 1
@@ -322,7 +362,73 @@ class NativeController:
             move.target, move.moved, int(move.captured), -1 if move.eliminated is None else move.eliminated,
             int(move.target_owned)]
 
+    def reset_batch(self, player_ids, seeds):
+        self.close()
+        if not len(player_ids) or len(player_ids) != len(seeds):
+            raise ValueError('one player id and seed are required per lane')
+        self._seats = np.asarray(player_ids, dtype=np.int64)
+        self._previous = np.zeros((len(seeds), 10), dtype=np.int64)
+        self._actions = np.zeros(len(seeds), dtype=np.int64)
+        try:
+            for lane, (seat, seed) in enumerate(zip(player_ids, seeds, strict=True)):
+                child = NativeController(bundle=self.bundle, _source=self)
+                child._batch_lane = lane
+                self._children.append(child)
+                child.reset(int(seat), int(seed))
+            self._handles = np.asarray([c.instance for c in self._children], dtype=np.uintp)
+            self._metrics = np.asarray([c.values.ctypes.data for c in self._children], dtype=np.uintp)
+            self._headers = np.asarray([DIAGNOSTICS.journals[i].header.ctypes.data
+                                       for i in range(len(seeds))], dtype=np.uintp) if DIAGNOSTICS is not None else np.zeros(len(seeds), np.uintp)
+            self._active_lane = DIAGNOSTICS.active_lane if DIAGNOSTICS is not None else np.full(1, -1, np.int64)
+        except BaseException:
+            self.close()
+            raise
+
+    def act_batch(self, raw):
+        if not self._children:
+            raise RuntimeError('reset_batch must be called before act_batch')
+        if not np.array_equal(raw['player_ids'], self._seats):
+            raise ValueError('observation player_ids differ from reset_batch')
+        failed = _host().act_batch(self._handles, self._children[0]._act_address, raw,
+            self._previous, self._metrics, self._actions, self._headers, self._active_lane)
+        if failed >= 0:
+            try:
+                self._children[failed]._check(int(raw['state']['tick'][failed]), 'decision')
+            except PolicyError as exc:
+                exc.details['lane'] = failed
+                raise
+        return self._actions
+
+    def on_result_batch(self, raw):
+        active, rows = raw['active'], raw['moves']
+        self._previous[active, 0] = 1
+        self._previous[active, 1] = self._seats[active]
+        self._previous[active, 2] = raw['actions'][active]
+        self._previous[active, 3:] = rows[active, 1:8]
+        # ArenaMoveResult's source is canonical -1 for WAIT.
+        self._previous[active, 4] = np.where(raw['actions'][active] > 0,
+                                            (raw['actions'][active] - 1) // 8, -1)
+
+    @contextmanager
+    def native_batch(self, height, width, players):
+        from generals.protocol.native import ABI_VERSION, PolicyABI, PolicyBinding, address
+        if not self._children or np.any(self._seats < 0) or np.any(self._seats >= players):
+            raise ValueError('reset_batch with valid player ids before binding')
+        self._previous[:, 1] = self._seats
+        context = _BoundPolicy(self._handles.ctypes.data, address(self._children[0].lib.arena_host_decide),
+            self._previous.ctypes.data, self._metrics.ctypes.data, self._headers.ctypes.data,
+            self._active_lane.ctypes.data)
+        library = _bound_library()
+        abi = PolicyABI(ABI_VERSION, C.addressof(context), address(library.arena_bound_act),
+                        address(library.arena_bound_feedback), address(library.arena_bound_one))
+        def check_error(lane, tick):
+            self._children[lane]._check(tick, 'decision')
+        yield PolicyBinding(abi, (self, context, library), check_error)
+
     def close(self):
+        children, self._children = self._children, []
+        for child in children:
+            child.close()
         if self.instance is not None:
             instance, self.instance = self.instance, None
             tick = int(DIAGNOSTICS.header[0]) if DIAGNOSTICS is not None else 0
@@ -330,6 +436,14 @@ class NativeController:
             self.lib.arena_host_destroy(instance, self.values.ctypes.data_as(C.POINTER(C.c_int64)))
             self._idle()
             self._check(tick, 'destruction')
+
+    def release_batch(self):
+        # Retain verified code/parameters, but run user destructors while this
+        # match's journal is still bound. No user instance crosses a game boundary.
+        self.close()
+        self.values = np.zeros(8, dtype=np.int64)
+        for name in ('_handles', '_metrics', '_headers', '_active_lane'):
+            self.__dict__.pop(name, None)
 
 
 def create_controller(*, bundle, player_id, seed):

@@ -125,7 +125,7 @@ def make_server(store, host="127.0.0.1", port=8086):
                     self.respond(arena.active(self.human()))
                 elif path.startswith("/api/play/"):
                     self.respond(arena.view(path.split("/")[-1], self.human(), int(query["after"][0]) if "after" in query else None))
-                elif path in ("/", "/app.js", "/board.js", "/playback.js", "/input.js", "/svgIcons.js", "/style.css"):
+                elif path in ("/", "/app.js", "/board.js", "/playback.js", "/replay.js", "/input.js", "/svgIcons.js", "/style.css"):
                     filename = "index.html" if path == "/" else path[1:]
                     mime = "text/html" if filename.endswith(".html") else "text/css" if filename.endswith(".css") else "text/javascript"
                     self.respond((STATIC / filename).read_bytes(), content_type=mime + "; charset=utf-8")

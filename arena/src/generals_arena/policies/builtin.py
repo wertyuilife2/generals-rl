@@ -1,5 +1,14 @@
 """One trusted WAIT reference for scalar, vector and persistent competitions."""
 from pathlib import Path
+from contextlib import contextmanager
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _native_library():
+    from generals.backends._build import build_shared
+    from generals.protocol.native import INCLUDE
+    return build_shared(Path(__file__).with_name('wait.cpp'), name='arena-wait', include_dirs=[INCLUDE])[0]
 
 
 class WaitController:
@@ -25,6 +34,12 @@ class WaitController:
         import numpy as np
         return np.zeros(active.shape, dtype=np.int64)
 
+    @contextmanager
+    def native_batch(self, height, width, players):
+        from generals.protocol.native import ABI_VERSION, PolicyABI, PolicyBinding, address
+        library = _native_library()
+        yield PolicyBinding(PolicyABI(ABI_VERSION, None, address(library.arena_wait_act), None, address(library.arena_wait_one)), library, None)
+
 
 def create_wait_controller(*, player_id=0, seed=0):
     return WaitController()
@@ -32,8 +47,9 @@ def create_wait_controller(*, player_id=0, seed=0):
 
 def wait_spec():
     """Return the same policy identity for every Arena match mode."""
-    from generals_arena.util import file_digest
-    return {'name': 'WAIT', 'kind': 'custom', 'version': file_digest(Path(__file__)),
+    from generals_arena.util import digest, file_digest
+    version = digest({name: file_digest(Path(__file__).with_name(name)) for name in ('builtin.py', 'wait.cpp')})
+    return {'name': 'WAIT', 'kind': 'custom', 'version': version,
             'factory': 'generals_arena.policies.builtin:create_wait_controller'}
 
 

@@ -309,9 +309,9 @@ return 0;''')
     assert result['kills'] == [0]*4
     assert all(move.eliminated is None for _, outcome in verified_replay(blob, result)
                if outcome is not None for move in outcome.moves)
-    assert [m['calls'] for m in result['decision_timing']] == [3,4,4]
+    assert [m['calls'] for m in result['decision_timing']] == [3,4,4,4]
     trace = json.loads(gzip.decompress(blob))
-    assert all(Action(*row[0]) == Action.wait() for row in trace['actions'][2:])
+    assert all(row[0] == 0 for row in trace['actions'][2:])
     frames = replay_frames(blob, result)
     import numpy as np
     mask = np.array(frames[1]['owner']) == 0

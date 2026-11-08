@@ -1,15 +1,14 @@
-"""JSON representation for browser boards and replay snapshots."""
-
-from generals.core.observation import snapshot
-from generals.core.state import rank_players
+"""Compatibility snapshot API; live sessions obtain their views from the runtime."""
+from types import SimpleNamespace
 
 
 def board_view(state, seat=None):
-    observation = snapshot(state, seat)
-    return {"width": observation.width, "height": observation.height,
-            "tick": observation.tick, "player_id": observation.player_id,
-            "general_pos": observation.general_pos, "ranking": rank_players(state, observation.stats),
-            **{key: getattr(observation, key).tolist() for key in
-               ("terrain", "structure", "owner", "army", "visible", "alive", "fog_obstacles", "has_kill", "warn_afk", "neutralize_in")},
-            "stats": {key: getattr(observation.stats, key).tolist() for key in
-                      ("army", "territory", "cities")}}
+    from .game import RecordedGame
+    p = state.player_count
+    plan = dict(entrant_ids=[str(i) for i in range(p)], controller_seeds=[0]*p, map={}, map_seed=0)
+    game = RecordedGame(plan, SimpleNamespace(max_ticks=max(1,state.tick+1)), [None]*p,
+                        initial=state, record=False)
+    try:
+        return game.view(seat)
+    finally:
+        game.close()

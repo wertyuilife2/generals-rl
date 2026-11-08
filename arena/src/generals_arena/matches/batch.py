@@ -1,53 +1,32 @@
 """Joint-tick batch execution for explicit, independently seeded match plans."""
-from time import perf_counter
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 
 from generals import Action, MapConfig, VecEnv
 from generals.protocol import MOVE_REASONS
-from generals.core.mapgen import generate_map
+from .cache import initial_map as generate_map
 from generals.core.observation import Observation, readonly
-from generals.core.recording import state_digest, state_to_dict
-from generals.core.state import GameState, MoveResult, PlayerStats
+from generals.core.state import MoveResult, PlayerStats
 
 from generals_arena.matches.config import MatchConfig
 from generals_arena.policies.entries import load_controller
 from generals_arena.matches.results import EXECUTION_POLICY
-from generals_arena.matches.results import build_result
-from generals_arena.matches.replay import encode_replay
+from generals_arena.matches.resources import cpu_bounded
+from generals_arena.matches.native import bind_loop
 
 
 def _numpy(value):
     return value.detach().cpu().numpy() if hasattr(value, "detach") else np.asarray(value)
 
 
-class _HostSnapshot:
-    """One synchronization for all required CUDA host views per joint tick."""
-    def __init__(self, env, joint):
-        self.env = env
-        self.sources = {**env.state, "_moves": env.unwrapped.last_moves, "_done": env.done, "_stats": env.stats,
-                        "_joint": joint, "_errors": env.unwrapped.errors}
-        self.cuda = hasattr(env.state["army"], "is_cuda")
-        if self.cuda:
-            import torch
-            self.buffers = {name: torch.empty(value.shape, dtype=value.dtype, pin_memory=True)
-                            for name, value in self.sources.items()}
-            self.arrays = {name: value.numpy() for name, value in self.buffers.items()}
-        else:
-            self.arrays = self.sources
-        self.refresh()
-
-    def refresh(self):
-        if self.cuda:
-            import torch
-            for name, source in self.sources.items():
-                self.buffers[name].copy_(source, non_blocking=True)
-            torch.cuda.current_stream(self.env.device).synchronize()
-        if np.any(self.arrays["_errors"]):
-            raise RuntimeError("vector simulator reported a native error")
-        return self.arrays
+def _host_observation(raw):
+    """Transfer public arrays once per batch, never once per scalar lane."""
+    if isinstance(raw['state']['army'], np.ndarray):
+        return raw
+    return {key: {name: _numpy(value) for name, value in item.items()} if key == 'state'
+            else _numpy(item) if hasattr(item, 'shape') else item
+            for key, item in raw.items()}
 
 
 def _one_observation(batch, lane):
@@ -65,18 +44,8 @@ def _one_observation(batch, lane):
         neutralize_in=readonly(_numpy(state["neutralize_in"])[lane]),
         general_pos=int(_numpy(batch["general_pos"])[lane]),
         stats=PlayerStats(*(readonly(stats[:, index]) for index in range(3))),
-        visibility="local", terminated=bool(_numpy(state["terminated"])[lane]),
+        visibility=batch.get("visibility", "local"), terminated=bool(_numpy(state["terminated"])[lane]),
         winner_id=None if int(_numpy(state["winner_id"])[lane]) < 0 else int(_numpy(state["winner_id"])[lane]))
-
-
-def _lane_state(host, lane, layout):
-    shape = (layout.height, layout.width)
-    winner = int(host["winner"][lane])
-    return GameState(layout, *(host[name][lane].reshape(shape) for name in ("structure", "owner", "army")),
-                     host["alive"][lane], host["general_pos"][lane], tick=int(host["tick"][lane]),
-                     terminated=bool(host["terminated"][lane]), winner_id=None if winner < 0 else winner,
-                     **{name: host[name][lane] for name in ('idle_ticks', 'afk_turn', 'end_reason',
-                        'leave_tick', 'death_order', 'kills', 'damage', 'spawn_pos', 'city_known', 'capture_mask', 'warn_afk')})
 
 
 def _move(row, pid, encoded):
@@ -91,9 +60,13 @@ def _move(row, pid, encoded):
 class _PolicyGroup:
     def __init__(self, entry, rules, seats, seeds, *, scalar=False, cache=None, slot=None):
         self.entry, self.seats = entry, np.asarray(seats, dtype=np.int64)
+        self.lanes = np.arange(len(self.seats))
         key = (entry["entrant_id"], slot, rules.map, rules.visibility)
         self.controller = cache[key] if cache is not None and key in cache else load_controller(entry, rules)
-        self.batch = not scalar and all(callable(getattr(self.controller, name, None))
+        if cache is not None and key in cache:
+            if hasattr(cache, 'move_to_end'):
+                cache.move_to_end(key)
+        self.batch = (not scalar or callable(getattr(self.controller, 'native_batch', None))) and all(callable(getattr(self.controller, name, None))
                                         for name in ("reset_batch", "act_batch"))
         self.controllers = []
         self.cached = False
@@ -115,6 +88,8 @@ class _PolicyGroup:
             raise
 
     def act(self, raw):
+        if not self.batch or getattr(self.controller, 'batch_device', None) == 'cpu':
+            raw = _host_observation(raw)
         if self.batch:
             actions = self.controller.act_batch(raw)
             if isinstance(actions, list) and all(isinstance(action, Action) for action in actions):
@@ -131,10 +106,9 @@ class _PolicyGroup:
         if self.batch:
             callback = getattr(self.controller, "on_result_batch", None)
             if callback is not None:
-                lanes = np.arange(len(self.seats))
-                own_moves = host["_moves"][lanes, self.seats].copy()
+                own_moves = host["_moves"][self.lanes, self.seats]
                 callback({"moves": own_moves,
-                          "actions": joint[lanes, self.seats].copy(),
+                          "actions": joint[self.lanes, self.seats],
                           "active": active & own_moves[:, 0].astype(bool), "player_ids": self.seats.copy()})
         else:
             for lane in np.flatnonzero(active):
@@ -145,6 +119,9 @@ class _PolicyGroup:
 
     def close(self):
         if self.cached:
+            release = getattr(self.controller, 'release_batch', None)
+            if release is not None:
+                release()
             return
         for controller in ([self.controller] if self.batch else self.controllers):
             close = getattr(controller, "close", None)
@@ -174,109 +151,57 @@ def _instances(entries, plans):
     return config, roles
 
 
+@cpu_bounded
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
-                  record_replays=False, scalar=False, runtime_cache=None):
-    """Return input-ordered (result, replay-or-None) pairs for explicit plans.
+                  record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True,
+                  initial_states=None, prepared_states=None):
+    """Schedule one homogeneous batch in the native Arena executor.
 
-    Rows share map configuration and instance-to-entrant assignment; seats may
-    rotate. The caller owns batch controllers cached by entrant, instance, map and visibility.
-    Every controller_seed is final, including native P2 baseline seeds.
+    native=False benchmarks the public policy bridge, not a second match loop.
+    Environment training backends remain independent of Arena's CPU runtime.
     """
     if not plans:
         return [], {}
+    if backend != 'cpu':
+        raise ValueError('Arena requires the native CPU backend; GPU/MPS simulation is available through VecEnv')
     config, roles = _instances(entries, plans)
-    if backend not in ("cpu", "gpu"):
-        raise ValueError("backend must be cpu or gpu")
-    states = [generate_map(config, plan["map_seed"]) for plan in plans]
+    maps = {plan['map_seed']: None for plan in plans}
+    for seed in maps:
+        maps[seed] = (initial_states[(config, seed)] if initial_states is not None and (config, seed) in initial_states
+                      else generate_map(config, seed))
+    states = [maps[plan['map_seed']] for plan in plans]
     config = replace(config, width=states[0].layout.width, height=states[0].layout.height)
     count, players = len(plans), config.players
     rules = MatchConfig(config, max_ticks=max_ticks)
-    placement = {"device": device if str(device).startswith("cuda") else "cuda:0"} if backend == "gpu" else {
-        "device": "cpu", "threads": cpu_threads}
     timing = dict(observation_seconds=0., policy_seconds=0., step_seconds=0., transfer_seconds=0.)
-    groups, baselines, records = [], [], [None] * count
-    eliminations = np.full((count, players), -1, dtype=np.int64)
-    invalid = np.zeros((count, players), dtype=np.int64)
-    traces = [[] for _ in plans] if record_replays else None
-    digests = [[] for _ in plans] if record_replays else None
-    initial_digests = [state_digest(state) for state in states]
+    groups, records = [], [None]*count
     try:
         for instance, entry, seats, seeds in roles:
-            if players == 2 and entry["kind"] == "baseline" and not scalar:
-                from generals_baselines import BatchBaselineControllers
-                specs = [SimpleNamespace(opponent=entry["factory_kwargs"]["kind"], learner_seat=1-int(seat))
-                         for seat in seats]
-                owner = BatchBaselineControllers(specs, height=config.height, width=config.width, seat_seeds=seeds)
-                baselines.append((owner, seats))
-            else:
-                groups.append(_PolicyGroup(entry, rules, seats, seeds, scalar=scalar,
-                                           cache=runtime_cache, slot=instance))
-        with VecEnv.from_states(states, **placement, auto_reset=False, episode_ticks=max_ticks) as env:
-            observers = [env.observer(group.seats) for group in groups]
-            active = np.ones(count, dtype=np.bool_)
-            if backend == "gpu":
-                import torch
-                joint = torch.zeros((count, players), dtype=torch.int64, device=env.device)
-                lanes = torch.arange(count, device=env.device)
-                group_seats = [torch.as_tensor(group.seats, device=env.device) for group in groups]
-                baseline_seats = [torch.as_tensor(seats, device=env.device) for _, seats in baselines]
-            else:
-                joint = np.zeros((count, players), dtype=np.int64)
-                lanes = np.arange(count)
-                group_seats = [group.seats for group in groups]
-                baseline_seats = [seats for _, seats in baselines]
-            host_view = _HostSnapshot(env, joint)
-            host = host_view.arrays
-            while active.any():
-                joint *= 0
-                for observer, group, seats in zip(observers, groups, group_seats, strict=True):
-                    entered = perf_counter()
-                    raw = observer()
-                    timing["observation_seconds"] += perf_counter() - entered
-                    entered = perf_counter()
-                    actions = group.act(raw)
-                    joint[lanes, seats] = (torch.as_tensor(actions, device=env.device, dtype=torch.int64)
-                                           if backend == "gpu" else _numpy(actions))
-                    timing["policy_seconds"] += perf_counter() - entered
-                for (owner, _), seats in zip(baselines, baseline_seats, strict=True):
-                    entered = perf_counter()
-                    actions = owner.act(host, active)
-                    joint[lanes, seats] = (torch.as_tensor(actions, device=env.device)
-                                           if backend == "gpu" else actions)
-                    timing["policy_seconds"] += perf_counter() - entered
-                entered = perf_counter()
-                env.step(joint)
-                timing["step_seconds"] += perf_counter() - entered
-                entered = perf_counter()
-                host = host_view.refresh()
-                timing["transfer_seconds"] += perf_counter() - entered
-                joint_host, moves = host["_joint"], host["_moves"]
-                invalid += (moves[:, :, 0].astype(bool) & ~moves[:, :, 1].astype(bool)) * active[:, None]
-                newly_dead = ~host['alive'] & (eliminations < 0) & active[:, None]
-                eliminations[:] = np.where(newly_dead, host['tick'][:, None], eliminations)
-                for owner, _ in baselines:
-                    owner.on_result(moves, joint_host, active)
-                for group in groups:
-                    group.feedback(host, joint_host, active)
-                if record_replays:
-                    for lane in np.flatnonzero(active):
-                        traces[lane].append([[int(a.kind), a.source, int(a.direction), int(a.mode)]
-                                             for a in (Action.decode(int(value)) for value in joint_host[lane])])
-                        digests[lane].append(state_digest(_lane_state(host, lane, states[lane].layout)))
-                ending = active & host["_done"].any(axis=1)
-                for lane in np.flatnonzero(ending):
-                    state = _lane_state(host, lane, states[lane].layout)
-                    record = build_result(plans[lane], state=state,
-                        stats={name: host["_stats"][lane, :, index] for index, name in enumerate(("army", "territory", "cities"))},
-                        elimination_ticks=[None if value < 0 else int(value) for value in eliminations[lane]],
-                        invalid_actions=invalid[lane].tolist(), initial_digest=initial_digests[lane])
-                    record["execution_policy"] = EXECUTION_POLICY
-                    blob = encode_replay(state_to_dict(states[lane]), traces[lane], digests[lane]) if record_replays else None
-                    records[lane] = record, blob
-                active[ending] = False
+            groups.append(_PolicyGroup(entry, rules, seats, seeds, scalar=scalar,
+                                       cache=runtime_cache, slot=instance))
+        packed = ([prepared_states[(MapConfig(**plan['map']), plan['map_seed'])] for plan in plans]
+                  if prepared_states is not None else states)
+        with VecEnv.from_states(packed, device='cpu', threads=cpu_threads,
+                                auto_reset=False, episode_ticks=max_ticks) as env:
+            active = np.ones(count, bool)
+            joint, invalid = np.zeros((count, players), np.int64), np.zeros((count, players), np.int64)
+            eliminations = np.full((count, players), -1, np.int64)
+            with bind_loop(env, groups, joint, invalid, eliminations, active, journal,
+                           native_policies=native, topologies=[s.layout.topology_id for s in states],
+                           record=record_replays) as execution:
+                while np.any(active):
+                    execution.advance(max_ticks, timing)
+                    for lane in np.flatnonzero(execution.ending):
+                        record = {**plans[lane], **execution.query(0, lane), 'execution_policy': EXECUTION_POLICY}
+                        metrics = execution.decision_timing(lane)
+                        if metrics:
+                            for item in metrics:
+                                item['entrant_id'] = plans[lane]['entrant_ids'][item['seat']]
+                            record['decision_timing'] = metrics
+                        from .replay import encode_native_trace
+                        blob = encode_native_trace(execution.query_bytes(1, lane)) if record_replays else None
+                        records[lane] = record, blob
     finally:
-        for owner, _ in baselines:
-            owner.close()
         for group in groups:
             group.close()
     return records, timing

@@ -5,6 +5,7 @@ lifetimes and emits the same completed result/replay pair for either executor.
 """
 import json
 import time
+from collections import defaultdict, deque
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -14,6 +15,8 @@ from generals_arena.policies.entries import load_controller
 from generals_arena.policies.entries import verify_artifacts
 from generals_arena.util import integer
 from generals_arena.util import source_digest
+from generals_arena.matches.resources import cpu_slot
+from generals_arena.matches.cache import initial_map
 
 
 def _verify_implementations(entries):
@@ -65,6 +68,22 @@ def _batch_key(plan):
             tuple(sorted(zip(plan["instance_ids"], plan["entrant_ids"]))))
 
 
+def resolve_geometries(plans):
+    """Resolve a schedule's random dimensions once per map, before dispatch."""
+    geometries, resolved = {}, []
+    for original in plans:
+        plan = dict(original)
+        config = MapConfig(**plan['map'])
+        if 'geometry' not in plan and (config.width is None or config.height is None):
+            key = (config, plan['map_seed'])
+            if key not in geometries:
+                state = initial_map(config, plan['map_seed'])
+                geometries[key] = [state.layout.width, state.layout.height]
+            plan['geometry'] = geometries[key]
+        resolved.append(plan)
+    return resolved
+
+
 class MatchRunner:
     def __init__(self, entries, *, max_ticks, backend="cpu", device="cpu", batch_size=128,
                  cpu_threads=1, record_replays=False, scalar=False, execution="batch",
@@ -73,12 +92,10 @@ class MatchRunner:
         integer("batch_size", batch_size)
         integer("cpu_threads", cpu_threads, 1)
         device = str(device)
-        if backend not in ("cpu", "gpu"):
-            raise ValueError("backend must be cpu or gpu")
+        if backend != 'cpu':
+            raise ValueError('Arena requires native CPU execution; GPU/MPS training uses VecEnv')
         if device != "cpu" and device != "cuda" and not (device.startswith("cuda:") and device[5:].isdigit()):
             raise ValueError("device must be cpu, cuda, or cuda:N")
-        if backend == "gpu" and device == "cpu":
-            raise ValueError("GPU backend requires a CUDA device")
         if execution not in ("batch", "isolated"):
             raise ValueError("execution must be 'batch' or 'isolated'")
         self.entries, self.max_ticks = entries, max_ticks
@@ -87,15 +104,13 @@ class MatchRunner:
         self.record_replays, self.scalar = record_replays, scalar
         self.execution = execution
         self.worker, self._owned_worker = worker, None
-        self.runtime_cache = {}
+        self._batch_worker = None
         self.execution_modes = set()
 
     def _validate(self, plans):
         """Validate the complete schedule before any results can be emitted."""
         from generals_arena.policies.artifacts import capabilities_supports
         used = {key for plan in plans for key in plan["entrant_ids"]}
-        if self.backend == "gpu" and any(self.entries[key]["kind"] == "cpp" for key in used):
-            raise ValueError("C++ policies require isolated CPU execution; GPU batch execution is unsupported")
         _verify_implementations(self.entries[key] for key in used)
         capabilities = {}
         for key in used:
@@ -130,76 +145,38 @@ class MatchRunner:
         self.close()
 
     def close(self):
-        cache, self.runtime_cache = self.runtime_cache, {}
-        try:
-            for controller in cache.values():
-                close = getattr(controller, "close", None)
-                if close is not None:
-                    close()
-        finally:
-            if self._owned_worker is not None:
-                self._owned_worker.close()
-                self.worker = self._owned_worker = None
+        if self._owned_worker is not None:
+            self._owned_worker.close()
+            self.worker = self._owned_worker = None
+        if self._batch_worker is not None:
+            self._batch_worker.close()
+            self._batch_worker = None
 
     def _isolated(self, plan, stop):
-        from generals_arena.matches.game import RecordedGame
-        from generals_arena.matches.game import close_game
-        from generals_arena.matches.game import failure
-        from generals_arena.policies.native import PolicyError
-
-        if any(self.entries[key]["kind"] == "cpp" for key in plan["entrant_ids"]):
-            if self.worker is None:
-                from generals_arena.matches.worker import MatchWorker
-                self.worker = self._owned_worker = MatchWorker()
-            # The match process owns native watchdogs, journal recovery and
-            # decision-timeout forfeits; a generic batch call cannot replace it.
-            return self.worker.run(self.entries, plan, max_ticks=self.max_ticks)
-
-        controllers, game = [], None
-        config = SimpleNamespace(max_ticks=self.max_ticks)
+        if self.worker is None:
+            from .worker import MatchWorker
+            self.worker = self._owned_worker = MatchWorker()
         try:
-            controllers = build_controllers(self.entries, plan)
-            game = RecordedGame(plan, config, controllers)
-            while not game.done:
-                if stop is not None and stop.is_set():
-                    return None  # Leave a persistent plan pending for retry.
-                game.advance()
-            return game.result(), game.replay_blob()
-        except PolicyError as exc:
-            if game is None:
-                game = RecordedGame(plan, config, [None] * len(plan["entrant_ids"]))
-                game.controllers = controllers
-            return failure(game, exc), game.replay_blob()
-        finally:
-            if game is not None:
-                close_game(game)
-            else:
-                for controller in controllers:
-                    close = getattr(controller, "close", None)
-                    if close is not None:
-                        close()
+            with cpu_slot():
+                return self.worker.run({key: self.entries[key] for key in plan['entrant_ids']},
+                                       plan, max_ticks=self.max_ticks, stop=stop)
+        except InterruptedError:
+            return None  # Scheduler leaves the cancelled plan pending for retry.
 
     def run(self, plans, on_result=None, *, stop=None):
         """Emit results in schedule order; callbacks may atomically commit them.
 
-        Stopping leaves the un-emitted suffix untouched. Native C++ matches
-        retain their existing whole-match watchdog boundary.
+        Stopping leaves the un-emitted suffix untouched. Every native policy
+        uses the same worker and per-decision watchdog boundary.
         """
-        plans = list(plans)
-        from generals.core.mapgen import generate_map
-        geometries = {}
-        plans = [dict(plan) for plan in plans]
-        for plan in plans:
-            config = MapConfig(**plan['map'])
-            if config.width is None or config.height is None:
-                key = (config, plan['map_seed'])
-                if key not in geometries:
-                    state = generate_map(config, plan['map_seed'])
-                    geometries[key] = [state.layout.width, state.layout.height]
-                plan['geometry'] = geometries[key]
+        plans = resolve_geometries(plans)
         used = self._validate(plans)
         results, timing = [], {}
         ready = {}
+        buckets = defaultdict(deque)
+        if not self.scalar and self.execution == 'batch' and stop is None:
+            for index, plan in enumerate(plans):
+                buckets[_batch_key(plan)].append(index)
         offset = 0
         while offset < len(plans):
             if stop is not None and stop.is_set():
@@ -211,9 +188,7 @@ class MatchRunner:
                 results.append(value)
                 offset += 1
                 continue
-            isolated = self.execution == "isolated" or any(
-                self.entries[key]["kind"] == "cpp" for key in plans[offset]["entrant_ids"])
-            if isolated:
+            if self.scalar or self.execution == 'isolated' or stop is not None:
                 self.execution_modes.add("isolated")
                 start = time.monotonic()
                 record = self._isolated(plans[offset], stop)
@@ -223,16 +198,26 @@ class MatchRunner:
                 records = [record]
                 offset += 1
             else:
-                self.execution_modes.add("scalar_reference" if self.scalar else "policy_batch")
-                from generals_arena.matches.batch import execute_batch
+                self.execution_modes.add("isolated_batch")
                 key = _batch_key(plans[offset])
                 limit = self.batch_size or len(plans)
-                indices = [index for index in range(offset, len(plans))
-                           if index not in ready and _batch_key(plans[index]) == key][:limit]
-                records, elapsed = execute_batch(self.entries, [plans[index] for index in indices],
-                    max_ticks=self.max_ticks, device=self.device, backend=self.backend,
-                    cpu_threads=self.cpu_threads, record_replays=self.record_replays,
-                    scalar=self.scalar, runtime_cache=self.runtime_cache)
+                bucket = buckets[key]
+                indices = [bucket.popleft() for _ in range(min(limit, len(bucket)))]
+                options = dict(max_ticks=self.max_ticks, device=self.device, backend=self.backend,
+                    cpu_threads=self.cpu_threads, record_replays=self.record_replays, scalar=self.scalar)
+                config = MapConfig(**plans[offset]['map'])
+                options['initial_states'] = {(config, plans[index]['map_seed']):
+                    initial_map(config, plans[index]['map_seed']) for index in indices}
+                if self.worker is not None:
+                    executor = self.worker.run_batch
+                else:
+                    if self._batch_worker is None:
+                        from .batch_worker import BatchWorker
+                        self._batch_worker = BatchWorker()
+                    executor = self._batch_worker.run
+                entries = {key: self.entries[key] for index in indices for key in plans[index]['entrant_ids']}
+                records, elapsed = executor(entries,
+                    [plans[index] for index in indices], **options)
                 for name, seconds in elapsed.items():
                     timing[name] = timing.get(name, 0.) + seconds
                 ready.update(zip(indices, records, strict=True))

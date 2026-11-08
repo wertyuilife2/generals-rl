@@ -29,7 +29,8 @@ class _Options(ctypes.Structure):
 
 @lru_cache(maxsize=1)
 def _library():
-    lib, metadata = build_shared(Path(__file__).with_name('policy.cpp'), name='baselines')
+    from generals.protocol.native import INCLUDE
+    lib, metadata = build_shared(Path(__file__).with_name('policy.cpp'), name='baselines', include_dirs=[INCLUDE])
     signatures = {
         'baseline_error': ([], ctypes.c_char_p),
         'baseline_create': ([ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
@@ -43,9 +44,9 @@ def _library():
         'baseline_batch_create': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                                   ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int], ctypes.c_void_p),
         'baseline_batch_destroy': ([ctypes.c_void_p], None),
-        'baseline_batch_act': ([ctypes.c_void_p, *([ctypes.c_void_p] * 9)], ctypes.c_int),
+        'baseline_batch_act': ([ctypes.c_void_p, *([ctypes.c_void_p] * 10)], ctypes.c_int),
         'baseline_batch_result': ([ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-                                  ctypes.c_int, ctypes.c_void_p], None),
+                                  ctypes.c_void_p], None),
     }
     for name, (args, result) in signatures.items():
         function = getattr(lib, name)
@@ -62,6 +63,8 @@ class BaseAI:
     max_sources = 6
     max_path_attempts = 12
     memory_ttl = 50
+    requires_move_results = True
+    batch_device = 'cpu'
 
     def __init__(self, player_id=0, seed=0):
         self.reset(player_id, seed)
@@ -82,10 +85,32 @@ class BaseAI:
                                           (bits.next_uint64, bits.next_uint32, bits.next_double)])
 
     def close(self):
+        batch, self._batch = getattr(self, '_batch', None), None
+        if batch is not None:
+            batch.close()
         finalizer = getattr(self, '_finalizer', None)
         if finalizer is not None:
             finalizer()
         self._handle = None
+
+    def reset_batch(self, player_ids, seeds):
+        from .batch import PolicyBatch
+        self.close()
+        self._batch = PolicyBatch(self, player_ids, seeds)
+
+    def act_batch(self, observations):
+        if self._batch is None:
+            raise RuntimeError('reset_batch must be called before act_batch')
+        return self._batch.act(observations)
+
+    def on_result_batch(self, results):
+        self._batch.on_result(results)
+
+    def native_batch(self, height, width, players):
+        """Lease the same independently seeded planners to a native executor."""
+        if self._batch is None:
+            raise RuntimeError('reset_batch must be called before native_batch')
+        return self._batch.native_binding(height, width, players)
 
     def act(self, observation):
         if not self._handle:

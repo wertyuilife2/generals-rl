@@ -1,4 +1,5 @@
 """Generic batch execution preserves scalar matches, seed pairing and replays."""
+from execution_test_utils import without_timing
 from copy import deepcopy
 import json
 
@@ -25,7 +26,7 @@ def test_batch_scalar_and_chunking_have_identical_games(tmp_path):
     batch = evaluate(bundle, settings, tmp_path/'batch.json', batch_size=0)
     scalar = evaluate(bundle, settings, batch_size=0, scalar=True)
     chunks = evaluate(bundle, settings, batch_size=1)
-    assert batch['results'] == scalar['results'] == chunks['results']
+    assert without_timing(batch['results']) == without_timing(scalar['results']) == without_timing(chunks['results'])
     assert batch['elo'] == scalar['elo'] == chunks['elo']
     assert batch['games'] == batch['expected_games'] == 8
     assert batch['wins'] + batch['losses'] + batch['draws'] == 8
@@ -92,20 +93,13 @@ def test_incompatible_capability_and_bad_profile_do_not_produce_results(tmp_path
         profile_id(dict(profile(), rating_policy='invented'))
 
 
-def test_cuda_vector_results_match_cpu_when_available(tmp_path):
-    import torch
-    if not torch.cuda.is_available():
-        pytest.skip('CUDA unavailable')
+def test_arena_gpu_environment_requires_native_execution_binding(tmp_path):
     bundle = make_bundle(tmp_path/'bundle')
-    cpu = evaluate(bundle, profile(maps=1,ticks=8), batch_size=0)
-    gpu = evaluate(bundle, profile(maps=1,ticks=8), batch_size=0, backend='gpu',device='cuda:0')
-    # Deployment IDs include the inference device; simulated game data do not.
-    simulated = lambda rows: [{k:v for k,v in row.items() if k not in ('game_id','entrant_ids','rating_changes')} for row in rows]
-    assert simulated(cpu['results']) == simulated(gpu['results'])
-    assert cpu['elo'] == gpu['elo']
+    with pytest.raises(ValueError, match='native CPU'):
+        evaluate(bundle, profile(maps=1,ticks=8), backend='gpu', device='cuda:0')
 
 
-def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(tmp_path,monkeypatch):
+def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(in_process_batch, tmp_path,monkeypatch):
     from generals.core.state import GameState,MapLayout
     shape=(9,9)
     owner=np.full(shape,-1,dtype=np.int16)
@@ -116,7 +110,7 @@ def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(tmp_pat
     army.flat[0]=20
     state=GameState(MapLayout(np.zeros(shape,dtype=np.uint8)),structure,owner,army,
                     np.ones(3,dtype=np.bool_),np.array([0,1,80],dtype=np.int32))
-    monkeypatch.setattr('generals_arena.matches.batch.generate_map',lambda *args: state.copy())
+    monkeypatch.setattr('generals_arena.matches.runner.initial_map',lambda *args: state.copy())
     bundle=make_bundle(tmp_path/'bundle',players=(3,))
     settings=make_profile(MapConfig(25, 25,3,0,0),max_ticks=1,maps_per_opponent=1,
         opponents=[{'name':'aggressive','kind':'baseline','policy':'aggressive'}])
@@ -127,7 +121,7 @@ def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(tmp_pat
     assert eliminated['outcome']=='loss'
 
 
-def test_neural_opponents_have_independent_streams_that_follow_seat_rotations(tmp_path, monkeypatch):
+def test_neural_opponents_have_independent_streams_that_follow_seat_rotations(in_process_batch, tmp_path, monkeypatch):
     import generals_arena.competitions.evaluation as evaluation
     from generals_arena.matches import batch as batch_execution
     candidate = make_bundle(tmp_path/'candidate', name='candidate', players=(3,))

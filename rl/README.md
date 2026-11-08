@@ -201,7 +201,7 @@ python -m generals_arena commit outputs/models/nova-224 --league outputs/arena/m
 ```
 
 已有联赛跳过 `init`；其他地图／人数模型需要匹配自己的联赛配置。`commit/run` 的环境执行仍是 CPU 单局，
-`--device` 只指定包的推理设备；需要 GPU 环境和跨对局批推理时使用下方 `evaluate` 或 Arena 的 `tournament`。
+`--device` 只指定包的推理设备；需要跨对局批推理时使用下方 `evaluate` 或 Arena 的 `tournament`。
 
 包内只有 `manifest.json`、`actor.pt`、`model_config.json` 和 `policy/`，不含 critic、optimizer 或训练依赖。
 Arena 仅解析通用 manifest；features/history/knowledge/mask、网络和动作转换均由 RL 的共享 policy 实现。
@@ -226,14 +226,14 @@ from generals import MapConfig
 from generals_arena.competitions.evaluation import make_profile
 profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2000)
 # 可配置其他 package / baseline 对手；1v1 自动加入 WAIT 对照。
-# 独立 C++ 策略包只支持 CPU 隔离执行，不能用于下方 GPU 批评估。
+# 独立 C++ 策略包使用原生 CPU 批执行，可与 CUDA NN 混合评估。
 with open("profile.json", "w") as f:
     json.dump(profile, f)
 ```
 
 ```bash
 python -m generals_arena evaluate --bundle outputs/models/nova-224 --profile profile.json \
-  --output outputs/eval/nova.json --backend gpu --device cuda:0 --batch-size 256
+  --output outputs/eval/nova.json --backend cpu --device cuda:0 --batch-size 128
 ```
 
 默认 `evaluation.profile=null`，根据当前任务生成官方随机 1v1 地图、四个 baseline 和 WAIT 面板。周期评估默认每对手 100 张地图、交换座位，共 1000 局。可通过 `evaluation.profile` 指定外部校准配置文件；更换规则后必须重新校准参考分数，旧 F03 9×9 的分数不沿用。新规则的校准留待后续实验。
@@ -248,7 +248,7 @@ RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续
 `--record-replays` 保存可由 Arena 逐 tick 验证的录像；
 `generals-arena evaluate` 是接受 bundle/profile 的 CLI。纯 env.step 性能指标与含决策的批评估 wall throughput 分开报告。
 
-训练默认与训练卡共用 `cuda:0`，在 PPO 更新间同步批评估；CPU 或显式独立单卡评估可异步。
+评估默认 `backend=cpu, device=cuda:0, batch_size=128`：原生 CPU 批量链推进环境，NN 在 CUDA 上批推理。训练自身仍使用 GPU 环境。评估与训练卡共用 `cuda:0` 时在 PPO 更新间同步运行；CPU 推理或显式独立单卡评估可异步。
 共享 GPU 时，所有 rank 先完成 CUDA 工作、释放空闲缓存并在 CPU 同步，评估结束后一起恢复训练；
 显式设置 `allow_shared_gpus=true` 也遵循这一顺序。rollout 和模型仍驻留显存，容量需容纳它们与评估峰值。
 CUDA 初始化前未显式配置 allocator 时，训练入口默认启用

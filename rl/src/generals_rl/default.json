@@ -115,7 +115,7 @@
   "evaluation": {
     "enabled": true,
     "profile": null,
-    "batch_size": 0,
+    "batch_size": 128,
     "max_ticks": 2000,
     "seed": 271828,
     "cpu_threads": 1,
@@ -124,7 +124,7 @@
     "timeout_seconds": 1800,
     "every_n_updates": 14,
     "maps_per_opponent": 100,
-    "backend": "gpu",
+    "backend": "cpu",
     "final_top_k": 3,
     "final_games_multiplier": 2
   },

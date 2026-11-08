@@ -29,9 +29,9 @@ players = make_controllers(["expansion", "defensive"], seed=42)
 `src/generals_baselines/policy.cpp` 中实现；`base.py` 是生命周期与数组绑定，不保留另一套 Python 规划器。
 每个控制器独立持有原生状态，仅接收允许的观测。调试用的 `terrain/owner/army/path` 返回独立快照。
 
-`BatchBaselineControllers` 为二人对局提供一次原生调用处理多个独立控制器的接口，返回借用的编码动作数组，下一次调用会覆盖。
-Arena 的二人批评估使用该接口；3–8 人批评估仍逐席位调用标量控制器。两条路径复用同一个 C++ 策略实现，
-不需要再导入或维护 RL 专属的 baseline 评估器。
+同一控制器提供 `reset_batch(player_ids, seeds)` / `act_batch(observations)` 批接口，支持 2–8 人对局，
+每个 lane 独立持有记忆和 RNG。`native_batch(height, width, players)` 将该批次绑定到 Arena 的原生执行链，
+省去逐 tick 的 Python 控制器调用；标量接口与批接口复用同一个 C++ 策略实现。
 
 C++ 在持有 NumPy BitGenerator 锁时直接调用其原生随机函数，保持原有种子派生、洗牌和抽样顺序，
 不预取随机数，不跨席位共享随机流。优化前后的完整动作与逐 tick 状态通过黄金轨迹及 1000 局对照校验。

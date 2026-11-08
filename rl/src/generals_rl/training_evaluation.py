@@ -95,8 +95,8 @@ class TrainingEvalConfig:
         if device.type not in ('cpu', 'cuda'):
             raise ValueError('evaluation.device must be a CPU or CUDA device string')
         object.__setattr__(self, 'device', str(device))
-        if self.backend not in ('cpu', 'gpu') or (self.backend == 'gpu' and device.type != 'cuda'):
-            raise ValueError('evaluation.backend must be cpu or gpu; gpu requires a CUDA device')
+        if self.backend != 'cpu':
+            raise ValueError('evaluation.backend must be cpu; evaluation.device selects CPU or CUDA model inference')
         if self.timeout_seconds is not None and (isinstance(self.timeout_seconds, bool)
                 or not isinstance(self.timeout_seconds, (int, float))
                 or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
