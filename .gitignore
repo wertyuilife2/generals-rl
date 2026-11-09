@@ -21,3 +21,12 @@ doc/assets/*
 !doc/assets/f03_ablation/
 
 config/secret/
+
+# Local heuristic research is disposable; commit published policies only.
+heristic/**/experiments/
+heristic/**/research.py
+heristic/**/results.json
+heristic/**/HUMAN_LEARNING.md
+/heristic/gpt-6-aegis-v1/*/
+!/heristic/gpt-6-aegis-v1/checkpoints/
+!/heristic/gpt-6-aegis-v1/tests/
