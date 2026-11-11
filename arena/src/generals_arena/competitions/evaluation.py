@@ -31,7 +31,7 @@ from generals_arena.matches.reporting import output_path
 from generals_arena.matches.reporting import replay_writer
 from generals_arena.matches.reporting import write_report
 
-def make_profile(map_config, *, max_ticks=2000, opponents=None, seed=1000042,
+def make_profile(map_config, *, max_ticks=2048, opponents=None, seed=1000042,
                  maps_per_opponent=50, paired_seats=True, calibration=None):
     """Build a serializable, model-independent fixed evaluation gauntlet."""
     map_config = MapConfig(**map_config) if isinstance(map_config, dict) else map_config

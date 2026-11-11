@@ -1,123 +1,50 @@
 # Generals PPO self-play
 
-本优化 worktree 默认训练使用 **纯 ViT Actor／Critic、H4/K11、current-vs-current 双座训练与 gamma 课程**，运行官网 31.4.5 规则及随机 1v1 地图。双方使用同一 actor 的独立局部输入，双方轨迹都用于 PPO；Actor／Critic默认共享局部信息ViT；Critic通过独立的小型特权encoder读取当前完整棋盘，可分别关闭共享或特权分支。配置随包保存在 [`generals_rl/default.json`](src/generals_rl/default.json)。当前只训练 1v1；训练和评估默认均为 **2000 tick**，自然终局与外部截断分别处理。四个基础 AI 只参与评估。本次执行优化的短训与 4090 测量不能替代长期棋力验收，历史 recent8/F03 结果保留为对照。
+基于仓库内 RSL 分支的离散 PPO。当前支持官方规则 1v1、双座纯自对弈，以及历史对手池消融。
+默认配置见 [default.json](src/generals_rl/default.json)，设计与可选实验见
+[训练设计](../doc/rl_training_design.md)，实验结果见[训练日志](../doc/rl_train_log.md)。
 
-新输入与地图尚未进行大规模效果／吞吐实验，不能把旧 F03 的胜率和最优 batch 结论当作新默认的验证。旧模型需用对应冻结源码与旧规则运行，不提供静默兼容转换。
+## 安装与启动
 
-正式结果见 [H200 scaling：22 项训练](../doc/h200_scaling.md) 和 [F03 顺序消融](../doc/f03_ablation.md)；研究历史见 [Auto research 记录](../doc/auto_research.md)。
-
-## 安装与运行
-
-在仓库根目录激活已有 PyTorch/CUDA 的 `generals-rl` conda 环境：
+在已有 PyTorch/CUDA 的环境中，从仓库根目录执行：
 
 ```bash
 conda activate generals-rl
 python -m pip install -r rl/requirements-train.txt
 python -m pip install -e ./env -e ./baselines -e ./arena -e ./rl/vendor/rsl_rl -e ./rl --no-deps --no-build-isolation
-python -m generals_rl.train
+python -m generals_rl.train --output outputs/rl/my-run
+# 八卡；每 rank 使用同一份配置中的环境数与物理批大小。
+torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/rl/my-ddp-run
 ```
 
-`requirements-train.txt` 是本地测试环境的依赖固定清单；已有兼容依赖的环境可跳过第一条 pip 命令。
-训练使用仓库内的 RSL 分支，不能用同名 PyPI 包替代该 editable 安装。H200 完整实训使用 PyTorch 2.8.0+cu129。
+RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/path/to/nvcc` 指定已安装的编译器。
+独立 checkout 使用共享 Python 环境时，设置
+`PYTHONPATH=rl/src:env/src:baselines/src:arena/src:rl/vendor/rsl_rl` 选择该 checkout 的源码。
 
-默认从头初始化，训练 **224 轮 PPO**，输出写入新的 `outputs/rl/<时间戳>/`。`--output PATH` 可指定新目录；`--iterations` 或 `--steps-per-env` 可覆盖预算，二者互斥。单卡执行沿用每 rank 配置，环境总数和全局 minibatch 小于八卡实验。
-
-八卡启动方式（本次完成双rank CPU回归及4090单卡实测；新的双座配方尚未在H200上实训）：
-
-```bash
-torchrun --standalone --nproc_per_node=8 -m generals_rl.train --output outputs/rl/f03-selected
-```
-
-配置默认使用 CUDA 和原生 BF16，需要相应设备与 `nvcc` 编译工具链。下表的全局量以八个 rank 为准。
+## 默认配置
 
 | 项目 | 默认值 |
-| --- | --- |
-| 游戏与输入 | 官方随机 18–23 格长方形、2 人；RL 填充到 23×23，13 通道局部 H4 combat 历史＋K11；独立 `valid_cells` 布尔掩码；特权 critic |
-| 模型 | ViT1M总参数量级：共享主干128维／4层／4头，独立主干各96维／4层／3头；特权ViT为64维／1层／4头 |
-| 采样 | 每 rank 8,192 个真实对局、16,384 条玩家轨迹；八卡共65,536局、131,072条轨迹；T=32 |
-| PPO | E=4，每 epoch 64 个逻辑 minibatch；全局 B=65,536，每 rank B=8,192 |
-| 激活内存 | 物理 minibatch=512，梯度累积为原逻辑 minibatch；推理 chunk=1024；共享主干联合反向，独立主干分开反向 |
-| Rollout存储 | H4历史去重＋二值位打包；连续特征与公开统计保持FP32，取样恢复原观察 |
-| 预算 | 224轮，八卡合计939,524,096个fresh玩家transitions、469,762,048个真实棋盘tick |
-| 对手／快照 | live current；没有训练对手池或逐轮发布；训练checkpoint保留2个，评测保留最近2个及top3候选 |
-| 学习率 | actor/critic 共享，adaptive 范围 `[1e-5, 1e-3]`，desired KL=.01 |
-| 课程 | gamma 与 PBRS gamma 从 .99 线性到 .999，iteration=112 到达终值；tick 惩罚在 iteration=125 衰减至 0 |
-| 数值执行 | 双方合并推理与 PPO 使用 BF16，`compile_forward=true`；概率、GAE、loss归约及主参数/Adam状态保持FP32 |
+|---|---|
+| 地图 | 官方随机18–23格长方形，填充到23×23；固定9×9需同时设 `width=height=9, random_maps=false` |
+| Episode | 训练与评估均为 **2048 tick**，对9×9及全尺寸一致 |
+| 输入／网络 | 局部H4/K11、独立 `valid_cells`；ViT1M、共享主干、特权critic、`critic_fusion="late"` |
+| 采样 | 每卡8192个真实对局、16384条玩家轨迹；T32 |
+| 更新 | E4/M64；每卡逻辑batch8192、物理batch512；推理chunk1024 |
+| 预算 | 224轮PPO；八卡合计939,524,096条玩家transition |
+| 训练对手 | live current；双方轨迹均用于PPO |
+| 学习率 | categorical adaptive LR，范围 `[1e-5, 1e-3]`，desired KL=.01 |
+| 奖励课程 | gamma/PBRS gamma从.99到.999，iteration112结束；tick惩罚在iteration125衰减至0 |
+| 数值／存储 | BF16前向、FP32参数/GAE/loss；历史去重和二值位打包 |
+| 评估 | 默认开启，每14次更新；原四baseline＋Kestrel v7、Razor v8、Aegis v2，采样动作 |
+| 保留 | 常规checkpoint保留2个；评估保留最近2个，并保护best、top3复评候选和在途任务 |
 
-iteration从0起算。每次PPO轮包含一次采样、GAE和完整E4；双方的独立动作/奖励计入fresh玩家样本，重复epoch不计新样本。`task.num_envs`始终是真实对局数；`task.train_both_sides=true`时RSL看到两倍数量的玩家轨迹，顺序固定为game0/seat0、game0/seat1、game1/seat0……。例如4096局×32tick产生262144条玩家transitions及131072个棋盘tick。TensorBoard和summary同时记录`player_transitions`和`board_ticks`，地图课程按真实棋盘tick推进。物理microbatch控制执行内存；共享模式复用一次局部编码并联合反向，独立模式复制同一encoder并分别反向；全部逻辑batch累积后只做一次梯度裁剪和Adam step。
+`task.num_envs` 表示真实对局数。双座模式的玩家transition是board tick数的两倍；
+**地图课程按全局board ticks推进**，PPO样本数按玩家transition统计。
+`runner.num_steps_per_env` 是rollout长度，与episode上限分别配置。权重在一个rollout内固定，局内可以跨多次更新。
 
-纯模式不再创建`history_pool/`。周期评测直接使用已有checkpoint导出策略，按原有更新间隔触发，不依赖模型快照发布。保留旧单座current作消融可设`train_both_sides=false`；历史对手模式需同时设`opponent="self_play"`和`train_both_sides=false`，按需提供原`self_play.pool_size/snapshot_interval`。双座训练必须使用student-only StudentPPO和采样策略。4090前后测量与实现说明见[双座纯自对弈对照](../doc/current_self_play_4090.md)。
-
-默认`runner.release_terminal_observations=true`：timeout bootstrap和每步日志消费完成后释放终局观测引用，避免旧H4数据占用PPO更新期间的显存。该vendor runner选项默认false，Generals配置显式开启；补丁记录在[PATCHES.md](vendor/rsl_rl/PATCHES.md)。
-
-独立worktree使用共享venv时，用`PYTHONPATH=rl/src:env/src:baselines/src:arena/src:rl/vendor/rsl_rl`选择该worktree源码；不对共享venv重新做editable安装，以免影响原工作区。
-
-4090可用[独立配置](configs/current-dual-4090.json)：4096真实对局、8192玩家轨迹、T32、每轮262144个fresh样本，E4/逻辑batch8192不变，32个minibatch。该执行规模已在512地图池下测量，实际训练仍继承65536地图池；表中峰值不包含扩大地图池的额外存储。不能把双座样本数量直接当成两倍完整训练加速。
-
-默认配置通过 `{"runner": {"storage_history": {"policy": 4}}}` 无损去重 H4
-rollout 历史：每 tick 只存当前帧，额外保留 rollout 起点的三帧上下文和 episode 边界，
-在取 minibatch 时恢复原观察。帧数须与 `task.history_length` 一致；省略该配置则完整保存。
-它只改变采样缓存的表示，可在相同源码与网络结构下继续 `--resume`；本次纯 ViT／十三通道结构需要从头训练。
-在每卡 N=16,384、T=32、23×23 画布下，每卡节省约42.1 GiB，允许测试更大的物理批；
-逻辑 minibatch、PPO epochs 和总采样预算仍单独配置。正确性、显存和八卡吞吐实测见
-[历史去重测试](../doc/history_storage_20261103.md)。
-
-默认 `runner.storage_codec` 为
-`"storage_codec": "generals_rl.rollout_codec.GeneralsObservationCodec"`，
-局部地图保留13通道，特权地图为11通道；二值地图／K11标志及action mask／valid_cells按位打包。特权地图的8个二值通道使用uint8；
-连续特征及公开统计保留FP32，minibatch取样时恢复原观察。
-该选项与历史去重独立，当前默认启用，只影响训练采样缓存，不进入env／Arena协议或导出策略包。
-可将 `storage_codec` 设为 `null` 关闭位打包，将 `storage_history` 设为 `null` 关闭历史去重。
-CUDA融合取样与解码，CPU使用相同张量表达式；配置、正确性及实测见
-[无损位打包测试](../doc/packed_storage_20261103.md)。
-
-Actor只接收该座位的局部观测、历史、知识和公开统计；critic的完整棋盘不传给actor。H4是四帧近期输入，知识和历史按座位及episode隔离。双座模式的同一对局一起reset，但两人的观测、奖励、old logprob和GAE轨迹独立。局内跨rollout边界时双方一起更新网络；单rollout内权重固定。历史模式另行保留逐局固定对手的原行为。
-默认 actor/critic 的运行统计 observation normalization 均关闭；各字段的固定缩放由 `policy/` 中的特征构造实现。
-
-13 个棋盘通道包含迷雾障碍提示，有效地图区域通过独立 `valid_cells` 传递；填充格不进入行动掩码，统计按真实地图面积缩放。combat 使用行动前的当前兵力，0/1 兵来源不可行动。K11 记录曾经看见的信息及年龄，不把将军身份当作永久属性：将军转换／交换后会根据新观测更新。训练与导出共用这些构造器；部署包将原始地图填充后推理，再将动作还原为真实宽度的格点编码。CPU/CUDA 都有多尺寸逐 tick 的训练／部署输入与动作一致性测试。
-
-Dense ViT 默认开启 `runner.policy.mask_padding_tokens=true`：Actor／Critic 的 Transformer 排除填充格，空间汇聚只使用有效格点。`valid_cells` 是 `[batch, cells]` 的独立布尔输入，不作为可学习地图通道，不堆叠到 H4 历史。训练、自对弈、rollout 取样与导出推理共同传递此字段；每次终局观察保留其自己的掩码。CUDA 混合精度通过 PyTorch 的变长 Flash Attention 打包有效 token，CPU/FP32 使用 attention mask，保留原画布位置编码与动作编码。
-
-局部encoder的空间输入为H4（52通道）、K11和将军相对坐标（2通道）。Actor与Critic共享局部encoder的特征，独立模式则复制同一实现。ViT `model_size="1m"`按总参数量级配置：共享模式使用128维／4层／4头，独立模式的两份encoder各为96维／4层／3头；两种规格每头均为32维。策略头始终只依赖局部信息；价值损失可训练共享encoder，特权信息只在价值分支融合。10M／100M及ResNet规格维持原值，本次仅调整ViT1M共享主干。
-
-23×23画布、H4/K11、head_channels=128的实际总参数（共享权重计一次）为：
-
-| share_backbone | critic_privileged | patch=1（默认） | patch=3 |
-|---|---|---:|---:|
-| false | true | 1,250,954 | 1,250,250 |
-| false | false | 1,139,722 | 1,163,146 |
-| true | true | 1,102,090 | 1,096,330 |
-| true | false | 990,858 | 1,009,226 |
-
-特权开关不改变主干尺寸，关闭时直接省去该分支。这里的1M是约百万参数的规格，不保证不同几何或head设置恰好为1,000,000。
-
-`runner.policy.share_backbone`与`runner.policy.critic_privileged`默认均为true，支持上述四种组合。独立模式的Critic使用局部encoder的独立副本；两个模式都可关闭特权分支。
-
-例如以下稀疏覆盖开启共享、关闭特权：
-
-```json
-{"runner": {"policy": {"share_backbone": true, "critic_privileged": false}}}
-```
-
-训练入口和基准会自动同步task、obs_groups与storage_obs_keys，无需手动修改这些派生字段。关闭特权时，不构造、不存储`critic`张量，也不创建特权encoder。开启时，特权观测为`[B,11*H*W+13]`：保留当前完整棋盘的地形、建筑、归属、兵力与combat特征，删除全图可见性和迷雾障碍提示；`valid_cells`继续负责padding。Actor仍保留原13通道局部特征。
-
-特权encoder采用同尺寸patch网格、64维／1层／4头的ViT；其特征与局部encoder特征按空间位置拼接，经1×1投影、有效token池化及统计量融合得到价值。无特权配置的Critic只使用局部统计。Scaled策略不再使用`critic_actor_information`参数，H4/K11始终是价值输入的一部分。
-
-PPO采样和共享模式更新使用联合前向，不缓存上一次Actor计算图。独立模式保留分开反向的显存优化，共享主干只在`actor.encoder`注册一次，Critic复用其特征；所有参数只更新一次。导出只包含Actor的encoder及策略头；模型配置的`network.vit_config`记录实际`[width, depth, heads]`，训练用的两个开关不进入Arena模型推理配置。新结构需要重新训练；历史checkpoint使用各自固定源码续训。模型语义标识为`official_p2_hist4_local13_priv11_encoder_v1`，后缀记录共享、特权、patch等设置。
-
-`early_shared`在无特权时自动复用一次Transformer输出。有特权时可设置`runner.policy.batch_shared_forward=true`，沿batch维合并Actor/Critic的主干计算，同时保持各局、各分支的attention序列隔离；rollout和PPO更新均生效，参数与checkpoint格式不变。此选项默认关闭：大batch下不一定加速，需按训练设备实测；[性能与等价性验证](../doc/shared_forward_optimization_20261108.md)。
-
-以下为共享改造前的历史对照（2026-11-04，RTX 4090、PyTorch 2.13.0+cu130），不代表当前默认架构：官方随机地图填充至 23×23，ViT1M、N128/T8、E4、逻辑 minibatch256／物理128，当前模型自对弈，BF16＋编译。完整 PPO 先预热3轮、测量5轮，包含采样、GAE和更新，排除评估、checkpoint／日志I/O及另跑的profile。网络分项固定同一批观察，预热后取9组中位数。
-
-| 实现 | Actor 推理 ms/批 | Critic 前向 ms/批 | Actor＋Critic 前向反向 ms/批 | 完整 PPO transitions/s |
-|---|---:|---:|---:|---:|
-| 改造前默认，未屏蔽 padding | 2.586 | 2.610 | 20.718 | 1231 |
-| 改造前，仅开启 padding mask | 2.025 | 2.053 | 13.999 | 1747 |
-| 独立 ViT＋独立 mask（旧架构） | 1.969 | 1.831 | 13.606 | 1778 |
-
-完整 PPO 相对旧默认快约44%，相对旧 masked 版本约1.8%；本次主要速度收益来自排除padding，去除前置CNN的额外收益较小。Profile 中更新窗口的 Flash Attention 反向自用GPU时间从7.68ms降至3.94ms，`aten::mm`从7.99ms降至4.68ms；当前主要计算仍在Transformer。另用记录输入形状的critic profile确认：两个3×3卷积已消失，只剩patch embedding和输出投影的1×1映射。
-
-十三通道布局不意味着位打包存储必然更小：相同N128/T8的rollout实际分配从21,964,576增至22,033,184字节（约+0.31%），来自独立mask的额外位打包字段。改造前源码、输入配置、原始计时和profile保存在本机 `outputs/analysis/pure_vit_20261104/`；这些短程效率结果不代表H200吞吐或长期训练效果结论。
+4090可从 [current-dual-4090.json](configs/current-dual-4090.json) 开始调整执行规模。
+历史网络预设 [v32](configs/v32.json)／[v32-opt](configs/v32-opt.json) 使用当前默认2048上限；
+复现已完成实验请使用其归档 `run_config.json` 与冻结源码。
 
 ## 配置覆盖与恢复
 
@@ -152,73 +79,41 @@ python -m generals_rl.train --config cpu.json --iterations 1 --output outputs/rl
 
 仅设置 `--backend cpu --device cpu` 不会自动修改精度；上述 CPU 配置用于开发检查，不作为八卡训练的性能或质量复现。历史已退休的实验变体使用原冻结源码和运行配置。
 
-## 代码职责
+## 可选训练方案
 
-| 路径（相对 `src/generals_rl/`） | 职责 |
-| --- | --- |
-| `policy/` | actor、特征、历史／知识、动作映射和推理运行时；训练共用，导出时随模型快照 |
-| `actor_critic.py` 及各 `*_ppo.py` 策略模块 | 训练网络、独立 critic 与网络配方 |
-| `mdp/`、`task.py`、`cts.py` | 奖励、训练任务、环境和 RSL 接口 |
-| `self_play.py`、`self_play_training.py`、`opponents.py` | 历史池、发布与对手采样 |
-| `student_ppo.py`、`train.py`、`distributed_training.py` | PPO 更新、训练入口与多卡同步 |
-| `export.py`、`training_evaluation.py` | 策略导出、Arena 评估队列、候选保留及 best 选择 |
+| 配置 | 用途 |
+|---|---|
+| `task.map_curriculum` | 易图→官方图的分层图池；阈值 `warmup_transitions/end_transitions` 的单位均为全局board ticks |
+| `curriculum.potential_decay` | 线性衰减territory/cities/army shaping；终点缺省沿用tick课程终点 |
+| `runner.policy.critic_fusion` | `late`、`early_shared`、`post_attention`、`joint_independent` |
+| `runner.policy.value_distribution` | `scalar`、128-bin `hl_gauss`、两端点 `binary_ce` |
+| `task.feature_set` | `stacked`、`compact`、`temporal`、`temporal_dedup` |
+| `runner.algorithm.advantage_top_fraction` | 默认1；小于1时按标准化advantage绝对值筛样 |
+| `runner.policy.patch_size` | 默认1；3使用非重叠patch并恢复逐格动作logit |
 
-对战执行、赛程与评分位于 Arena 的 `matches/` 和 `competitions/`。RL 不再维护独立对战评估器，旧入口和旧类路径没有兼容别名。
+特征方案统一派生H/K及内置codec；修改 `feature_set` 后可重新解析已有配置。
+显式 `storage_codec=null` 或自定义codec保持原选择；`storage_history=null/{}` 可关闭历史去重。
+分类critic要求纯终局±1奖励、固定折扣，并关闭clipped value loss；GAE与timeout bootstrap始终使用解码标量。
+具体特征、网络限制和损失语义见[训练设计](../doc/rl_training_design.md)。
 
-## 模型导出与 Arena 评估
+历史对手模式设 `opponent="self_play", train_both_sides=false`，并配置 `self_play.pool_size/snapshot_interval`。
+单座当前对手消融设 `opponent="current_self_play", train_both_sides=false`。
 
-正常训练无需单独的发布步骤：
-
-1. 启动训练时把 `generals_rl/policy/` 和部署配置快照到 run 目录，checkpoint 记录其内容哈希。
-2. 按 `runner.save_interval` 配置的周期原子保存 checkpoint；按 `evaluation.every_n_updates` 配置的周期保存、导出 actor 策略包并入队 Arena。最后一轮始终保存，启用评估时必评。
-3. Arena 按固定地图分布、对手版本、预算和种子批量对战，拟合当前模型的 GoR，返回 Elo、条件 CI、胜平负及耗时。显式选择已校准 profile 时使用其固定参考分数；当前默认生成新规则下的未校准 baseline＋WAIT 面板。
-4. 训练结束排空队列，周期 Elo 最高的候选用共同的新地图挑战参考池，并相互进行循环赛；整批结果在同一固定参考尺度上联合评分，写出 `best_model.json`。候选数和每对策略的地图预算倍数分别由 `evaluation.final_top_k`（默认3）与 `final_games_multiplier`（默认2）控制。
-5. 共享 best 指向的完整 `bundle/`，合作者直接 `generals-arena commit 目录` 或 `run`。
-
-默认关闭基于 Elo 的平台期早停（`training_control.plateau_evaluations=null`），
-`min_improvement` 默认按 10 Elo 判断有效进步。需要早停时显式设置连续无有效进步的评估次数；
-该开关与 `evaluation.enabled` 独立。
-
-`evaluations/index.json` 保存持久队列；`evaluations/candidates/` 保存候选的完整可恢复 checkpoint、
-训练配置和 actor-only bundle；`evaluations/jobs/` 保存周期任务；`evaluations/confirmations/` 保存一次共同复评的 profile、候选清单、Arena 报告和 worker 日志。报告附带 `report.win_matrix.csv`，每格为行策略对列策略的胜／平／负；JSON 同时保存胜率和含半分平局的得分率。
-best 指针不复制权重，包含模型代号、已完成更新数、
-`policy_id/profile_id`、Elo/CI、报告和可恢复 checkpoint 路径。best 恢复模型/optimizer，
-对局和随机流重置；candidate 不另存历史对手池，只恢复原 run 中仍可获得的池内容。
-`policy_id` 对权重、部署配置和源码一起取内容身份；不同版本无需手工维护冻结策略目录。
-常规 checkpoint 由 `training_control.keep_checkpoints` 控制（默认2，含最终 `checkpoint.pt`）；
-`evaluation.keep_snapshots` 单独控制最近评估候选的保留数量，完整恢复 checkpoint 与对应 bundle 一起保留或删除；best、最终复评候选及排队／运行中的候选另外保护。该项默认 `null`，即保留所有评估候选，不受常规 checkpoint 数量限制。评估任务的报告、profile 和日志继续保留。
-从较早 checkpoint 恢复时，会按 SHA 找回该候选的完整权重，重新导出已清理的 bundle 并核对原 `policy_id`；无法恢复权重的历史结果只用于曲线，不参加 best 或最终复评选择。
-评估 profile 中的对手文件路径相对于 profile 所在目录解析；复制完整 run 后，分析工具按新的 run 目录定位报告和 checkpoint。
-
-手动导出任意新 checkpoint（checkpoint 中已有来源元数据）：
+## 导出与评估
 
 ```bash
 python -m generals_rl.export outputs/rl/my-run/checkpoint.pt \
-  --output outputs/models/nova-224 --codename nova-ViT1M
-# 默认模型支持官方18–23格随机1v1；首次创建匹配的联赛
-python -m generals_arena league init outputs/arena/models --config arena/configs/leagues/official_1v1.json
-python -m generals_arena commit outputs/models/nova-224 --league outputs/arena/models --device cuda:0 --workers 1
+  --output outputs/models/my-model --codename my-model
 ```
 
-已有联赛跳过 `init`；其他地图／人数模型需要匹配自己的联赛配置。`commit/run` 的环境执行仍是 CPU 单局，
-`--device` 只指定包的推理设备；需要跨对局批推理时使用下方 `evaluate` 或 Arena 的 `tournament`。
+导出包包含actor权重、部署配置与冻结 `policy/` 源码，不含critic和optimizer。
+Arena推理使用同一套特征、记忆、掩码和动作转换。模型包应整体保存；权重不纳入Git。
 
-包内只有 `manifest.json`、`actor.pt`、`model_config.json` 和 `policy/`，不含 critic、optimizer 或训练依赖。
-Arena 仅解析通用 manifest；features/history/knowledge/mask、网络和动作转换均由 RL 的共享 policy 实现。
-训练和部署共用 actor 与特征实现，部署才切换 eval/冻结参数。执行包需要 env/Arena、PyTorch、NumPy、timm，
-不需要安装 RL、RSL 或 TensorDict。显式配置的 AMP、matmul/TF32/cuDNN 设置随包保存，
-执行后恢复进程全局设置，以免不同包相互影响。权重和 `outputs/` 不纳入 Git，直接共享整个目录即可。
+默认周期评估由Arena原生CPU批量链执行，模型在 `evaluation.device` 上推理。
+每对手100张地图并交换座位，七对手共1400局；另加200局WAIT诊断，均值排除WAIT。
+显式 `evaluation.profile` 的地图、上限、局数与对手优先于默认生成参数。
 
-导出包声明当前规则与支持的地图尺寸／人数；不能仅凭 checkpoint 的文件名判断兼容。历史 S4/F03 的 9×9 权重对应旧输入和旧规则，应使用当时的导出器与运行环境，不应包装成当前官方规则模型。
-
-默认 `inference.mode="stochastic"` 保留训练配方的采样评估；可显式设为 `greedy`，该选择属于模型包身份。
-新 run 的代号来自 `model.codename`，未设置时自动用 `run_id-输出目录名`，resume 继承原代号。同代号下 `completed_ppo_updates` 是一基完成次数，
-原始 `iteration=updates-1`；新 seed/新实验应使用新代号。自动代号含输出目录名，手动指定代号时需自行保持唯一。
-`--codename` 可更名，但会改变导出包身份。元数据在 `model_config.json`，Arena 不解释。
-源代码或 features/network/inference 配置改变时，旧 checkpoint 不能伪装成原方案 resume；
-应使用原源码继续，或显式 warm-start 新训练。新训练的 source snapshot 要和 checkpoint 一起保留。
-
-单独评估导出包：
+创建独立评估profile：
 
 ```python
 import json
@@ -226,56 +121,34 @@ from pathlib import Path
 from generals import MapConfig
 from generals_arena.competitions.evaluation import make_profile
 from generals_arena.policies.references import training_opponents
-profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2000,
-                       opponents=training_opponents(Path("outputs/eval/opponents")))
-# 原四基线 + Kestrel v7 / Razor v8 / Aegis v2；1v1 自动加入 WAIT 对照。
-with open("profile.json", "w") as f:
-    json.dump(profile, f)
+
+profile = make_profile(MapConfig(players=2), maps_per_opponent=100, max_ticks=2048,
+    opponents=training_opponents(Path("outputs/eval/opponents")))
+Path("profile.json").write_text(json.dumps(profile))
 ```
 
 ```bash
-python -m generals_arena evaluate --bundle outputs/models/nova-224 --profile profile.json \
-  --output outputs/eval/nova.json --backend cpu --device cuda:0 --batch-size 128
+python -m generals_arena evaluate --bundle outputs/models/my-model --profile profile.json \
+  --output outputs/eval/my-model.json --backend cpu --device cuda:0 --batch-size 128
 ```
 
-默认 `evaluation.profile=null`，根据当前任务生成地图面板，对手为原四基线 `aggressive / expansion / defensive / random`，以及各启发式系列的最新版本 `kestrel-v7 / razor-v8 / aegis-v2`。1v1 另加 WAIT 诊断与评分锚点。周期评估默认每对手 100 张地图、交换座位，共 1600 局（七个正式对手 1400 局）。三份启发式源码与参数随 Arena 安装，编译包冻结在每个 run 的 `evaluations/opponents/`，训练中不追踪远端新版本。
+固定9×9评估使用 `MapConfig(9, 9, 2)`。默认 `inference.mode="stochastic"`；推理模式、特征和源码均属于模型身份。
+更换评估面板或规则后新建run，保留历史报告原始口径。比赛、录像与联赛接口见 [Arena README](../arena/README.md)。
+共享训练GPU时，周期评估在PPO更新之间同步运行；独立GPU可配置 `evaluation.cuda_visible_devices`，
+并从训练可见卡中排除。默认allocator为 `expandable_segments:True`，显式环境变量优先。
 
-TensorBoard 记录 `Arena/win_rate/<对手>`、`draw_rate/<对手>`、`games/<对手>`、`timeouts/<对手>`，以及 `baseline4_mean_win_rate`、`heuristic3_mean_win_rate`、`mean_win_rate`；总均值排除 WAIT，旧四基线均值可继续对比原曲线。超时指标统计对手席位的原生决策超时。显式 `evaluation.profile` 仍可覆盖默认面板；更换面板或执行源码后应新建 run，已有 run 使用其冻结源码与 profile，不能拼接新旧 Elo。旧 F03 9×9 的分数不沿用。
+## 指标与验证
 
-1v1 采用 `gor-batch-fit-v1`：使用现有 GoR 胜率函数，对整批胜平负联合拟合，计分不依赖结果顺序。每个实际交手的策略对加入一局虚拟平局，避免全胜／全负导致无穷估计；换座对局各计半份信息。未校准面板固定 WAIT 原始分为 0；显式校准后可固定参考分数，只估计候选。公开联赛的逐局 GoR 更新及 FFA 的 Codeforces 评分仍独立，不能与训练面板分数直接混用。
-
-CI 是给定固定参考分数后的局部 Fisher 近似，不包含参考校准误差、训练随机性或对手选择偏差。校准原始区间保存在 profile 中。胜率矩阵用于检查策略克制，最终 Elo 最高也不保证面对每个对手都更强。未校准的自定义 1v1 profile 会以 WAIT 为零联合拟合该次面板；3–8 人 FFA 周期评估仍使用原 Codeforces 规则，共同候选复评当前要求 1v1（FFA 可设置 `final_top_k=0`）。
-
-profile schema 为 3，内容绑定规则、地图、预算和对手身份；已有 run 保留原始报告和冻结源码。策略包和权重通过本地文件共享，仓库不跟踪权重；`policy_id` 校验完整内容。缺少显式指定的对手包会报错，不会替换为其他策略。
-Arena 将训练评估、固定 round-robin 和持久 league 作为不同赛程模式，共用比赛执行、结果、录像和评分规则。
-RL 只管理 checkpoint、候选队列和 best 选择，固定对手评估继续调用 `generals_arena.competitions.evaluation`；通用比赛入口见 [Arena 文档](../arena/README.md)。
-`--record-replays` 保存初始状态、逐 tick 动作与外部事件，可由 Arena 原生重建并校验最终状态；
-`generals-arena evaluate` 是接受 bundle/profile 的 CLI。纯 env.step 性能指标与含决策的批评估 wall throughput 分开报告。
-
-评估默认 `backend=cpu, device=cuda:0, batch_size=128`：原生 CPU 批量链推进环境与 C++ 对手，NN 在 CUDA 上批推理，适用于启发式、RL 混合对局。训练自身仍使用 GPU 环境。评估默认与训练卡共用 `cuda:0`，在 PPO 更新间同步运行；CPU 推理或显式独立单卡评估可异步。
-旧配置的 `evaluation.backend="gpu"`（以及 Arena CLI 的 `--backend gpu`）会提示弃用并映射为原生 CPU 环境，`device`、batch、显式 profile 和采样方式保持原配置；新 `run_config.json` 写入实际 backend。用旧 GPU 评估 run 的 checkpoint 续训到新目录时，训练状态照常恢复，评估从新面板重新开始；旧报告保持原样，新 `evaluations/index.json` 的 `migration` 记录来源与摘要，旧 Elo 不参与新 best 选择。旧校准 profile 仍需按当前执行版本重新校准。
-
-共享 GPU 时，所有 rank 先完成 CUDA 工作、释放空闲缓存并在 CPU 同步，评估结束后一起恢复训练；
-显式设置 `allow_shared_gpus=true` 也遵循这一顺序。rollout 和模型仍驻留显存，容量需容纳它们与评估峰值。
-CUDA 初始化前未显式配置 allocator 时，训练入口默认启用
-[`expandable_segments:True`](https://docs.pytorch.org/docs/2.8/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)，
-减少变长 token 张量的显存预留。已有 `PYTORCH_ALLOC_CONF` 或 `PYTORCH_CUDA_ALLOC_CONF` 优先；
-启动前设置 `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False` 可关闭，嵌入式调用也需在 CUDA 初始化前设置。
-独立 GPU 评估可设置 `evaluation.cuda_visible_devices="7"`，训练通过 `CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6` 排除该卡，
-worker 中仍用 `cuda:0`。当前批评估只使用一个 device，不保留旧多卡分片执行器；可增大单卡 batch。
-`evaluation.profile` 可指定新规则的 JSON 文件或配置对象，`every_n_updates/maps_per_opponent/backend/batch_size`
-控制频率、预算及执行；显式 `profile` 内的地图／对手／局数覆盖默认 profile 的生成参数。推理模式由顶层 `inference.mode` 指定。
-`batch_size=0` 表示按当前兼容赛程组全量并行，不自动探测显存或搜索最优 batch。评估中的候选和 package 对手统一使用评估的 `device`。
-随机推理的 lane RNG 绑定 seed 和计数，
-与分批、重排及其他局结束无关。GPU 不同 batch 的矩阵乘法可能造成微小浮点差异，不能保证整局动作逐位一致。
-
-## Benchmark 与验证
-
-`rl/tools/benchmark_training.py` 测量完整 rollout＋GAE＋PPO 的 fresh learner transitions/s，包含双方决策，排除评估、存盘和独立 profile。全流程 wall throughput 另报；它与仅计 `env.step(action)` 的环境基准不同。
+TensorBoard位于run输出目录，记录PPO更新、episode胜负/截断、吞吐、显存和七对手胜率。
+`Arena/baseline4_mean_win_rate` 保留原四基线口径；`Arena/mean_win_rate` 排除WAIT。
+共享梯度探针记录主rank首个物理批、归约和裁剪前的梯度，`PPO/shared_grad_probe_samples` 给出采样量；
+这些指标及分类critic首批诊断不是全rollout或全卡平均。
 
 ```bash
-python rl/tools/benchmark_training.py --help
 python -m pytest -q rl/tests rl/tools/tests
+python rl/tools/benchmark_training.py --help
 ```
 
-保留当前模型／MDP、自对弈、分布式、学习率恢复、评估和 Core 重放回归；vendor 框架及许可证保留。`search.py` 提供未来搜索的整 tick 分支接口，尚未实现完整 MCTS。实验结果和冻结产物留在报告及原归档，正式训练不依赖旧 F03 阶段调度、门禁或作业监督脚本。
+代码职责：`policy/` 管理可导出的actor与MDP输入；`task.py`／`mdp/` 管理对局与奖励；
+`map_sampling.py`／`map_curriculum.py` 管理初始地图；`student_ppo.py` 管理更新，`ppo_monitor.py` 管理诊断；
+`training_evaluation.py` 管理候选及Arena评估队列。vendor修改记录见 [PATCHES.md](vendor/rsl_rl/PATCHES.md)。

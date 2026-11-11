@@ -408,7 +408,7 @@ Aegis v2 对应上游 `heristic/gpt-6-aegis-v1` 根目录的最新源码，目�
 `rules.json` 示例：
 
 ```json
-{"map": {"players": 2}, "max_ticks": 2000}
+{"map": {"players": 2}, "max_ticks": 2048}
 ```
 
 ```bash

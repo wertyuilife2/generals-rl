@@ -66,9 +66,15 @@ def test_exported_actor_matches_random_shape_training(tmp_path,backend,patch_siz
         assert len(shapes)>1
 
 
-def test_defaults_pin_2000_ticks_and_uncalibrated_official_profile():
+def test_defaults_pin_2048_ticks_and_uncalibrated_official_profile():
+    from generals import MapConfig
+    from generals_arena.competitions.evaluation import make_profile
+    from generals_rl.config import default_training_config
     from generals_rl.training_evaluation import TrainingEvalConfig
-    assert TaskConfig().max_episode_steps==TrainingEvalConfig().max_ticks==2000
+    config = default_training_config()
+    assert TaskConfig().max_episode_steps==TrainingEvalConfig().max_ticks==2048
+    assert config['task']['max_episode_steps']==config['evaluation']['max_ticks']==2048
+    assert make_profile(MapConfig(players=2))['max_ticks']==2048
     assert TaskConfig().random_maps and TrainingEvalConfig().profile is None
 
 
@@ -98,7 +104,7 @@ def test_terminal_actor_features_publish_enemy_city_count():
     surrender(state, 1)
     with VecEnv.from_states([state]) as backend:
         batch = GameBatch.from_backend(backend, 'cpu')
-        features = LocalObservationEncoder(2000).encode(batch, torch.tensor([0]))
+        features = LocalObservationEncoder(2048).encode(batch, torch.tensor([0]))
         assert features[0, 13 * state.layout.size + 6].item() == pytest.approx(1 / state.layout.size)
 
 
@@ -121,7 +127,7 @@ def test_short_training_saves_exports_and_evaluates_official_maps(tmp_path):
 
     config = small_training_config(task_overrides=dict(
         width=23, height=23, random_maps=True, map_pool_size=8,
-        max_episode_steps=2000, mountain_density=.5, city_density=.5,
+        max_episode_steps=2048, mountain_density=.5, city_density=.5,
         persistent_knowledge=True), runner_overrides={'learning_epochs': 1})
     config['runner']['policy'].update(map_width=23, map_height=23, knowledge_channels=11,
                                       critic_actor_information=True)
@@ -129,7 +135,7 @@ def test_short_training_saves_exports_and_evaluates_official_maps(tmp_path):
                                      'critic': ['critic', 'policy', 'knowledge']}
     config['self_play'] = {'pool_size': 2, 'snapshot_interval': 1}
     config['evaluation'] = {'enabled': True, 'every_n_updates': 2, 'maps_per_opponent': 1,
-                            'max_ticks': 2000, 'batch_size': 8, 'final_top_k': 0}
+                            'max_ticks': 2048, 'batch_size': 8, 'final_top_k': 0}
     with redirect_stdout(io.StringIO()):
         summary = train(config, tmp_path/'run', iterations=2)
     assert summary['evaluation']['completed'] == 1 and summary['evaluation']['failed'] == 0
@@ -139,7 +145,7 @@ def test_short_training_saves_exports_and_evaluates_official_maps(tmp_path):
     assert report['games'] == 16
     for result in report['results']:
         assert result['map']['width'] is None and result['map']['height'] is None
-        assert result['ticks'] <= 2000
+        assert result['ticks'] <= 2048
 
 
 def test_cached_afk_winner_receives_win_reward_without_loss():
@@ -150,7 +156,7 @@ def test_cached_afk_winner_receives_win_reward_without_loss():
     config = TaskConfig(width=state.layout.width, height=state.layout.height,
                         random_maps=False, map_pool_size=0, num_envs=2,
                         opponent='wait', rotate_seats=True)
-    with VecEnv.from_states([state, state], episode_ticks=2000) as backend:
+    with VecEnv.from_states([state, state], episode_ticks=config.max_episode_steps) as backend:
         with GeneralsTask(config, backend=backend) as task:
             result = task.step(torch.zeros(2, dtype=torch.long))
             assert result.terminated.tolist() == [True, True]

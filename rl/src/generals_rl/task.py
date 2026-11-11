@@ -24,7 +24,7 @@ class TaskConfig:
     num_envs: int = 64
     backend: str = "cpu"
     device: str = "cpu"
-    max_episode_steps: int = 2000
+    max_episode_steps: int = 2048
     history_length: int = 4
     feature_set: str = "stacked"
     seed: int = 42

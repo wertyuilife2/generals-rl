@@ -22,7 +22,7 @@ _FAMILIES = {
     'OptimizedInformationSpatialPPOPolicy': 'optimized',
     'ScaledInformationSpatialPPOPolicy': 'scaled',
 }
-_FEATURES = dict(width=23, height=23, players=2, max_episode_steps=2000, history_length=4, random_maps=True,
+_FEATURES = dict(width=23, height=23, players=2, max_episode_steps=2048, history_length=4, random_maps=True,
                  combat_features=False,
                  king_threat_distance=False, persistent_knowledge=False, feature_set="stacked")
 

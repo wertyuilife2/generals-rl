@@ -60,7 +60,7 @@ class TrainingEvalConfig:
     every_n_updates: int = 14
     profile: str | dict | None = None
     maps_per_opponent: int = 100
-    max_ticks: int = 2000
+    max_ticks: int = 2048
     seed: int = 1000042
     batch_size: int = 128
     cpu_threads: int = 1

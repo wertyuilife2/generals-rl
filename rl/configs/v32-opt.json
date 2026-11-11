@@ -6,7 +6,7 @@
     "num_envs": 16384,
     "backend": "gpu",
     "device": "cuda:0",
-    "max_episode_steps": 2000,
+    "max_episode_steps": 2048,
     "history_length": 4,
     "seed": 20261013,
     "threads": 1,
@@ -102,7 +102,7 @@
   "evaluation": {
     "enabled": true,
     "batch_size": 0,
-    "max_ticks": 2000,
+    "max_ticks": 2048,
     "seed": 271828,
     "cpu_threads": 1,
     "keep_snapshots": 3,

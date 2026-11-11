@@ -379,3 +379,11 @@ GUI 测试需要图形显示；CUDA 测试需要真实设备和编译器。当�
 2026-10-03 清理前的源码、测试及完整文档保存在本地 `outputs/cleanup/20261003/before/`，哈希清单位于同目录 `before.json`。原 GPUv2 存档为 `outputs/archive/gpuv2/20261003/before.tar.gz`。本地存档和原始测量不打包、不提交；本文保存现行接口与验证记录。恢复历史实现时应解压到独立目录。
 
 跨算法与模型版本的统一评测见 [Arena 使用说明](../arena/README.md)。
+
+## RL训练与实验
+
+- [训练配置与运行接口](../rl/README.md)
+- [MDP、网络、课程和PPO设计](rl_training_design.md)
+- [逐版本训练日志及胜率曲线](rl_train_log.md)
+- [地图课程验证](map_curriculum9_20261103.md)
+- [Sparse critic／紧凑与时序特征：设计](sparse_features_20261109.md) · [结果](sparse_features_20261109_results.md)
