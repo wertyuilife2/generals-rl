@@ -32,7 +32,7 @@ class StudentPPO(PPO):
                  ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
                  physical_minibatch_size=None, amp_bfloat16=False,
                  adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
-                 betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
+                 betas=(0.9, 0.999), weight_decay=0.0, advantage_top_fraction=1.0, **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, CategoricalActorCritic):
             raise TypeError("StudentPPO requires CategoricalActorCritic")
@@ -60,6 +60,10 @@ class StudentPPO(PPO):
             raise ValueError("initial learning_rate must be within adaptive LR bounds")
         if kwargs.get("rnd_cfg") is not None or kwargs.get("symmetry_cfg") is not None:
             raise ValueError("student-only PPO does not support RND or symmetry")
+        if (isinstance(advantage_top_fraction, bool) or not isinstance(advantage_top_fraction, (int, float))
+                or not math.isfinite(advantage_top_fraction) or not 0 < advantage_top_fraction <= 1):
+            raise ValueError("advantage_top_fraction must be finite and in (0, 1]")
+        self.advantage_top_fraction = float(advantage_top_fraction)
         if (physical_minibatch_size is not None
                 and (isinstance(physical_minibatch_size, bool)
                      or not isinstance(physical_minibatch_size, int)
@@ -165,16 +169,19 @@ class StudentPPO(PPO):
         self.update_metrics = {}
         try:
             self.monitor.begin(self)
+            indices, selection_metrics = self._advantage_sample_indices()
             # Independent, unchunked execution retains upstream PPO.update.
-            # Shared encoders need the explicit joint-forward update below.
+            # Shared encoders need the explicit actor/critic update adapter.
             # Distributed minibatch normalization uses the same adapter with
             # one physical chunk when memory splitting is disabled. Upstream
             # PPO would otherwise normalize each rank's advantages locally.
             use_adapter = (self._chunked_update or self._custom_learning_rates
                            or getattr(self.policy, 'share_backbone', False)
+                           or indices is not None
                            or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch))
-            losses = self._update_microbatched() if use_adapter else super().update()
+            losses = self._update_microbatched(indices=indices) if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
+            self.update_metrics.update(selection_metrics)
             if self.monitor.enabled:
                 self.update_metrics.update(actor_learning_rate=self.learning_rate,
                                            critic_learning_rate=self.learning_rate)
@@ -184,7 +191,39 @@ class StudentPPO(PPO):
         finally:
             self.monitor.release()
 
-    def _update_microbatched(self):
+    @torch.no_grad()
+    def _advantage_sample_indices(self):
+        """AverageJoe-style rank-local top-|global-standardized A| selection.
+
+        Keep the configured number of minibatches/epochs. Thus filtering
+        reduces their sample count, not the number of optimizer steps.
+        """
+        if self.advantage_top_fraction == 1:
+            return None, {}
+        storage = self.storage
+        steps, envs = storage.num_transitions_per_env, storage.num_envs
+        advantages = storage.advantages[:steps]
+        standardized = self._normalize_advantages(advantages)
+        scores = standardized.transpose(0, 1).flatten()
+        keep = int(scores.numel() * self.advantage_top_fraction)
+        keep -= keep % self.num_mini_batches
+        minimum = self.num_mini_batches * (2 if self.normalize_advantage_per_mini_batch else 1)
+        if keep < minimum:
+            raise ValueError("advantage filtering leaves too few samples for the configured minibatches")
+        magnitude, selected = scores.abs().topk(keep, sorted=False)
+        selected = selected[torch.randperm(keep, device=self.device)]
+        selected_done = storage.dones[selected % steps, selected // steps].float()
+        metrics = {"advantage_top_fraction": self.advantage_top_fraction,
+                   "retained_fraction": keep / (steps * envs),
+                   "available_samples_per_rank": float(steps * envs),
+                   "retained_samples_per_rank": float(keep),
+                   "selected_positive_fraction": float((scores[selected] > 0).float().mean()),
+                   "selected_done_fraction": float(selected_done.mean()),
+                   "selected_abs_advantage_mean": float(magnitude.mean()),
+                   "selected_abs_advantage_min": float(magnitude.min())}
+        return (selected.new_empty(0), selected), metrics
+
+    def _update_microbatched(self, *, indices=None):
         """Memory-bounded execution of existing logical categorical PPO batches.
 
         Losses/adaptive-KL mirror vendored algorithms/ppo.py:246-317; gradient
@@ -199,7 +238,8 @@ class StudentPPO(PPO):
         mask_validator = getattr(self.policy, "validate_action_mask", None)
         for (obs, actions, old_values, advantages, returns, old_log_probs,
              _old_mean, _old_std, _hidden, _masks) in self.storage.mini_batch_generator(
-                 self.num_mini_batches, self.num_learning_epochs):
+                 self.num_mini_batches, self.num_learning_epochs,
+                 **({"indices": indices} if indices is not None else {})):
             count = obs.batch_size[0]
             logical_batch_size = count
             if self.normalize_advantage_per_mini_batch:

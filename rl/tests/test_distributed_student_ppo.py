@@ -199,3 +199,33 @@ class DistributedStudentPPOTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _filtered_distributed_worker(rank, init_file):
+    torch.set_num_threads(1)
+    dist.init_process_group('gloo', init_method='file://'+init_file, rank=rank, world_size=2,
+                            timeout=timedelta(seconds=60))
+    try:
+        alg = algorithm(rank, physical=1)
+        alg.advantage_top_fraction = .25
+        alg.compute_returns(observations(rank, 2))
+        indices, _ = alg._advantage_sample_indices()
+        values = alg.storage.advantages[:2].transpose(0, 1).flatten()
+        # Every rank selects locally; centering must use the shared population.
+        standardized = alg._normalize_advantages(alg.storage.advantages[:2]).transpose(0, 1).flatten()
+        assert set(indices[1].tolist()) == set(standardized.abs().topk(2).indices.tolist())
+        assert torch.isfinite(values).all()  # poisoned inactive tail is excluded
+        alg.update()
+        assert alg.update_metrics['retained_samples_per_rank'] == 2
+        flat = torch.cat([p.detach().flatten() for p in alg.policy.parameters()])
+        gathered = [torch.empty_like(flat) for _ in range(2)]
+        dist.all_gather(gathered, flat)
+        torch.testing.assert_close(gathered[0], gathered[1], rtol=0, atol=0)
+    finally:
+        dist.destroy_process_group()
+
+
+
+def test_two_rank_filtered_ppo_uses_global_moments_and_synchronized_updates(tmp_path):
+    with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': ''}):
+        mp.spawn(_filtered_distributed_worker, args=(str(tmp_path/'gloo_init'),), nprocs=2, join=True)
