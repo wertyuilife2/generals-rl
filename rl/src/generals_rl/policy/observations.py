@@ -125,16 +125,25 @@ class ObservationHistory:
         self.length = length
         self.frames = None
 
-    def reset(self, current, mask=None):
+    def reset(self, current, mask=None, *, rows=None):
         repeated = current[:, None].expand(-1, self.length, -1)
-        if self.frames is None or mask is None:
+        if rows is not None:
+            if mask is not None:
+                raise ValueError('choose reset rows or a reset mask')
+            self.frames = self.frames.index_copy(0, rows, repeated)
+        elif self.frames is None or mask is None:
             self.frames = repeated.clone()
         else:
             # Copy-on-write preserves terminal and pre-step observation views.
             self.frames = torch.where(mask[:, None, None], repeated, self.frames)
 
-    def push(self, current):
-        self.frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)
+    def push(self, current, *, reset_rows=None):
+        frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)
+        if reset_rows is not None:
+            # Only the newly allocated history is mutable; prior observations
+            # and stored timeout snapshots continue to own their old frames.
+            frames[reset_rows] = current[reset_rows, None]
+        self.frames = frames
 
     def flattened(self):
         return self.frames.flatten(1).clone()

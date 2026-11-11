@@ -353,8 +353,9 @@ def resolve_config(args, context):
         run["policy"]["amp_bfloat16"] = run["algorithm"]["amp_bfloat16"] = args.amp_bfloat16
     if (run["algorithm"].get("teacher_env_ratio") != 0
             or not run["algorithm"]["class_name"].endswith("StudentPPO")
-            or run["algorithm"]["num_learning_epochs"] != 4):
-        raise ValueError("benchmark requires student-only PPO with four complete epochs")
+            or type(run["algorithm"]["num_learning_epochs"]) is not int
+            or run["algorithm"]["num_learning_epochs"] < 1):
+        raise ValueError("benchmark requires student-only PPO with a positive epoch count")
     if run["algorithm"]["num_mini_batches"] < 1 or total % run["algorithm"]["num_mini_batches"]:
         raise ValueError("NT must divide the number of PPO minibatches exactly")
     config = configure_observations(config)

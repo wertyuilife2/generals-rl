@@ -95,7 +95,7 @@ class TaskStep:
     reward: torch.Tensor
     terminated: torch.Tensor
     truncated: torch.Tensor
-    terminal_observations: dict[str, torch.Tensor]
+    terminal_observations: dict[str, torch.Tensor] | None
     metrics: dict[str, torch.Tensor]
 
 
@@ -196,26 +196,30 @@ class GeneralsTask:
             valid=batch.valid_cells.repeat_interleave(2, 0))
         return self._batch_cache
 
-    def _update_knowledge(self, batch, mask=None):
-        self.knowledge.update(batch, self.player_ids, mask=mask,
-                              lane_ids=self._game_rows if self.train_both_sides else None)
+    def _update_knowledge(self, batch, mask=None, rows=None):
+        players = self.player_ids if rows is None else self.player_ids[rows]
+        lanes = (self._game_rows if self.train_both_sides else None) if rows is None else self._game_rows[rows]
+        self.knowledge.update(batch, players, mask=mask, lane_ids=lanes)
 
-    def _observations(self):
-        batch = self.batch()
+    def _observations(self, batch=None, rows=None, frames=None):
+        batch = self.batch() if batch is None else batch
+        if frames is None:
+            frames = self.history.frames if rows is None else self.history.frames[rows]
+        players = self.player_ids if rows is None else self.player_ids[rows]
+        lanes = (self._game_rows if self.train_both_sides else None) if rows is None else self._game_rows[rows]
         observations = {
             # History push/reset replace storage, so these immutable views are
             # valid until PPO has encoded the transition (including timeouts).
-            "policy": self.history.frames.flatten(1),
-            "single_obs": self.history.frames[:, -1],
-            "action_mask": self.action_space.mask(batch, self.player_ids),
+            "policy": frames.flatten(1),
+            "single_obs": frames[:, -1],
+            "action_mask": self.action_space.mask(batch, players),
             "valid_cells": batch.valid_cells.clone(),
         }
         if self.config.critic_privileged:
-            observations["critic"] = encode_privileged(self.observation_encoder, batch, self.player_ids)
+            observations["critic"] = encode_privileged(self.observation_encoder, batch, players)
         if self.knowledge is not None:
             observations["knowledge"] = self.knowledge.features(
-                batch.state["tick"], self.player_ids,
-                lane_ids=self._game_rows if self.train_both_sides else None).flatten(1)
+                batch.state["tick"], players, lane_ids=lanes).flatten(1)
         if feature_recipe(self.config.feature_set).half_precision:
             observations["knowledge"] = observations["knowledge"].half().float()
         return observations
@@ -238,6 +242,25 @@ class GeneralsTask:
     def reset(self, mask=None, *, rotate=False):
         if mask is None:
             mask = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        rows, batch = self._reset_state(mask, rotate=rotate)
+        if not rows.numel():
+            return self.observations
+        self.history.reset(self.observation_encoder.encode(batch, self.player_ids[rows]), rows=rows)
+        self._notify_opponent("on_reset", mask)
+        selected = self._observations(batch, rows)
+        if len(rows) == self.num_envs:
+            self.observations = selected
+        else:
+            # Preserve all retained pre-step/terminal tensors. Policy history
+            # already owns new storage; only the other fields need a row merge.
+            self.observations = {
+                key: value.index_copy(0, rows, selected[key])
+                for key, value in self.observations.items() if key not in ('policy', 'single_obs')}
+            self.observations.update(policy=self.history.frames.flatten(1), single_obs=self.history.frames[:, -1])
+        return self.observations
+
+    def _reset_state(self, mask, *, rotate):
+        """Reset games and memories without encoding a second full observation."""
         game_mask = mask
         if self.train_both_sides:
             paired = mask.reshape(self.num_games, 2)
@@ -246,6 +269,9 @@ class GeneralsTask:
             elif not torch.equal(paired[:, 0], paired[:, 1]):
                 raise ValueError('both seats must reset together')
             game_mask = paired[:, 0]
+        rows = mask.nonzero(as_tuple=True)[0]
+        if not rows.numel():
+            return rows, None
         backend_mask = self._backend_mask(game_mask)
         if self.map_sampler is None:
             self.backend.reset(backend_mask)
@@ -259,13 +285,20 @@ class GeneralsTask:
         self.action_metrics.reset(mask)
         if self.knowledge is not None:
             self.knowledge.reset(game_mask)
-            self._update_knowledge(self.batch(), mask=mask)
-        self.history.reset(self.observation_encoder.encode(self.batch(), self.player_ids), mask)
-        self._notify_opponent("on_reset", mask)
-        self.observations = self._observations()
-        return self.observations
+        batch = self.batch()
+        selected = batch if len(rows) == self.num_envs else batch.select(rows)
+        if self.knowledge is not None:
+            self._update_knowledge(selected, rows=rows)
+        return rows, selected
 
-    def step(self, actions):
+    def step(self, actions, *, capture_all_terminals=True):
+        """Advance one tick; training may request only timeout snapshots.
+
+        The default preserves the full pre-reset observation contract. With
+        capture_all_terminals=False, terminal_observations is None unless a
+        time limit needs bootstrap, and only truncated rows are defined there.
+        Rewards and next observations are identical in both modes.
+        """
         batch = self.batch()
         learner_actions = self.action_space.validate(actions.to(self.device), self.observations["action_mask"])
         before = batch.learner_stats(self.player_ids)
@@ -309,30 +342,47 @@ class GeneralsTask:
         self.episode_return += reward.total
         if self.knowledge is not None:
             self._update_knowledge(batch)
-        self.history.push(self.observation_encoder.encode(batch, self.player_ids))
-        self._notify_opponent("on_step")
-        terminal_obs = self._observations()
         metrics = {f"Reward/{key}": value.detach() for key, value in reward.terms.items()}
         metrics.update({f"Action/{key}": value for key, value in action_metrics.items()})
         if self.knowledge is not None:
-            planes = terminal_obs["knowledge"][:, :len(self.knowledge.channels) * batch.width * batch.height].reshape(
-                self.num_envs, len(self.knowledge.channels), -1)
-            metrics["Knowledge/explored_fraction"] = planes[:, 0].mean(1)
-            enemy_index = self.knowledge.channels.index("last_seen_enemy_general")
-            metrics["Knowledge/known_enemy_general"] = planes[:, enemy_index].any(1).float()
+            metrics.update({f"Knowledge/{key}": value for key, value in self.knowledge.exploration_metrics(
+                self.player_ids, self._game_rows if self.train_both_sides else None).items()})
         metrics.update({"Episode/return": self.episode_return[done].clone(),
                         "Episode/length": self.episode_length_buf[done].float().clone(),
                         "Episode/win": (batch.state["winner"][done] == self.player_ids[done]).float(),
                         "Episode/truncated": truncated[done].float()})
         stride = 2 if self.train_both_sides else 1
-        self.completed_episodes += int(done[::stride].sum())
-        self.truncated_episodes += int(truncated[::stride].sum())
-        self.terminated_episodes += int(terminated[::stride].sum())
-        if bool(done.any()):
-            obs = self.reset(done, rotate=True)
-        else:
+        # One host rendezvous also supplies the reset/timeout branch decisions.
+        completed, timeouts = torch.stack((done[::stride].sum(), truncated[::stride].sum())).tolist()
+        self.completed_episodes += completed
+        self.truncated_episodes += timeouts
+        self.terminated_episodes += completed - timeouts
+        if capture_all_terminals:
+            self.history.push(self.observation_encoder.encode(batch, self.player_ids))
+            self._notify_opponent("on_step")
+            terminal_obs = self._observations()
             self.observations = terminal_obs
-            obs = terminal_obs
+            obs = self.reset(done, rotate=True) if completed else terminal_obs
+        else:
+            timeout_rows = snapshots = None
+            if timeouts:
+                timeout_rows = truncated.nonzero(as_tuple=True)[0]
+                selected = batch.select(timeout_rows)
+                current = self.observation_encoder.encode(selected, self.player_ids[timeout_rows])
+                frames = torch.cat((self.history.frames[timeout_rows, 1:], current[:, None]), 1)
+                snapshots = self._observations(selected, timeout_rows, frames)
+            self._notify_opponent("on_step")
+            rows = None
+            if completed:
+                rows, _ = self._reset_state(done, rotate=True)
+            self.history.push(self.observation_encoder.encode(self.batch(), self.player_ids), reset_rows=rows)
+            if completed:
+                self._notify_opponent("on_reset", done)
+            self.observations = obs = self._observations()
+            # RSL's bridge expects a full batch, but only timeout rows are
+            # consumed. Reuse next-state rows elsewhere; never re-encode them.
+            terminal_obs = (None if snapshots is None else {
+                key: value.index_copy(0, timeout_rows, snapshots[key]) for key, value in obs.items()})
         return TaskStep(obs, reward.total, terminated, truncated, terminal_obs, metrics)
 
     @property

@@ -29,6 +29,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 
 双座当前策略自对弈中，每局每tick生成两条玩家transition，GAE与奖励按座位分开。一次rollout内参数固定；对局可跨越多轮PPO。自然终局与外部时限截断分别记录，timeout使用重置前终局观测的critic值bootstrap。
 
+训练桥接层只为timeout行保存重置前快照；其余行直接构建下一步观测。结束的对局先重置模拟器和对应记忆，再统一编码一次局部观测、特权观测与动作mask，避免每次有对局结束就重复编码整个batch。timeout快照包含当时的历史、记忆和路径特征，历史推进及局部重置不修改已经交给rollout的张量。`GeneralsTask.step()`默认仍提供完整终局观测；只有桥接层显式使用`capture_all_terminals=False`，此时终局字段仅timeout行有效，没有timeout时桥接层复用下一步观测作为占位。奖励、时限与bootstrap语义不变。
+
 历史去重每tick存一帧，加上rollout起点上下文和episode边界；抽样时重建原堆叠。标准codec按位压缩二值信息，保留FP32连续值。紧凑方案在行动前就量化至FP16可精确表示的值，再以FP32参与推理；存储解码恢复相同输入，避免old log-prob与更新输入因压缩不一致。
 
 存储实现与MDP表示分别配置。旧标准存储验证见[历史去重](history_storage_20261103.md)和[位打包](packed_storage_20261103.md)。

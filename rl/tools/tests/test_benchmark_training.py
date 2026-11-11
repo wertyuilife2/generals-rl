@@ -53,7 +53,8 @@ def test_storage_estimate_preserves_boolean_mask_and_matches_real_allocation(his
 
 
 @pytest.mark.parametrize("profile,compact,packed", ((False, False, False), (False, True, False), (True, True, True)))
-def test_real_cpu_rollout_gae_four_epoch_updates_exclude_warmup_and_refuse_overwrite(tmp_path, monkeypatch, profile, compact, packed):
+@pytest.mark.parametrize('epochs', (1, 4))
+def test_real_cpu_rollout_gae_updates_exclude_warmup_and_refuse_overwrite(tmp_path, monkeypatch, profile, compact, packed, epochs):
     for name in ("WORLD_SIZE", "RANK", "LOCAL_RANK"):
         monkeypatch.delenv(name, raising=False)
     config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
@@ -64,7 +65,7 @@ def test_real_cpu_rollout_gae_four_epoch_updates_exclude_warmup_and_refuse_overw
         config['runner']['storage_history'] = {'policy': config['task']['history_length']}
     if packed:
         config['runner']['storage_codec'] = 'generals_rl.rollout_codec.GeneralsObservationCodec'
-    config["runner"]["algorithm"].update(num_mini_batches=2, ppo_monitor=False,
+    config["runner"]["algorithm"].update(num_learning_epochs=epochs, num_mini_batches=2, ppo_monitor=False,
                                           schedule="fixed", desired_kl=None)
     config["self_play"].update(pool_size=2, snapshot_interval=50)
     path = tmp_path / "config.json"
@@ -76,8 +77,8 @@ def test_real_cpu_rollout_gae_four_epoch_updates_exclude_warmup_and_refuse_overw
     assert bench.main(command) == 0
     report = json.loads((output / "report.json").read_text())
     assert report["performance"]["fresh_transitions_measured_global"] == 32
-    assert report["performance"]["ppo_epochs"] == 4
-    assert report["performance"]["optimizer_steps_per_update_per_rank"] == 8
+    assert report["performance"]["ppo_epochs"] == epochs
+    assert report["performance"]["optimizer_steps_per_update_per_rank"] == 2 * epochs
     assert len(report["ranks"][0]["iterations"]) == 2
     assert len(report["ranks"][0]["warmup_iterations"]) == 1
     assert report["ranks"][0]["estimated_storage"]["total_storage_bytes"] == report["ranks"][0]["actual_storage"]["total_storage_bytes"]

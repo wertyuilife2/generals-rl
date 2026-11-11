@@ -21,12 +21,16 @@ class GeneralsCTSVecEnv(VecEnv):
         return self._tensor_dict(self.task.get_observations())
 
     def step(self, actions):
-        result = self.task.step(actions)
+        result = self.task.step(actions, capture_all_terminals=False)
         log = {key: value for key, value in result.metrics.items() if value.numel()}
+        observations = self._tensor_dict(result.observations)
+        # RSL reads this field only for time_outs. Without timeouts, alias the
+        # next observation instead of constructing/retaining unused snapshots.
         extras = {"time_outs": result.truncated,
-                  "terminal_observations": self._tensor_dict(result.terminal_observations),
+                  "terminal_observations": (observations if result.terminal_observations is None
+                                            else self._tensor_dict(result.terminal_observations)),
                   "log": log}
-        return (self._tensor_dict(result.observations), result.reward,
+        return (observations, result.reward,
                 result.terminated | result.truncated, extras)
 
 

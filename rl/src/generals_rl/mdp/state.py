@@ -4,6 +4,13 @@ from ..policy.state import GameBatch as PublicBatch
 
 
 class GameBatch(PublicBatch):
+    def select(self, rows):
+        """A compact batch for reset lanes, retaining training visibility rules."""
+        return type(self)({key: value.index_select(0, rows) for key, value in self.state.items()},
+                          self.stats.index_select(0, rows), self.width, self.height,
+                          None if self.visible is None else self.visible.index_select(0, rows),
+                          self.valid_cells.index_select(0, rows))
+
     @classmethod
     def from_backend(cls, env, device, valid=None):
         return cls({k: torch.as_tensor(v, device=device) for k, v in env.state.items()},

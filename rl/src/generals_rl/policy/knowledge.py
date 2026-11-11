@@ -187,6 +187,13 @@ class KnowledgeState:
             maps = torch.cat((maps, summary.flatten(1)), -1)
         return maps
 
+    def exploration_metrics(self, player_ids, lane_ids=None):
+        """Episode diagnostics without materializing every memory plane."""
+        explored = self._select(self.last_seen_tick, player_ids, lane_ids) >= 0
+        general = self._select(self.general_owner, player_ids, lane_ids)
+        return {"explored_fraction": explored.float().mean(1),
+                "known_enemy_general": ((general >= 0) & (general != player_ids[:, None])).any(1).float()}
+
     @torch.no_grad()
     def reset(self, mask=None):
         """Clear every seat in selected episode lanes; preserve other lanes."""
