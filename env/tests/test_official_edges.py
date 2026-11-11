@@ -131,6 +131,13 @@ def test_live_afk_rechecks_warning_and_retains_last_survivor(backend):
     assert final.death_order.tolist() == [0, 1] and final.kills.tolist() == [0, 0]
     assert final.leave_tick.tolist() == [71, 71]
     assert final.warn_afk.tolist() == [0, 0]
+    if backend != 'reference':
+        # A valid terminal snapshot must survive loading/reset, including the
+        # cached winner when both players leave in the same AFK check.
+        with VecEnv.from_states([final], device='cuda' if backend == 'gpu' else 'cpu') as env:
+            assert state_digest(env.to_states()[0]) == state_digest(final)
+            env.reset()
+            assert state_digest(env.to_states()[0]) == state_digest(final)
 
 
 @pytest.mark.parametrize('device', ['cpu', 'cuda', 'mps'])

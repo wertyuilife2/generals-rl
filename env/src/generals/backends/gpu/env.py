@@ -90,7 +90,9 @@ class GPUEnv:
         live_count = s["alive"].sum(dim=1)
         bad |= ((s["tick"] < 0) | (s["terminated"] != (live_count <= 1))).any()
         winner = torch.where(live_count == 1, s["alive"].to(torch.int32).argmax(dim=1), -1)
-        bad |= (s["winner"] != winner).any()
+        # AFK processing may remove the final survivor after caching the winner.
+        bad |= ((live_count > 0) & (s["winner"] != winner)).any()
+        bad |= ((s["winner"] < -1) | (s["winner"] >= self.players)).any()
         indices = torch.arange(n, device=self.device)[None, :]
         expected_general = torch.zeros_like(structure, dtype=torch.bool)
         for pid in range(self.players):
