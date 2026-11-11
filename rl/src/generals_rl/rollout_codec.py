@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as F
 from tensordict import TensorDict
 
+from .policy.features import feature_recipe
+
 
 def _pack_maps(value, cells, planes):
     frames = value.unflatten(-1, (-1, planes * cells + 13))
@@ -99,3 +101,61 @@ class GeneralsObservationCodec:
         if key in self.mask_sizes:
             return self._gather_mask(value, times, envs, self.mask_sizes[key])
         return value[times, envs]
+
+
+def _pack_half_maps(value, cells, planes):
+    flags, continuous, public = _pack_maps(value, cells, planes)
+    return flags, continuous.half(), public.half()
+
+
+def _pack_half_knowledge(value, cells):
+    flags, age = _pack_knowledge(value, cells)
+    return flags, age.half()
+
+
+class CompactObservationCodec(GeneralsObservationCodec):
+    """Bit-packed flags plus FP16 normalized features, quantized before acting.
+
+    Combat risk/margin are continuous: never reinterpret them as identity bits.
+    Decoding returns the exact float32 values seen by the rollout policy.
+    """
+    dynamic_memory = False
+
+    def __init__(self, observations):
+        # Extended memory is encoded separately; validate its standard prefix.
+        initial = observations.clone(recurse=False)
+        if self.dynamic_memory:
+            cells = (observations['action_mask'].shape[-1] - 1) // 8
+            recipe = feature_recipe('temporal')
+            if observations['knowledge'].shape[-1] != recipe.knowledge_channels * cells + recipe.public_extra_dim:
+                raise ValueError('dynamic memory requires K12 plus six public EMA features')
+            initial['knowledge'] = observations['knowledge'][..., :11*cells]
+        super().__init__(initial)
+        for key in self.map_planes.keys() | {'knowledge'}:
+            value = observations[key]
+            exact = (torch.isfinite(value) & (value == value.half().float())).all()
+            if value.is_cuda:
+                torch._assert_async(exact, 'compact observations must be quantized before acting')
+            elif not bool(exact):
+                raise ValueError('compact observations must be quantized before acting')
+        functions = (_pack_half_maps, _pack_half_knowledge)
+        if observations['action_mask'].is_cuda:
+            functions = tuple(torch.compile(fn, fullgraph=True, dynamic=True) for fn in functions)
+        self._pack_maps, self._pack_knowledge = functions
+
+    def encode(self, key, value):
+        base = value[..., :11*self.cells] if key == 'knowledge' and self.dynamic_memory else value
+        result = super().encode(key, base)
+        if key == 'knowledge' and self.dynamic_memory:
+            result['dynamics'] = value[..., 11*self.cells:].half()
+        return result
+
+    def gather(self, key, value, times, envs):
+        result = super().gather(key, value, times, envs)
+        if key == 'knowledge' and self.dynamic_memory:
+            result = torch.cat((result, value['dynamics'][times, envs].float()), -1)
+        return result
+
+
+class DynamicObservationCodec(CompactObservationCodec):
+    dynamic_memory = True

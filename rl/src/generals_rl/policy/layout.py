@@ -12,8 +12,12 @@ class ObservationLayout:
     map_planes: int = 13
     public_dim: int = 13
     knowledge_channels: int = 0
+    feature_set: str = "stacked"
 
     def __post_init__(self):
+        from .features import FEATURE_SETS
+        if self.feature_set not in FEATURE_SETS:
+            raise ValueError("unsupported feature_set")
         for name in ("width", "height", "history_length", "map_planes", "public_dim"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -43,7 +47,12 @@ class ObservationLayout:
 
     @property
     def knowledge_dim(self):
-        return self.knowledge_channels * self.cells
+        return self.knowledge_channels * self.cells + self.public_extra_dim
+
+    @property
+    def public_extra_dim(self):
+        from .features import feature_recipe
+        return feature_recipe(self.feature_set).public_extra_dim
 
     @property
     def num_actions(self):
@@ -74,7 +83,8 @@ class ObservationLayout:
     def memory_maps(self, knowledge, batch_size):
         if knowledge is None or knowledge.shape != (batch_size, self.knowledge_dim):
             raise ValueError("knowledge shape does not match observation layout")
-        return knowledge.reshape(batch_size, self.knowledge_channels, self.height, self.width)
+        return knowledge[:, :self.knowledge_channels * self.cells].reshape(
+            batch_size, self.knowledge_channels, self.height, self.width)
 
     def with_geometry(self, width, height):
         return replace(self, width=width, height=height)

@@ -12,6 +12,7 @@ from torch.nn import functional as F
 
 from .spatial_ppo import SpatialPPOPolicy
 from .value_distribution import ValueDistribution
+from .policy.features import feature_recipe, public_features
 from .policy.layout import ObservationLayout
 from .policy.scaled import _ScaledInformationActor, _ViTBackbone, RESNET_TOTAL_PRESETS, vit_configuration
 from .policy.tokens import (pack_tokens, paired_token_blocks, patch_mask, prepare_tokens, spatial_features,
@@ -27,7 +28,7 @@ class _ScaledInformationCritic(nn.Module):
         self.privileged_encoder = (_ViTBackbone(layout.privileged_planes, (64, 1, 4),
             map_shape=(layout.height, layout.width), patch_size=patch_size) if privileged else None)
         self.fusion = (nn.Conv2d(head_channels + 64, head_channels, 1) if privileged else None)
-        public_inputs = layout.public_dim * (2 if privileged else 1)
+        public_inputs = layout.public_dim * (2 if privileged else 1) + layout.public_extra_dim
         self.context = nn.Sequential(nn.Linear(head_channels + public_inputs, head_channels), nn.SiLU())
         self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
 
@@ -100,7 +101,7 @@ class _AttentionInformationCritic(nn.Module):
         self.projection = deepcopy(local_encoder.projection)
         # Common heads/embedding have identical initialization across both
         # fusion variants. Shared modules are registered only under actor.
-        public_inputs = layout.public_dim * (2 if privileged else 1)
+        public_inputs = layout.public_dim * (2 if privileged else 1) + layout.public_extra_dim
         self.context = nn.Sequential(nn.Linear(head_channels + public_inputs, head_channels), nn.SiLU())
         self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
         self.privileged_embedding = (nn.Conv2d(layout.privileged_planes, width, self.patch_size,
@@ -185,7 +186,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                  wait_move_factorization=True, inference_chunk_size=128, amp_bfloat16=False,
                  compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1,
                  critic_fusion="late", critic_attention_layers=2, batch_shared_forward=False,
-                 value_distribution="scalar", value_bins=128, value_sigma=.04):
+                 value_distribution="scalar", value_bins=128, value_sigma=.04, feature_set="stacked"):
         nn.Module.__init__(self)
         if backbone not in ("resnet", "vit"):
             raise ValueError("backbone must be resnet or vit")
@@ -206,11 +207,14 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         if not isinstance(model_size, str) or model_size.lower() not in RESNET_TOTAL_PRESETS:
             raise ValueError("model_size must be 1m, 10m, or 100m")
         self.backbone_kind, self.model_size = backbone, model_size.lower()
+        recipe = feature_recipe(feature_set)
+        if feature_set != "stacked" and critic_fusion != "early_shared":
+            raise ValueError("compact feature experiments require early_shared")
         schema = (players, map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
         if (any(isinstance(value, bool) or not isinstance(value, int) for value in schema)
-                or (players, history_length, map_planes, public_dim, knowledge_channels) != (2, 4, 13, 13, 11)
+                or (players, history_length, map_planes, public_dim, knowledge_channels) != (2, recipe.history_length, 13, 13, recipe.knowledge_channels)
                 or min(map_width, map_height) < 1):
-            raise ValueError("scaled policy requires P2 H4/K11 thirteen-plane/public13 features")
+            raise ValueError("scaled policy requires P2 local13/public13 and history/memory matching its feature recipe")
         if action_distribution != "categorical" or actor_obs_normalization is not False or critic_obs_normalization is not False:
             raise ValueError("scaled policy uses categorical actions and unnormalized explicit features")
         for name, value in (("share_backbone", share_backbone), ("critic_privileged", critic_privileged),
@@ -226,7 +230,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         for name, value in (("head_channels", head_channels), ("inference_chunk_size", inference_chunk_size)):
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
-        self.layout = ObservationLayout(map_width, map_height, history_length, map_planes, public_dim, knowledge_channels)
+        self.layout = ObservationLayout(map_width, map_height, history_length, map_planes, public_dim, knowledge_channels, feature_set)
         self.share_backbone, self.critic_privileged = share_backbone, critic_privileged
         local_keys = ["policy", "knowledge", "valid_cells"]
         expected = {"policy": local_keys, "critic": (["critic"] if critic_privileged else []) + local_keys}
@@ -275,6 +279,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             self.semantics += f"_fusion_{critic_fusion}_v1"
             if critic_fusion == "post_attention":
                 self.semantics += f"_layers{critic_attention_layers}"
+        if feature_set != "stacked":
+            self.semantics += f"_features_{feature_set}_v1"
         if value_distribution != "scalar":
             self.semantics += f"_value_{value_distribution}_{value_bins}_{value_sigma}"
         if spatial_mode == "pyramid":
@@ -319,7 +325,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             encoder = self.actor.encoder
             transformer = encoder.backbone.transformer
             local = encoder.embed(history, knowledge, valid_cells, tokens)
-            public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+            public = public_features(self.layout, history, knowledge)
             if (mode == "joint" and self.critic_fusion == "early_shared"
                     and (self.batch_shared_forward or not self.critic_privileged)):
                 maximum = self.critic.grid_shape[0] * self.critic.grid_shape[1]
@@ -342,7 +348,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             return (logits, values) if mode == "joint" else values
         encoder = self.actor.encoder if self.share_backbone or mode == "joint" else self.critic.encoder
         encoded = encoder(history, knowledge, valid_cells, tokens)
-        public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+        public = public_features(self.layout, history, knowledge)
         if mode == "joint":
             logits = self.actor.decode(encoded, public)
             if not self.share_backbone:

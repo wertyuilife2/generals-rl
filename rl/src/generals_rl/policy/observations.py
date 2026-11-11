@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 
 from .state import GameBatch
+from .features import feature_recipe
 
 
 class LocalObservationEncoder:
@@ -62,7 +63,21 @@ def make_observation_encoder(config, *, local_encoder=LocalObservationEncoder, c
         encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps)
     else:
         encoder = local_encoder(config.max_episode_steps)
-    return (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
+    encoder = (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
+    return CompactPrecisionEncoder(encoder) if feature_recipe(getattr(config, "feature_set", "stacked")).half_precision else encoder
+
+
+class CompactPrecisionEncoder:
+    """Quantize normalized features before both rollout and stored PPO replay."""
+    def __init__(self, base):
+        self.base, self.channels = base, base.channels
+        self.semantics = base.semantics + "_fp16_transport_v1"
+
+    def visibility(self, batch, player_ids):
+        return self.base.visibility(batch, player_ids)
+
+    def encode(self, batch, player_ids, **options):
+        return self.base.encode(batch, player_ids, **options).half().float()
 
 
 class KingThreatDistanceEncoder:

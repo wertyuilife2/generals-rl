@@ -40,11 +40,30 @@ def task_config(values):
 
 
 def configure_observations(config):
-    """Resolve the scaled policy's single privilege switch into task/storage."""
+    """Resolve feature recipes and privilege into matching task/model/storage.
+
+    Recipes own history and memory widths. Built-in codecs follow the recipe;
+    explicit custom codecs or disabled compression/history remain caller-owned.
+    """
     config = deepcopy(config)
     runner = config['runner']
     policy = runner['policy']
     if policy['class_name'] == 'generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy':
+        from .policy.features import feature_recipe
+        feature_set = config['task'].get('feature_set', 'stacked')
+        recipe = feature_recipe(feature_set)
+        policy['feature_set'] = feature_set
+        config['task']['history_length'] = policy['history_length'] = recipe.history_length
+        policy['knowledge_channels'] = recipe.knowledge_channels
+        if 'storage_history' not in runner:
+            runner['storage_history'] = {'policy': recipe.history_length}
+        elif runner['storage_history'] and 'policy' in runner['storage_history']:
+            runner['storage_history']['policy'] = recipe.history_length
+        codecs = ('generals_rl.rollout_codec.GeneralsObservationCodec',
+                  'generals_rl.rollout_codec.CompactObservationCodec',
+                  'generals_rl.rollout_codec.DynamicObservationCodec')
+        if 'storage_codec' not in runner or runner['storage_codec'] in codecs:
+            runner['storage_codec'] = codecs[2 if recipe.dynamic_memory else int(recipe.half_precision)]
         if policy.get('value_distribution', 'scalar') != 'scalar':
             reward = config['task']['reward']
             if any(reward.get(k, 0) != 0 for k in ('territory', 'cities', 'army', 'tick')) or (reward.get('win', 1), reward.get('loss', -1)) != (1, -1):

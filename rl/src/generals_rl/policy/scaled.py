@@ -8,6 +8,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 from .backbones import RESNET_DEPTHS, ResNetBackbone, ViTBackbone
 from .layout import own_king_coordinates
+from .features import spatial_channels, spatial_features as compact_features, public_features
 from .tokens import embed_tokens, patch_mask, prepare_tokens, spatial_features, valid_mean, valid_token_features
 
 
@@ -142,7 +143,7 @@ class _ScaledObservationEncoder(nn.Module):
         self.spatial_mode = spatial_mode
         self.mask_padding_tokens = mask_padding_tokens
         self.patch_size = patch_size
-        logical_inputs = layout.history_length * layout.map_planes + layout.knowledge_channels + 2
+        logical_inputs = spatial_channels(layout) + 2
         padding = (-logical_inputs) % alignment if alignment else 0
         self.backbone = _build_total_backbone(kind, size, logical_inputs + padding, spatial_mode,
                                               (layout.height, layout.width), patch_size, vit_config)
@@ -154,8 +155,9 @@ class _ScaledObservationEncoder(nn.Module):
 
     def input_maps(self, history, knowledge, valid_cells):
         layout, count = self.layout, history.shape[0]
-        maps = layout.history_maps(history)
-        parts = [maps, layout.memory_maps(knowledge, count), own_king_coordinates(maps[:, -layout.map_planes:], valid_cells)]
+        maps, memory = compact_features(layout, history, knowledge)
+        current = layout.history_maps(history)[:, -layout.map_planes:]
+        parts = [maps, memory, own_king_coordinates(current, valid_cells)]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
         inputs = torch.cat(parts, 1)
@@ -205,7 +207,7 @@ class _ScaledInformationActor(nn.Module):
         self.layout = layout
         self.encoder = _ScaledObservationEncoder(layout, kind, size, alignment, head_channels,
                                                  spatial_mode, mask_padding_tokens, patch_size, vit_config)
-        self.context = nn.Sequential(nn.Linear(head_channels + layout.public_dim, head_channels), nn.SiLU())
+        self.context = nn.Sequential(nn.Linear(head_channels + layout.public_dim + layout.public_extra_dim, head_channels), nn.SiLU())
         self.cell_head = nn.Conv2d(head_channels, 8 * patch_size * patch_size, 1)
         self.wait_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
 
@@ -225,5 +227,5 @@ class _ScaledInformationActor(nn.Module):
         if not history.shape[0]:
             return history.new_empty((0, self.layout.num_actions))
         encoded = self.encoder(history, knowledge, valid_cells, tokens)
-        public = self.layout.frames(history)[:, -1, -self.layout.public_dim:]
+        public = public_features(self.layout, history, knowledge)
         return self.decode(encoded, public)

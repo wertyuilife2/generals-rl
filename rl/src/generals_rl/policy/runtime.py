@@ -14,6 +14,7 @@ from .actions import make_action_space
 from .actor import build_actor
 from .config import FeatureConfig
 from .distributions import action_probabilities, greedy_actions
+from .features import feature_recipe
 from .knowledge import KnowledgeState
 from .observations import ObservationHistory, make_observation_encoder
 from .precision import matmul_precision, validate_precision
@@ -116,7 +117,8 @@ class PolicyRuntime:
             setattr(self, name, value)
         if self.features.persistent_knowledge:
             memory = KnowledgeState(capacity, self.features.width, self.features.height, self.features.players,
-                                    self.device, age_scale=self.features.knowledge_age_scale)
+                                    self.device, age_scale=self.features.knowledge_age_scale,
+                                    remember_dynamics=feature_recipe(self.features.feature_set).dynamic_memory)
             if old:
                 for name in memory._fields:
                     getattr(memory, name)[:old] = getattr(self.knowledge, name)
@@ -191,7 +193,9 @@ class PolicyRuntime:
                   "action_mask": self.action_space.mask(batch, players), "valid_cells": batch.valid_cells}
         if self.knowledge is not None:
             self.knowledge.update(batch, players, mask=active, lane_ids=rows, visible=visible)
-            inputs["knowledge"] = self.knowledge.encode(batch.state["tick"], players, lane_ids=rows).flatten(1)
+            inputs["knowledge"] = self.knowledge.features(batch.state["tick"], players, lane_ids=rows)
+        if feature_recipe(self.features.feature_set).half_precision:
+            inputs["knowledge"] = inputs["knowledge"].half().float()
         return inputs
 
     def _uniforms(self, rows, active):

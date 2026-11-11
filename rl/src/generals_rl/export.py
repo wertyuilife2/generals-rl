@@ -24,7 +24,7 @@ _FAMILIES = {
 }
 _FEATURES = dict(width=23, height=23, players=2, max_episode_steps=2000, history_length=4, random_maps=True,
                  combat_features=False,
-                 king_threat_distance=False, persistent_knowledge=False)
+                 king_threat_distance=False, persistent_knowledge=False, feature_set="stacked")
 
 
 def make_policy_spec(run_config):

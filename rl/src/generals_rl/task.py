@@ -9,6 +9,7 @@ from generals import MapConfig, VecEnv
 from .mdp import ActionMetrics, GameBatch, RewardConfig, ShapedReward, make_observation_encoder
 from .policy.actions import make_action_space
 from .policy.knowledge import KnowledgeState
+from .policy.features import feature_recipe
 from .policy.observations import ObservationHistory
 from .mdp.observations import encode_privileged
 from .opponents import make_opponent
@@ -25,6 +26,7 @@ class TaskConfig:
     device: str = "cpu"
     max_episode_steps: int = 2000
     history_length: int = 4
+    feature_set: str = "stacked"
     seed: int = 42
     threads: int = 1
     learner_seat: int = 0
@@ -44,6 +46,9 @@ class TaskConfig:
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
+        recipe = feature_recipe(self.feature_set)
+        if self.feature_set != "stacked" and (self.history_length != recipe.history_length or not self.persistent_knowledge or not self.train_both_sides):
+            raise ValueError("compact training requires matching history, persistent memory and dual current self-play")
         MapConfig(self.width, self.height, self.players, self.mountain_density, self.city_density)
         if self.players != 2:
             raise ValueError("RL training currently supports 1v1 only")
@@ -167,7 +172,8 @@ class GeneralsTask:
         self.terminated_episodes = 0
         if config.persistent_knowledge:
             self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
-                                            config.players, self.device)
+                                            config.players, self.device,
+                                            remember_dynamics=feature_recipe(config.feature_set).dynamic_memory)
             self._update_knowledge(self.batch())
         bind_knowledge = getattr(self.opponent, "bind_knowledge", None)
         if bind_knowledge is not None:
@@ -206,9 +212,11 @@ class GeneralsTask:
         if self.config.critic_privileged:
             observations["critic"] = encode_privileged(self.observation_encoder, batch, self.player_ids)
         if self.knowledge is not None:
-            observations["knowledge"] = self.knowledge.encode(
+            observations["knowledge"] = self.knowledge.features(
                 batch.state["tick"], self.player_ids,
                 lane_ids=self._game_rows if self.train_both_sides else None).flatten(1)
+        if feature_recipe(self.config.feature_set).half_precision:
+            observations["knowledge"] = observations["knowledge"].half().float()
         return observations
 
     def get_observations(self):
@@ -306,7 +314,8 @@ class GeneralsTask:
         metrics = {f"Reward/{key}": value.detach() for key, value in reward.terms.items()}
         metrics.update({f"Action/{key}": value for key, value in action_metrics.items()})
         if self.knowledge is not None:
-            planes = terminal_obs["knowledge"].reshape(self.num_envs, len(self.knowledge.channels), -1)
+            planes = terminal_obs["knowledge"][:, :len(self.knowledge.channels) * batch.width * batch.height].reshape(
+                self.num_envs, len(self.knowledge.channels), -1)
             metrics["Knowledge/explored_fraction"] = planes[:, 0].mean(1)
             enemy_index = self.knowledge.channels.index("last_seen_enemy_general")
             metrics["Knowledge/known_enemy_general"] = planes[:, enemy_index].any(1).float()
