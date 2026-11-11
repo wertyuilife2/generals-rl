@@ -45,6 +45,14 @@ def configure_observations(config):
     runner = config['runner']
     policy = runner['policy']
     if policy['class_name'] == 'generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy':
+        if policy.get('value_distribution', 'scalar') != 'scalar':
+            reward = config['task']['reward']
+            if any(reward.get(k, 0) != 0 for k in ('territory', 'cities', 'army', 'tick')) or (reward.get('win', 1), reward.get('loss', -1)) != (1, -1):
+                raise ValueError('bounded value heads require pure terminal +/-1 rewards')
+            if any(config.get('curriculum', {}).get(k) for k in ('tick_decay', 'potential_decay', 'gamma_final')):
+                raise ValueError('bounded value experiments require fixed sparse rewards/discount')
+            if runner['algorithm'].get('use_clipped_value_loss', True):
+                raise ValueError('classification values replace clipped value regression; set use_clipped_value_loss=False')
         privileged = policy.get('critic_privileged', True)
         if type(privileged) is not bool:
             raise TypeError('critic_privileged must be boolean')

@@ -11,6 +11,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .spatial_ppo import SpatialPPOPolicy
+from .value_distribution import ValueDistribution
 from .policy.layout import ObservationLayout
 from .policy.scaled import _ScaledInformationActor, _ViTBackbone, RESNET_TOTAL_PRESETS, vit_configuration
 from .policy.tokens import (pack_tokens, paired_token_blocks, patch_mask, prepare_tokens, spatial_features,
@@ -183,7 +184,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                  actor_obs_normalization=False, critic_obs_normalization=False,
                  wait_move_factorization=True, inference_chunk_size=128, amp_bfloat16=False,
                  compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1,
-                 critic_fusion="late", critic_attention_layers=2, batch_shared_forward=False):
+                 critic_fusion="late", critic_attention_layers=2, batch_shared_forward=False,
+                 value_distribution="scalar", value_bins=128, value_sigma=.04):
         nn.Module.__init__(self)
         if backbone not in ("resnet", "vit"):
             raise ValueError("backbone must be resnet or vit")
@@ -258,6 +260,11 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                 raise ValueError("critic_attention_layers must be between 1 and ViT depth")
             self.critic = _AttentionInformationCritic(self.layout, self.actor.encoder, critic_fusion,
                                                       critic_privileged, critic_attention_layers)
+        self.value_distribution = ValueDistribution(value_distribution, value_bins, value_sigma)
+        if value_distribution != "scalar":
+            # Changing the value head must not advance the rollout RNG stream.
+            with torch.random.fork_rng(devices=[]):
+                self.critic.value_head[-1] = nn.Linear(head_channels, self.value_distribution.outputs)
         self.distribution = None
         self.num_actions = self.layout.num_actions
         self.num_actor_obs = self.layout.history_dim + self.layout.knowledge_dim
@@ -268,6 +275,8 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             self.semantics += f"_fusion_{critic_fusion}_v1"
             if critic_fusion == "post_attention":
                 self.semantics += f"_layers{critic_attention_layers}"
+        if value_distribution != "scalar":
+            self.semantics += f"_value_{value_distribution}_{value_bins}_{value_sigma}"
         if spatial_mode == "pyramid":
             self.semantics += "_spatial_pyramid_v1"
         if mask_padding_tokens:
@@ -377,11 +386,12 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         reference = obs["policy"]
         count, mode = len(reference), "joint" if joint else "critic" if critic else "actor"
         if not count:
-            logits, values = reference.new_empty((0, self.num_actions)), reference.new_empty((0, 1))
+            logits, values = reference.new_empty((0, self.num_actions)), reference.new_empty((0, self.value_distribution.outputs))
             return (logits, values) if joint else values if critic else logits
         if torch.is_grad_enabled():
             return self._network_forward(obs, mode)
-        widths = (self.num_actions, 1) if joint else (1 if critic else self.num_actions,)
+        widths = (self.num_actions, self.value_distribution.outputs) if joint else (
+            self.value_distribution.outputs if critic else self.num_actions,)
         output = tuple(reference.new_empty((count, width), dtype=torch.float32) for width in widths)
         for start in range(0, count, self.inference_chunk_size):
             end = min(count, start + self.inference_chunk_size)
@@ -398,16 +408,17 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         with torch.autocast(logits.device.type, enabled=False):
             return self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)
 
-    def action_probabilities_and_value(self, obs, *, validate_mask=True):
+    def action_probabilities_and_value(self, obs, *, validate_mask=True, raw_value=False):
         logits, values = self._forward(obs, joint=True)
         with torch.autocast(logits.device.type, enabled=False):
             probabilities = self._probabilities_from_logits(logits, obs.get("action_mask"), validate_mask=validate_mask)
-        return probabilities, values
+        return probabilities, values if raw_value else self.value_distribution.decode(values)
 
     def evaluate(self, obs, is_teacher=False, **kwargs):
         if is_teacher and obs.batch_size[0]:
             raise ValueError("scaled student policy has no teacher value branch")
-        return self._forward(obs, critic=True)
+        output = self._forward(obs, critic=True)
+        return output if kwargs.get("raw_value", False) else self.value_distribution.decode(output)
 
     def __getstate__(self):
         state = super().__getstate__().copy()

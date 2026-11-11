@@ -120,6 +120,10 @@ class StudentPPO(PPO):
         self.monitor = PPOUpdateMonitor(enabled=ppo_monitor, probe_samples=ppo_probe_samples,
                                         probe_batch_size=ppo_probe_batch_size)
         self.update_metrics = {}
+        self.value_distribution = getattr(policy, "value_distribution", None)
+        self._classification_value = self.value_distribution is not None and self.value_distribution.kind != "scalar"
+        if self._classification_value and self.use_clipped_value_loss:
+            raise ValueError("classification values require use_clipped_value_loss=False")
 
     def restore_learning_rates(self):
         """Restore the shared scheduler scalar from a single-group Adam state."""
@@ -180,12 +184,13 @@ class StudentPPO(PPO):
             # one physical chunk when memory splitting is disabled. Upstream
             # PPO would otherwise normalize each rank's advantages locally.
             use_adapter = (self._chunked_update or self._custom_learning_rates
-                           or getattr(self.policy, 'share_backbone', False)
+                           or getattr(self.policy, 'share_backbone', False) or self._classification_value
                            or indices is not None
                            or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch))
             losses = self._update_microbatched(indices=indices) if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
             self.update_metrics.update(selection_metrics)
+            self.update_metrics.update(getattr(self, "value_metrics", {}))
             if self.monitor.enabled:
                 self.update_metrics.update(actor_learning_rate=self.learning_rate,
                                            critic_learning_rate=self.learning_rate)
@@ -238,6 +243,7 @@ class StudentPPO(PPO):
         """
         mean_losses = {"value": 0.0, "surrogate": 0.0, "entropy": 0.0}
         physical_batches = 0
+        self.value_metrics = {}
         logical_batch_size = 0
         mask_validator = getattr(self.policy, "validate_action_mask", None)
         for (obs, actions, old_values, advantages, returns, old_log_probs,
@@ -270,7 +276,8 @@ class StudentPPO(PPO):
                     # upstream update's otherwise-unused sample call.
                     if not self._separate_backward:
                         _, values = self.policy.action_probabilities_and_value(
-                            obs[sl], validate_mask=mask_validator is None)
+                            obs[sl], validate_mask=mask_validator is None,
+                            **({"raw_value": True} if self._classification_value else {}))
                     elif mask_validator is None:
                         self.policy.action_probabilities(obs[sl])
                     else:
@@ -296,14 +303,20 @@ class StudentPPO(PPO):
                         self.monitor.capture_actor_gradients(self.policy, end - start)
                     with (torch.autocast('cuda', dtype=torch.bfloat16)
                           if self.amp_bfloat16 else nullcontext()):
-                        values = self.policy.evaluate(obs[sl])
+                        values = self.policy.evaluate(obs[sl], **({"raw_value": True} if self._classification_value else {}))
                 values = values.float()
                 target, old_value = returns[sl].float(), old_values[sl].float()
-                value_losses = (values - target).pow(2)
-                if self.use_clipped_value_loss:
-                    clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
-                    value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
-                value_loss = value_losses.mean()
+                if self._classification_value:
+                    value_loss = self.value_distribution.loss(values, target)
+                    if physical_batches == 0:
+                        self.value_metrics.update({k: float(v) for k, v in
+                            self.value_distribution.diagnostics(values, target).items()})
+                else:
+                    value_losses = (values - target).pow(2)
+                    if self.use_clipped_value_loss:
+                        clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
+                        value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
+                    value_loss = value_losses.mean()
                 if self._separate_backward:
                     if value_loss.requires_grad:
                         (self.value_loss_coef * value_loss * weight).backward()
@@ -369,7 +382,9 @@ class StudentPPO(PPO):
         # uses only the active prefix; no return or normalization formula is copied.
         self._check_sample_count()
         if not self.is_multi_gpu or self.normalize_advantage_per_mini_batch:
-            return MoECTS.compute_returns(self, obs)
+            result = MoECTS.compute_returns(self, obs)
+            self._check_value_targets()
+            return result
         # Let CTS compute unchanged GAE, then normalize the active advantages
         # using moments from every rank rather than separate local populations.
         self.normalize_advantage_per_mini_batch = True
@@ -378,6 +393,16 @@ class StudentPPO(PPO):
         finally:
             self.normalize_advantage_per_mini_batch = False
         self.storage.advantages = self._normalize_advantages(self.storage.advantages)
+        self._check_value_targets()
+
+    def _check_value_targets(self):
+        if self._classification_value:
+            target = self.storage.returns[:self.storage.num_transitions_per_env]
+            valid = (torch.isfinite(target) & (target.abs() <= 1 + 1e-4)).all()
+            if target.is_cuda:
+                torch._assert_async(valid, "bounded value requires returns within [-1,1]")
+            elif not bool(valid):
+                raise ValueError("bounded value requires returns within [-1,1]")
 
     @torch.no_grad()
     def _normalize_advantages(self, advantages):
