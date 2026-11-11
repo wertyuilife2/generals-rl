@@ -20,6 +20,75 @@ from test_vit_padding import observations, policy
 MODES = ('early_shared', 'post_attention')
 
 
+@pytest.mark.parametrize('device', ('cpu', pytest.param('cuda', marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason='CUDA required'))))
+@pytest.mark.parametrize('patch_size', (1, 3))
+def test_sequential_shared_ppo_matches_joint_gradients_and_adam(device, patch_size):
+    from generals_rl.student_ppo import StudentPPO
+    from rsl_rl.storage import RolloutStorageCTS
+    from test_scaled_ppo import construct, observations as small_observations
+
+    torch.set_num_threads(1)
+    torch.manual_seed(91)
+    obs = small_observations(4).to(device)
+    model = construct(obs, 'vit', share_backbone=True, critic_fusion='early_shared',
+                      patch_size=patch_size, amp_bfloat16=device == 'cuda').to(device)
+    storage = RolloutStorageCTS('rl', 4, 0, 3, obs, [1], distribution_shape=[649],
+        action_dtype=torch.long, store_action_std=False, store_action_mean=False, device=device)
+    options = dict(num_learning_epochs=2, num_mini_batches=2, physical_minibatch_size=4,
+                   amp_bfloat16=device == 'cuda', schedule='fixed', desired_kl=None,
+                   ppo_monitor=False, max_grad_norm=.1, device=device)
+    joint = StudentPPO(model, storage, 4, **options)
+    assert joint._separate_backward
+    joint._separate_backward = False
+    with torch.inference_mode():
+        for tick in range(3):
+            joint.act(obs)
+            done = torch.zeros(4, dtype=torch.bool, device=device)
+            joint.process_env_step(obs, torch.linspace(-.3, .3, 4, device=device) + tick * .1,
+                                   done, {'time_outs': done, 'terminal_observations': obs})
+        joint.compute_returns(obs)
+    sequential = StudentPPO(deepcopy(model), deepcopy(storage), 4, **options)
+    assert sequential._separate_backward
+    rng = torch.get_rng_state()
+    cuda_rng = torch.cuda.get_rng_state() if device == 'cuda' else None
+    gradients, losses = [], []
+    for alg in (joint, sequential):
+        torch.set_rng_state(rng)
+        if cuda_rng is not None:
+            torch.cuda.set_rng_state(cuda_rng)
+        steps = []
+        original = alg.optimizer.step
+        def step():
+            steps.append(torch.cat([p.grad.detach().flatten().clone() for p in alg.policy.parameters()]))
+            return original()
+        with patch.object(alg.optimizer, 'step', side_effect=step):
+            losses.append(alg.update())
+        assert len(steps) == 4  # One Adam step per logical batch, after both branches.
+        assert alg.update_metrics['microbatches'] == 8  # Unequal chunks: 4 + 2.
+        assert {int(s['step']) for s in alg.optimizer.state.values()} == {4}
+        gradients.append(torch.cat(steps))
+    relative_error = (gradients[1] - gradients[0]).norm() / gradients[0].norm()
+    assert relative_error < (.01 if device == 'cuda' else 2e-5)
+    if device == 'cpu':
+        for a, b in zip(sequential.policy.parameters(), joint.policy.parameters(), strict=True):
+            torch.testing.assert_close(a, b, rtol=2e-5, atol=2e-6)
+    else:
+        # BF16 rounds the shared embedding gradient before/after summing the
+        # two branches differently. Adam can amplify this for near-zero
+        # coordinates, so bound the resulting policy/value change as well.
+        from generals_rl.ppo_monitor import categorical_changes
+        with torch.no_grad():
+            _, expected_value = joint.policy.action_probabilities_and_value(obs)
+            old_logits = joint.policy.distribution.logits.clone()
+            _, value = sequential.policy.action_probabilities_and_value(obs)
+            kl = categorical_changes(old_logits, sequential.policy.distribution.logits)['exact_update_kl']
+        assert kl.max() < 1e-4
+        torch.testing.assert_close(value, expected_value, rtol=.02, atol=.003)
+    for name in losses[0]:
+        assert losses[1][name] == pytest.approx(losses[0][name], rel=.01, abs=2e-6)
+
+
 @pytest.mark.parametrize('mode', MODES)
 @pytest.mark.parametrize('patch_size', (1, 3))
 @pytest.mark.parametrize('privileged', (False, True))
@@ -142,11 +211,12 @@ def test_fused_critic_excludes_padding_and_matches_unmasked_canvas(mode, patch_s
 
 @pytest.mark.parametrize('mode', MODES)
 @pytest.mark.parametrize('historical', (False, True))
-def test_cpu_ppo_checkpoint_resume_and_actor_export(tmp_path, mode, historical):
+@pytest.mark.parametrize('batched', (False, True))
+def test_cpu_ppo_checkpoint_resume_and_actor_export(tmp_path, mode, historical, batched):
     torch.set_num_threads(1)
     config = configuration(True, True)
     config['runner']['policy']['critic_fusion'] = mode
-    config['runner']['policy']['batch_shared_forward'] = True
+    config['runner']['policy']['batch_shared_forward'] = batched
     if historical:
         config['task'].update(opponent='self_play', train_both_sides=False)
         config['self_play'].update(pool_size=2, snapshot_interval=1, retain_seed=False)

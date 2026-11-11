@@ -100,11 +100,15 @@ class StudentPPO(PPO):
         parameters = [parameter for parameter in policy.parameters() if parameter.requires_grad]
         actor_ids = {id(p) for p in policy.actor.parameters()}
         critic_ids = {id(p) for p in policy.critic.parameters()}
-        # Independent towers do not need to retain both activation graphs at
-        # once. Shared/outside parameters use the original joint backward.
-        self._separate_backward = (not getattr(policy, 'share_backbone', False)
-                                   and not actor_ids.intersection(critic_ids)
-                                   and {id(p) for p in parameters} <= actor_ids | critic_ids)
+        # Separate forwards can release actor activations before building the
+        # critic graph, even when both branches accumulate into shared weights.
+        # Policies opt in only when this avoids duplicating a shared backbone
+        # forward. Both losses still precede one reduction, clip and Adam step.
+        self._separate_backward = (
+            getattr(policy, 'separate_actor_critic_backward', False)
+            or (not getattr(policy, 'share_backbone', False)
+                and not actor_ids.intersection(critic_ids)
+                and {id(p) for p in parameters} <= actor_ids | critic_ids))
         # Keep the default single group, including parameter ordering and Adam
         # execution, identical to the original implementation.
         self.optimizer = torch.optim.Adam(parameters, lr=learning_rate, betas=betas, weight_decay=weight_decay)
@@ -288,6 +292,8 @@ class StudentPPO(PPO):
                 if self._separate_backward:
                     if actor_loss.requires_grad:
                         (actor_loss * weight).backward()
+                    if physical_batches == 0:
+                        self.monitor.capture_actor_gradients(self.policy, end - start)
                     with (torch.autocast('cuda', dtype=torch.bfloat16)
                           if self.amp_bfloat16 else nullcontext()):
                         values = self.policy.evaluate(obs[sl])
@@ -303,6 +309,8 @@ class StudentPPO(PPO):
                         (self.value_loss_coef * value_loss * weight).backward()
                 else:
                     ((actor_loss + self.value_loss_coef * value_loss) * weight).backward()
+                if self._separate_backward and physical_batches == 0:
+                    self.monitor.capture_critic_gradients()
                 for key, value in (("value", value_loss), ("surrogate", surrogate_loss),
                                    ("entropy", entropy_loss)):
                     batch_losses[key] += value.detach() * weight

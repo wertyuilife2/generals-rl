@@ -1,15 +1,38 @@
 """Categorical KL math, LR response, bounded probes and monitoring isolation."""
 from copy import deepcopy
 import math
-from types import MethodType
+from types import MethodType, SimpleNamespace
 import unittest
 
 import torch
 from torch.distributions import Categorical, kl_divergence
 
-from generals_rl.ppo_monitor import categorical_changes
+from generals_rl.ppo_monitor import PPOUpdateMonitor, categorical_changes
 from rl_test_utils import assert_nested_equal
 from test_student_ppo import algorithm, collect, observation
+
+
+def test_shared_gradient_probe_is_local_detached_and_released():
+    backbone = torch.nn.Linear(2, 1, bias=False)
+    parameter = backbone.weight
+    parameter.grad = torch.tensor([[1., 2.]])
+    policy = SimpleNamespace(share_backbone=True,
+        actor=SimpleNamespace(encoder=SimpleNamespace(backbone=backbone)))
+    monitor = PPOUpdateMonitor()
+    monitor.metrics = {}
+    monitor.capture_actor_gradients(policy, samples=3)
+    parameter.grad += torch.tensor([[-3., 4.]])
+    before = parameter.grad.clone()
+    monitor.capture_critic_gradients()
+    torch.testing.assert_close(parameter.grad, before, rtol=0, atol=0)
+    assert monitor.metrics['shared_grad_probe_samples'] == 3
+    assert math.isclose(monitor.metrics['shared_actor_grad_norm'], math.sqrt(5), rel_tol=1e-6)
+    assert monitor.metrics['shared_critic_grad_norm'] == 5
+    assert math.isclose(monitor.metrics['shared_actor_critic_grad_cosine'], 1/math.sqrt(5), rel_tol=1e-6)
+    assert not monitor._actor_gradients and not monitor._shared_parameters
+    monitor.capture_actor_gradients(policy, samples=3)
+    monitor.release()
+    assert not monitor._actor_gradients and not monitor._shared_parameters
 
 
 class PPOMonitorTests(unittest.TestCase):

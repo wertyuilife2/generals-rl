@@ -285,6 +285,14 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             raise ValueError('valid_cells must be bool [batch, cells]')
         self.layout.memory_maps(obs.get("knowledge"), obs.batch_size[0])
 
+    @property
+    def separate_actor_critic_backward(self):
+        # Privileged early fusion already needs two Transformer passes. Split
+        # their graphs during PPO, unless the caller explicitly requests the
+        # batched joint forward. Other shared modes reuse backbone activations.
+        return (self.critic_fusion == "early_shared" and self.critic_privileged
+                and not self.batch_shared_forward)
+
     def parameter_counts(self):
         actor = sum(parameter.numel() for parameter in self.actor.parameters())
         critic = sum(parameter.numel() for parameter in self.critic.parameters())
