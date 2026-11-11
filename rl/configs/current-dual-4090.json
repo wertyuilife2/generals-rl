@@ -1,17 +1,11 @@
 {
-  "task": {
-    "opponent": "current_self_play",
-    "train_both_sides": true,
-    "num_envs": 4096
-  },
   "runner": {
     "policy": {
       "inference_chunk_size": 1024
     },
     "algorithm": {
-      "num_mini_batches": 32,
       "physical_minibatch_size": 512
     }
   },
-  "run_id": "official-current-dual-4090"
+  "run_id": "v32-temporal-paths-4090"
 }

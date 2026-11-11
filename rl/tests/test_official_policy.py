@@ -12,6 +12,7 @@ from generals.core.state import MapLayout
 from generals_rl.task import TaskConfig,GeneralsTask
 from generals_rl.export import export_policy
 from generals_rl.policy.runtime import PolicyRuntime
+from rl_test_utils import stacked_vit_config
 
 
 def unpad(state, valid):
@@ -30,7 +31,7 @@ def test_exported_actor_matches_random_shape_training(tmp_path,backend,patch_siz
     if backend=='gpu' and not torch.cuda.is_available():pytest.skip('CUDA unavailable')
     torch.set_num_threads(1)
     device='cuda:0' if backend=='gpu' else 'cpu'
-    config=json.loads((Path(__file__).parents[1]/'src/generals_rl/default.json').read_text())
+    config=stacked_vit_config()
     config['task'].update(num_envs=3,backend=backend,device=device,map_pool_size=16,opponent='wait',train_both_sides=False,seed=84)
     config['runner']['policy']['amp_bfloat16']=False
     config['runner']['policy']['patch_size']=patch_size

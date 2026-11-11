@@ -7,7 +7,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from generals_rl.config import default_training_config
+from rl_test_utils import stacked_vit_config
 from generals_rl.export import make_policy_spec
 from generals_rl.policy.actor import build_actor
 from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
@@ -30,12 +30,12 @@ def observations(device='cpu'):
 
 
 def policy(obs, **overrides):
-    options = deepcopy(default_training_config()['runner']['policy'])
+    options = deepcopy(stacked_vit_config()['runner']['policy'])
     options.pop('class_name')
     options.update(amp_bfloat16=False, compile_forward=False, mask_padding_tokens=True)
     options.update(overrides)
     return ScaledInformationSpatialPPOPolicy(obs,
-        default_training_config()['runner']['obs_groups'], 4233, **options).to(obs.device)
+        stacked_vit_config()['runner']['obs_groups'], 4233, **options).to(obs.device)
 
 
 def dense_reference(transformer, inputs, valid, tokens):
@@ -52,7 +52,7 @@ def test_padding_cannot_change_actor_valid_actions_and_export_matches(patch_size
     torch.set_num_threads(1)
     obs = observations()
     model = policy(obs, patch_size=patch_size)
-    config = default_training_config()
+    config = stacked_vit_config()
     config['runner']['policy']['mask_padding_tokens'] = True
     config['runner']['policy']['patch_size'] = patch_size
     spec = make_policy_spec(config)

@@ -9,7 +9,8 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from generals_rl.config import configure_observations, default_training_config, task_config
+from generals_rl.config import configure_observations, task_config
+from rl_test_utils import stacked_vit_config
 from generals_rl.export import export_policy
 from generals_rl.policy.actor import build_actor
 from generals_rl.policy.runtime import create_controller
@@ -19,7 +20,7 @@ from generals_rl.train import train
 
 
 def configuration(shared, privileged, device='cpu'):
-    config = default_training_config()
+    config = stacked_vit_config()
     config['task'].update(num_envs=2, map_pool_size=4, max_episode_steps=2,
                           backend='gpu' if device == 'cuda' else 'cpu', device=device)
     config['runner'].update(num_steps_per_env=2, save_interval=1)

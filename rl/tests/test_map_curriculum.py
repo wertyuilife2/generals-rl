@@ -100,8 +100,7 @@ class MapCurriculumTests(unittest.TestCase):
         config['task'].update(width=9, height=9, random_maps=False, num_envs=8, device='cpu',
                               backend='cpu', max_episode_steps=2, map_pool_size=8,
                               map_curriculum=dict(warmup_transitions=32, end_transitions=64))
-        config['runner'].update(num_steps_per_env=4, save_interval=1, storage_history={'policy': 4},
-                                storage_codec='generals_rl.rollout_codec.GeneralsObservationCodec')
+        config['runner'].update(num_steps_per_env=4, save_interval=1)
         config['runner']['policy'].update(map_width=9, map_height=9, compile_forward=False, amp_bfloat16=False)
         config['runner']['algorithm'].update(num_learning_epochs=1, num_mini_batches=2,
                                              physical_minibatch_size=16, amp_bfloat16=False,

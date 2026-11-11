@@ -39,8 +39,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 
 | `critic_fusion` | 行为与约束 |
 |---|---|
-| late（默认） | 局部encoder输出与独立小型特权ViT输出融合；可共享或独立主干 |
-| early_shared | 局部embedding与特权embedding相加，同一Transformer权重执行两路前向；要求共享dense ViT |
+| late | 局部encoder输出与独立小型特权ViT输出融合；可共享或独立主干 |
+| early_shared（当前训练默认） | 局部embedding与特权embedding相加，同一Transformer权重执行两路前向；要求共享dense ViT |
 | post_attention | 复用局部主干输出，与特权embedding联合经过默认两层critic专属attention；要求共享dense ViT |
 | joint_independent | 恢复1237301的完整状态＋局部历史／记忆联合输入critic；要求独立特权dense ViT patch1 |
 
@@ -66,7 +66,7 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 
 ## 地图和奖励课程
 
-`task.map_curriculum`默认关闭。每个seed生成易图和精确官方终点；中间层级插值出生距离、山脉与城市数量。`map_pool_size`是每层地图数，因此启用课程会增加初始化时间和图池内存。当前对局不换地图，进度仅影响后续reset。
+包内默认配方开启9×9的 `task.map_curriculum`；底层 `TaskConfig` 不隐式启用课程。每个seed生成易图和精确官方终点；中间层级插值出生距离、山脉与城市数量。`map_pool_size`是每层地图数，因此启用课程会增加初始化时间和图池内存。当前对局不换地图，进度仅影响后续reset。
 
 历史配置键 `warmup_transitions/end_transitions` 与checkpoint的 `map_curriculum_transitions` 均计数**全局真实board ticks**。双座采样数是该值的两倍。resume恢复保存的绝对计数；warm-start新训练从零开始。`easy_spawn_reference_size=9`可在较大地图上保留易图近距离出生分布。详见[9×9课程](map_curriculum9_20261103.md)、[全尺寸课程](map_curriculum_full_20261103.md)及[压缩存储实验](map_curriculum_full_packed_20261103.md)。
 

@@ -15,7 +15,7 @@ DEFAULT_ITERATIONS = 224
 
 
 def default_training_config():
-    """Load the selected F03 recipe from package data as a fresh dictionary."""
+    """Load the selected temporal-paths v32 recipe as a fresh dictionary."""
     return json.loads(files("generals_rl").joinpath("default.json").read_text())
 
 

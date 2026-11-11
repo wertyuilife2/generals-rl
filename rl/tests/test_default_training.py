@@ -41,12 +41,15 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert execute.call_args.kwargs["iterations"] == DEFAULT_ITERATIONS == 224
     assert execute.call_args.kwargs["steps_per_env"] is None
     assert expected['evaluation']['profile'] is None
-    assert expected['runner']['storage_history'] == {'policy': 4}
-    assert expected['runner']['storage_codec'] == 'generals_rl.rollout_codec.GeneralsObservationCodec'
-    assert expected['runner']['algorithm']['physical_minibatch_size'] == 512
+    assert expected['task']['feature_set'] == 'temporal_paths'
+    assert expected['runner']['policy']['critic_fusion'] == 'early_shared'
+    assert expected['runner']['policy']['value_distribution'] == 'hl_gauss'
+    assert expected['runner']['storage_history'] == {'policy': 8}
+    assert expected['runner']['storage_codec'] == 'generals_rl.rollout_codec.PathObservationCodec'
+    assert expected['runner']['algorithm']['physical_minibatch_size'] == 8192
     assert expected['task']['opponent'] == 'current_self_play'
     assert expected['task']['train_both_sides'] is True
-    assert 8 * expected["task"]["num_envs"] * 2 * expected["runner"]["num_steps_per_env"] * 224 == 939_524_096
+    assert 8 * expected["task"]["num_envs"] * 2 * expected["runner"]["num_steps_per_env"] * 224 == 3_758_096_384
     with patch("generals_rl.train.train") as execute:
         main(["--output", "unused-ticks", "--steps-per-env", "64"])
     assert execute.call_args.kwargs["iterations"] is None
@@ -104,7 +107,7 @@ def test_partial_override_and_resume_preserve_their_configuration_boundaries(tmp
 def test_selected_vit_recipe_completes_cpu_updates_and_resumes(tmp_path):
     config = default_training_config()
     config["task"].update(backend="cpu", device="cpu", num_envs=2, map_pool_size=0,
-                          max_episode_steps=3, mountain_density=0, city_density=0)
+                          map_curriculum=None, max_episode_steps=3, mountain_density=0, city_density=0)
     config["runner"].update(num_steps_per_env=4, save_interval=1)
     config["runner"]["policy"].update(amp_bfloat16=False, compile_forward=False)
     config["runner"]["algorithm"].update(amp_bfloat16=False, num_learning_epochs=1,

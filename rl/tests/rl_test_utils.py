@@ -11,6 +11,18 @@ GROUPS = {"policy": ["policy"], "critic": ["critic"]}
 MAP_GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
 
 
+def stacked_vit_config():
+    """Pin the full-map H4/late/scalar architecture exercised by legacy tests."""
+    from generals_rl.config import default_training_config
+    config = default_training_config()
+    config['task'].update(width=23, height=23, random_maps=True, history_length=4,
+                          feature_set='stacked', map_curriculum=None)
+    config['runner']['policy'].update(map_width=23, map_height=23, history_length=4,
+                                      knowledge_channels=11, feature_set='stacked',
+                                      critic_fusion='late', value_distribution='scalar')
+    return config
+
+
 def light_policy_config():
     return {"class_name": "generals_rl.spatial_ppo.LightSpatialPPOPolicy",
             "action_distribution": "categorical", "spatial_channels": 16,
