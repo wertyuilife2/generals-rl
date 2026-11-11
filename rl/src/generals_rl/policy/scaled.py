@@ -8,7 +8,7 @@ from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
 from .backbones import RESNET_DEPTHS, ResNetBackbone, ViTBackbone
 from .layout import own_king_coordinates
-from .features import spatial_channels, spatial_features as compact_features, public_features
+from .features import feature_recipe, spatial_channels, spatial_features as compact_features, public_features
 from .tokens import embed_tokens, patch_mask, prepare_tokens, spatial_features, valid_mean, valid_token_features
 
 
@@ -158,6 +158,9 @@ class _ScaledObservationEncoder(nn.Module):
         maps, memory = compact_features(layout, history, knowledge)
         current = layout.history_maps(history)[:, -layout.map_planes:]
         parts = [maps, memory, own_king_coordinates(current, valid_cells)]
+        if feature_recipe(layout.feature_set).terrain_distances:
+            # Fill existing padding after XY; all temporal feature indices stay fixed.
+            parts = [maps, memory[:, :-2], parts[2], memory[:, -2:]]
         if self._input_zero_padding.shape[1]:
             parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
         inputs = torch.cat(parts, 1)

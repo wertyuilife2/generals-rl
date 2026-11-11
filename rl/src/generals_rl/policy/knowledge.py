@@ -46,7 +46,7 @@ class KnowledgeState:
     _fields = ("terrain", "structure", "general_owner", "owner", "last_seen_tick")
 
     def __init__(self, num_envs: int, width: int, height: int, players: int,
-                 device="cpu", *, age_scale: int = 2000, remember_dynamics=False):
+                 device="cpu", *, age_scale: int = 2000, remember_dynamics=False, terrain_distances=False):
         for name, value in (("num_envs", num_envs), ("width", width),
                             ("height", height), ("players", players),
                             ("age_scale", age_scale)):
@@ -57,6 +57,10 @@ class KnowledgeState:
         self.age_scale = age_scale
         self.remember_dynamics = remember_dynamics
         self.channels = knowledge_channels(players) + (("last_seen_enemy_log_army",) if remember_dynamics else ())
+        if terrain_distances and (not remember_dynamics or players != 2):
+            raise ValueError("terrain distances require two-player dynamic memory")
+        if terrain_distances:
+            self.channels += ("own_general_distance", "known_enemy_general_distance")
         shape = (num_envs, players, width * height)
         # -1 terrain/structure/tick means unobserved; owner -1/-2 are legal
         # empty/neutral values, so its unknown sentinel is -3.
@@ -75,6 +79,10 @@ class KnowledgeState:
             self.score_tick = torch.full((num_envs, players), -1, dtype=torch.long, device=self.device)
             self._spatial_fields = self._fields + ("army",)
             self._fields = self._spatial_fields + ("score_current", "score_ema", "score_tick")
+        self.paths = None
+        if terrain_distances:
+            from .paths import TerrainDistances
+            self.paths = TerrainDistances(num_envs, players, width, height, self.device)
 
     def _ids(self, player_ids, count=None):
         ids = torch.as_tensor(player_ids, device=self.device)
@@ -137,6 +145,9 @@ class KnowledgeState:
             self.score_ema[rows, ids] = torch.where(active[:, None, None], ema, old_ema)
             self.score_current[rows, ids] = torch.where(active[:, None], current, self.score_current[rows, ids])
             self.score_tick[rows, ids] = torch.where(active, tick, previous)
+        if self.paths is not None:
+            self.paths.update(self.terrain, self.general_owner, batch.fog_obstacles(ids, visible),
+                              batch.valid_cells, ids, lane_ids, mask)
 
     @torch.no_grad()
     def encode(self, tick, player_ids, lane_ids=None):
@@ -163,6 +174,8 @@ class KnowledgeState:
             army = self._select(self.army, ids, lane_ids)
             enemy = (owner >= 0) & (owner != ids[:, None]) & explored
             planes = torch.cat((planes, (torch.log1p(army) / 10. * enemy)[:, None]), 1)
+        if self.paths is not None:
+            planes = torch.cat((planes, self.paths.features(ids, lane_ids)), 1)
         return planes.reshape(count, len(self.channels), self.height, self.width)
 
     def features(self, tick, player_ids, lane_ids=None):
@@ -188,6 +201,8 @@ class KnowledgeState:
                 field.fill_(value)
             else:
                 field[mask] = value
+        if self.paths is not None:
+            self.paths.reset(mask)
 
     def clone(self):
         """Independent memory for an alternate search branch or simulation."""
@@ -195,4 +210,6 @@ class KnowledgeState:
         result.__dict__ = self.__dict__.copy()
         for name in self._fields:
             setattr(result, name, getattr(self, name).clone())
+        if self.paths is not None:
+            result.paths = self.paths.clone()
         return result

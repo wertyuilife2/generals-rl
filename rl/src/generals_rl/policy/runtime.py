@@ -118,10 +118,13 @@ class PolicyRuntime:
         if self.features.persistent_knowledge:
             memory = KnowledgeState(capacity, self.features.width, self.features.height, self.features.players,
                                     self.device, age_scale=self.features.knowledge_age_scale,
-                                    remember_dynamics=feature_recipe(self.features.feature_set).dynamic_memory)
+                                    remember_dynamics=feature_recipe(self.features.feature_set).dynamic_memory,
+                                    terrain_distances=feature_recipe(self.features.feature_set).terrain_distances)
             if old:
                 for name in memory._fields:
                     getattr(memory, name)[:old] = getattr(self.knowledge, name)
+                if memory.paths is not None:
+                    memory.paths.copy_prefix(self.knowledge.paths)
             self.knowledge = memory
         self.capacity = capacity
 

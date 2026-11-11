@@ -173,7 +173,8 @@ class GeneralsTask:
         if config.persistent_knowledge:
             self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
                                             config.players, self.device,
-                                            remember_dynamics=feature_recipe(config.feature_set).dynamic_memory)
+                                            remember_dynamics=feature_recipe(config.feature_set).dynamic_memory,
+                                            terrain_distances=feature_recipe(config.feature_set).terrain_distances)
             self._update_knowledge(self.batch())
         bind_knowledge = getattr(self.opponent, "bind_knowledge", None)
         if bind_knowledge is not None:

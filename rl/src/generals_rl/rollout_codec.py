@@ -120,15 +120,16 @@ class CompactObservationCodec(GeneralsObservationCodec):
     Decoding returns the exact float32 values seen by the rollout policy.
     """
     dynamic_memory = False
+    feature_set = 'compact'
 
     def __init__(self, observations):
         # Extended memory is encoded separately; validate its standard prefix.
         initial = observations.clone(recurse=False)
         if self.dynamic_memory:
             cells = (observations['action_mask'].shape[-1] - 1) // 8
-            recipe = feature_recipe('temporal')
+            recipe = feature_recipe(self.feature_set)
             if observations['knowledge'].shape[-1] != recipe.knowledge_channels * cells + recipe.public_extra_dim:
-                raise ValueError('dynamic memory requires K12 plus six public EMA features')
+                raise ValueError('dynamic memory does not match the feature recipe')
             initial['knowledge'] = observations['knowledge'][..., :11*cells]
         super().__init__(initial)
         for key in self.map_planes.keys() | {'knowledge'}:
@@ -159,3 +160,9 @@ class CompactObservationCodec(GeneralsObservationCodec):
 
 class DynamicObservationCodec(CompactObservationCodec):
     dynamic_memory = True
+    feature_set = 'temporal'
+
+
+class PathObservationCodec(DynamicObservationCodec):
+    """Store the two distance planes from each decision, alongside dynamic memory."""
+    feature_set = 'temporal_paths'

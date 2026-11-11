@@ -41,6 +41,12 @@ heristic/**/experiments/
 !doc/sparse_features_20261109_results.md
 !doc/rl_train_log.md
 !doc/rl_training_design.md
+!doc/terrain_distance_20261110.md
+!doc/terrain_distance_20261110_results.md
+!doc/assets/terrain_distance_20261110/
+doc/assets/terrain_distance_20261110/*
+!doc/assets/terrain_distance_20261110/curves_cap1024.png
+!doc/assets/terrain_distance_20261110/curves_cap2048.png
 !doc/assets/fullmap_t512_ablation_20261106/
 doc/assets/fullmap_t512_ablation_20261106/*
 !doc/assets/fullmap_t512_ablation_20261106/learning_curves.png

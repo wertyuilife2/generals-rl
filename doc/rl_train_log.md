@@ -193,3 +193,19 @@ v24 本表按四 baseline 峰值选 U140；此前七对手选模采用 U180，�
 可复现分析：`outputs/analysis/late_decline_audit_20261110_actual01/analyze.py`；完整38条评估曲线汇总 `all_panels.csv`，逐局转移矩阵、配置配对检查及补测数据在 `audit.json`。全部为离线读取既有结果；未启动训练或新对战。
 
 <!-- /late_decline_audit_20261110 -->
+
+<!-- terrain_distance_20261110 -->
+
+## v30–v32：temporal＋HL128，时限与路径消融
+
+[配置与改动](terrain_distance_20261110.md)；[动态结果与曲线](terrain_distance_20261110_results.md)。
+
+| Run | PPO轮 | 原时限 | 原时限七对手 | 统一2048四基线 | 统一2048七对手 | 玩家样本/s | 峰值allocated/reserved GiB |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| v30_9x9_temporal_hl128 | 0/224 | 2048 | — | — | — | — | 0.00/0.00 |
+| v31_9x9_temporal_hl128_4096 | 0/224 | 4096 | — | — | — | — | 0.00/0.00 |
+| v32_9x9_temporal_hl128_paths | 0/224 | 2048 | — | — | — | — | 0.00/0.00 |
+
+![统一2048 tick曲线](assets/terrain_distance_20261110/curves_cap2048.png)
+
+<!-- /terrain_distance_20261110 -->

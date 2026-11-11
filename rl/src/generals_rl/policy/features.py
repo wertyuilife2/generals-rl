@@ -20,6 +20,7 @@ class FeatureRecipe:
     half_precision: bool = False
     dynamic_memory: bool = False
     deduplicate_half: bool = False
+    terrain_distances: bool = False
 
     @property
     def public_extra_dim(self):
@@ -31,6 +32,7 @@ FEATURE_RECIPES = {
     "compact": FeatureRecipe(4, 11, half_precision=True),
     "temporal": FeatureRecipe(8, 12, half_precision=True, dynamic_memory=True),
     "temporal_dedup": FeatureRecipe(8, 12, half_precision=True, dynamic_memory=True, deduplicate_half=True),
+    "temporal_paths": FeatureRecipe(8, 14, half_precision=True, dynamic_memory=True, terrain_distances=True),
 }
 FEATURE_SETS = tuple(FEATURE_RECIPES)
 CURRENT_CHANNELS = (0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
@@ -46,8 +48,9 @@ def feature_recipe(name):
 def spatial_channels(layout):
     if layout.feature_set == "stacked":
         return layout.history_length * layout.map_planes + layout.knowledge_channels
-    return len(CURRENT_CHANNELS) + 2 * (layout.history_length - 1) + len(MEMORY_CHANNELS) + int(
-        feature_recipe(layout.feature_set).dynamic_memory)
+    recipe = feature_recipe(layout.feature_set)
+    return (len(CURRENT_CHANNELS) + 2 * (layout.history_length - 1) + len(MEMORY_CHANNELS)
+            + int(recipe.dynamic_memory) + 2 * int(recipe.terrain_distances))
 
 
 def spatial_features(layout, history, knowledge):
@@ -61,6 +64,8 @@ def spatial_features(layout, history, knowledge):
     army = frames[:, :, 9:10] * frames[:, :, 5:7]
     differences = (army[:, 1:] - army[:, :-1]).flatten(1, 2)
     channels = MEMORY_CHANNELS + ((11,) if feature_recipe(layout.feature_set).dynamic_memory else ())
+    if feature_recipe(layout.feature_set).terrain_distances:
+        channels += (12, 13)
     return torch.cat((frames[:, -1, CURRENT_CHANNELS], differences), 1), memory[:, channels]
 
 
