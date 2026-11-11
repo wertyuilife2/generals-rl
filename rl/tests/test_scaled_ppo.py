@@ -1,4 +1,5 @@
 """Balanced parameter audits and CPU training/rollout information contracts."""
+from generals_rl.scaled_ppo import valid_token_features
 from copy import deepcopy
 import math
 import unittest
@@ -237,3 +238,20 @@ class ScaledInformationPolicyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_joint_independent_critic_restores_original_full_state_channels():
+    torch.set_num_threads(1)
+    obs = observations()
+    model = construct(obs, 'vit', critic_fusion='joint_independent')
+    with patch('generals_rl.scaled_ppo.valid_token_features', wraps=valid_token_features) as encode:
+        values = model.evaluate(obs)
+        inputs = encode.call_args.args[1]
+    assert inputs.shape == (2, 76, 9, 9)
+    torch.testing.assert_close(inputs[:, 0].flatten(1), obs['valid_cells'].float(), rtol=0, atol=0)
+    torch.testing.assert_close(inputs[:, 1:12].flatten(1), obs['critic'][:, :11*81], rtol=0, atol=0)
+    assert not inputs[:, 12].any()
+    assert model.parameter_counts() == {'actor': 527369, 'critic': 528769, 'total': 1056138}
+    values.square().mean().backward()
+    assert all(p.grad is None for p in model.actor.parameters())
+    assert model.critic.backbone.transformer.patch_embed.proj.weight.grad.abs().sum() > 0

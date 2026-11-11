@@ -48,6 +48,44 @@ class _ScaledInformationCritic(nn.Module):
         return self.value_head(torch.cat((pooled, context), -1))
 
 
+class _JointInformationCritic(nn.Module):
+    """The dense joint-input critic from 1237301, with compact-state unpacking.
+
+    Restore its constant visibility/fog planes at the input; all learned
+    layers and their state keys match the original independent critic.
+    """
+    def __init__(self, layout, size, alignment, head_channels, mask_padding_tokens):
+        super().__init__()
+        self.layout, self.mask_padding_tokens = layout, mask_padding_tokens
+        inputs = (layout.history_length + 1) * layout.map_planes + layout.knowledge_channels
+        padding = (-inputs) % alignment if alignment else 0
+        self.backbone = _ViTBackbone(inputs + padding, vit_configuration(size, False),
+                                     map_shape=(layout.height, layout.width))
+        self.projection = nn.Conv2d(self.backbone.out_channels, head_channels, 1)
+        self.context = nn.Sequential(nn.Linear(head_channels + 2 * layout.public_dim, head_channels), nn.SiLU())
+        self.value_head = nn.Sequential(nn.Linear(2 * head_channels, head_channels), nn.SiLU(), nn.Linear(head_channels, 1))
+        self.register_buffer('_input_zero_padding', self.projection.weight.new_zeros(
+            1, padding, layout.height, layout.width), persistent=False)
+
+    def forward(self, privileged, history, knowledge, valid_cells, tokens):
+        layout, count = self.layout, privileged.shape[0]
+        maps = layout.privileged_maps(privileged)
+        visible = valid_cells.reshape(count, 1, layout.height, layout.width).to(maps.dtype)
+        current = torch.cat((visible, maps, torch.zeros_like(visible)), 1)
+        parts = [current, layout.history_maps(history), layout.memory_maps(knowledge, count)]
+        if self._input_zero_padding.shape[1]:
+            parts.append(self._input_zero_padding.expand(count, -1, -1, -1))
+        inputs = torch.cat(parts, 1)
+        if self.mask_padding_tokens:
+            features = valid_token_features(self.backbone.transformer, inputs, tokens[0], tokens)
+            pooled = valid_mean(F.silu(self.projection(features)), tokens[0])
+        else:
+            pooled = F.silu(self.projection(self.backbone(inputs))).mean((-2, -1))
+        public = layout.frames(history)[:, -1, -layout.public_dim:]
+        context = self.context(torch.cat((pooled, privileged[:, -layout.public_dim:], public), -1))
+        return self.value_head(torch.cat((pooled, context), -1))
+
+
 class _AttentionInformationCritic(nn.Module):
     """Fuse state before shared attention, or before private post-attention."""
     def __init__(self, layout, local_encoder, mode, privileged, layers):
@@ -151,11 +189,14 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             raise ValueError("backbone must be resnet or vit")
         if spatial_mode not in ("dense", "pyramid"):
             raise ValueError("spatial_mode must be dense or pyramid")
-        if critic_fusion not in ("late", "early_shared", "post_attention"):
+        if critic_fusion not in ("late", "early_shared", "post_attention", "joint_independent"):
             raise ValueError("unsupported critic_fusion")
         if critic_fusion in ("early_shared", "post_attention") and (
                 backbone != "vit" or spatial_mode != "dense" or share_backbone is not True):
             raise ValueError("attention critic fusion requires a shared dense ViT")
+        if critic_fusion == "joint_independent" and (backbone != "vit" or spatial_mode != "dense"
+                or share_backbone is not False or critic_privileged is not True or patch_size != 1):
+            raise ValueError("joint_independent requires independent privileged dense ViT patch1")
         if mask_padding_tokens is None:
             mask_padding_tokens = backbone == "vit" and spatial_mode == "dense"
         if type(mask_padding_tokens) is not bool or mask_padding_tokens and (backbone != 'vit' or spatial_mode != 'dense'):
@@ -208,6 +249,9 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             value_encoder = None if share_backbone else deepcopy(self.actor.encoder)
             self.critic = _ScaledInformationCritic(self.layout, value_encoder, head_channels, patch_size,
                                                    mask_padding_tokens, critic_privileged)
+        elif critic_fusion == "joint_independent":
+            self.critic = _JointInformationCritic(self.layout, self.model_size, input_channel_alignment,
+                                                 head_channels, mask_padding_tokens)
         else:
             if critic_fusion == "post_attention" and (type(critic_attention_layers) is not int
                     or not 1 <= critic_attention_layers <= self.actor.encoder.backbone.depth):
@@ -249,6 +293,11 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     def _numeric_forward(self, history, knowledge, valid_cells, privileged, tokens, mode):
         if mode == "actor":
             return self.actor(history, knowledge, valid_cells, tokens)
+        if self.critic_fusion == "joint_independent":
+            if mode == "joint":
+                logits = self.actor(history, knowledge, valid_cells, tokens)
+            values = self.critic(privileged, history, knowledge, valid_cells, tokens)
+            return (logits, values) if mode == "joint" else values
         if self.critic_fusion != "late":
             encoder = self.actor.encoder
             transformer = encoder.backbone.transformer
