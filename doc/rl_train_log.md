@@ -237,3 +237,7 @@ v24 本表按四 baseline 峰值选 U140；此前七对手选模采用 U180，�
 **正确性**：CPU和CUDA覆盖部分自然终局、部分timeout、换座、无特权输入、历史与路径快照保留；另用旧源码和新源码逐步哈希对照，强制64tick超时，128tick预热＋128tick验证，观测／奖励／done／timeout／指标／timeout行终局特征完全相同。最终两组相关回归共88 passed，另有76个subtests。H200四次短跑的各卡loss及终局统计完全相同，均发生了真实timeout；各跑4轮后的rank0完整模型权重SHA256均为`4d2dd0368b572b2c702a13a993479d1288c23f7e7e93bf8b2170800de5cca2b3`。
 
 原始配置、源码快照与SHA256清单、profile、逐卡报告及汇总脚本位于`outputs/experiments/observation_build_20261111_actual01/`，本地和H200均保留；入口为`summary.json`、`summarize.py`、`run_ppo_bench.py`及`bench_observations.py`。复用的`rl/tools/benchmark_training.py`解除旧E4硬限制，支持正整数epoch，已验证E1/E4；两种实现使用相同工具。未保存新的训练模型，全部benchmark进程已退出。
+
+## v33–v36：配对采样、超时语义、联合critic与D4
+
+[固定配置、选择规则、实现与执行状态](episode_critic_d4_20261111.md)。按用户确认的四组顺序消融执行，每组224轮／单训练种子，全部采用配对采样；先完成正确性及H200预检，再进行正式训练。

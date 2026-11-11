@@ -48,6 +48,12 @@ def configure_observations(config):
     config = deepcopy(config)
     runner = config['runner']
     policy = runner['policy']
+    paired = runner['algorithm'].get('pair_minibatches', False)
+    if paired and not config['task'].get('train_both_sides', False):
+        raise ValueError('paired minibatches require dual current self-play')
+    if policy.get('joint_critic', False) and (not paired or runner['algorithm'].get('gamma') != 1
+                                             or policy.get('value_distribution') != 'hl_gauss'):
+        raise ValueError('joint critic requires paired sparse HL-Gauss training with gamma=1')
     if policy['class_name'] == 'generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy':
         from .policy.features import feature_recipe
         feature_set = config['task'].get('feature_set', 'stacked')

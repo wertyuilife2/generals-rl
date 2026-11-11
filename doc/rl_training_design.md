@@ -35,6 +35,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 
 存储实现与MDP表示分别配置。旧标准存储验证见[历史去重](history_storage_20261103.md)和[位打包](packed_storage_20261103.md)。
 
+实验开关`runner.algorithm.pair_minibatches`按同局、同tick成对打乱两座样本，所有玩家样本仍各使用一次；逻辑批与物理批均须容纳完整双座，暂不与advantage筛选组合。`task.time_limit_mode`默认`bootstrap`；可选`terminal_draw`在时限处接零后续价值，并令potential吸收。Task的`terminated/truncated`仍记录模拟器自然终局／时限原因，训练桥接层独立决定是否bootstrap；两种模式都切断reset处的GAE，rollout边界仍bootstrap，最后一tick自然胜负优先。
+
 ## Actor与critic
 
 共享ViT1M主干为128维/4层/4头；独立模式每份为96维/4层/3头。Actor动作头始终只依赖局部信息。`share_backbone` 与 `critic_privileged` 分别控制权重共享和完整状态分支。
@@ -51,6 +53,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 `patch_size=3` 使用非重叠patch，23×23补齐到24×24；动作头恢复九个格子的移动logit。包含边缘有效格的partial patch保留，完全无效patch排除。改变patch大小或网络语义需重新训练。
 
 紧凑/时序方案目前支持 `early_shared` 双座当前自对弈。配置校验明确拒绝尚未验证的组合。
+
+实验开关`runner.policy.joint_critic`要求双座配对、稀疏±1奖励、固定gamma=1及HL-Gauss。两座历史／记忆分别经过共享局部embedding，另一座token再经过critic专属线性投影，与seat0局部和全图embedding相加，保持空间token数不变；双方公开统计进入价值头。每局仅执行一次critic Transformer，输出seat0分布，seat1反转bin顺序，标量价值显式取负。PPO保留两座损失的平均尺度和原value系数，actor不读取另一座数据；增加的参数初始化不改变actor权重和训练RNG。监控记录两座value／GAE return之和的平均绝对值。
 
 ## PPO与价值头
 
@@ -73,6 +77,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 历史配置键 `warmup_transitions/end_transitions` 与checkpoint的 `map_curriculum_transitions` 均计数**全局真实board ticks**。双座采样数是该值的两倍。resume恢复保存的绝对计数；warm-start新训练从零开始。`easy_spawn_reference_size=9`可在较大地图上保留易图近距离出生分布。详见[9×9课程](map_curriculum9_20261103.md)、[全尺寸课程](map_curriculum_full_20261103.md)及[压缩存储实验](map_curriculum_full_packed_20261103.md)。
 
 gamma和奖励课程按绝对PPO iteration推进，每次rollout开始前固定设置。`potential_decay`从原始territory/cities/army系数线性衰减，终点由 `potential_end_iteration` 指定，未指定时沿用tick课程终点；胜负奖励保持原值。此时奖励随训练变化，不能声称全程满足固定potential的PBRS策略不变性。
+
+实验开关`task.d4_augmentation`只支持固定正方形地图池。reset抽图后用独立RNG随机选择8种旋转／翻转之一，批量变换空间数组、general/spawn位置和valid mask；地图池、抽图RNG、座位及统计保持原样。两座共用变换后的实际棋盘，局内不再旋转观测或动作，历史／路径缓存自然处于同一坐标系；不复制8倍样本或地图池。导出的actor仍直接在评估原坐标中运行。
 
 ## 实验记录
 

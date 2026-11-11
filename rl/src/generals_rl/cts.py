@@ -26,7 +26,9 @@ class GeneralsCTSVecEnv(VecEnv):
         observations = self._tensor_dict(result.observations)
         # RSL reads this field only for time_outs. Without timeouts, alias the
         # next observation instead of constructing/retaining unused snapshots.
-        extras = {"time_outs": result.truncated,
+        time_outs = (result.truncated if self.task.config.time_limit_mode == 'bootstrap'
+                     else result.truncated.new_zeros(result.truncated.shape))
+        extras = {"time_outs": time_outs,
                   "terminal_observations": (observations if result.terminal_observations is None
                                             else self._tensor_dict(result.terminal_observations)),
                   "log": log}

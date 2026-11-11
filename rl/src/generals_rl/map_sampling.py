@@ -114,7 +114,7 @@ class MapSampler:
     Native initial/current storage is owned by the backend. Bank selections are
     copied only into requested reset lanes, so active games keep their maps.
     """
-    def __init__(self, env, config, size, *, seed, curriculum=None):
+    def __init__(self, env, config, size, *, seed, curriculum=None, d4=False):
         self.backend = getattr(env, "unwrapped", env)
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             raise ValueError("map bank size must be a positive integer")
@@ -146,6 +146,16 @@ class MapSampler:
             self.generator = torch.Generator(device=self.device).manual_seed(stream_seed)
         else:
             self.generator = np.random.default_rng(np.random.SeedSequence([seed, 0x53414D]))
+        self.symmetry = None
+        if d4:
+            if self.backend.width != self.backend.height or config.width is None or config.height is None:
+                raise ValueError('D4 map augmentation requires fixed square maps')
+            from .map_symmetry import MapSymmetry
+            self.symmetry = MapSymmetry(self.backend.width, self.device if self.tensor else None)
+            symmetry_seed = np.random.SeedSequence([seed, 0x4434])
+            self.symmetry_generator = (torch.Generator(device=self.device).manual_seed(
+                int(symmetry_seed.generate_state(1, dtype=np.uint64)[0])) if self.tensor
+                else np.random.default_rng(symmetry_seed))
 
     def set_transitions(self, transitions):
         """Only future resets observe this schedule; live games are untouched."""
@@ -201,6 +211,11 @@ class MapSampler:
             stats, rng = self.stats[selected], self.rng[selected]
         if self.curriculum is not None:
             self.level_ids[rows] = selected // self.size
-        self.valid[rows] = self.bank_valid[selected]
+        valid = self.bank_valid[selected]
+        if self.symmetry is not None:
+            transforms = (torch.randint(8, (len(rows),), generator=self.symmetry_generator, device=self.device)
+                          if self.tensor else self.symmetry_generator.integers(8, size=len(rows)))
+            arrays, valid = self.symmetry.apply(arrays, valid, transforms)
+        self.valid[rows] = valid
         _replace_initial(backend, rows, arrays, stats, rng)
         return backend.reset(mask)

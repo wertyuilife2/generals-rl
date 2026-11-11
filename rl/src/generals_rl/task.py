@@ -25,6 +25,7 @@ class TaskConfig:
     backend: str = "cpu"
     device: str = "cpu"
     max_episode_steps: int = 2048
+    time_limit_mode: str = "bootstrap"
     history_length: int = 4
     feature_set: str = "stacked"
     seed: int = 42
@@ -41,11 +42,14 @@ class TaskConfig:
     persistent_knowledge: bool = False
     critic_privileged: bool = True
     map_pool_size: int = 256
+    d4_augmentation: bool = False
     random_maps: bool = True
     map_curriculum: MapCurriculumConfig | None = None
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
+        if self.time_limit_mode not in ('bootstrap', 'terminal_draw'):
+            raise ValueError('time_limit_mode must be bootstrap or terminal_draw')
         recipe = feature_recipe(self.feature_set)
         if self.feature_set != "stacked" and (self.history_length != recipe.history_length or not self.persistent_knowledge or not self.train_both_sides):
             raise ValueError("compact training requires matching history, persistent memory and dual current self-play")
@@ -87,6 +91,10 @@ class TaskConfig:
         if self.map_curriculum is not None and (not isinstance(self.map_curriculum, MapCurriculumConfig)
                                                or not self.map_pool_size):
             raise ValueError('map_curriculum requires MapCurriculumConfig and a positive map_pool_size')
+        if type(self.d4_augmentation) is not bool:
+            raise TypeError('d4_augmentation must be boolean')
+        if self.d4_augmentation and (not self.map_pool_size or self.random_maps or self.width != self.height):
+            raise ValueError('D4 augmentation requires a map bank and fixed square maps')
 
 
 @dataclass(frozen=True)
@@ -144,7 +152,7 @@ class GeneralsTask:
         if config.map_pool_size:
             from .map_sampling import MapSampler
             self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed,
-                                          curriculum=config.map_curriculum)
+                                          curriculum=config.map_curriculum, d4=config.d4_augmentation)
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
@@ -335,8 +343,11 @@ class GeneralsTask:
         terminated = raw_done[:, 0] | ~alive
         truncated = raw_done[:, 1] & ~terminated
         done = terminated | truncated
+        # Keep simulator end causes for diagnostics. A finite-horizon draw
+        # absorbs reward potentials, but never fabricates a winner or defeat.
+        reward_terminal = terminated | truncated if self.config.time_limit_mode == 'terminal_draw' else terminated
         reward = self.reward_model.evaluate(before, batch.learner_stats(self.player_ids),
-                                           terminated, truncated, batch.state["winner"],
+                                           reward_terminal, truncated, batch.state["winner"],
                                            alive, self.player_ids)
         self.episode_length_buf += 1
         self.episode_return += reward.total
@@ -365,7 +376,7 @@ class GeneralsTask:
             obs = self.reset(done, rotate=True) if completed else terminal_obs
         else:
             timeout_rows = snapshots = None
-            if timeouts:
+            if timeouts and self.config.time_limit_mode == 'bootstrap':
                 timeout_rows = truncated.nonzero(as_tuple=True)[0]
                 selected = batch.select(timeout_rows)
                 current = self.observation_encoder.encode(selected, self.player_ids[timeout_rows])
