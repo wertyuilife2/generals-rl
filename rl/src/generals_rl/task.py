@@ -12,6 +12,7 @@ from .policy.knowledge import KnowledgeState
 from .policy.observations import ObservationHistory
 from .mdp.observations import encode_privileged
 from .opponents import make_opponent
+from .map_curriculum import MapCurriculumConfig
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class TaskConfig:
     critic_privileged: bool = True
     map_pool_size: int = 256
     random_maps: bool = True
+    map_curriculum: MapCurriculumConfig | None = None
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
@@ -77,6 +79,9 @@ class TaskConfig:
             raise ValueError("king threat distance requires two players")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
             raise ValueError("map_pool_size must be a nonnegative integer")
+        if self.map_curriculum is not None and (not isinstance(self.map_curriculum, MapCurriculumConfig)
+                                               or not self.map_pool_size):
+            raise ValueError('map_curriculum requires MapCurriculumConfig and a positive map_pool_size')
 
 
 @dataclass(frozen=True)
@@ -133,7 +138,8 @@ class GeneralsTask:
         self.map_sampler = None
         if config.map_pool_size:
             from .map_sampling import MapSampler
-            self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed)
+            self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed,
+                                          curriculum=config.map_curriculum)
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)

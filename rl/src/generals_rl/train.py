@@ -177,17 +177,22 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     last_losses = None
     stop_reason = None
     warm_source = None
+    map_transitions = 0
     with matmul_precision(precision, cudnn_allow_tf32, cudnn_benchmark), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output) if distributed.is_main else None, str(task.device))
         if resume:
-            runner.load(str(Path(resume).resolve()), map_location=str(task.device))
+            resume_info = runner.load(str(Path(resume).resolve()), map_location=str(task.device))
             # Restore the adaptive scheduler scalar and continue after the saved index.
             if hasattr(runner.alg, "restore_learning_rates"):
                 runner.alg.restore_learning_rates()
             else:
                 runner.alg.learning_rate = runner.alg.optimizer.param_groups[0]["lr"]
             runner.current_learning_iteration += 1
+            if settings.map_curriculum is not None:
+                map_transitions = resume_info['map_curriculum_transitions']
+                task.map_sampler.set_transitions(map_transitions)
+                task.reset()
         elif warm_start is not None:
             checkpoint = Path(warm_start).resolve()
             saved = torch.load(checkpoint, weights_only=True, map_location="cpu")
@@ -279,6 +284,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             else:
                 metadata = dict(infos or {})
                 metadata.update(deployment, completed_ppo_updates=it + 1)
+                if settings.map_curriculum is not None:
+                    metadata['map_curriculum_transitions'] = map_transitions
                 metadata["run_config_sha256"] = sha256((output / "run_config.json").read_bytes()).hexdigest()
                 original_save(str(temporary), it=it, last_model=last_model, infos=metadata)
                 temporary.replace(path)
@@ -303,7 +310,9 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         def on_update(**kwargs):
             nonlocal sampled_ticks, completed_updates, collection_seconds, update_seconds, last_losses, stop_reason
             nonlocal curriculum_metrics
+            nonlocal map_transitions
             sampled_ticks += runner.cfg["num_steps_per_env"]
+            map_transitions += distributed.global_transitions(task.num_games, runner.cfg['num_steps_per_env'])
             completed_updates += 1
             if task.device.type == "cuda" and distributed.is_distributed:
                 torch.cuda.synchronize(task.device)
@@ -358,6 +367,9 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     writer.add_scalar(f"PPO/{name}", value, kwargs["it"])
                 for name, value in curriculum_metrics.items():
                     writer.add_scalar(f"Curriculum/{name}", value, kwargs["it"])
+                if settings.map_curriculum is not None:
+                    for name, value in task.map_sampler.metrics().items():
+                        writer.add_scalar(f'Curriculum/{name}', value, kwargs['it'])
                 global_transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
                 board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
                 writer.add_scalar("Perf/environment_steps", global_transitions, kwargs["it"])
@@ -401,6 +413,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 # This rollout's returns/update already used one fixed setting.
                 # Advance only before collecting the next rollout.
                 curriculum_metrics = curriculum.apply(kwargs["it"] + 1)
+                if settings.map_curriculum is not None:
+                    task.map_sampler.set_transitions(map_transitions)
 
         runner.logger.log = on_update
         try:
@@ -473,6 +487,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             }
             if warm_source is not None:
                 summary["warm_start"] = warm_source
+            if settings.map_curriculum is not None:
+                summary['map_curriculum'] = dict(transitions=map_transitions, **task.map_sampler.metrics())
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,

@@ -1,4 +1,4 @@
-"""Optional gamma/tick courses, applied before a rollout at its TB iteration.
+"""Optional gamma/tick/potential courses applied before each rollout.
 
 Defaults do nothing. The original RewardConfig is the immutable reference;
 absolute iteration reconstructs the course on resume without scheduler state.
@@ -16,10 +16,16 @@ class CurriculumConfig:
     gamma_final: float | None = None
     gamma_end_iteration: int | None = None
     tick_end_iteration: int = 1000
+    potential_decay: bool = False
+    potential_end_iteration: int | None = None
 
     def __post_init__(self):
-        if not isinstance(self.tick_decay, bool):
-            raise TypeError("curriculum.tick_decay must be boolean")
+        for name in ("tick_decay", "potential_decay"):
+            if type(getattr(self, name)) is not bool:
+                raise TypeError(f"curriculum.{name} must be boolean")
+        if self.potential_end_iteration is not None and (
+                type(self.potential_end_iteration) is not int or self.potential_end_iteration < 1):
+            raise ValueError("curriculum.potential_end_iteration must be a positive integer or None")
         if (isinstance(self.tick_end_iteration, bool) or not isinstance(self.tick_end_iteration, int)
                 or self.tick_end_iteration < 1):
             raise ValueError("curriculum.tick_end_iteration must be a positive integer")
@@ -35,11 +41,11 @@ class CurriculumConfig:
 
     @property
     def enabled(self):
-        return self.tick_decay or self.gamma_final is not None
+        return self.tick_decay or self.potential_decay or self.gamma_final is not None
 
 
 class RolloutCurriculum:
-    """Synchronize PPO/PBRS discount and scale only the original tick penalty.
+    """Synchronize PPO/PBRS discount and scale original shaping coefficients.
 
 Call apply(absolute_iteration) BEFORE collecting that rollout, not between its
 steps or before computing returns for an already collected rollout. Gamma's
@@ -75,10 +81,19 @@ end iteration is deliberately required, not chosen by this module.
                      self.initial_gamma + (self.settings.gamma_final - self.initial_gamma) * progress)
         tick_scale = (max(0.0, 1.0 - iteration / self.settings.tick_end_iteration)
                       if self.settings.tick_decay else 1.0)
-        # Rebuild from the original coefficients, never from the last scaled
-        # configuration. PBRS resource and terminal coefficients stay intact.
+        potential_end = self.settings.potential_end_iteration or self.settings.tick_end_iteration
+        potential_scale = max(0.0, 1.0 - iteration / potential_end) if self.settings.potential_decay else 1.0
+        # Rebuild from the original coefficients, never multiply an already
+        # decayed value. Win/loss coefficients stay intact. Potential scaling
+        # is a rollout-level reward course, not a stationary-PBRS guarantee.
         self.reward_model.config = replace(self.base_reward, potential_gamma=gamma,
-                                           tick=self.base_reward.tick * tick_scale)
+                                           tick=self.base_reward.tick * tick_scale,
+                                           territory=self.base_reward.territory * potential_scale,
+                                           cities=self.base_reward.cities * potential_scale,
+                                           army=self.base_reward.army * potential_scale)
         if self.settings.gamma_final is not None:
             self.algorithm.gamma = gamma
-        return {"gamma": gamma, "tick_scale": tick_scale, "tick": self.reward_model.config.tick}
+        metrics = {"gamma": gamma, "tick_scale": tick_scale, "tick": self.reward_model.config.tick}
+        if self.settings.potential_decay:
+            metrics["potential_scale"] = potential_scale
+        return metrics

@@ -77,18 +77,27 @@ def pad_state(state, width, height):
     return result, valid.ravel()
 
 
-def _build_bank(config, size, seed, *, width, height):
+def _build_bank(config, size, seed, *, width, height, curriculum=None):
     cells, players = width * height, config.players
-    arrays = {name: np.empty(state_shape(name, size, cells, players), dtype=dtype)
+    levels = curriculum.levels if curriculum is not None else 1
+    total = size * levels
+    arrays = {name: np.empty(state_shape(name, total, cells, players), dtype=dtype)
               for name, dtype in STATE_DTYPES.items()}
-    valid = np.empty((size, cells), dtype=bool)
+    valid = np.empty((total, cells), dtype=bool)
     seeds = np.random.SeedSequence([seed, 0x4D4150]).generate_state(size, dtype=np.uint64)
     for index, map_seed in enumerate(seeds):
-        state, valid[index] = pad_state(generate_map(config, int(map_seed)), width, height)
-        packed, _, _ = pack_states([state])
-        for name in arrays:
-            arrays[name][index] = packed[name][0]
-    stats = np.empty((size, players, 3), dtype=np.int64)
+        if curriculum is None:
+            maps = (generate_map(config, int(map_seed)),)
+        else:
+            from .map_curriculum import curriculum_maps
+            maps = curriculum_maps(config, int(map_seed), curriculum)
+        for level, state in enumerate(maps):
+            row = level * size + index
+            state, valid[row] = pad_state(state, width, height)
+            packed, _, _ = pack_states([state])
+            for name in arrays:
+                arrays[name][row] = packed[name][0]
+    stats = np.empty((total, players, 3), dtype=np.int64)
     for pid in range(players):
         owned = arrays["owner"] == pid
         stats[:, pid, 0] = np.where(owned, arrays["army"], 0).sum(axis=1)
@@ -96,7 +105,7 @@ def _build_bank(config, size, seed, *, width, height):
         stats[:, pid, 2] = (owned & (arrays["structure"] == 1)).sum(axis=1)
     rng = np.random.SeedSequence([seed, 0x524E47]).generate_state(size, dtype=np.uint32)
     rng[rng == 0] = 1
-    return arrays, stats, rng, valid
+    return arrays, stats, np.tile(rng, levels), valid
 
 
 class MapSampler:
@@ -105,7 +114,7 @@ class MapSampler:
     Native initial/current storage is owned by the backend. Bank selections are
     copied only into requested reset lanes, so active games keep their maps.
     """
-    def __init__(self, env, config, size, *, seed):
+    def __init__(self, env, config, size, *, seed, curriculum=None):
         self.backend = getattr(env, "unwrapped", env)
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             raise ValueError("map bank size must be a positive integer")
@@ -115,9 +124,13 @@ class MapSampler:
             raise ValueError("map bank and backend player counts must match")
         _replace_initial(self.backend)
         self.size = size
+        self.curriculum = curriculum
+        self.position = 0.
         self.tensor = isinstance(self.backend.state["army"], torch.Tensor)
         self.arrays, self.stats, self.rng, self.bank_valid = _build_bank(
-            config, size, seed, width=self.backend.width, height=self.backend.height)
+            config, size, seed, width=self.backend.width, height=self.backend.height, curriculum=curriculum)
+        self.level_ids = (np.zeros(self.backend.batch_size, dtype=np.int64)
+                          if curriculum is not None else None)
         self.valid = np.ones((self.backend.batch_size, self.backend.width * self.backend.height), dtype=bool)
         if self.tensor:
             self.device = self.backend.state["army"].device
@@ -125,12 +138,29 @@ class MapSampler:
                            for name, value in self.arrays.items()}
             self.bank_valid = torch.from_numpy(self.bank_valid).to(self.device)
             self.valid = torch.from_numpy(self.valid).to(self.device)
+            if self.level_ids is not None:
+                self.level_ids = torch.from_numpy(self.level_ids).to(self.device)
             self.stats = torch.from_numpy(self.stats).to(self.device, copy=True)
             self.rng = torch.from_numpy(self.rng.view(np.int32)).to(self.device, copy=True)
             stream_seed = int(np.random.SeedSequence([seed, 0x53414D]).generate_state(1, dtype=np.uint64)[0])
             self.generator = torch.Generator(device=self.device).manual_seed(stream_seed)
         else:
             self.generator = np.random.default_rng(np.random.SeedSequence([seed, 0x53414D]))
+
+    def set_transitions(self, transitions):
+        """Only future resets observe this schedule; live games are untouched."""
+        self.position = self.curriculum.position(transitions)
+
+    def metrics(self):
+        if self.curriculum is None:
+            return {}
+        if self.tensor:
+            mean = self.level_ids.float().mean().item()
+            final = (self.level_ids == self.curriculum.levels - 1).float().mean().item()
+        else:
+            mean = float(self.level_ids.mean())
+            final = float((self.level_ids == self.curriculum.levels - 1).mean())
+        return dict(map_position=self.position, map_level_mean=mean, map_final_fraction=final)
 
     def reset(self, mask=None):
         backend = self.backend
@@ -142,6 +172,14 @@ class MapSampler:
             if not rows.numel():
                 return backend.state
             selected = torch.randint(self.size, (rows.numel(),), generator=self.generator, device=self.device)
+            if self.curriculum is not None:
+                location = self.position * (self.curriculum.levels - 1)
+                level = int(location)
+                if location > level:
+                    selected += self.size * (level + (torch.rand(rows.numel(), generator=self.generator,
+                                             device=self.device) < location - level).long())
+                elif level:
+                    selected += self.size * level
             arrays = {name: value.index_select(0, selected) for name, value in self.arrays.items()}
             stats, rng = self.stats.index_select(0, selected), self.rng.index_select(0, selected)
         else:
@@ -152,8 +190,17 @@ class MapSampler:
             if not len(rows):
                 return backend.state
             selected = self.generator.integers(self.size, size=len(rows))
+            if self.curriculum is not None:
+                location = self.position * (self.curriculum.levels - 1)
+                level = int(location)
+                if location > level:
+                    selected += self.size * (level + (self.generator.random(len(rows)) < location - level))
+                elif level:
+                    selected += self.size * level
             arrays = {name: value[selected] for name, value in self.arrays.items()}
             stats, rng = self.stats[selected], self.rng[selected]
+        if self.curriculum is not None:
+            self.level_ids[rows] = selected // self.size
         self.valid[rows] = self.bank_valid[selected]
         _replace_initial(backend, rows, arrays, stats, rng)
         return backend.reset(mask)

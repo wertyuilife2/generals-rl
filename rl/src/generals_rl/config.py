@@ -33,6 +33,9 @@ def task_config(values):
     values = deepcopy(values)
     if isinstance(values.get("reward"), dict):
         values["reward"] = RewardConfig(**values["reward"])
+    if isinstance(values.get('map_curriculum'), dict):
+        from .map_curriculum import MapCurriculumConfig
+        values['map_curriculum'] = MapCurriculumConfig(**values['map_curriculum'])
     return TaskConfig(**values)
 
 
