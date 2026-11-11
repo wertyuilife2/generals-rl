@@ -5,7 +5,7 @@
 本仓库原始导入 commit 为 `38c6cad003a293c50196e5d62a799ad59c8fb400`；两个子树的 Git 树哈希一致。
 未复制来源工作区的未提交修改。完整上游源码、测试及许可证保留。
 
-仅修改以下五个运行时源文件：
+修改以下六个运行时源文件：
 
 | 文件 | 修改与用途 |
 | --- | --- |
@@ -14,6 +14,7 @@
 | `algorithms/ppo.py` | Categorical 自适应 LR 使用已存动作 log-prob 的非负 KL 估计 `exp(log_ratio)-1-log_ratio`，无需完整旧分布；复用上游每 minibatch 的阈值、1.5倍调节、[1e-5,1e-2]界限及多卡归约。增加可选 minibatch observer，并取得原梯度裁剪函数的返回值；Normal KL、PPO loss/optimizer step 顺序不变。 |
 | `storage/rollout_storage_cts.py` | 分离动作与分布形状/dtype，保留 bool mask；按 env-major 索引逐批读取 rollout；支持有效时间前缀。新增默认开启的 `store_action_std` / `store_action_mean`；关闭时对应 `sigma` / `mu` 为 `None`，不分配、写入或取样缓存。Categorical 关闭标准差，StudentPPO 另关闭旧动作分布均值。 |
 | `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。可选 `storage_obs_keys` 仅筛选 rollout 存储键，默认完整保存；构造策略和实时 obs 保持完整。 |
+| `utils/logger_cts.py` | 汇总整个 rollout 出现的 episode 指标键，避免遗漏首次在后续 tick 才出现的统计。 |
 
 `runner.storage_history` 可指定堆叠观测的帧数，例如 `{"policy": 4}`。
 `runner.release_terminal_observations=true`可在每步timeout bootstrap与logger消费完成后，

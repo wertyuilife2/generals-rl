@@ -137,8 +137,8 @@ class LoggerCTS:
             # Log episode extras
             extras_string = ""
             if self.ep_extras:
-                # Iterate over all keys in the episode info dictionary
-                for key in self.ep_extras[0]:
+                # Episode fields may first appear after the rollout's first step.
+                for key in dict.fromkeys(key for info in self.ep_extras for key in info):
                     infotensor = torch.tensor([], device=self.device)
                     # Iterate over all steps
                     for ep_info in self.ep_extras:
