@@ -36,6 +36,8 @@ def make_policy_spec(run_config):
     if options.get('actor_obs_normalization', False):
         raise ValueError('export requires the supported explicit, unnormalized feature policy')
     features = {key: task.get(key, default) for key, default in _FEATURES.items()}
+    # Keep specifications lacking these keys identical for legacy packages.
+    features.update({key: task[key] for key in ('clock_scale_ticks', 'knowledge_age_scale') if key in task})
     network = {'family': _FAMILIES[name]}
     common = ('spatial_channels', 'residual_blocks', 'own_king_geometry', 'knowledge_channels',
               'input_channel_alignment', 'wait_move_factorization', 'amp_bfloat16')

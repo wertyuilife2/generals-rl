@@ -380,6 +380,10 @@ class StudentPPO(PPO):
         return {key: value / updates for key, value in mean_losses.items()}
 
     def process_env_step(self, obs, rewards, dones, extras):
+        if extras.get('has_bootstrap_timeouts') is False:
+            # The bridge already resolved this on the host. Skip CTS's CUDA
+            # any()/zero-multiplies without changing its actual timeout path.
+            extras = {key: value for key, value in extras.items() if key != 'time_outs'}
         if getattr(self.policy, 'joint_critic', False):
             pairs = rewards.reshape(-1, 2)
             valid = (pairs.sum(-1) == 0).all() & (dones[::2] == dones[1::2]).all()

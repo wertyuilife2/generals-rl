@@ -77,6 +77,7 @@ class KnowledgeState:
             self.score_current = torch.zeros(num_envs, players, SCORE_FEATURES, device=self.device)
             self.score_ema = torch.zeros(num_envs, players, len(SCORE_HALF_LIVES), SCORE_FEATURES, device=self.device)
             self.score_tick = torch.full((num_envs, players), -1, dtype=torch.long, device=self.device)
+            self.score_half_lives = self.score_current.new_tensor(SCORE_HALF_LIVES)
             self._spatial_fields = self._fields + ("army",)
             self._fields = self._spatial_fields + ("score_current", "score_ema", "score_tick")
         self.paths = None
@@ -136,9 +137,7 @@ class KnowledgeState:
                                    stats[:, 1] / batch.valid_cells.sum(1).clamp_min(1)), -1)
             tick, previous = state["tick"], self.score_tick[rows, ids]
             elapsed = (tick - previous).clamp_min(0).float()
-            from .features import SCORE_HALF_LIVES
-            half_lives = current.new_tensor(SCORE_HALF_LIVES)
-            retention = torch.exp2(-elapsed[:, None] / half_lives)[..., None]
+            retention = torch.exp2(-elapsed[:, None] / self.score_half_lives)[..., None]
             old_ema = self.score_ema[rows, ids]
             ema = retention * old_ema + (1 - retention) * current[:, None]
             ema = torch.where((previous < 0)[:, None, None], current[:, None], ema)

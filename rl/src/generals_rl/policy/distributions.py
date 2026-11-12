@@ -8,8 +8,14 @@ def make_distribution(logits, mask, *, factorized=True, validate_mask=True):
     if mask is None:
         raise ValueError("categorical policies require action_mask")
     mask = mask.to(device=logits.device, dtype=torch.bool)
-    if mask.shape != logits.shape or (validate_mask and not mask.any(dim=-1).all()):
+    if mask.shape != logits.shape:
         raise ValueError("action_mask must match logits and contain a legal action in every row")
+    if validate_mask:
+        legal = mask.any(dim=-1).all()
+        if mask.is_cuda:
+            torch._assert_async(legal, 'action_mask must contain a legal action in every row')
+        elif not bool(legal):
+            raise ValueError('action_mask must contain a legal action in every row')
     if factorized:
         has_move = mask[:, 1:].any(dim=-1, keepdim=True)
         moves = logits[:, 1:].masked_fill(~mask[:, 1:], -torch.inf)

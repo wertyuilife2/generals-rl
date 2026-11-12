@@ -25,6 +25,8 @@ class TaskConfig:
     backend: str = "cpu"
     device: str = "cpu"
     max_episode_steps: int = 2048
+    clock_scale_ticks: int | None = None
+    knowledge_age_scale: int = 2000
     time_limit_mode: str = "bootstrap"
     history_length: int = 4
     feature_set: str = "stacked"
@@ -42,12 +44,20 @@ class TaskConfig:
     persistent_knowledge: bool = False
     critic_privileged: bool = True
     map_pool_size: int = 256
+    map_cache_dir: str | None = 'auto'
+    map_generation_workers: int = 2
+    map_refresh_reuse: int = 0
+    map_refresh_chunk_size: int = 1024
     d4_augmentation: bool = False
     random_maps: bool = True
     map_curriculum: MapCurriculumConfig | None = None
     reward: RewardConfig = field(default_factory=RewardConfig)
 
     def __post_init__(self):
+        if self.clock_scale_ticks is not None and (type(self.clock_scale_ticks) is not int or self.clock_scale_ticks < 1):
+            raise ValueError('clock_scale_ticks must be a positive integer or None (legacy episode clock)')
+        if type(self.knowledge_age_scale) is not int or self.knowledge_age_scale < 1:
+            raise ValueError('knowledge_age_scale must be a positive integer')
         if self.time_limit_mode not in ('bootstrap', 'terminal_draw'):
             raise ValueError('time_limit_mode must be bootstrap or terminal_draw')
         recipe = feature_recipe(self.feature_set)
@@ -88,6 +98,13 @@ class TaskConfig:
             raise ValueError("king threat distance requires two players")
         if isinstance(self.map_pool_size, bool) or not isinstance(self.map_pool_size, int) or self.map_pool_size < 0:
             raise ValueError("map_pool_size must be a nonnegative integer")
+        if self.map_cache_dir is not None and (not isinstance(self.map_cache_dir, str) or not self.map_cache_dir):
+            raise ValueError('map_cache_dir must be a path, auto, or None')
+        for name in ('map_generation_workers', 'map_refresh_chunk_size'):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f'{name} must be a positive integer')
+        if type(self.map_refresh_reuse) is not int or self.map_refresh_reuse < 0 or (self.map_refresh_reuse and not self.map_pool_size):
+            raise ValueError('map_refresh_reuse must be nonnegative and requires a map pool')
         if self.map_curriculum is not None and (not isinstance(self.map_curriculum, MapCurriculumConfig)
                                                or not self.map_pool_size):
             raise ValueError('map_curriculum requires MapCurriculumConfig and a positive map_pool_size')
@@ -152,7 +169,9 @@ class GeneralsTask:
         if config.map_pool_size:
             from .map_sampling import MapSampler
             self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed,
-                                          curriculum=config.map_curriculum, d4=config.d4_augmentation)
+                curriculum=config.map_curriculum, d4=config.d4_augmentation, cache_dir=config.map_cache_dir,
+                generation_workers=config.map_generation_workers, refresh_reuse=config.map_refresh_reuse,
+                refresh_chunk_size=config.map_refresh_chunk_size)
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)
@@ -181,6 +200,7 @@ class GeneralsTask:
         if config.persistent_knowledge:
             self.knowledge = KnowledgeState(config.num_envs, config.width, config.height,
                                             config.players, self.device,
+                                            age_scale=config.knowledge_age_scale,
                                             remember_dynamics=feature_recipe(config.feature_set).dynamic_memory,
                                             terrain_distances=feature_recipe(config.feature_set).terrain_distances)
             self._update_knowledge(self.batch())
@@ -267,7 +287,7 @@ class GeneralsTask:
             self.observations.update(policy=self.history.frames.flatten(1), single_obs=self.history.frames[:, -1])
         return self.observations
 
-    def _reset_state(self, mask, *, rotate):
+    def _reset_state(self, mask, *, rotate, rows=None):
         """Reset games and memories without encoding a second full observation."""
         game_mask = mask
         if self.train_both_sides:
@@ -277,17 +297,20 @@ class GeneralsTask:
             elif not torch.equal(paired[:, 0], paired[:, 1]):
                 raise ValueError('both seats must reset together')
             game_mask = paired[:, 0]
-        rows = mask.nonzero(as_tuple=True)[0]
+        rows = mask.nonzero(as_tuple=True)[0] if rows is None else rows
         if not rows.numel():
             return rows, None
         backend_mask = self._backend_mask(game_mask)
         if self.map_sampler is None:
             self.backend.reset(backend_mask)
         else:
-            self.map_sampler.reset(backend_mask)
+            game_rows = rows[::2] // 2 if self.train_both_sides else rows
+            if not self.map_sampler.tensor:
+                game_rows = game_rows.cpu().numpy()
+            self.map_sampler.reset(backend_mask, _rows=game_rows)
         self._batch_cache = None
         if rotate and self.config.rotate_seats and not self.train_both_sides:
-            self.player_ids[mask] = (self.player_ids[mask] + 1) % self.config.players
+            self.player_ids[rows] = (self.player_ids[rows] + 1) % self.config.players
         self.episode_length_buf[mask] = 0
         self.episode_return[mask] = 0
         self.action_metrics.reset(mask)
@@ -326,8 +349,13 @@ class GeneralsTask:
         submitted = joint.cpu().numpy() if str(self.backend.device) == "cpu" else joint.to(self.backend.device)
         result = self.backend.step(submitted)
         self._batch_cache = None
-        # Check simulator overflow/numerical errors before using its outputs.
-        self.backend.check_errors()
+        # CUDA's errors are reserved status codes, not overflow protection.
+        # Retain the invariant check without copying its whole buffer to CPU.
+        errors = self.backend.unwrapped.errors
+        if isinstance(errors, torch.Tensor) and errors.is_cuda:
+            torch._assert_async((errors == 0).all(), 'GPU simulator reported a device error')
+        else:
+            self.backend.check_errors()
         result_hook = getattr(self.opponent, "on_result", None)
         if result_hook is not None:
             result_hook(result, submitted, self.batch(), self.player_ids)
@@ -343,6 +371,9 @@ class GeneralsTask:
         terminated = raw_done[:, 0] | ~alive
         truncated = raw_done[:, 1] & ~terminated
         done = terminated | truncated
+        # Compact once and reuse for metrics and both reset adapters. Repeated
+        # boolean gathers each perform a synchronizing CUDA nonzero otherwise.
+        ended_rows = done.nonzero(as_tuple=True)[0]
         # Keep simulator end causes for diagnostics. A finite-horizon draw
         # absorbs reward potentials, but never fabricates a winner or defeat.
         reward_terminal = terminated | truncated if self.config.time_limit_mode == 'terminal_draw' else terminated
@@ -358,13 +389,13 @@ class GeneralsTask:
         if self.knowledge is not None:
             metrics.update({f"Knowledge/{key}": value for key, value in self.knowledge.exploration_metrics(
                 self.player_ids, self._game_rows if self.train_both_sides else None).items()})
-        metrics.update({"Episode/return": self.episode_return[done].clone(),
-                        "Episode/length": self.episode_length_buf[done].float().clone(),
-                        "Episode/win": (batch.state["winner"][done] == self.player_ids[done]).float(),
-                        "Episode/truncated": truncated[done].float()})
+        metrics.update({"Episode/return": self.episode_return[ended_rows],
+                        "Episode/length": self.episode_length_buf[ended_rows].float(),
+                        "Episode/win": (batch.state["winner"][ended_rows] == self.player_ids[ended_rows]).float(),
+                        "Episode/truncated": truncated[ended_rows].float()})
         stride = 2 if self.train_both_sides else 1
-        # One host rendezvous also supplies the reset/timeout branch decisions.
-        completed, timeouts = torch.stack((done[::stride].sum(), truncated[::stride].sum())).tolist()
+        completed = len(ended_rows) // stride
+        timeouts = int(truncated[ended_rows[::stride]].sum()) if completed else 0
         self.completed_episodes += completed
         self.truncated_episodes += timeouts
         self.terminated_episodes += completed - timeouts
@@ -385,7 +416,7 @@ class GeneralsTask:
             self._notify_opponent("on_step")
             rows = None
             if completed:
-                rows, _ = self._reset_state(done, rotate=True)
+                rows, _ = self._reset_state(done, rotate=True, rows=ended_rows)
             self.history.push(self.observation_encoder.encode(self.batch(), self.player_ids), reset_rows=rows)
             if completed:
                 self._notify_opponent("on_reset", done)
@@ -402,6 +433,8 @@ class GeneralsTask:
 
     def close(self):
         self.backend.close()
+        if self.map_sampler is not None:
+            self.map_sampler.close()
         self.map_sampler = None
 
     def __enter__(self):

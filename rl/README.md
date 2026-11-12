@@ -29,6 +29,7 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 |---|---|
 | 地图 | 固定9×9尺寸、随机地图，5级易图→官方图课程；每层图池65536张 |
 | Episode | 训练与评估均为 **2048 tick**，对9×9及全尺寸一致 |
+| 地图生成／时间特征 | 初始池磁盘缓存、2个CPU生成worker，固定池不更新；clock尺度2048、记忆age尺度2000，与episode上限分开配置 |
 | 输入／网络 | `temporal_paths` H8/K14、40通道；ViT1M、`early_shared`、特权critic、patch1、分次前向/反向 |
 | 采样 | 每卡2048个真实对局、4096条玩家轨迹；T512 |
 | 更新 | E1/M256；每卡逻辑batch8192、物理batch8192；推理chunk2048 |
@@ -48,6 +49,7 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 4090可从 [current-dual-4090.json](configs/current-dual-4090.json) 开始：保留环境数、T/E/M和逻辑batch，仅将物理batch降至512、推理chunk降至1024。
 地图课程按全局board ticks固定阈值；减少GPU数会使课程在更多PPO轮后结束。正式八卡实验的评估脚本额外检查U112并另做best/final独立种子复评；通用入口保留每20轮＋最终评估和top3复评机制，不依赖实验机的绝对路径。
 全尺寸地图需同时覆盖 `task.width=task.height=23, task.random_maps=true` 和 `runner.policy.map_width=runner.policy.map_height=23`，并重新评估显存与课程预算；当前默认质量结果只覆盖9×9。
+持续换图可设置 `task.map_refresh_reuse>0`；常驻池大小与累计新图数量分开控制，具体参数、缓存目录、复现边界及实测见[地图池设计](../doc/rl_rollout_and_map_bank_20261111.md)。固定池仍是默认，以便和已完成实验比较。
 历史网络预设 [v32](configs/v32.json)／[v32-opt](configs/v32-opt.json) 使用当前默认2048上限；
 它们是早期LightCNN，与本轮路径v32不同。复现已完成实验请使用其归档 `run_config.json` 与冻结源码。
 

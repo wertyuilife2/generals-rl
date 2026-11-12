@@ -29,6 +29,7 @@ class GeneralsCTSVecEnv(VecEnv):
         time_outs = (result.truncated if self.task.config.time_limit_mode == 'bootstrap'
                      else result.truncated.new_zeros(result.truncated.shape))
         extras = {"time_outs": time_outs,
+                  "has_bootstrap_timeouts": result.terminal_observations is not None,
                   "terminal_observations": (observations if result.terminal_observations is None
                                             else self._tensor_dict(result.terminal_observations)),
                   "log": log}

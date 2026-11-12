@@ -48,6 +48,13 @@ class EncodedActionSpace:
         if actions.dtype not in (torch.int32, torch.int64):
             raise TypeError("encoded actions must be integer tensors")
         encoded = actions.reshape(-1).long()
+        if encoded.is_cuda:
+            # Keep validation on the device. Clamp the gather index so a bad
+            # action reaches our assertion rather than an unrelated OOB read.
+            allowed = mask.gather(1, encoded.clamp(0, self.size - 1)[:, None]).squeeze(1)
+            torch._assert_async(((encoded >= 0) & (encoded < self.size) & allowed).all(),
+                                'encoded action is out of range or masked at the joint decision boundary')
+            return encoded
         if bool(((encoded < 0) | (encoded >= self.size)).any()):
             raise ValueError("encoded action is out of range")
         if not bool(mask.gather(1, encoded[:, None]).all()):

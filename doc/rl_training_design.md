@@ -18,6 +18,8 @@ Actor读取自己的局部地图、历史、记忆与公开比分，critic可额
 
 记忆按座位和episode隔离，只用可见地块与公开比分更新；旧敌军兵力不代表当前隐藏状态。新观测可更新地形、建筑和将军身份。局部combat风险与margin仍为连续特征，不按二值存储。
 
+新默认显式设置 `clock_scale_ticks=2048`，经过时间为 `clamp(tick/clock_scale_ticks, 0, 1)`，不随episode上限自动缩放；规则相位 `%2/%50` 保持原样。`knowledge_age_scale=2000` 独立控制记忆年龄并截断到1。两项尺度随actor导出。旧完整配置或policy spec缺少clock字段时保留原来的 `tick/max_episode_steps`，保证旧模型兼容。固定时钟超过尺度后饱和，不再区分更长的绝对经过时间；较长时限训练应明确选择尺度，不能将其当作剩余时间。
+
 路径只依赖本座地形记忆和公开的山/城混合提示，未知提示保守阻断、已知城市可通行；不计算战斗成本。
 GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollout，不用后续探索到的信息重算旧观测。
 新增通道填在原temporal的padding位置，保持既有输入索引与网络参数量。编码、测试和实验口径见
@@ -30,6 +32,8 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 双座当前策略自对弈中，每局每tick生成两条玩家transition，GAE与奖励按座位分开。一次rollout内参数固定；对局可跨越多轮PPO。自然终局与外部时限截断分别记录，timeout使用重置前终局观测的critic值bootstrap。
 
 训练桥接层只为timeout行保存重置前快照；其余行直接构建下一步观测。结束的对局先重置模拟器和对应记忆，再统一编码一次局部观测、特权观测与动作mask，避免每次有对局结束就重复编码整个batch。timeout快照包含当时的历史、记忆和路径特征，历史推进及局部重置不修改已经交给rollout的张量。`GeneralsTask.step()`默认仍提供完整终局观测；只有桥接层显式使用`capture_all_terminals=False`，此时终局字段仅timeout行有效，没有timeout时桥接层复用下一步观测作为占位。奖励、时限与bootstrap语义不变。
+
+CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保留异常检查；结束行索引在step内计算一次，供episode指标和reset复用。桥接层将是否存在bootstrap快照作为Python元数据交给PPO，避免无timeout时再次从GPU读取布尔值。异步断言失败会终止CUDA执行，不能依赖捕获该异常后继续使用同一CUDA上下文。
 
 历史去重每tick存一帧，加上rollout起点上下文和episode边界；抽样时重建原堆叠。标准codec按位压缩二值信息，保留FP32连续值。紧凑方案在行动前就量化至FP16可精确表示的值，再以FP32参与推理；存储解码恢复相同输入，避免old log-prob与更新输入因压缩不一致。
 
@@ -73,6 +77,14 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 ## 地图和奖励课程
 
 包内默认配方开启9×9的 `task.map_curriculum`；底层 `TaskConfig` 不隐式启用课程。每个seed生成易图和精确官方终点；中间层级插值出生距离、山脉与城市数量。`map_pool_size`是每层地图数，因此启用课程会增加初始化时间和图池内存。当前对局不换地图，进度仅影响后续reset。
+
+地图生成与缓存由 `map_bank.py` 管理，后台预取在 `map_stream.py`，reset采样在 `map_sampling.py`。初始池默认启用内容寻址磁盘缓存（`map_cache_dir="auto"`），按地图配置、种子、画布、课程布局参数、生成源码摘要和NumPy版本区分；仅改变课程推进阈值可复用。目录优先使用 `GENERALS_RL_MAP_CACHE`，否则为XDG cache下的 `generals_rl/map_banks`。`null`禁用缓存。文件锁、原子发布、逐数组校验和防止并发重复生成和读入损坏结果；不同rank仍有不同种子的池。`map_generation_workers=2` 默认用两个spawn CPU进程并行生成，结果顺序与单进程一致。
+
+`map_refresh_reuse=0`保留固定池，保证旧数据分布可复现。设为正整数R后，在后台持续生成新种子的chunk；每累计 `chunk实际大小 × R` 次真实对局抽图，按固定顺序替换池中的一段。`map_refresh_chunk_size=1024`控制单次替换数量，预取队列最多为worker数。新图只用于后续reset，不替换正在进行的棋盘，也不写入磁盘缓存。生成落后时等待固定的下一块并记录耗时，不能因worker完成顺序不同而改变训练数据。更改池大小、R或chunk大小会改变数据分布，应当作为训练方案记录。
+
+长跑／全尺寸训练可先验证每层8192、R=4、chunk1024、两个worker的滚动池：常驻容量固定，累计新种子持续增长。此配置尚未验证长期学习收益，暂不替换默认固定65536池。初始缓存会随配置／源码版本累积，当前无自动清理；持续生成的图不落盘。resume与既有环境一致，恢复课程计数但重新开始对局、抽图流及滚动池，不支持精确恢复地图流位置。
+
+TensorBoard的 `MapBank/` 记录初始cache hit、加载秒数、累计抽图数、累计引入base seeds和等待新chunk的累计秒数；这些是主rank指标，不是八卡求和。`Curriculum/map_*`保留课程位置和当前局的层级比例。算法、实测和边界见[地图池与同步优化](rl_rollout_and_map_bank_20261111.md)。
 
 历史配置键 `warmup_transitions/end_transitions` 与checkpoint的 `map_curriculum_transitions` 均计数**全局真实board ticks**。双座采样数是该值的两倍。resume恢复保存的绝对计数；warm-start新训练从零开始。`easy_spawn_reference_size=9`可在较大地图上保留易图近距离出生分布。详见[9×9课程](map_curriculum9_20261103.md)、[全尺寸课程](map_curriculum_full_20261103.md)及[压缩存储实验](map_curriculum_full_packed_20261103.md)。
 

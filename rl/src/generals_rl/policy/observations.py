@@ -11,8 +11,13 @@ class LocalObservationEncoder:
     channels = ("visible", "plain", "mountain", "city", "general", "self",
                 "enemy", "empty", "neutral", "log_army")
 
-    def __init__(self, episode_ticks: int):
+    def __init__(self, episode_ticks: int, *, clock_scale_ticks=None):
         self.episode_ticks = episode_ticks
+        self.clock_scale_ticks = clock_scale_ticks
+        if clock_scale_ticks is not None:
+            if type(clock_scale_ticks) is not int or clock_scale_ticks < 1:
+                raise ValueError('clock_scale_ticks must be a positive integer')
+            self.semantics += '_fixed_bounded_clock_v1'
 
     def visibility(self, batch: GameBatch, player_ids: torch.Tensor):
         owned = (batch.state["owner"] == player_ids[:, None]).float()
@@ -50,7 +55,9 @@ class LocalObservationEncoder:
         public = torch.stack((torch.log1p(relative[..., 0]) / 10.0,
                               relative[..., 1] / cells, city, alive), -1).flatten(1)
         tick = s["tick"].float()
-        clock = torch.stack((tick / self.episode_ticks, (tick % 2) / 2, (tick % 50) / 50), -1)
+        elapsed = (tick / self.episode_ticks if self.clock_scale_ticks is None
+                   else (tick / self.clock_scale_ticks).clamp(0, 1))
+        clock = torch.stack((elapsed, (tick % 2) / 2, (tick % 50) / 50), -1)
         # Seat and clock expose the alternating base tie-break priority.
         seat = F.one_hot(player_ids, num_classes=batch.players).float()
         return torch.cat((maps, public, clock, seat), -1)
@@ -58,11 +65,13 @@ class LocalObservationEncoder:
 
 def make_observation_encoder(config, *, local_encoder=LocalObservationEncoder, combat_encoder=None, king_encoder=None):
     """Use one configured feature layout for learner, opponents and evaluation."""
+    clock = getattr(config, 'clock_scale_ticks', None)
+    options = {} if clock is None else {'clock_scale_ticks': clock}
     if config.combat_features:
         from .combat import CombatObservationEncoder
-        encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps)
+        encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps, **options)
     else:
-        encoder = local_encoder(config.max_episode_steps)
+        encoder = local_encoder(config.max_episode_steps, **options)
     encoder = (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
     return CompactPrecisionEncoder(encoder) if feature_recipe(getattr(config, "feature_set", "stacked")).half_precision else encoder
 

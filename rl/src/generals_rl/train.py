@@ -367,9 +367,10 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     writer.add_scalar(f"PPO/{name}", value, kwargs["it"])
                 for name, value in curriculum_metrics.items():
                     writer.add_scalar(f"Curriculum/{name}", value, kwargs["it"])
-                if settings.map_curriculum is not None:
+                if task.map_sampler is not None:
                     for name, value in task.map_sampler.metrics().items():
-                        writer.add_scalar(f'Curriculum/{name}', value, kwargs['it'])
+                        prefix = 'Curriculum' if name in ('map_position', 'map_level_mean', 'map_final_fraction') else 'MapBank'
+                        writer.add_scalar(f'{prefix}/{name}', value, kwargs['it'])
                 global_transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
                 board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
                 writer.add_scalar("Perf/environment_steps", global_transitions, kwargs["it"])
@@ -489,6 +490,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 summary["warm_start"] = warm_source
             if settings.map_curriculum is not None:
                 summary['map_curriculum'] = dict(transitions=map_transitions, **task.map_sampler.metrics())
+            elif task.map_sampler is not None:
+                summary['map_bank'] = task.map_sampler.metrics()
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,
