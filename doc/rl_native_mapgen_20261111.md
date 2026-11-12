@@ -77,6 +77,8 @@ H200主机为双路Xeon Platinum 8558，96物理核／192逻辑核。八个独�
 
 已获用户同意的下一批9×9消融统一使用每层65536、R4、chunk1024、prefetch8；建议每rank四个CPU生成进程，八rank共32个。全尺寸／更高reset速率可改为八个进程，共64个，结合`MapBank/map_refresh_wait_seconds`增量和主机CPU竞争判断。包内worker默认仍为2，滚动默认仍关闭，保留旧实验复现入口；本轮准备的共同覆盖配置位于产物目录`next_map_overrides.json`。
 
+后续设计已更新为**R2／prefetch16**，以增加新地图追加预算，其余常驻池及worker配置保持；以上原始基准参数保留不改。新候选配置、预算计算及当前显存检查见[消融地图方案](rl_ablation_map_plan_20261111.md)，正式训练仍未启动。
+
 未来全尺寸每卡16384局时，地图池本身可以供应并保持固定显存，但完整T512双座训练另受rollout存储限制：按当前存储格式，仅观测约217.9 GiB/卡，不能在单张H200直接沿用。这个限制与本次CPU生成优化分开处理。
 
 没有启动正式训练。`episode_critic_d4_20261111_actual01`的旧预检及冻结源码保留，正式控制器仍为`formal_training_enabled=false`、`requires_source_refresh=true`。下一步正式训练前需要新的完整容量预检。
