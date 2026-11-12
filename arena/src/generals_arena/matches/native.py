@@ -20,7 +20,7 @@ class _Config(C.Structure):
         ('backend', BackendABI), ('policies', C.c_void_p), ('seats', C.c_void_p),
         *[(name, C.c_void_p) for name in ('joint', 'invalid', 'eliminations', 'active', 'ending')],
         ('journal', _Journal), ('metrics', C.c_void_p), ('cursor', C.c_void_p),
-        ('topologies', C.c_void_p), ('record', C.c_int)]
+        ('topologies', C.c_void_p), ('record', C.c_int), ('decision_limit_ns', C.c_int64)]
 
 
 class _Status(C.Structure):
@@ -53,7 +53,10 @@ def _pointer(array, dtype, shape):
 
 
 class NativeLoop:
-    def __init__(self, env, bindings, backend, seats, joint, invalid, eliminations, active, journal, *, topologies=None, record=False):
+    def __init__(self, env, bindings, backend, seats, joint, invalid, eliminations, active, journal, *, topologies=None, record=False,
+                 decision_limit_ms=10):
+        from generals_arena.util import integer
+        integer('decision_limit_ms', decision_limit_ms, 1)
         b, p = env.num_envs, env.players
         self.env, self.bindings = env, bindings
         self.ending = np.zeros(b, bool)
@@ -76,7 +79,8 @@ class NativeLoop:
         self.config = _Config(b, env.height, env.width, p, backend.abi, C.addressof(policies),
             _pointer(seats, np.int64, (p, b)), _pointer(joint, np.int64, (b, p)),
             _pointer(invalid, np.int64, (b, p)), _pointer(eliminations, np.int64, (b, p)),
-            _pointer(active, np.bool_, (b,)), _pointer(self.ending, np.bool_, (b,)), log, self.metrics.ctypes.data, self.cursor.ctypes.data, C.addressof(topology), record)
+            _pointer(active, np.bool_, (b,)), _pointer(self.ending, np.bool_, (b,)), log, self.metrics.ctypes.data, self.cursor.ctypes.data,
+            C.addressof(topology), record, decision_limit_ms * 1_000_000)
         self.owners = (backend, policies, seats, joint, invalid, eliminations, active, journal, topology)
         self.lib = _library()
         self.handle = self.lib.arena_loop_create(C.byref(self.config))
@@ -101,12 +105,12 @@ class NativeLoop:
                 if pending is not None:
                     pending()
         if code == 3:
-            from generals_arena.policies.native import PolicyError, DECISION_NS
+            from generals_arena.policies.native import PolicyError
             seat = int(self.seats[status.group, status.lane])
             values = self.metrics[status.lane, seat]
             detail = dict(kind='timeout' if values[7] == 1 else 'policy_error', player=seat,
                 lane=int(status.lane), tick=int(self.env.state['tick'][status.lane]),
-                elapsed_ns=int(values[6]), limit_ns=DECISION_NS, phase='decision')
+                elapsed_ns=int(values[6]), limit_ns=self.config.decision_limit_ns, phase='decision')
             raise PolicyError(f'native policy decision {detail["kind"]}: {detail["elapsed_ns"]/1e6:.3f} ms', details=detail)
         if code == 1:
             binding = self.bindings[status.group]
@@ -140,6 +144,7 @@ class NativeLoop:
             values = self.metrics[lane, seat]
             if values[0] or values[4] or values[5]:
                 row = dict(seat=seat, **metrics(values))
+                row['limit_ns'] = self.config.decision_limit_ns
                 if not self.bindings[group].abi.act_one:
                     row.update(limit_ns=None, measurement='batch policy wall time / active lanes; excludes observations and IPC')
                 rows.append(row)
@@ -170,7 +175,8 @@ class NativeLoop:
 
 
 @contextmanager
-def bind_loop(env, groups, joint, invalid, eliminations, active, journal, *, native_policies=True, topologies=None, record=False):
+def bind_loop(env, groups, joint, invalid, eliminations, active, journal, *, native_policies=True, topologies=None, record=False,
+              decision_limit_ms=10):
     """Capability-based selection; never branch on a policy's name or kind."""
     if not callable(getattr(env.unwrapped, 'native_binding', None)):
         raise ValueError('Arena requires a native backend execution binding')
@@ -180,7 +186,8 @@ def bind_loop(env, groups, joint, invalid, eliminations, active, journal, *, nat
                     if native_policies and group.batch and callable(getattr(group.controller, 'native_batch', None))
                     else callback_binding(group, env) for group in groups]
         loop = NativeLoop(env, bindings, backend, np.stack([group.seats for group in groups]),
-                          joint, invalid, eliminations, active, journal, topologies=topologies, record=record)
+                          joint, invalid, eliminations, active, journal, topologies=topologies, record=record,
+                          decision_limit_ms=decision_limit_ms)
         stack.callback(loop.close)
         yield loop
 
@@ -206,7 +213,7 @@ def _array(pointer, dtype, shape):
 
 
 def callback_binding(group, env):
-    """Python/NN policy adapter. Native execution still owns the match and observations."""
+    """Untimed Python/RL inference; native execution owns the match and observations."""
     from generals.protocol.native import PolicyBinding, ABI_VERSION, address
     from .batch import _numpy
     failure = []
@@ -253,7 +260,10 @@ def callback_binding(group, env):
         if failure:
             raise failure[0]
     needs_feedback = getattr(group.controller, 'needs_feedback', True)
-    binding = PolicyBinding(PolicyABI(ABI_VERSION, None, address(act), address(feedback) if needs_feedback else None, None),
+    # Neural inference can include model warmup and GPU scheduling delays. Keep
+    # its wall-time metrics, but never advertise the native decision watchdog.
+    binding = PolicyBinding(PolicyABI(ABI_VERSION, None, address(act), address(feedback) if needs_feedback else None,
+                                     None, flags=0),
                             (group, act, feedback, failure), check_error)
     binding.pending_error = lambda: check_error(0, 0)
     return binding

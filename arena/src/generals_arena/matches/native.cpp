@@ -29,7 +29,7 @@ struct MatchConfig {
     I *metrics, *cursor;
     const char *const *topologies;
     int record;
-
+    I decision_limit_ns;
 };
 struct Status {
     I group=-1, lane=-1, ticks=0;
@@ -134,7 +134,7 @@ struct Match {
                             if(header){header[1]=ids[l];header[2]=obs.tick[l];header[3]=2;}
                             I saved[8];if(recorded)std::copy_n(m,8,saved);
                             if(policies[g].flags&GENERALS_TIMED_POLICY){
-                                generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(m),10000000,true,obs.tick[l],true);
+                                generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(m),c.decision_limit_ns,true,obs.tick[l],true);
                                 output[l]=policies[g].act_one(policies[g].context,&view,l,m);
                                 guard.done(m[7]);
                             }else output[l]=policies[g].act_one(policies[g].context,&view,l,m);
@@ -228,7 +228,7 @@ extern "C" void *arena_loop_create(const MatchConfig *c) {
            !c->backend.context || !c->backend.observe || !c->backend.step ||
            !c->backend.alive || !c->backend.done || !c->backend.tick || !c->backend.moves || !c->backend.errors ||
            !c->backend.depart || !c->backend.snapshot || !c->backend.stats || !c->metrics || !c->topologies || !c->policies || !c->seats || !c->joint || !c->invalid || !c->eliminations || !c->active || !c->ending ||
-           !(c->backend.capabilities&GENERALS_HOST_BUFFERS) || c->record<0 || c->record>2)
+           !(c->backend.capabilities&GENERALS_HOST_BUFFERS) || c->record<0 || c->record>2 || c->decision_limit_ns<=0)
             throw std::runtime_error("invalid native match binding");
         for(int g=0;g<c->players;++g)
             if(c->policies[g].abi!=GENERALS_NATIVE_ABI || !c->policies[g].act)

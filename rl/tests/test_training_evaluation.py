@@ -74,6 +74,7 @@ def complete(evaluator, job, elo=100):
 def test_settings_use_one_based_updates_and_only_configure_evaluation_execution():
     value = TrainingEvalConfig(every_n_updates=3, maps_per_opponent=2, backend='cpu')
     assert value.every_n_updates == 3 and value.maps_per_opponent == 2
+    assert value.decision_limit_ms == 50
     assert [value.due(update) for update in (0, 1, 2, 3, 4, 6)] == [False, False, False, True, False, True]
     assert not TrainingEvalConfig(enabled=False, every_n_updates=3).due(3)
     assert 'inference' not in asdict(value)
@@ -87,6 +88,7 @@ def test_default_evaluation_uses_native_cpu_environment_and_independent_model_de
     config = json.loads(files('generals_rl').joinpath('default.json').read_text())
     settings = TrainingEvalConfig(**config['evaluation'])
     assert settings.backend == 'cpu' and settings.device == 'cuda:0'
+    assert settings.decision_limit_ms == 50
 
 
 def test_legacy_gpu_evaluation_keeps_inference_device_and_explicit_profile():
@@ -123,6 +125,7 @@ def test_resume_legacy_gpu_starts_new_scores_and_preserves_original_index(evalua
 @pytest.mark.parametrize('values', [
     {'enabled': 'yes'}, {'every_n_updates': 0}, {'maps_per_opponent': True}, {'batch_size': -1},
     {'max_ticks': 0}, {'seed': -1}, {'cpu_threads': 0}, {'final_top_k': -1},
+    {'decision_limit_ms': 0}, {'decision_limit_ms': True}, {'decision_limit_ms': 1.5},
     {'final_games_multiplier': 0}, {'keep_snapshots': 0}, {'backend': 'gpu'}, {'backend': 'other'},
     {'device': None}, {'device': 'invalid'}, {'device': 'mps'}, {'timeout_seconds': True},
     {'timeout_seconds': 0}, {'timeout_seconds': float('inf')},
@@ -296,8 +299,9 @@ def test_unavailable_candidates_remain_in_curves_but_cannot_be_best_or_finalists
     assert [job['completed_ppo_updates'] for job in restored._candidates()] == [4]
 
 
-def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monkeypatch):
-    from generals_arena.competitions.evaluation import make_profile, profile_id
+@pytest.mark.parametrize('decision_limit_ms', [10, 50])
+def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monkeypatch, decision_limit_ms):
+    from generals_arena.competitions.evaluation import make_profile, profile_id, load_profile
     root = tmp_path / 'profiles'
     root.mkdir()
     (root / 'weights.dat').write_bytes(b'opaque weights')
@@ -307,8 +311,11 @@ def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monke
     path = root / 'profile.json'
     path.write_text(json.dumps(profile))
     monkeypatch.chdir(tmp_path)
-    evaluator = PeriodicEvaluator(TrainingEvalConfig(profile=str(path)), small_config(), tmp_path / 'run', None)
-    assert evaluator.profile_id == profile_id(path)
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(profile=str(path), decision_limit_ms=decision_limit_ms),
+                                 small_config(), tmp_path / 'run', None)
+    assert evaluator.profile_id == profile_id(dict(load_profile(path), decision_limit_ms=decision_limit_ms))
+    assert evaluator.profile['decision_limit_ms'] == decision_limit_ms
+    assert json.loads(path.read_text())['decision_limit_ms'] == 10
     job = enqueue(evaluator, 2)
     assert profile_id(job['profile_path']) == evaluator.profile_id
 
@@ -382,6 +389,11 @@ def test_real_training_evaluates_periodic_and_final_and_preserves_rng_and_optimi
     assert [job['completed_ppo_updates'] for job in jobs] == [2, 3]
     assert jobs[-1]['final'] is True
     for job in jobs:
+        report = json.loads(Path(job['report']).read_text())
+        assert report['profile']['decision_limit_ms'] == 50
+        for game in report['results']:
+            for row in game['decision_timing']:
+                assert row['limit_ns'] == (None if row['seat'] == game['candidate_seat'] else 50_000_000)
         saved = torch.load(job['checkpoint'], weights_only=True, map_location='cpu')
         assert saved['iter'] + 1 == job['completed_ppo_updates']
         assert saved['infos']['policy_spec'] and saved['infos']['source_id']

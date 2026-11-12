@@ -100,10 +100,11 @@ def resolve_geometries(plans):
 class MatchRunner:
     def __init__(self, entries, *, max_ticks, backend="cpu", device="cpu", batch_size=128,
                  cpu_threads=1, record_replays=False, scalar=False, execution="batch",
-                 worker=None):
+                 worker=None, decision_limit_ms=10):
         integer("max_ticks", max_ticks, 1)
         integer("batch_size", batch_size)
         integer("cpu_threads", cpu_threads, 1)
+        integer("decision_limit_ms", decision_limit_ms, 1)
         device = str(device)
         if device != "cpu" and device != "cuda" and not (device.startswith("cuda:") and device[5:].isdigit()):
             raise ValueError("device must be cpu, cuda, or cuda:N")
@@ -111,6 +112,7 @@ class MatchRunner:
         if execution not in ("batch", "isolated"):
             raise ValueError("execution must be 'batch' or 'isolated'")
         self.entries, self.max_ticks = entries, max_ticks
+        self.decision_limit_ms = decision_limit_ms
         self.backend, self.device = backend, device
         self.batch_size, self.cpu_threads = batch_size, cpu_threads
         self.record_replays, self.scalar = record_replays, scalar
@@ -171,7 +173,8 @@ class MatchRunner:
         try:
             with cpu_slot():
                 return self.worker.run({key: self.entries[key] for key in plan['entrant_ids']},
-                                       plan, max_ticks=self.max_ticks, stop=stop)
+                                       plan, max_ticks=self.max_ticks, stop=stop,
+                                       decision_limit_ms=self.decision_limit_ms)
         except InterruptedError:
             return None  # Scheduler leaves the cancelled plan pending for retry.
 
@@ -216,7 +219,8 @@ class MatchRunner:
                 bucket = buckets[key]
                 indices = [bucket.popleft() for _ in range(min(limit, len(bucket)))]
                 options = dict(max_ticks=self.max_ticks, device=self.device, backend=self.backend,
-                    cpu_threads=self.cpu_threads, record_replays=self.record_replays, scalar=self.scalar)
+                    cpu_threads=self.cpu_threads, record_replays=self.record_replays, scalar=self.scalar,
+                    decision_limit_ms=self.decision_limit_ms)
                 config = MapConfig(**plans[offset]['map'])
                 options['initial_states'] = {(config, plans[index]['map_seed']):
                     initial_map(config, plans[index]['map_seed']) for index in indices}

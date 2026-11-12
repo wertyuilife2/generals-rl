@@ -119,7 +119,10 @@ Arena推理使用同一套特征、记忆、掩码和动作转换。模型包应
 
 默认周期评估由Arena原生CPU批量链执行，模型在 `evaluation.device` 上推理。
 每对手100张地图并交换座位，七对手共1400局；另加200局WAIT诊断，均值排除WAIT。
-显式 `evaluation.profile` 的地图、上限、局数与对手优先于默认生成参数。
+显式 `evaluation.profile` 的地图、tick上限、局数与对手优先于默认生成参数。
+训练自动评估的原生策略决策预算由 `evaluation.decision_limit_ms` 控制，默认 **50ms**，
+也应用于显式profile及最终复评。RL模型推理始终不限时。实际预算写入profile身份及耗时报告，
+不同预算的结果不混用；Arena普通对战／未指定预算的独立profile仍为10ms。
 
 创建独立评估profile：
 
@@ -131,6 +134,7 @@ from generals_arena.competitions.evaluation import make_profile
 from generals_arena.policies.references import training_opponents
 
 profile = make_profile(MapConfig(9, 9, 2), maps_per_opponent=100, max_ticks=2048,
+    decision_limit_ms=50,  # 与训练自动评估一致；省略则为普通Arena的10ms。
     opponents=training_opponents(Path("outputs/eval/opponents")))
 Path("profile.json").write_text(json.dumps(profile))
 ```

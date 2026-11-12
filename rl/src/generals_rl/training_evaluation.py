@@ -61,6 +61,7 @@ class TrainingEvalConfig:
     profile: str | dict | None = None
     maps_per_opponent: int = 100
     max_ticks: int = 2048
+    decision_limit_ms: int = 50
     seed: int = 1000042
     batch_size: int = 128
     cpu_threads: int = 1
@@ -78,7 +79,7 @@ class TrainingEvalConfig:
             if type(getattr(self, name)) is not bool:
                 raise TypeError(f'evaluation.{name} must be boolean')
         for name in ('every_n_updates', 'maps_per_opponent', 'max_ticks', 'seed', 'batch_size',
-                     'cpu_threads', 'final_top_k', 'final_games_multiplier'):
+                     'cpu_threads', 'final_top_k', 'final_games_multiplier', 'decision_limit_ms'):
             value = getattr(self, name)
             minimum = 0 if name in ('seed', 'batch_size', 'final_top_k') else 1
             if type(value) is not int or value < minimum:
@@ -194,6 +195,9 @@ class PeriodicEvaluator:
         else:
             from generals_arena.competitions.evaluation import load_profile
             self.profile = load_profile(settings.profile)
+        # Apply the training budget to both generated and explicit panels. The
+        # profile identity keeps scores under different deadlines separate.
+        self.profile['decision_limit_ms'] = settings.decision_limit_ms
         self.profile_id = profile_id(self.profile)
         self._restore(resume, resume_updates)
         self._save_index()
