@@ -263,3 +263,21 @@ v24 本表按四 baseline 峰值选 U140；此前七对手选模采用 U180，�
 [方案与资源证据](rl_ablation_map_plan_20261111.md)。为v33–v36统一准备65536池、R2、chunk1024、prefetch16、每rank4进程；相对前案新图追加预算翻倍，CPU就绪载荷约95.8 MiB/rank，常驻池显存维持0.374 GiB/rank。按历史v32结束局数估算，新增base seeds约107.6万→215.2万；平均供给能力约为所需的23.4倍，尚未把它解释为胜率提升。
 
 四份候选配置已通过当前配置解析校验。19:25–19:26 PST连续13次检查，八卡空闲约23.8–25.0 GiB，均未达到现有32 GiB启动门槛；历史完整池reserved峰值约21.38 GiB，新版训练和实际评估策略进程峰值仍需预检。CPU内存和磁盘充足。没有启动预检、正式训练或自动等待启动任务，因此没有新模型或曲线；旧预检及暂停状态保持。
+
+<!-- episode_critic_d4_native_maps_20261111_actual01 -->
+## 2026-11-11：原生滚动地图池上的v33–v36消融
+
+状态：`v33_paired_baseline`；本地同步时间 2026-11-11T20:22:32-08:00。
+8×H200，每卡2048物理局／4096玩家轨迹，9×9课程、T512/E1/M256、224轮。
+逻辑minibatch8192，物理minibatch2048；R2、65536池、chunk1024、prefetch16、每rank4个生成进程。
+七对手评估采用采样；各组共享GPU资源，墙钟差异不能直接用于结构优劣判断。
+
+| Run | PPO轮数 | 最新七对手胜率 | 峰值allocated/reserved GiB |
+|---|---:|---:|---:|
+| v33_paired_baseline | 1/224 | 待评估 | 9.35/9.62 |
+| v34_timeout_terminal | 0/224 | 待评估 | 0.00/0.00 |
+| v35_joint_critic | 0/224 | 待评估 | 0.00/0.00 |
+| v36_d4 | 0/224 | 待评估 | 0.00/0.00 |
+
+配置、TensorBoard、审计及原始数据：`outputs/experiments/episode_critic_d4_native_maps_20261111_actual01/`。
+<!-- /episode_critic_d4_native_maps_20261111_actual01 -->

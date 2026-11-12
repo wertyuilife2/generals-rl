@@ -1,14 +1,16 @@
 # v33–v36：配对采样、超时语义、联合critic与D4
 
-状态：**8×H200预检全部通过，按用户要求停在正式训练之前**。控制器状态`preflight_passed_waiting_user`，正式训练开关关闭，未创建正式run、未开始224轮训练。源基座为`6eec3e5`（v32＋观测构建优化），功能提交`271e8f1`，冻结快照`cc380bf`；本批版本号与早期同名实验按目录区分。
+旧目录记录：8×H200预检全部通过后，曾按用户要求停在正式训练之前；旧控制器状态保留为`preflight_passed_waiting_user`，未创建正式run。源基座为`6eec3e5`（v32＋观测构建优化），功能提交`271e8f1`，冻结快照`cc380bf`；本批版本号与早期同名实验按目录区分。
 
-后续更新：已完成[同步、地图池与时间特征修复](rl_rollout_and_map_bank_20261111.md)，并通过新的两轮小规模八卡集成检查；随后完成[原生地图生成迁移与基准](rl_native_mapgen_20261111.md)。下文四组容量预检仍准确对应旧冻结源码`cc380bf`，不能视为新源码的完整容量验证。旧控制器额外标记`requires_source_refresh=true`；正式训练继续关闭，后续应创建新源码快照并补做容量预检。原有冻结源码和预检产物不覆盖。
+最新执行：用户已解除暂停并授权降低物理批启动。新目录`outputs/experiments/episode_critic_d4_native_maps_20261111_actual01/`冻结`901a7c0`，使用R2/prefetch16、完整65536地图池，正式四组统一物理minibatch2048、逻辑minibatch8192。前三组通过物理批4096的八卡容量预检；随后外部任务显存增长，最后一组改用2048并通过预检。**2026-11-11 20:18:37 PST已启动正式v33**，控制器随后自动按本页的选父顺序训练四组。每组仍224轮，T512/E1/M256、每卡2048物理局不变。原目录及本页以下旧预检证据保留，新状态与曲线同步至[训练日志](rl_train_log.md)。
 
-最新的[地图方案与H200资源评估](rl_ablation_map_plan_20261111.md)将四组共同配置设计为：每层65536、`map_refresh_reuse=2`、chunk1024、prefetch16、每rank四个生成进程。相对前次R4候选，新增地图预算翻倍，常驻GPU池不增加；首次reset不消耗替换预算。四份候选配置已校验，完整新容量预检待执行，当前H200仅余23.8–25.0 GiB／卡，未达到原32 GiB启动门槛。此共同数据源调整与时间尺度修复一并用于新v33共同基线及后续组，不能把相对历史v32的差别全部归因于配对minibatch；超时／critic／D4仍按下述父配置逐项比较。包内默认仍关闭滚动，以保留旧配方复现入口。
+旧预检之后，已完成[同步、地图池与时间特征修复](rl_rollout_and_map_bank_20261111.md)，并通过两轮小规模八卡集成检查；随后完成[原生地图生成迁移与基准](rl_native_mapgen_20261111.md)。下文旧容量预检准确对应冻结源码`cc380bf`，不能视为新源码的完整容量验证。旧控制器保留`requires_source_refresh=true`及关闭状态；新执行使用上文的新目录，原有冻结源码和预检产物不覆盖。
+
+最新的[地图方案与H200资源评估](rl_ablation_map_plan_20261111.md)将四组共同配置设计为：每层65536、`map_refresh_reuse=2`、chunk1024、prefetch16、每rank四个生成进程。相对前次R4候选，新增地图预算翻倍，常驻GPU池不增加；首次reset不消耗替换预算。四份候选配置已校验，完整新容量预检在新目录执行；初始评估时H200仅余23.8–25.0 GiB／卡，因此按用户授权降低物理批，重新验证训练与评估的实际峰值。此共同数据源调整与时间尺度修复一并用于新v33共同基线及后续组，不能把相对历史v32的差别全部归因于配对minibatch；超时／critic／D4仍按下述父配置逐项比较。包内默认仍关闭滚动，以保留旧配方复现入口。
 
 ## 固定口径
 
-8×H200，每卡2048局／4096玩家轨迹，9×9＋5级地图课程，每级65,536张图；T512/E1/M256、物理批8192、224轮，共3,758,096,384条新玩家样本和57,344次optimizer更新。双座当前策略纯自对弈、early_shared ViT1M、temporal_paths、HL-Gauss128/sigma=.04、sparse±1、gamma=1、lambda=.95、2048 tick，保留时钟和规则相位。所有组从头训练、同一初始化种子2026102901，不从前一组续训。配对采样在全部四组开启，其余默认值沿用v32。
+8×H200，每卡2048局／4096玩家轨迹，9×9＋5级地图课程，每级65,536张图；T512/E1/M256、逻辑批8192、物理批2048、224轮，共3,758,096,384条新玩家样本和57,344次optimizer更新。每个逻辑批累积四次梯度后才裁剪及更新参数；下文旧容量预检采用物理批8192，其数值单独保留。双座当前策略纯自对弈、early_shared ViT1M、temporal_paths、HL-Gauss128/sigma=.04、sparse±1、gamma=1、lambda=.95、2048 tick，保留时钟和规则相位。所有组从头训练、同一初始化种子2026102901，不从前一组续训。配对采样在全部四组开启，其余默认值沿用v32。
 
 | 顺序/run | 改动 | 对照 |
 |---|---|---|
@@ -33,7 +35,7 @@
 
 TensorBoard与曲线记录七对手／四基线胜率、各对手胜平负、PPO更新幅度、价值与共享梯度、配对价值和return残差、训练超时、吞吐及allocated/reserved峰值。checkpoint及eval快照有数量上限；训练源在独立目录冻结，避免干扰H200工作区。启动前检查显存／磁盘，记录其他GPU进程与资源占用；共享GPU时不将墙钟差异直接归因于方案。
 
-完整配置、源码SHA256清单、脚本、TensorBoard和原始报告：`outputs/experiments/episode_critic_d4_20261111_actual01/`。后续结果与曲线追加到本页及[训练日志](rl_train_log.md)。
+新执行的完整配置、源码SHA256清单、脚本、TensorBoard和原始报告：`outputs/experiments/episode_critic_d4_native_maps_20261111_actual01/`；旧预检保留在`outputs/experiments/episode_critic_d4_20261111_actual01/`。当前状态及后续曲线同步至[训练日志](rl_train_log.md)。
 
 ## 2026-11-11 H200预检结果
 
@@ -54,4 +56,4 @@ v33、v36期间存在其他CUDA任务，尤其v36第2–3轮受到明显竞争�
 
 本地回归覆盖CPU/CUDA D4规则等价、配对GAE、自然胜负优先、训练恢复／导出；主回归120 passed（另16 subtests），补充检查57 passed，最终配对测试11 passed，各组存在重复用例，不合并为独立用例总数。
 
-预检TensorBoard在`pilots/<run>/events.out.tfevents.*`；`preflight_summary.json`、`pilots/<run>/audit.json`、`updates.jsonl`及`eval_smoke/audit.json`保存原始／汇总结果。四组预检及评估子进程均已退出，其他用户GPU任务未改动。正式训练脚本、独立种子验证及绘图脚本已准备，待用户决定后再启动。
+旧预检TensorBoard在`pilots/<run>/events.out.tfevents.*`；`preflight_summary.json`、`pilots/<run>/audit.json`、`updates.jsonl`及`eval_smoke/audit.json`保存原始／汇总结果。旧预检及评估子进程均已退出，其他用户GPU任务未改动。当时正式训练脚本、独立种子验证及绘图脚本已准备，但按用户要求未启动；此后的授权与新执行见页首。
