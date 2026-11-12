@@ -48,6 +48,7 @@ class TaskConfig:
     map_generation_workers: int = 2
     map_refresh_reuse: int = 0
     map_refresh_chunk_size: int = 1024
+    map_prefetch_chunks: int = 8
     d4_augmentation: bool = False
     random_maps: bool = True
     map_curriculum: MapCurriculumConfig | None = None
@@ -100,7 +101,7 @@ class TaskConfig:
             raise ValueError("map_pool_size must be a nonnegative integer")
         if self.map_cache_dir is not None and (not isinstance(self.map_cache_dir, str) or not self.map_cache_dir):
             raise ValueError('map_cache_dir must be a path, auto, or None')
-        for name in ('map_generation_workers', 'map_refresh_chunk_size'):
+        for name in ('map_generation_workers', 'map_refresh_chunk_size', 'map_prefetch_chunks'):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f'{name} must be a positive integer')
         if type(self.map_refresh_reuse) is not int or self.map_refresh_reuse < 0 or (self.map_refresh_reuse and not self.map_pool_size):
@@ -171,7 +172,7 @@ class GeneralsTask:
             self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed,
                 curriculum=config.map_curriculum, d4=config.d4_augmentation, cache_dir=config.map_cache_dir,
                 generation_workers=config.map_generation_workers, refresh_reuse=config.map_refresh_reuse,
-                refresh_chunk_size=config.map_refresh_chunk_size)
+                refresh_chunk_size=config.map_refresh_chunk_size, prefetch_chunks=config.map_prefetch_chunks)
             # Choose the first maps before any history/opponent/episode state.
             self.map_sampler.reset()
         self.action_space = action_space or make_action_space(config)

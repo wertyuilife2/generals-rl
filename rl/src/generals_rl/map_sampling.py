@@ -64,10 +64,13 @@ class MapSampler:
     copied only into requested reset lanes, so active games keep their maps.
     """
     def __init__(self, env, config, size, *, seed, curriculum=None, d4=False,
-                 cache_dir=None, generation_workers=1, refresh_reuse=0, refresh_chunk_size=1024):
+                 cache_dir=None, generation_workers=1, refresh_reuse=0, refresh_chunk_size=1024,
+                 prefetch_chunks=8):
         self.backend = getattr(env, "unwrapped", env)
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             raise ValueError("map bank size must be a positive integer")
+        if type(prefetch_chunks) is not int or prefetch_chunks < 1:
+            raise ValueError('map prefetch chunks must be a positive integer')
         if self.backend.auto_reset:
             raise ValueError("map sampling requires auto_reset=False")
         if self.backend.players != config.players:
@@ -113,11 +116,13 @@ class MapSampler:
         if refresh_reuse:
             from .map_stream import MapStream
             self.stream = MapStream(config, size, seed, width=self.backend.width, height=self.backend.height,
-                curriculum=curriculum, workers=generation_workers, chunk_size=refresh_chunk_size, reuse=refresh_reuse)
+                curriculum=curriculum, workers=generation_workers, chunk_size=refresh_chunk_size,
+                reuse=refresh_reuse, prefetch_chunks=prefetch_chunks)
 
     def _refresh(self, count):
+        initial_draw = self.sampled_games == 0
         self.sampled_games += count
-        if self.stream is None:
+        if self.stream is None or initial_draw:
             return
         levels = self.curriculum.levels if self.curriculum is not None else 1
         for start, size, (arrays, stats, rng, valid) in self.stream.consume(count):
@@ -127,7 +132,9 @@ class MapSampler:
                 values = {**arrays, 'stats': stats, 'rng': rng.view(np.int32), 'valid': valid}
                 targets = {**self.arrays, 'stats': self.stats, 'rng': self.rng, 'valid': self.bank_valid}
                 for name, value in values.items():
-                    targets[name].index_copy_(0, rows, torch.from_numpy(value).to(self.device))
+                    # Owned pageable CPU arrays; copies and consumers share the
+                    # current stream, so no host synchronization per field is needed.
+                    targets[name].index_copy_(0, rows, torch.from_numpy(value).to(self.device, non_blocking=True))
             else:
                 for name, value in arrays.items():
                     self.arrays[name][rows] = value

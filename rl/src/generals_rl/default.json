@@ -28,6 +28,7 @@
     "map_generation_workers": 2,
     "map_refresh_reuse": 0,
     "map_refresh_chunk_size": 1024,
+    "map_prefetch_chunks": 8,
     "map_curriculum": {
       "warmup_transitions": 71303168,
       "end_transitions": 306184192,

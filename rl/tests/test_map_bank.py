@@ -73,7 +73,8 @@ def test_stream_is_deterministic_independent_of_prefetch_and_preserves_live_game
             env = stack.enter_context(VecEnv.from_states([generate_map(CONFIG, 91)]*4,
                 auto_reset=False, device=device, backend='cpu' if device == 'cpu' else 'gpu'))
             sampler = MapSampler(env, CONFIG, 6, seed=47, curriculum=CURRICULUM,
-                generation_workers=workers, refresh_reuse=1, refresh_chunk_size=4, d4=True)
+                generation_workers=workers, refresh_reuse=1, refresh_chunk_size=4,
+                prefetch_chunks=2*workers+1, d4=True)
             stack.callback(sampler.close)
             samplers.append(sampler)
         mask = np.array([True, False, True, False]) if device == 'cpu' else torch.tensor(
@@ -88,6 +89,8 @@ def test_stream_is_deterministic_independent_of_prefetch_and_preserves_live_game
             for sampler in samplers:
                 sampler.set_transitions(100+step*20)
                 sampler.reset(mask)
+                if step == 0:
+                    assert sampler.stream.introduced == 0  # Initial fill is never discarded unused.
             for k, value in a.backend.state.items():
                 if device == 'cpu':
                     np.testing.assert_array_equal(value, b.backend.state[k])
@@ -95,8 +98,8 @@ def test_stream_is_deterministic_independent_of_prefetch_and_preserves_live_game
                 else:
                     torch.testing.assert_close(value, b.backend.state[k], rtol=0, atol=0)
                     torch.testing.assert_close(value[~mask], initial[k][~mask], rtol=0, atol=0)
-        assert a.stream.introduced == b.stream.introduced == 16
-        assert len(a.stream.pending) == 1 and len(b.stream.pending) == 2
+        assert a.stream.introduced == b.stream.introduced == 12
+        assert (len(a.stream.pending), len(b.stream.pending)) == (3, 5)
         assert not (np.array_equal(first_bank, a.arrays['army']) if device == 'cpu'
                     else torch.equal(first_bank, a.arrays['army']))
         assert a.arrays['army'].shape == (6*CURRICULUM.levels, 81)

@@ -10,14 +10,15 @@ from .map_bank import build_bank
 
 
 class MapStream:
-    def __init__(self, config, size, seed, *, width, height, curriculum, workers, chunk_size, reuse):
+    def __init__(self, config, size, seed, *, width, height, curriculum, workers, chunk_size, reuse,
+                 prefetch_chunks=None):
         self.config, self.size, self.seed, self.reuse = config, size, seed, reuse
         self.options = dict(width=width, height=height, curriculum=curriculum)
         self.spans = [(start, min(chunk_size, size-start)) for start in range(0, size, chunk_size)]
         self.pool = ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context('spawn'))
         self.pending, self.submitted, self.draws = deque(), 0, 0
         self.wait_seconds, self.introduced, self.replacements = 0., 0, 0
-        for _ in range(workers):
+        for _ in range(workers if prefetch_chunks is None else prefetch_chunks):
             self._submit()
 
     def _submit(self):

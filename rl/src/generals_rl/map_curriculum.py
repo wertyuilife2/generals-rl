@@ -4,13 +4,13 @@ Each seed has an easy layout and an unmodified official target. Intermediate
 layouts interpolate their distance and obstacle counts. The last bank always
 contains the official generator's exact output, including city fairness.
 """
-from collections import deque
 from dataclasses import dataclass, replace
 from numbers import Integral
 
 import numpy as np
 
 from generals.core.mapgen import generate_map
+from generals.core.mapgen_native import connect as _connect, distance as _open_path, select_pair
 from generals.core.state import GameState, MapLayout
 from generals.protocol import EMPTY, NEUTRAL
 
@@ -52,58 +52,6 @@ class MapCurriculumConfig:
             raise ValueError('map curriculum transitions must be nonnegative')
         return float(np.clip((transitions - self.warmup_transitions)
                              / (self.end_transitions - self.warmup_transitions), 0, 1))
-
-
-def _adjacent(cell, width, height):
-    # Preserve the successful easy generator's tie-breaking and random stream.
-    y, x = divmod(int(cell), width)
-    if y: yield cell - width
-    if x + 1 < width: yield cell + 1
-    if y + 1 < height: yield cell + width
-    if x: yield cell - 1
-
-
-def _connect(terrain, source):
-    """Legacy linear-time connectivity repair, used only for training layouts."""
-    h, w = terrain.shape
-    cells = terrain.ravel().tolist()
-    size = len(cells)
-    connected = [False] * size
-    connected[source] = True
-    component, queue = [source], deque([source])
-    while queue:
-        for other in _adjacent(queue.popleft(), w, h):
-            if not cells[other] and not connected[other]:
-                connected[other] = True
-                component.append(other)
-                queue.append(other)
-    if len(component) == cells.count(0):
-        return
-    distance, parent, settled = [size + 1] * size, [-1] * size, [False] * size
-    for cell in component:
-        distance[cell] = 0
-    queue = deque(component)
-    while queue:
-        cell = queue.popleft()
-        if settled[cell]:
-            continue
-        settled[cell] = True
-        for other in _adjacent(cell, w, h):
-            cost = cells[other]
-            candidate = distance[cell] + cost
-            if candidate < distance[other]:
-                distance[other], parent[other] = candidate, cell
-                (queue.append if cost else queue.appendleft)(other)
-    carved = []
-    for cell, cost in enumerate(cells):
-        if cost:
-            continue
-        while not connected[cell]:
-            connected[cell] = True
-            if cells[cell]:
-                carved.append(cell)
-            cell = parent[cell]
-    terrain.ravel()[carved] = 0
 
 
 def _state(terrain, cities, generals, rng):
@@ -168,21 +116,11 @@ def easy_map(config, seed, settings):
 
 def map_metrics(state):
     """Generation-time diagnostics; no path searches enter env.step()."""
-    h, w = state.owner.shape
+    _, w = state.owner.shape
     a, b = map(int, state.general_pos)
-    blocked = state.layout.terrain.astype(bool) | (state.structure == 1)
-    distance = np.full(h * w, -1, dtype=np.int32)
-    distance[a] = 0
-    queue = deque([a])
-    while queue and distance[b] < 0:
-        cell = queue.popleft()
-        for other in _adjacent(cell, w, h):
-            if not blocked.ravel()[other] and distance[other] < 0:
-                distance[other] = distance[cell] + 1
-                queue.append(other)
     return dict(manhattan=abs(a // w - b // w) + abs(a % w - b % w),
                 mountain_fraction=float(state.layout.terrain.mean()),
-                cities=int((state.structure == 1).sum()), open_path=int(distance[b]))
+                cities=int((state.structure == 1).sum()), open_path=_open_path(state))
 
 
 def curriculum_maps(config, seed, settings):
@@ -209,12 +147,9 @@ def curriculum_maps(config, seed, settings):
             terrain.ravel()[order[:mountains]] = 1
             cities = order[mountains:mountains + desired['cities']]
             candidates = order[mountains + desired['cities']:]
-            ys, xs = candidates // w, candidates % w
-            pairs = np.argwhere((np.abs(ys[:, None] - ys) + np.abs(xs[:, None] - xs))
-                                == desired['manhattan'])
-            if not len(pairs):
+            generals = select_pair(candidates, w, desired['manhattan'], rng)
+            if generals is None:
                 continue
-            generals = candidates[pairs[int(rng.integers(len(pairs)))]]
             _connect(terrain, int(generals[0]))
             state = _state(terrain, cities, generals, rng)
             if map_metrics(state)['open_path'] >= 0:

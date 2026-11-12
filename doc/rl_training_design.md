@@ -78,9 +78,11 @@ CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保
 
 包内默认配方开启9×9的 `task.map_curriculum`；底层 `TaskConfig` 不隐式启用课程。每个seed生成易图和精确官方终点；中间层级插值出生距离、山脉与城市数量。`map_pool_size`是每层地图数，因此启用课程会增加初始化时间和图池内存。当前对局不换地图，进度仅影响后续reset。
 
-地图生成与缓存由 `map_bank.py` 管理，后台预取在 `map_stream.py`，reset采样在 `map_sampling.py`。初始池默认启用内容寻址磁盘缓存（`map_cache_dir="auto"`），按地图配置、种子、画布、课程布局参数、生成源码摘要和NumPy版本区分；仅改变课程推进阈值可复用。目录优先使用 `GENERALS_RL_MAP_CACHE`，否则为XDG cache下的 `generals_rl/map_banks`。`null`禁用缓存。文件锁、原子发布、逐数组校验和防止并发重复生成和读入损坏结果；不同rank仍有不同种子的池。`map_generation_workers=2` 默认用两个spawn CPU进程并行生成，结果顺序与单进程一致。
+地图生成与缓存由 `map_bank.py` 管理，后台预取在 `map_stream.py`，reset采样在 `map_sampling.py`。1v1出生点筛选、城市公平性、连通性，以及课程连通性修复／出生点配对／路径距离使用C++ CPU内核；Python保留配置、种子、NumPy数组和任务调度。C++继续使用NumPy原BitGenerator，保留随机数调用顺序；固定池的生成结果不因迁移或worker数变化。初始池默认启用内容寻址磁盘缓存（`map_cache_dir="auto"`），按地图配置、种子、画布、课程布局参数、生成源码摘要（包括C++）和NumPy版本区分；仅改变课程推进阈值可复用。目录优先使用 `GENERALS_RL_MAP_CACHE`，否则为XDG cache下的 `generals_rl/map_banks`。`null`禁用缓存。文件锁、原子发布、逐数组校验和防止并发重复生成和读入损坏结果；不同rank仍有不同种子的池。`map_generation_workers=2` 默认用两个spawn CPU进程并行生成，结果顺序与单进程一致；它不是OpenMP线程数。
 
-`map_refresh_reuse=0`保留固定池，保证旧数据分布可复现。设为正整数R后，在后台持续生成新种子的chunk；每累计 `chunk实际大小 × R` 次真实对局抽图，按固定顺序替换池中的一段。`map_refresh_chunk_size=1024`控制单次替换数量，预取队列最多为worker数。新图只用于后续reset，不替换正在进行的棋盘，也不写入磁盘缓存。生成落后时等待固定的下一块并记录耗时，不能因worker完成顺序不同而改变训练数据。更改池大小、R或chunk大小会改变数据分布，应当作为训练方案记录。
+`map_refresh_reuse=0`保留固定池，保证旧数据分布可复现。设为正整数R后，在后台持续生成新种子的chunk；每累计 `chunk实际大小 × R` 次真实对局抽图，按固定顺序替换池中的一段。首次非空reset只从初始池抽图，不计入替换预算，避免还没开始使用初始池就先替换它；总抽图指标仍包含首次reset。`map_refresh_chunk_size=1024`控制单次替换数量；`map_prefetch_chunks=8`独立控制待消费chunk数，包括运行中与已就绪项，不再由worker数决定。新图只用于后续reset，不替换正在进行的棋盘，也不写入磁盘缓存。生成落后时等待固定的下一块并记录耗时，不能因worker完成顺序不同而改变训练数据。更改池大小、R、chunk大小或首次抽图预算语义会改变数据流；worker数和预取深度只影响速度与内存。原生迁移与八rank实测见[报告](rl_native_mapgen_20261111.md)。
+
+CUDA chunk上传使用生成结果独占的pageable数组与`non_blocking=True`，在当前流内依次上传和写入池，避免每字段一次host同步；后续reset在同一流读取。未增加跨流访问或可提前覆写的共享pinned buffer。
 
 长跑／全尺寸训练可先验证每层8192、R=4、chunk1024、两个worker的滚动池：常驻容量固定，累计新种子持续增长。此配置尚未验证长期学习收益，暂不替换默认固定65536池。初始缓存会随配置／源码版本累积，当前无自动清理；持续生成的图不落盘。resume与既有环境一致，恢复课程计数但重新开始对局、抽图流及滚动池，不支持精确恢复地图流位置。
 

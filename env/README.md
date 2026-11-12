@@ -21,6 +21,8 @@ Apple clang 与已安装的 `libomp`，非标准位置可用 `GENERALS_LIBOMP_PR
 首次使用自动编译，后续复用缓存。单局调用 `generals.make_engine(state)`，批量调用 `VecEnv`；
 二者执行同一个 `backends/cpu/step.cpp`，Arena 不再维护执行后端。独立 Python 规则实现已移除；旧 `CoreEngine` 名称只保留调用原生 CPU backend 的兼容入口。投降、中立化、观测和合法动作掩码也由原生 backend 构建。
 
+随机地图的1v1出生点筛选、城市公平性及连通性检查也使用C++ CPU内核（`core/mapgen_native.cpp`），首次调用需要C++17编译器；GPU/MPS环境创建随机地图时同样使用它。NumPy继续管理种子和随机状态，固定种子的布局与迁移前相同。FFA出生点与城市放置仍保留原实现。RL课程另调用原生连通性修复和距离计算，参见[迁移与基准](../doc/rl_native_mapgen_20261111.md)。
+
 CPU/CUDA/MPS 共用 `VecEnv.step()`、`observe(player_ids)` 和可复用的 `observer(player_ids)`。
 批量观测由 env 返回原始局部信息；特征、历史、知识、动作映射与模型推理属于 `rl/` 的策略实现。
 CPU 的迷雾、公开障碍、统计脱敏和生命周期字段由一次 C++ 调用生成，返回独立快照；

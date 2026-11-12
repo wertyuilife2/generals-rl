@@ -15,7 +15,6 @@ from time import perf_counter
 
 import numpy as np
 
-from generals.core.batch import pack_states
 from generals.core.mapgen import generate_map
 from generals.core.state import MapLayout
 from generals.protocol import STATE_DTYPES, state_shape
@@ -57,10 +56,27 @@ def _generate_rows(config, seeds, width, height, curriculum):
             maps = curriculum_maps(config, int(seed), curriculum)
         for level, state in enumerate(maps):
             row = level * len(seeds) + index
-            state, valid[row] = pad_state(state, width, height)
-            packed, _, _ = pack_states([state])
+            # Generated states are still validated, but padding directly into
+            # owned bank storage avoids a copied GameState and singleton stacks.
+            state.validate()
+            h, w = state.owner.shape
+            if h > height or w > width:
+                raise ValueError('sampled map exceeds the policy canvas')
+            valid[row] = False
+            valid[row].reshape(height, width)[:h, :w] = True
             for name in arrays:
-                arrays[name][row] = packed[name][0]
+                if name in ('terrain', 'structure', 'owner', 'army'):
+                    target = arrays[name][row].reshape(height, width)
+                    if (h, w) != (height, width):
+                        target.fill(1 if name == 'terrain' else -1 if name == 'owner' else 0)
+                    target[:h, :w] = state.layout.terrain if name == 'terrain' else getattr(state, name)
+                elif name in ('general_pos', 'spawn_pos'):
+                    cells = getattr(state, name)
+                    arrays[name][row] = np.where(cells >= 0, cells//w*width + cells%w, -1)
+                elif name == 'winner':
+                    arrays[name][row] = -1 if state.winner_id is None else state.winner_id
+                else:
+                    arrays[name][row] = getattr(state, name)
     return arrays, valid
 
 
@@ -110,7 +126,7 @@ def file_digest(path):
 def source_digest():
     import generals.core.mapgen as mapgen
     root = Path(mapgen.__file__).parent.parent
-    sources = sorted((root/'core').glob('*.py')) + sorted((root/'protocol').glob('*.py'))
+    sources = sorted((root/'core').glob('*.py')) + sorted((root/'core').glob('*.cpp')) + sorted((root/'protocol').glob('*.py'))
     sources += [Path(__file__), Path(__file__).with_name('map_curriculum.py')]
     return hashlib.sha256(''.join(file_digest(p) for p in sources).encode()).hexdigest()
 
