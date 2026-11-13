@@ -321,7 +321,7 @@ return 0;''')
         assert (np.array(frame['army'])[mask] >= np.array(frames[2]['army'])[mask]).all()
 
 
-def test_native_parallel_and_serial_results_and_ratings_match(setup, tmp_path):
+def test_native_parallel_and_serial_match_results_agree(setup, tmp_path):
     import shutil
     directory, _ = setup
     cpp = source(tmp_path/'counter')
@@ -333,13 +333,12 @@ def test_native_parallel_and_serial_results_and_ratings_match(setup, tmp_path):
     right = run([selector,'baseline/aggressive'],league=copy,games=6,workers=2)
     assert left['ok'] and right['ok'] and right['workers'] == 2
     first, second = CompetitionStore(left['league_directory']), CompetitionStore(right['league_directory'])
-    assert first.leaderboard() == second.leaderboard()
+    assert first.leaderboard()["completed_games"] == second.leaderboard()["completed_games"] == 6
     for match in first.matches()['matches']:
         a, blob_a = first.replay(match['game_id'])
         b, blob_b = second.replay(match['game_id'])
         assert blob_a == blob_b
         assert a['final_digest'] == b['final_digest']
-        assert a['rating_changes'] == b['rating_changes']
 
 
 def test_idle_worker_takes_next_game_while_first_game_is_blocked(setup, tmp_path, monkeypatch):
@@ -369,7 +368,8 @@ def test_idle_worker_takes_next_game_while_first_game_is_blocked(setup, tmp_path
     assert run_jobs(store, workers=2) == 6
     with store.connect() as db:
         ids = [row[0] for row in db.execute("SELECT id FROM games ORDER BY sequence")]
-    assert ids == [plan['game_id'] for plan in plans]
+    assert set(ids) == {plan['game_id'] for plan in plans}
+    assert ids.index(plans[1]['game_id']) < ids.index(plans[0]['game_id'])
 
 
 def test_coordinator_failure_before_policy_execution_can_resume(setup, tmp_path):
@@ -548,3 +548,74 @@ def test_real_cli_compiles_run_and_commits_full_default_budget(setup,tmp_path):
     assert json.loads(Path(report['report']).read_text())==report
     again = subprocess.run([*base,'commit',str(path),'--league',str(directory)],capture_output=True,text=True)
     assert again.returncode==0 and json.loads(again.stdout)==report
+
+
+@pytest.mark.parametrize("split_jobs", [False, True])
+def test_rolling_queue_passes_old_window_while_first_game_is_running(setup, monkeypatch, split_jobs):
+    from generals_arena.competitions.jobs import NativeMatchPool, run_jobs
+    import threading
+    _, store = setup
+    store.add(dict(name='aggressive', kind='baseline', policy='aggressive'), games=1 if split_jobs else 40)
+    if split_jobs:
+        store.add(dict(name='expansion', kind='baseline', policy='expansion'), games=39)
+    crossed = threading.Event()
+    lock = threading.Lock()
+    started = []
+
+    def simulated(self, entries, chunk):
+        assert len(chunk) == 1
+        plan = chunk[0]
+        with lock:
+            index = len(started)
+            started.append(plan['game_id'])
+        if index == 0:
+            assert crossed.wait(10), 'scheduler waited at the old 32-game barrier'
+        if index == 32:
+            crossed.set()
+        p = len(plan['entrant_ids'])
+        return [({**plan, 'ticks': 1, 'elimination_ticks': [1]*(p-1)+[None],
+                  'placements': list(range(p, 0, -1)), 'kills': [0]*(p-1)+[p-1],
+                  'winner_seat': p-1, 'final_alive': [False]*(p-1)+[True]}, b'')]
+
+    monkeypatch.setattr(NativeMatchPool, '_run', simulated)
+    assert run_jobs(store, workers=2) == 40
+    assert len(set(started)) == 40
+    with store.connect() as db:
+        ids = [row[0] for row in db.execute('SELECT id FROM games ORDER BY sequence')]
+        assert db.execute("SELECT count(*) FROM games WHERE status='pending'").fetchone()[0] == 0
+    assert ids.index(started[0]) >= 31
+    assert store.jobs()[0]['status'] == 'complete'
+
+
+def test_rolling_failure_drains_started_games_and_keeps_job_failed(setup, monkeypatch):
+    from generals_arena.competitions.jobs import NativeMatchPool, run_jobs
+    import threading
+    import time
+    _, store = setup
+    store.add(dict(name='aggressive', kind='baseline', policy='aggressive'), games=8)
+    both_started = threading.Barrier(2)
+    lock = threading.Lock()
+    started = []
+
+    def simulated(self, entries, chunk):
+        plan = chunk[0]
+        with lock:
+            index = len(started)
+            started.append(plan['game_id'])
+        if index < 2:
+            both_started.wait(5)
+        if index == 0:
+            raise RuntimeError('worker failed')
+        time.sleep(.02)
+        p = len(plan['entrant_ids'])
+        return [({**plan, 'ticks': 1, 'elimination_ticks': [1]*(p-1)+[None],
+                  'placements': list(range(p, 0, -1)), 'kills': [0]*(p-1)+[p-1],
+                  'winner_seat': p-1, 'final_alive': [False]*(p-1)+[True]}, b'')]
+
+    monkeypatch.setattr(NativeMatchPool, '_run', simulated)
+    with pytest.raises(RuntimeError, match='worker failed'):
+        run_jobs(store, workers=2)
+    assert store.jobs()[0]['status'] == 'failed'
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM games WHERE status='complete'").fetchone()[0] >= 1
+        assert db.execute("SELECT status FROM games WHERE id=?", (started[0],)).fetchone()[0] == 'pending'

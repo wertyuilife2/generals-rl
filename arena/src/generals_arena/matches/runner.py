@@ -12,7 +12,6 @@ from types import SimpleNamespace
 from generals import MapConfig
 
 from generals_arena.policies.entries import load_controller
-from generals_arena.policies.entries import verify_artifacts
 from generals_arena.util import integer
 from generals_arena.util import source_digest
 from generals_arena.matches.resources import cpu_slot
@@ -117,9 +116,12 @@ class MatchRunner:
             entry = self.entries[key]
             if entry["kind"] == "human":
                 continue
-            info = verify_artifacts(entry)
             if entry["kind"] == "package":
-                capabilities[key] = info["manifest"]["capabilities"]
+                # Lightweight admission only; workers verify artifact bytes on load.
+                from pathlib import Path
+                from generals_arena.policies.artifacts import load_manifest
+                manifest = load_manifest(Path(entry['factory_kwargs']['bundle'])/'manifest.json')
+                capabilities[key] = manifest["capabilities"]
         for plan in plans:
             integer("map seed", plan["map_seed"])
             config = MapConfig(**plan["map"])
@@ -170,7 +172,7 @@ class MatchRunner:
         uses the same worker and per-decision watchdog boundary.
         """
         plans = resolve_geometries(plans)
-        used = self._validate(plans)
+        self._validate(plans)
         results, timing = [], {}
         ready = {}
         buckets = defaultdict(deque)
@@ -226,7 +228,4 @@ class MatchRunner:
                 if on_result is not None:
                     on_result(value, blob)
                 results.append(value)
-        for key in used:
-            if self.entries[key]["kind"] != "human":
-                verify_artifacts(self.entries[key])
         return results, timing

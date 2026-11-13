@@ -1,6 +1,5 @@
-"""Resumable persistent jobs with ordered commits through the shared runner."""
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections import defaultdict
+"""Resumable jobs with rolling dispatch and completion-order rating updates."""
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import json
 import os
 import threading
@@ -8,7 +7,7 @@ import time
 from types import SimpleNamespace
 
 from generals_arena.util import integer, process_lock
-from generals_arena.matches.runner import MatchRunner, resolve_geometries, _batch_key
+from generals_arena.matches.runner import MatchRunner
 from generals_arena.matches.worker import MatchWorker
 from generals_arena.policies.native import PolicyError
 from generals_arena.competitions.matchmaking import choose_player_count, make_block
@@ -63,22 +62,27 @@ def eligible_schedule(store, job, *, coverage=None, **options):
     return plans
 
 
-def prepare_batch(store, job):
-    """Persist at least 32 games before execution, adapting at each window.
+def prepare_batch(store, job, *, refill=False, size=32):
+    """Keep persisted pending games and optionally top up a rolling queue.
 
-    This keeps workers busy across small rotation groups. The same window is
-    used with one or many workers, so process count never changes a schedule.
-    Already-persisted rotations always take precedence during a resume.
+    Scheduled games count towards the budget even while workers execute them.
+    New matches use the latest committed ratings and include pending coverage.
     """
     with store.connect() as db:
-        plans = [json.loads(row[0]) for row in db.execute(
-            "SELECT plan FROM games WHERE job_id=? AND status='pending' ORDER BY rowid", (job["id"],))]
-    # Existing windows are immutable, including partially completed windows.
-    if plans:
+        query = "SELECT plan FROM games WHERE job_id=? AND status='pending' ORDER BY rowid"
+        args = (job['id'], size) if refill else (job['id'],)
+        plans = [json.loads(row[0]) for row in db.execute(query + (" LIMIT ?" if refill else ""), args)]
+    # Reuse persisted plans; only inspect coverage when new games are needed.
+    if (plans and not refill) or len(plans) >= size:
         return plans
-    done = job["done"]
+    existing = len(plans)
+    done = job["done"] + existing
     coverage = {mode: store.pair_counts(job['entrant_id'], mode=mode) for mode in MODES}
-    while len(plans) < 32 and done < job["budget"]:
+    for plan in plans:
+        for key in set(plan['entrant_ids']) - {job['entrant_id']}:
+            mode = rating_mode(plan)
+            coverage[mode][key] = coverage[mode].get(key, 0)+1
+    while len(plans) < size and done < job["budget"]:
         group = eligible_schedule(store, {**job, "done": done}, coverage=coverage)
         if not group:
             break
@@ -88,8 +92,8 @@ def prepare_batch(store, job):
             for key in set(plan['entrant_ids']) - {job['entrant_id']}:
                 mode = rating_mode(plan)
                 coverage[mode][key] = coverage[mode].get(key, 0)+1
-    if plans:
-        store.insert_plans(plans, job["id"])
+    if len(plans) > existing:
+        store.insert_plans(plans[existing:], job["id"])
     return plans
 
 
@@ -155,80 +159,71 @@ def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id
 
 
 def _run_parallel(store, workers, limit, progress, job_id=None):
-    completed = 0
-    # Keep adaptation at the same persistent window as sequential execution.
-    # Spawn works on macOS and does not inherit SQLite connections or locks.
+    completed, first_error = 0, None
+    failed_jobs = {}
+    # One match per task: native heuristic decisions are serial inside a worker.
+    # A small lookahead keeps workers busy without fixing a rating window.
     with NativeMatchPool(workers, store.config.max_ticks) as executor:
-        while limit is None or completed < limit:
-            job = next((j for j in store.jobs() if j["status"] == "queued"
-                        and (job_id is None or j['id'] == job_id)), None)
-            if job is None:
-                break
-            plans = prepare_batch(store, job)
-            if not plans:
-                break
-            if limit is not None:
-                plans = plans[:limit - completed]
-            entries = store.entrants()
-            # Small compatible batches amortize model inference and IPC while
-            # retaining at least four tasks per worker for dynamic load balance.
-            # The window and rating order remain independent of worker count.
-            plans = resolve_geometries(plans)
-            size = max(1, min(8, len(plans)//(workers*4)))
-            buckets = defaultdict(list)
-            for index, plan in enumerate(plans):
-                buckets[_batch_key(plan)].append(index)
-            chunks = [indices[start:start+size] for indices in buckets.values()
-                      for start in range(0, len(indices), size)]
-            chunks.sort(key=lambda indices: indices[0])
-            futures = {executor.submit_native(
-                {key: entries[key] for i in indices for key in plans[i]['entrant_ids']},
-                [plans[i] for i in indices]): indices
-                       for indices in chunks}
-            first_error, ready, next_index = None, {}, 0
-            for future in as_completed(futures):
-                indices = futures[future]
-                try:
-                    if future.cancelled():
-                        ready.update((index, None) for index in indices)
-                    else:
-                        records = future.result()
-                        if len(records) != len(indices):
-                            raise RuntimeError('match worker returned an incomplete task')
-                        ready.update(zip(indices, records, strict=True))
-                        for result, _ in records:
-                            if 'policy_error' in result:
-                                first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
-                except Exception as exc:
-                    first_error = first_error or exc
-                    ready.update((index, None) for index in indices)
-                # Completion order never becomes rating order. Commit any
-                # contiguous ready prefix while the other processes keep going.
-                while next_index in ready:
-                    record = ready.pop(next_index)
-                    next_index += 1
-                    if record is None:
+        futures = {}
+        while True:
+            if first_error is None:
+                capacity = workers * 2 - len(futures)
+                if limit is not None:
+                    capacity = min(capacity, limit - completed - len(futures))
+                active = {plan['game_id'] for _, plan in futures.values()}
+                entries = store.entrants() if capacity > 0 else None
+                for job in store.jobs() if capacity > 0 else ():
+                    if job['status'] != 'queued' or (job_id is not None and job['id'] != job_id):
                         continue
-                    result, blob = record
                     try:
-                        if 'policy_error' in result:
-                            store.fail_game(result, blob)
-                            first_error = first_error or PolicyError(result['policy_error'], details=result.get('error_detail'))
-                        else:
-                            store.complete_result(result, blob)
-                            completed += 1
-                            if progress is not None:
-                                progress(completed)
+                        plans = prepare_batch(store, job, refill=True,
+                                              size=len(futures)+capacity)
+                        for plan in plans:
+                            if plan['game_id'] in active:
+                                continue
+                            future = executor.submit_native(
+                                {key: entries[key] for key in plan['entrant_ids']}, [plan])
+                            futures[future] = job['id'], plan
+                            active.add(plan['game_id'])
+                            capacity -= 1
+                            if not capacity:
+                                break
                     except Exception as exc:
-                        first_error = first_error or exc
-                if first_error is not None:
-                    for queued in futures:
-                        queued.cancel()
-                    # Drain started games and preserve their results/violations.
-                    # A failed fast worker must not erase another timeout.
+                        failed_jobs[job['id']] = exc
+                        first_error = exc
+                        break
+                    if not capacity:
+                        break
+            if not futures:
+                break
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                current_job, plan = futures.pop(future)
+                if future.cancelled():
+                    continue
+                try:
+                    records = future.result()
+                    if len(records) != 1:
+                        raise RuntimeError('match worker returned an incomplete task')
+                    result, blob = records[0]
+                    if 'policy_error' in result:
+                        store.fail_game(result, blob)
+                        raise PolicyError(result['policy_error'], details=result.get('error_detail'))
+                    store.complete_result(result, blob)
+                    completed += 1
+                    if progress is not None:
+                        progress(completed)
+                except Exception as exc:
+                    failed_jobs[current_job] = exc
+                    first_error = first_error or exc
             if first_error is not None:
-                store.fail(job["id"], first_error)
-                raise first_error
+                # Preserve results from started tasks; leave cancelled plans pending.
+                for future in futures:
+                    future.cancel()
+    if first_error is not None:
+        for failed_job, error in failed_jobs.items():
+            store.fail(failed_job, error)
+        raise first_error
     return completed
 
 

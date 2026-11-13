@@ -548,24 +548,21 @@ def test_fresh_rating_schema_does_not_silently_read_old_global_pool(tmp_path):
         CompetitionStore(store.directory)
 
 
-def test_parallel_and_sequential_execution_have_identical_ratings(tmp_path):
-    import shutil
+def test_parallel_execution_resumes_without_duplicate_games(tmp_path):
     store = league(tmp_path, player_counts=(4,))
     add(store, games=7)
-    for policy in ('expansion','defensive'):
+    for policy in ('expansion', 'defensive'):
         add(store, policy, games=1)
-    # Copy before execution so job IDs, schedules and algorithm versions match.
-    shutil.copytree(store.directory, tmp_path/'parallel')
-    other = CompetitionStore(tmp_path/'parallel')
-    assert run_jobs(store, limit=5) == run_jobs(other, limit=5, workers=2) == 5
-    assert store.leaderboard() == other.leaderboard()
-    left = store.matches()['matches']
-    right = other.matches()['matches']
-    for a,b in zip(left,right):
-        assert a['game_id'] == b['game_id'] and a['sequence'] == b['sequence']
-        assert a['final_digest'] == b['final_digest']
-    assert run_jobs(other, workers=2) == 4
-    assert other.leaderboard()['completed_games'] == 9
+    assert run_jobs(store, limit=5, workers=2) == 5
+    assert store.leaderboard()['completed_games'] == 5
+    first = {r['game_id'] for r in store.matches()['matches']}
+    assert len(first) == 5
+    assert run_jobs(store, workers=2) == 4
+    matches = store.matches()['matches']
+    assert len({r['game_id'] for r in matches}) == 9
+    assert first <= {r['game_id'] for r in matches}
+    assert sorted(r['sequence'] for r in matches) == list(range(9))
+    assert store.leaderboard()['completed_games'] == 9
 
 
 def test_rating_uses_all_ranks_and_ties_not_just_winner():
