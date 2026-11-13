@@ -253,7 +253,8 @@ RL 先自动导出完整策略目录，再 `commit 目录`。Arena 只读取通�
 渲染只重绘变化格，统计面板复用节点并按兵力降序排列（同兵力按领地、席位排序）。
 人类对局通过长轮询接收新的状态或队列确认，服务器缓存每 tick 的观测，避免重复生成视野和重复重绘。
 
-正式 `commit` 默认最多 4 局并行，使用 `--workers N` 调整（1–32）。私有 `run` 默认 1 局，也支持该参数。
+`commit`、`run` 和 `league run` 未指定 `--workers` 时默认使用 `auto`，也可通过 `--workers N` 显式指定 1–32 个 worker。
+`commit`、`run` 和 `league run` 支持 `--workers auto`：取 `max(1, min(32, CPU配额, floor(可用CPU数 × 0.6)))`，优先使用进程可用 CPU 数，旧 Python 回退到系统逻辑核数。该保守估计给服务与策略决策留出余量；不同 CPU 和策略的最佳并行度仍需实测。
 并行 worker 在独立进程中执行整局比赛，进程可跨局复用；单 worker 的纯 Python／baseline 对局可直接在当前进程运行。局内 C++ 策略和 env CPU 后端保持单线程串行，协调器只传输整局任务与结果。
 比赛完成后立即结算并补充任务；一个 job 的尾部比赛仍在运行时，可以开始下一个 job。每局只结算一次，失败后保留未完成赛程供重试。
 需要同时查看界面时运行 `generals-arena serve outputs/arena/main --no-worker`，由独立 CLI 处理评测。

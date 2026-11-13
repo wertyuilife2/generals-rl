@@ -224,7 +224,7 @@ def _export(report, output):
 
 
 def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
-        output=None, parameters=None, max_ticks=None, progress=None, workers=1, device=None):
+        output=None, parameters=None, max_ticks=None, progress=None, workers="auto", device=None):
     workers = worker_count(workers)
     integer('games', games, 1)
     integer('seed', seed)

@@ -16,7 +16,12 @@ from generals_arena.competitions.store import CompetitionStore
 
 
 def worker_count(value):
-    value = min(4, os.cpu_count() or 1) if value is None else integer('workers', value, 1)
+    if value is None or value == 'auto':
+        from generals_arena.matches.resources import cpu_capacity
+        available = getattr(os, 'process_cpu_count', os.cpu_count)() or 1
+        # Leave headroom for serial policy deadlines and heterogeneous CPU cores.
+        return max(1, min(32, cpu_capacity(), available * 3 // 5))
+    value = integer('workers', value, 1)
     if value > 32:
         raise ValueError('workers must be <= 32')
     return value
@@ -128,7 +133,7 @@ def run_next(store, stop=None, job_id=None, cpp_worker=None, *, max_games=1, pro
     return False
 
 
-def run_jobs(store, *, limit=None, retry=False, progress=None, workers=1, job_id=None):
+def run_jobs(store, *, limit=None, retry=False, progress=None, workers="auto", job_id=None):
     store.verify_execution()
     if limit is not None:
         integer("limit", limit, 1)

@@ -11,6 +11,18 @@ from generals_arena.competitions.rating import MODES
 from generals_arena.competitions.config import DEFAULT_LEAGUE
 
 
+def worker_argument(value):
+    if value == 'auto':
+        return value
+    try:
+        count = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('workers must be auto or an integer from 1 to 32') from None
+    if not 1 <= count <= 32:
+        raise argparse.ArgumentTypeError('workers must be auto or an integer from 1 to 32')
+    return count
+
+
 def league_command(args):
     from generals_arena.competitions.config import LeagueConfig
     from generals_arena.competitions.jobs import run_jobs
@@ -40,7 +52,7 @@ def league_command(args):
             return
     if args.action in ("add", "run"):
         count = run_jobs(store, limit=getattr(args, "limit", None), retry=getattr(args, "retry", False),
-                         workers=getattr(args, "workers", 1),
+                         workers=getattr(args, "workers", "auto"),
                          progress=lambda done: print(f"League: {done} new games completed", file=sys.stderr))
         print(f"Completed {count} new games. Jobs: {json.dumps(store.jobs(), ensure_ascii=False)}")
     elif args.action == "rebuild":
@@ -196,7 +208,7 @@ def main(argv=None):
     worker.add_argument("directory", type=Path)
     worker.add_argument("--limit", type=int)
     worker.add_argument("--retry", action="store_true", help="retry failed jobs after fixing their cause")
-    worker.add_argument("--workers", type=int, default=1, help="parallel simulations within each persistent schedule window")
+    worker.add_argument("--workers", type=worker_argument, default="auto", help="parallel games: 1–32 or auto (default: auto; 60% of available CPUs)")
     ranking = actions.add_parser("leaderboard")
     ranking.add_argument("directory", type=Path)
     ranking.add_argument("--json", action="store_true")
@@ -264,7 +276,7 @@ def add_submission_commands(commands):
     submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
     submit.add_argument('--device', default='cpu', help='packaged policy device, e.g. cpu or cuda:0 (env remains CPU)')
     submit.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
-    submit.add_argument('--workers', type=int, default=None, help='parallel games (default: up to 4 CPU workers)')
+    submit.add_argument('--workers', type=worker_argument, default="auto", help='parallel games: 1–32 or auto (default: auto)')
     play = commands.add_parser('run', help='private games between explicit seats; never updates official ratings')
     play.add_argument('--player', action='append', required=True,
                       help='baseline/KIND, source.cpp, source directory, policy/HASH, or @alias; repeat for each seat')
@@ -276,7 +288,7 @@ def add_submission_commands(commands):
     play.add_argument('--device', help='override packaged policy device; otherwise use registered device')
     play.add_argument('--output', type=Path, help='optional report and replay database export directory')
     play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
-    play.add_argument('--workers', type=int, default=1, help='parallel games (default: 1)')
+    play.add_argument('--workers', type=worker_argument, default="auto", help='parallel games: 1–32 or auto (default: auto)')
     inspect = commands.add_parser('status', help='show managed submissions, jobs, and run report paths')
     inspect.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
 
