@@ -45,19 +45,17 @@ def build_actor(network, features):
         if network.get("wait_move_factorization", True) is not True:
             raise ValueError("scaled actors require WAIT/MOVE factorization")
         kind = network.get("backbone", "vit")
-        if kind not in ("vit", "resnet"):
-            raise ValueError("scaled backbone must be vit or resnet")
-        if kind != "vit" and network.get("vit_config") is not None:
-            raise ValueError("vit_config requires a ViT backbone")
+        if kind != "vit":
+            raise ValueError("scaled backbone must be vit; use the original policy bundle for retired networks")
         size, mode = network.get("model_size", "1m"), network.get("spatial_mode", "dense")
-        if size not in ("1m", "10m", "100m") or mode not in ("dense", "pyramid"):
+        if size not in ("1m", "10m", "100m") or mode != "dense":
             raise ValueError("unsupported scaled model_size or spatial_mode")
         head, alignment = network.get("head_channels", 128), network.get("input_channel_alignment", 4)
         for name, value, minimum in (("head_channels", head, 1), ("input_channel_alignment", alignment, 0)):
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{name} must be an integer >= {minimum}")
         from .scaled import _ScaledInformationActor
-        return _ScaledInformationActor(layout, kind, size, alignment, head, mode,
+        return _ScaledInformationActor(layout, size, alignment, head,
                                        network.get("mask_padding_tokens"), network.get("patch_size", 1),
                                        network.get("vit_config"))
     if family not in ("spatial", "lightcnn", "information", "optimized"):

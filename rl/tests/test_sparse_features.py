@@ -8,7 +8,6 @@ import torch
 
 from generals_rl.config import configure_observations, task_config
 from generals_rl.export import make_policy_spec
-from generals_rl.policy.actions import EncodedActionSpace
 from generals_rl.policy.features import FEATURE_SETS, feature_recipe
 from generals_rl.policy.runtime import PolicyRuntime
 from generals_rl.rollout_codec import CompactObservationCodec, DynamicObservationCodec
@@ -24,7 +23,7 @@ def recipe(features='stacked'):
     return configure_observations(cfg)
 
 
-@pytest.mark.parametrize('features', ('compact', 'temporal', 'temporal_dedup'))
+@pytest.mark.parametrize('features', ('compact', 'temporal'))
 def test_real_train_resume_export_and_scalar_rollout(tmp_path, features):
     assert_train_resume_export(tmp_path, recipe(features))
 
@@ -60,7 +59,7 @@ def test_switched_stacked_recipe_can_train(tmp_path, source):
     assert result['iterations'] == 1
 
 
-@pytest.mark.parametrize('features', ('compact', 'temporal', 'temporal_dedup'))
+@pytest.mark.parametrize('features', ('compact', 'temporal'))
 def test_compact_storage_matches_rollout_and_keeps_combat(features):
     torch.set_num_threads(1)
     cfg = recipe(features)
@@ -82,7 +81,7 @@ def test_compact_storage_matches_rollout_and_keeps_combat(features):
             torch.testing.assert_close(model.action_probabilities(obs), model.action_probabilities(altered), rtol=0, atol=0)
 
 
-@pytest.mark.parametrize('features', ('compact', 'temporal', 'temporal_dedup'))
+@pytest.mark.parametrize('features', ('compact', 'temporal'))
 def test_runtime_memory_matches_training_through_steps_and_reset(tmp_path, features):
     torch.set_num_threads(1)
     cfg = recipe(features)
@@ -104,23 +103,6 @@ def test_runtime_memory_matches_training_through_steps_and_reset(tmp_path, featu
             result = task.step(torch.zeros(task.num_envs, dtype=torch.long))
             if result.truncated.any() or result.terminated.any():
                 reset()
-
-
-def test_half_duplicate_mask_only_removes_equivalent_army_two():
-    cfg = recipe('temporal_dedup')
-    with GeneralsTask(task_config(cfg['task'])) as task:
-        batch = task.batch()
-        # Override independent batch view; engine actions still use native encoding.
-        for troops in (2, 3, 5):
-            batch.state['army'].fill_(troops)
-            plain = EncodedActionSpace(9,9).mask(batch, task.player_ids)
-            pruned = task.action_space.mask(batch, task.player_ids)
-            assert torch.equal(plain[:, 0], pruned[:, 0])
-            assert torch.equal(plain[:, 1::2], pruned[:, 1::2])
-            if troops == 2:
-                assert not pruned[:, 2::2].any()
-            else:
-                assert torch.equal(plain, pruned)
 
 
 def test_dynamic_memory_is_observation_only_and_clears_stale_enemy():

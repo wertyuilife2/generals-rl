@@ -1,5 +1,13 @@
 # RL training log
 
+## 消融代码清理（2026-11-12，第一批）
+
+默认方案仍为 v32 + 超时终止。删除零和联合 critic（`joint_critic`）及配对 minibatch、D4、ResNet、pyramid 和 `temporal_dedup` 专属实现及测试。保留 advantage 筛样、`late` / `early_shared` / `post_attention` / `joint_independent` critic 融合、actor/critic 拼 batch 前向、scalar / HL-Gauss / 两端点 CE，以及地图池、历史池、特征、压缩和训练效率优化。`joint_independent` 是独立网络的特权融合，不是本次删除的联合零和 critic。
+
+历史实验记录和曲线不变。已删除架构可使用清理前提交 `76cacef` 或 checkpoint 对应的冻结源码复现；带 `policy_source` 的旧 checkpoint 仍可导出。
+
+验证：默认配置缩小为 CPU 2 对局、T4、2 轮 PPO 后，模型参数和优化器状态与清理前逐位一致；旧 checkpoint 冻结源码导出通过。CPU 相关回归初测 170 passed / 40 skipped，修复 4 项失效测试后对应文件复测 20 passed / 5 skipped；GPU 编译融合前向与反向 6 项通过。未启动正式训练。
+
 
 <!-- fullmap_4096_e4_interrupted_20261107 -->
 ## 全尺寸大预算基准 v10（预算切换归档，2026-11-07）

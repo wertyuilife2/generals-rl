@@ -49,7 +49,6 @@ class TaskConfig:
     map_refresh_reuse: int = 0
     map_refresh_chunk_size: int = 1024
     map_prefetch_chunks: int = 8
-    d4_augmentation: bool = False
     random_maps: bool = True
     map_curriculum: MapCurriculumConfig | None = None
     reward: RewardConfig = field(default_factory=RewardConfig)
@@ -109,10 +108,6 @@ class TaskConfig:
         if self.map_curriculum is not None and (not isinstance(self.map_curriculum, MapCurriculumConfig)
                                                or not self.map_pool_size):
             raise ValueError('map_curriculum requires MapCurriculumConfig and a positive map_pool_size')
-        if type(self.d4_augmentation) is not bool:
-            raise TypeError('d4_augmentation must be boolean')
-        if self.d4_augmentation and (not self.map_pool_size or self.random_maps or self.width != self.height):
-            raise ValueError('D4 augmentation requires a map bank and fixed square maps')
 
 
 @dataclass(frozen=True)
@@ -170,7 +165,7 @@ class GeneralsTask:
         if config.map_pool_size:
             from .map_sampling import MapSampler
             self.map_sampler = MapSampler(self.backend, map_config, config.map_pool_size, seed=config.seed,
-                curriculum=config.map_curriculum, d4=config.d4_augmentation, cache_dir=config.map_cache_dir,
+                curriculum=config.map_curriculum, cache_dir=config.map_cache_dir,
                 generation_workers=config.map_generation_workers, refresh_reuse=config.map_refresh_reuse,
                 refresh_chunk_size=config.map_refresh_chunk_size, prefetch_chunks=config.map_prefetch_chunks)
             # Choose the first maps before any history/opponent/episode state.

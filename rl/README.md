@@ -23,7 +23,7 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 
 ## 默认配置
 
-采用2026-11-10路径消融的 **v32＋超时终止**，run ID为 `v32_9x9_temporal_hl128_paths_terminal`：沿用v32固定地图池和非配对PPO采样，2048 tick到时记平局0、不bootstrap，D4和联合critic关闭。保留原生地图生成、缓存和观测构建优化。历史v32的[配置](../doc/terrain_distance_20261110.md)及[结果](../doc/terrain_distance_20261110_results.md)采用超时bootstrap；本组合未新增完整训练或胜率评测。新run从头初始化，不自动加载历史权重。
+采用2026-11-10路径消融的 **v32＋超时终止**，run ID为 `v32_9x9_temporal_hl128_paths_terminal`：沿用v32固定地图池和非配对PPO采样，2048 tick到时记平局0、不bootstrap。保留原生地图生成、缓存和观测构建优化。历史v32的[配置](../doc/terrain_distance_20261110.md)及[结果](../doc/terrain_distance_20261110_results.md)采用超时bootstrap；本组合未新增完整训练或胜率评测。新run从头初始化，不自动加载历史权重。
 
 | 项目 | 默认值 |
 |---|---|

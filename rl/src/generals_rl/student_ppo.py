@@ -33,7 +33,7 @@ class StudentPPO(PPO):
                  physical_minibatch_size=None, amp_bfloat16=False,
                  adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
                  betas=(0.9, 0.999), weight_decay=0.0, advantage_top_fraction=1.0,
-                 pair_minibatches=False, **kwargs):
+                 **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, CategoricalActorCritic):
             raise TypeError("StudentPPO requires CategoricalActorCritic")
@@ -65,13 +65,6 @@ class StudentPPO(PPO):
                 or not math.isfinite(advantage_top_fraction) or not 0 < advantage_top_fraction <= 1):
             raise ValueError("advantage_top_fraction must be finite and in (0, 1]")
         self.advantage_top_fraction = float(advantage_top_fraction)
-        if type(pair_minibatches) is not bool:
-            raise TypeError('pair_minibatches must be boolean')
-        if pair_minibatches and (num_envs % 2 or policy.is_recurrent or advantage_top_fraction != 1):
-            raise ValueError('paired minibatches require even feedforward lanes and all samples')
-        if getattr(policy, 'joint_critic', False) and not pair_minibatches:
-            raise ValueError('joint critic requires paired minibatches')
-        self.pair_minibatches = pair_minibatches
         if (physical_minibatch_size is not None
                 and (isinstance(physical_minibatch_size, bool)
                      or not isinstance(physical_minibatch_size, int)
@@ -85,8 +78,6 @@ class StudentPPO(PPO):
         if hasattr(policy, "amp_bfloat16") and policy.amp_bfloat16 != amp_bfloat16:
             raise ValueError("policy and StudentPPO amp_bfloat16 must match for rollout/update precision")
         self.physical_minibatch_size = physical_minibatch_size
-        if pair_minibatches and physical_minibatch_size is not None and physical_minibatch_size % 2:
-            raise ValueError('paired physical minibatches must contain complete two-seat games')
         self.amp_bfloat16 = amp_bfloat16
         self._chunked_update = physical_minibatch_size is not None or amp_bfloat16
         if self._chunked_update:
@@ -201,7 +192,6 @@ class StudentPPO(PPO):
             self.update_metrics = self.monitor.finish(self)
             self.update_metrics.update(selection_metrics)
             self.update_metrics.update(getattr(self, "value_metrics", {}))
-            self.update_metrics.update(getattr(self, "pair_metrics", {}))
             if self.monitor.enabled:
                 self.update_metrics.update(actor_learning_rate=self.learning_rate,
                                            critic_learning_rate=self.learning_rate)
@@ -218,14 +208,6 @@ class StudentPPO(PPO):
         Keep the configured number of minibatches/epochs. Thus filtering
         reduces their sample count, not the number of optimizer steps.
         """
-        if self.pair_minibatches:
-            steps = self.storage.num_transitions_per_env
-            games = torch.randperm(steps * self.storage.num_envs // 2, device=self.device)
-            # CTS indexes env-major, while adjacent returned samples must be
-            # (same tick/game seat0, same tick/game seat1).
-            first = (games // steps) * (2 * steps) + games % steps
-            indices = torch.stack((first, first + steps), -1).flatten()
-            return (indices.new_empty(0), indices), {'paired_minibatches': 1.0}
         if self.advantage_top_fraction == 1:
             return None, {}
         storage = self.storage
@@ -384,13 +366,6 @@ class StudentPPO(PPO):
             # The bridge already resolved this on the host. Skip CTS's CUDA
             # any()/zero-multiplies without changing its actual timeout path.
             extras = {key: value for key, value in extras.items() if key != 'time_outs'}
-        if getattr(self.policy, 'joint_critic', False):
-            pairs = rewards.reshape(-1, 2)
-            valid = (pairs.sum(-1) == 0).all() & (dones[::2] == dones[1::2]).all()
-            if valid.is_cuda:
-                torch._assert_async(valid, 'joint critic requires zero-sum rewards and paired episode ends')
-            elif not bool(valid):
-                raise ValueError('joint critic requires zero-sum rewards and paired episode ends')
         if extras.get("terminal_observations") is None:
             timeouts = extras.get("time_outs")
             if timeouts is not None and bool(timeouts.any()):
@@ -406,8 +381,6 @@ class StudentPPO(PPO):
                        (2 if self.normalize_advantage_per_mini_batch else 1))
         if self.storage.num_envs * self.storage.num_transitions_per_env < required:
             raise ValueError(f"active PPO rollout needs at least {required} samples")
-        if self.pair_minibatches and (self.storage.num_envs * self.storage.num_transitions_per_env) % (2 * self.num_mini_batches):
-            raise ValueError('paired rollout must divide into complete two-seat minibatches')
 
     def compute_returns(self, obs):
         # Recheck after the runner shortens the final active rollout. Its GAE
@@ -435,21 +408,6 @@ class StudentPPO(PPO):
                 torch._assert_async(valid, "bounded value requires returns within [-1,1]")
             elif not bool(valid):
                 raise ValueError("bounded value requires returns within [-1,1]")
-            if getattr(self.policy, 'joint_critic', False):
-                valid = (target.reshape(-1, 2).sum(-1).abs() <= 1e-4).all()
-                if valid.is_cuda:
-                    torch._assert_async(valid, 'joint critic GAE targets must be antisymmetric')
-                elif not bool(valid):
-                    raise ValueError('joint critic GAE targets must be antisymmetric')
-        if self.pair_minibatches:
-            steps = self.storage.num_transitions_per_env
-            residuals = torch.stack([field[:steps].reshape(-1, 2).sum(-1).abs().mean()
-                                    for field in (self.storage.values, self.storage.returns)])
-            if self.is_multi_gpu:
-                torch.distributed.all_reduce(residuals)
-                residuals /= self.gpu_world_size
-            self.pair_metrics = dict(zip(('paired_value_sum_abs_mean', 'paired_return_sum_abs_mean'),
-                                         residuals.tolist()))
 
     @torch.no_grad()
     def _normalize_advantages(self, advantages):

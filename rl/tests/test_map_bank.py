@@ -74,7 +74,7 @@ def test_stream_is_deterministic_independent_of_prefetch_and_preserves_live_game
                 auto_reset=False, device=device, backend='cpu' if device == 'cpu' else 'gpu'))
             sampler = MapSampler(env, CONFIG, 6, seed=47, curriculum=CURRICULUM,
                 generation_workers=workers, refresh_reuse=1, refresh_chunk_size=4,
-                prefetch_chunks=2*workers+1, d4=True)
+                prefetch_chunks=2*workers+1)
             stack.callback(sampler.close)
             samplers.append(sampler)
         mask = np.array([True, False, True, False]) if device == 'cpu' else torch.tensor(

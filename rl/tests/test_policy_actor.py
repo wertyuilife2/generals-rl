@@ -119,10 +119,7 @@ class PolicyActorTests(unittest.TestCase):
              {"knowledge_channels": 11, "own_king_geometry": True, "critic_actor_information": True},
              {"knowledge_channels": 11, "own_king_geometry": True}, GROUPS),
         ]
-        for kind in ("vit", "resnet"):
-            for mode in ("dense", "pyramid"):
-                options = {"backbone": kind, "spatial_mode": mode}
-                cases.append(("scaled", ScaledInformationSpatialPPOPolicy, options, options, SCALED_GROUPS))
+        cases.append(("scaled", ScaledInformationSpatialPPOPolicy, {}, {}, SCALED_GROUPS))
         for family, policy_class, options, network, groups in cases:
             with self.subTest(family=family, network=network):
                 original = policy_class(obs, groups, 649, map_width=9, map_height=9, **options)

@@ -7,9 +7,8 @@ from .state import GameBatch
 class EncodedActionSpace:
     """WAIT=0; MOVE=1 + source*8 + direction*2 + mode (engine encoding)."""
 
-    def __init__(self, width: int, height: int, *, deduplicate_half=False):
+    def __init__(self, width: int, height: int):
         self.width, self.height = width, height
-        self.deduplicate_half = deduplicate_half
         self.size = 1 + width * height * 8
         self._tables = {}
 
@@ -33,10 +32,6 @@ class EncodedActionSpace:
         moves = (owned[:, :, None] & in_bounds[None] &
                  (state["terrain"][:, targets] != 1) & batch.valid_cells[:, targets] & active[:, None, None])
         moves = moves[..., None].expand(-1, -1, -1, 2)
-        if self.deduplicate_half:
-            # floor(2/2) == 2-1. This uses the actor's own visible source only.
-            modes = torch.stack((torch.ones_like(owned), state["army"] != 2), -1)
-            moves = moves & modes[:, :, None, :]
         moves = moves.reshape(batch.num_envs, -1)
         # A terminal or eliminated player's observation still needs a valid
         # distribution. WAIT is its absorbing action.
@@ -64,6 +59,4 @@ class EncodedActionSpace:
 
 def make_action_space(config):
     """Use the same configured action boundary for training and deployment."""
-    from .features import feature_recipe
-    return EncodedActionSpace(config.width, config.height,
-                              deduplicate_half=feature_recipe(getattr(config, "feature_set", "stacked")).deduplicate_half)
+    return EncodedActionSpace(config.width, config.height)

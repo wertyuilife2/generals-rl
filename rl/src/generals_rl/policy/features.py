@@ -19,7 +19,6 @@ class FeatureRecipe:
     knowledge_channels: int
     half_precision: bool = False
     dynamic_memory: bool = False
-    deduplicate_half: bool = False
     terrain_distances: bool = False
 
     @property
@@ -31,7 +30,6 @@ FEATURE_RECIPES = {
     "stacked": FeatureRecipe(4, 11),
     "compact": FeatureRecipe(4, 11, half_precision=True),
     "temporal": FeatureRecipe(8, 12, half_precision=True, dynamic_memory=True),
-    "temporal_dedup": FeatureRecipe(8, 12, half_precision=True, dynamic_memory=True, deduplicate_half=True),
     "temporal_paths": FeatureRecipe(8, 14, half_precision=True, dynamic_memory=True, terrain_distances=True),
 }
 FEATURE_SETS = tuple(FEATURE_RECIPES)

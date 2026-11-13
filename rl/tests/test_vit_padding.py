@@ -71,7 +71,7 @@ def test_padding_cannot_change_actor_valid_actions_and_export_matches(patch_size
         torch.testing.assert_close(model.evaluate(altered), model.evaluate(obs), rtol=0, atol=0)
     assert spec['network']['mask_padding_tokens'] is True
     assert spec['network']['patch_size'] == patch_size
-    with pytest.raises(ValueError, match='dense ViT'):
+    with pytest.raises(ValueError, match='backbone must be vit'):
         policy(obs, backbone='resnet')
 
 

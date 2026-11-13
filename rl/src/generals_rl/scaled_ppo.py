@@ -14,7 +14,7 @@ from .spatial_ppo import SpatialPPOPolicy
 from .value_distribution import ValueDistribution
 from .policy.features import feature_recipe, public_features
 from .policy.layout import ObservationLayout
-from .policy.scaled import _ScaledInformationActor, _ViTBackbone, RESNET_TOTAL_PRESETS, vit_configuration
+from .policy.scaled import _ScaledInformationActor, _ViTBackbone, VIT_TOTAL_PRESETS, vit_configuration
 from .policy.tokens import (pack_tokens, paired_token_blocks, patch_mask, prepare_tokens, spatial_features,
                             token_blocks, valid_mean, valid_token_features)
 
@@ -141,32 +141,26 @@ class _AttentionInformationCritic(nn.Module):
 
 
 @lru_cache(maxsize=32)
-def _compiled_numeric_forward(mode, shared, privileged, fusion, max_autotune=False, batch_shared=False, joint_critic=False):
+def _compiled_numeric_forward(mode, shared, privileged, fusion, batch_shared=False):
     # Separate frame caches keep the three forward modes and architecture
     # choices from consuming one Dynamo frame's shape-recompilation budget.
     original = ScaledInformationSpatialPPOPolicy._numeric_forward
     name = (f"scaled_{mode}_shared{int(shared)}_priv{int(privileged)}_{fusion}"
-            f"_maxauto{int(max_autotune)}_batched{int(batch_shared)}")
-    if joint_critic:
-        name += '_joint_game'
+            f"_batched{int(batch_shared)}")
     forward = FunctionType(original.__code__.replace(co_name=name), original.__globals__, name,
                            original.__defaults__, original.__closure__)
     options = {"triton.cudagraphs": False, "freezing": False}
-    if max_autotune:
-        options.update(emulate_precision_casts=False, max_autotune=True)
     return torch.compile(forward, dynamic=True, fullgraph=True, options=options)
 
 
 @lru_cache(maxsize=32)
-def _compiled_frozen_actor_forward(batch_size, max_autotune=False):
+def _compiled_frozen_actor_forward(batch_size):
     """Static batch buckets cache unbound functions, never snapshot modules."""
     original = _ScaledInformationActor.forward
-    name = f"frozen_actor_batch_{batch_size}_maxauto{int(max_autotune)}"
+    name = f"frozen_actor_batch_{batch_size}"
     forward = FunctionType(original.__code__.replace(co_name=name), original.__globals__, name,
                            original.__defaults__, original.__closure__)
     options = {"triton.cudagraphs": False, "freezing": False}
-    if max_autotune:
-        options.update(emulate_precision_casts=False, max_autotune=True)
     return torch.compile(forward, dynamic=False, fullgraph=True, options=options)
 
 
@@ -188,32 +182,24 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                  wait_move_factorization=True, inference_chunk_size=128, amp_bfloat16=False,
                  compile_forward=False, spatial_mode="dense", mask_padding_tokens=None, patch_size=1,
                  critic_fusion="late", critic_attention_layers=2, batch_shared_forward=False,
-                 value_distribution="scalar", value_bins=128, value_sigma=.04, feature_set="stacked",
-                 joint_critic=False):
+                 value_distribution="scalar", value_bins=128, value_sigma=.04, feature_set="stacked"):
         nn.Module.__init__(self)
-        if backbone not in ("resnet", "vit"):
-            raise ValueError("backbone must be resnet or vit")
-        if spatial_mode not in ("dense", "pyramid"):
-            raise ValueError("spatial_mode must be dense or pyramid")
+        if backbone != "vit":
+            raise ValueError("backbone must be vit; use frozen source for retired networks")
+        if spatial_mode != "dense":
+            raise ValueError("spatial_mode must be dense")
         if critic_fusion not in ("late", "early_shared", "post_attention", "joint_independent"):
             raise ValueError("unsupported critic_fusion")
         if critic_fusion in ("early_shared", "post_attention") and (
-                backbone != "vit" or spatial_mode != "dense" or share_backbone is not True):
+                share_backbone is not True):
             raise ValueError("attention critic fusion requires a shared dense ViT")
-        if critic_fusion == "joint_independent" and (backbone != "vit" or spatial_mode != "dense"
-                or share_backbone is not False or critic_privileged is not True or patch_size != 1):
+        if critic_fusion == "joint_independent" and (share_backbone is not False or critic_privileged is not True or patch_size != 1):
             raise ValueError("joint_independent requires independent privileged dense ViT patch1")
-        if type(joint_critic) is not bool:
-            raise TypeError('joint_critic must be boolean')
-        if joint_critic and (critic_fusion != 'early_shared' or not critic_privileged
-                             or value_distribution != 'hl_gauss' or inference_chunk_size % 2 or batch_shared_forward):
-            raise ValueError('joint critic requires sequential privileged early_shared, HL-Gauss and even inference chunks')
-        self.joint_critic = joint_critic
         if mask_padding_tokens is None:
-            mask_padding_tokens = backbone == "vit" and spatial_mode == "dense"
-        if type(mask_padding_tokens) is not bool or mask_padding_tokens and (backbone != 'vit' or spatial_mode != 'dense'):
-            raise ValueError('mask_padding_tokens requires a dense ViT')
-        if not isinstance(model_size, str) or model_size.lower() not in RESNET_TOTAL_PRESETS:
+            mask_padding_tokens = True
+        if type(mask_padding_tokens) is not bool:
+            raise ValueError('mask_padding_tokens must be boolean')
+        if not isinstance(model_size, str) or model_size.lower() not in VIT_TOTAL_PRESETS:
             raise ValueError("model_size must be 1m, 10m, or 100m")
         self.backbone_kind, self.model_size = backbone, model_size.lower()
         recipe = feature_recipe(feature_set)
@@ -257,9 +243,9 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         self.history_length, self.head_channels = history_length, head_channels
         self.critic_fusion = critic_fusion
         self.batch_shared_forward = batch_shared_forward
-        vit_config = vit_configuration(self.model_size, share_backbone) if backbone == "vit" else None
-        self.actor = _ScaledInformationActor(self.layout, backbone, self.model_size, input_channel_alignment,
-                                             head_channels, spatial_mode, mask_padding_tokens, patch_size, vit_config)
+        vit_config = vit_configuration(self.model_size, share_backbone)
+        self.actor = _ScaledInformationActor(self.layout, self.model_size, input_channel_alignment,
+                                             head_channels, mask_padding_tokens, patch_size, vit_config)
         if critic_fusion == "late":
             value_encoder = None if share_backbone else deepcopy(self.actor.encoder)
             self.critic = _ScaledInformationCritic(self.layout, value_encoder, head_channels, patch_size,
@@ -278,22 +264,6 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             # Changing the value head must not advance the rollout RNG stream.
             with torch.random.fork_rng(devices=[]):
                 self.critic.value_head[-1] = nn.Linear(head_channels, self.value_distribution.outputs)
-        if joint_critic:
-            # Extra critic-only input parameters must not change actor/common
-            # initialization or the rollout RNG stream. Spatial tokens stay N.
-            with torch.random.fork_rng(devices=[]):
-                width = self.actor.encoder.backbone.transformer.embed_dim
-                self.critic.opponent_projection = nn.Linear(width, width, bias=False)
-                original = self.critic.context[0]
-                extra = public_dim + self.layout.public_extra_dim
-                expanded = nn.Linear(original.in_features + extra, head_channels)
-                with torch.no_grad():
-                    split = head_channels + extra
-                    expanded.weight.zero_()
-                    expanded.weight[:, :split].copy_(original.weight[:, :split])
-                    expanded.weight[:, split + extra:].copy_(original.weight[:, split:])
-                    expanded.bias.copy_(original.bias)
-                self.critic.context[0] = expanded
         self.distribution = None
         self.num_actions = self.layout.num_actions
         self.num_actor_obs = self.layout.history_dim + self.layout.knowledge_dim
@@ -308,14 +278,10 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             self.semantics += f"_features_{feature_set}_v1"
         if value_distribution != "scalar":
             self.semantics += f"_value_{value_distribution}_{value_bins}_{value_sigma}"
-        if spatial_mode == "pyramid":
-            self.semantics += "_spatial_pyramid_v1"
         if mask_padding_tokens:
             self.semantics += "_valid_tokens_v1"
         if patch_size != 1:
             self.semantics += f"_patch{patch_size}"
-        if joint_critic:
-            self.semantics += '_joint_zero_sum_v1'
 
     def _validate_observations(self, obs, num_actions):
         if num_actions != self.layout.num_actions:
@@ -343,21 +309,6 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     def _numeric_forward(self, history, knowledge, valid_cells, privileged, tokens, mode):
         if mode == "actor":
             return self.actor(history, knowledge, valid_cells, tokens)
-        if self.joint_critic:
-            actor_tokens, game_tokens = tokens
-            if mode == 'joint':
-                logits = self.actor(history, knowledge, valid_cells, actor_tokens)
-            encoder = self.actor.encoder
-            valid = valid_cells[::2]
-            own = encoder.embed(history[::2], knowledge[::2], valid, game_tokens)
-            other = encoder.embed(history[1::2], knowledge[1::2], valid, game_tokens)
-            local = own + self.critic.opponent_projection(other)
-            public = public_features(self.layout, history, knowledge)
-            context = torch.cat((public[::2], public[1::2]), -1)
-            first = self.critic(local, context, privileged[::2], valid, game_tokens, encoder.backbone.transformer)
-            # Symmetric HL bins: reversing logits mirrors the return support.
-            values = torch.stack((first, first.flip(-1)), 1).flatten(0, 1)
-            return (logits, values) if mode == 'joint' else values
         if self.critic_fusion == "joint_independent":
             if mode == "joint":
                 logits = self.actor(history, knowledge, valid_cells, tokens)
@@ -400,9 +351,7 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
 
     def _numeric_network_forward(self, part, mode):
         history, knowledge, valid = part["policy"], part.get("knowledge"), part["valid_cells"]
-        compile_network = self.compile_forward and (self.backbone_kind == "vit" or not torch.is_grad_enabled())
-        max_autotune = (self.backbone_kind == "vit" and self.model_size == "100m"
-                        and self.spatial_mode == "pyramid" and history.is_cuda)
+        compile_network = self.compile_forward
         if (compile_network and mode == "actor" and not torch.is_grad_enabled() and not self.training
                 and all(not p.requires_grad for p in self.actor.parameters())):
             count = history.shape[0]
@@ -413,19 +362,14 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
                 valid = F.pad(valid, (0, 0, 0, bucket - count))
             tokens = (prepare_tokens(patch_mask(valid, self.layout.height, self.layout.width, self.patch_size))
                       if self.mask_padding_tokens else None)
-            return _compiled_frozen_actor_forward(bucket, max_autotune)(self.actor, history, knowledge, valid, tokens)[:count]
+            return _compiled_frozen_actor_forward(bucket)(self.actor, history, knowledge, valid, tokens)[:count]
         tokens = (prepare_tokens(patch_mask(valid, self.layout.height, self.layout.width, self.patch_size))
-                  if self.mask_padding_tokens and not (self.joint_critic and mode == 'critic') else None)
-        if self.joint_critic and mode != 'actor':
-            game_tokens = (prepare_tokens(patch_mask(valid[::2], self.layout.height, self.layout.width, self.patch_size))
-                           if self.mask_padding_tokens else None)
-            tokens = (tokens, game_tokens)
+                  if self.mask_padding_tokens else None)
         privileged = part["critic"] if mode != "actor" and self.critic_privileged else None
         args = (history, knowledge, valid, privileged, tokens, mode)
         if compile_network:
             return _compiled_numeric_forward(mode, self.share_backbone, self.critic_privileged,
-                                              self.critic_fusion, max_autotune, self.batch_shared_forward,
-                                              self.joint_critic)(self, *args)
+                                              self.critic_fusion, self.batch_shared_forward)(self, *args)
         return self._numeric_forward(*args)
 
     def _network_forward(self, part, mode):
@@ -438,8 +382,6 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
     def _forward(self, obs, *, critic=False, joint=False):
         reference = obs["policy"]
         count, mode = len(reference), "joint" if joint else "critic" if critic else "actor"
-        if self.joint_critic and mode != 'actor' and count % 2:
-            raise ValueError('joint critic expects adjacent complete seat0/seat1 pairs')
         if not count:
             logits, values = reference.new_empty((0, self.num_actions)), reference.new_empty((0, self.value_distribution.outputs))
             return (logits, values) if joint else values if critic else logits
@@ -470,9 +412,6 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
         return probabilities, values if raw_value else self._decode_values(values)
 
     def _decode_values(self, output):
-        if self.joint_critic:
-            first = self.value_distribution.decode(output[::2])
-            return torch.stack((first, -first), 1).flatten(0, 1)
         return self.value_distribution.decode(output)
 
     def evaluate(self, obs, is_teacher=False, **kwargs):

@@ -6,14 +6,13 @@
 
 Actor读取自己的局部地图、历史、记忆与公开比分，critic可额外读取当前完整棋盘。真实地图填充到训练画布；独立布尔 `valid_cells` 控制合法动作、统计归一化、attention与池化。无效格不作为可学习的地图通道，也不堆叠到历史。训练和导出共用构造器，将动作转换回真实地图宽度。
 
-动作保持环境原生编码：WAIT=0，其余为来源格×四方向×全量/半量。mask排除非己方来源、兵力不足、越界、山脉和填充目标。`temporal_dedup`只屏蔽来源恰有2兵时与全量等价的半量动作。
+动作保持环境原生编码：WAIT=0，其余为来源格×四方向×全量/半量。mask排除非己方来源、兵力不足、越界、山脉和填充目标。
 
 | 特征方案 | 历史／记忆 | 神经网络空间输入 | 附加公开统计 |
 |---|---|---|---|
 | stacked | H4/K11 | 4帧局部13通道＋K11＋将军相对坐标，按4通道对齐为68 | 当前比分／时钟 |
 | compact | H4/K11 | 当前局部类别、相邻帧己/敌兵力差、精简记忆，共28通道 | 当前比分／时钟 |
 | temporal | H8/K12 | 延长兵力差历史、最近见到的敌军兵力，共40通道 | 敌军兵力/领土相对16/64/256 tick EMA的差值 |
-| temporal_dedup | 同temporal | 同temporal | 同temporal，另启用等价动作去重 |
 | temporal_paths | H8/K14 | temporal＋己王／已发现敌王的地形距离，仍对齐40通道 | 同temporal |
 
 记忆按座位和episode隔离，只用可见地块与公开比分更新；旧敌军兵力不代表当前隐藏状态。新观测可更新地形、建筑和将军身份。局部combat风险与margin仍为连续特征，不按二值存储。
@@ -39,7 +38,7 @@ CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保
 
 存储实现与MDP表示分别配置。旧标准存储验证见[历史去重](history_storage_20261103.md)和[位打包](packed_storage_20261103.md)。
 
-实验开关`runner.algorithm.pair_minibatches`默认关闭；开启后按同局、同tick成对打乱两座样本，所有玩家样本仍各使用一次；逻辑批与物理批均须容纳完整双座，暂不与advantage筛选组合。包内默认配方显式设置`task.time_limit_mode="terminal_draw"`，在时限处接零后续价值，并令potential吸收；旧完整配置缺少该字段时，底层`TaskConfig`保留`bootstrap`默认值以兼容历史训练与恢复。Task的`terminated/truncated`仍记录模拟器自然终局／时限原因，训练桥接层独立决定是否bootstrap；两种模式都切断reset处的GAE，rollout边界仍bootstrap，最后一tick自然胜负优先。
+包内默认配方显式设置`task.time_limit_mode="terminal_draw"`，在时限处接零后续价值，并令potential吸收；旧完整配置缺少该字段时，底层`TaskConfig`保留`bootstrap`默认值以兼容历史训练与恢复。Task的`terminated/truncated`仍记录模拟器自然终局／时限原因，训练桥接层独立决定是否bootstrap；两种模式都切断reset处的GAE，rollout边界仍bootstrap，最后一tick自然胜负优先。
 
 ## Actor与critic
 
@@ -57,8 +56,6 @@ CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保
 `patch_size=3` 使用非重叠patch，23×23补齐到24×24；动作头恢复九个格子的移动logit。包含边缘有效格的partial patch保留，完全无效patch排除。改变patch大小或网络语义需重新训练。
 
 紧凑/时序方案目前支持 `early_shared` 双座当前自对弈。配置校验明确拒绝尚未验证的组合。
-
-实验开关`runner.policy.joint_critic`要求双座配对、稀疏±1奖励、固定gamma=1及HL-Gauss。两座历史／记忆分别经过共享局部embedding，另一座token再经过critic专属线性投影，与seat0局部和全图embedding相加，保持空间token数不变；双方公开统计进入价值头。每局仅执行一次critic Transformer，输出seat0分布，seat1反转bin顺序，标量价值显式取负。PPO保留两座损失的平均尺度和原value系数，actor不读取另一座数据；增加的参数初始化不改变actor权重和训练RNG。监控记录两座value／GAE return之和的平均绝对值。
 
 ## PPO与价值头
 
@@ -91,8 +88,6 @@ TensorBoard的 `MapBank/` 记录初始cache hit、加载秒数、累计抽图数
 历史配置键 `warmup_transitions/end_transitions` 与checkpoint的 `map_curriculum_transitions` 均计数**全局真实board ticks**。双座采样数是该值的两倍。resume恢复保存的绝对计数；warm-start新训练从零开始。`easy_spawn_reference_size=9`可在较大地图上保留易图近距离出生分布。详见[9×9课程](map_curriculum9_20261103.md)、[全尺寸课程](map_curriculum_full_20261103.md)及[压缩存储实验](map_curriculum_full_packed_20261103.md)。
 
 gamma和奖励课程按绝对PPO iteration推进，每次rollout开始前固定设置。`potential_decay`从原始territory/cities/army系数线性衰减，终点由 `potential_end_iteration` 指定，未指定时沿用tick课程终点；胜负奖励保持原值。此时奖励随训练变化，不能声称全程满足固定potential的PBRS策略不变性。
-
-实验开关`task.d4_augmentation`只支持固定正方形地图池。reset抽图后用独立RNG随机选择8种旋转／翻转之一，批量变换空间数组、general/spawn位置和valid mask；地图池、抽图RNG、座位及统计保持原样。两座共用变换后的实际棋盘，局内不再旋转观测或动作，历史／路径缓存自然处于同一坐标系；不复制8倍样本或地图池。导出的actor仍直接在评估原坐标中运行。
 
 ## 实验记录
 
