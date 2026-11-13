@@ -24,7 +24,7 @@ class LeagueConfig:
     mountain_max: float = 0.5
     city_min: float = 0.5
     city_max: float = 0.5
-    max_ticks: int = 50002
+    max_ticks: int = 3000
     seed: int = 1000042
     tick_seconds: float = 0.5
 

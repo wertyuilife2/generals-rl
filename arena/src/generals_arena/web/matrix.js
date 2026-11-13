@@ -1,6 +1,8 @@
 // Empirical win rates; the two rating pools never share observations.
 import { compareEntrants, entrantColor } from './history.js';
 
+const baselineOrder = new Map(['aggressive','expansion','defensive','random'].map((name,index)=>[name,index]));
+
 export function winColor(rate) {
   if (!Number.isFinite(rate)) return 'transparent';
   const low = [126,52,62], middle = [51,58,70], high = [32,126,105];
@@ -35,11 +37,14 @@ export function renderMatrix(host, matrix, rows, playerName, openMatchup) {
     const entry = entries.get(id) || {name:id};
     const {series,version} = entrantColor(entry);
     const group = series === 'WAIT' ? 2 : entry.kind === 'baseline' ? 1 : 0;
-    return {id,index,entry,series,version,group};
+    const baseline = baselineOrder.get(entry.name.replace(/-v\d+$/,'')) ?? baselineOrder.size;
+    return {id,index,entry,series,version,group,baseline};
   }).sort((a,b)=>a.group-b.group
     || (a.series !== b.series && ((seriesOrder.get(b.series) ?? 0)-(seriesOrder.get(a.series) ?? 0)
       || b.series.localeCompare(a.series,'en',{numeric:true,sensitivity:'base'})))
-    || b.version-a.version || compareEntrants(a.entry,b.entry));
+    || b.version-a.version
+    || (a.group === 1 && b.group === 1 && a.baseline-b.baseline)
+    || compareEntrants(a.entry,b.entry));
   const table = make('table','win-matrix'), head = make('thead',''), header = make('tr','');
   table.setAttribute('aria-label','行选手对列选手的胜率矩阵');
   const corner = make('th','matrix-corner'); corner.scope = 'col'; header.append(corner);

@@ -733,3 +733,81 @@ def test_map_revision_rejects_pending_games_and_non_map_code_changes(tmp_path):
     store.manifest={**before,'rating':'different-algorithm'}
     with pytest.raises(ValueError,match='engine or rating'):
         store.resize_maps(15,20,35)
+
+
+def completion_fixture(store):
+    candidate, job = add(store, games=4)
+    ids = [candidate['entrant_id'], store.reference]
+    records = []
+    for i in range(4):
+        seats = ids if i % 2 == 0 else [*ids, ids[0]]
+        plan = {'game_id': str(i), 'entrant_ids': seats}
+        store.insert_plans([plan], job)
+        records.append(({**plan, 'ticks': 8, 'winner_seat': 0,
+                         'placements': list(range(1, len(seats)+1)),
+                         'elimination_ticks': [None, *([8]*(len(seats)-1))],
+                         'final_alive': [True, *([False]*(len(seats)-1))]}, b'replay'))
+    return records
+
+
+def test_completion_batch_matches_sequential_scoring_and_is_idempotent(tmp_path):
+    single = league(tmp_path/'single', player_counts=(2,3))
+    batch = league(tmp_path/'batch', player_counts=(2,3))
+    records = completion_fixture(single)
+    completion_fixture(batch)
+    expected = [single.complete_result(*r) for r in records]
+    statements = []
+    with batch.session():
+        batch._connections.db.set_trace_callback(statements.append)
+        assert batch.complete_results(records) == expected
+        assert statements.count('BEGIN IMMEDIATE') == statements.count('COMMIT') == 1
+        assert batch.complete_results([records[0], records[0], *records[1:]]) == [expected[0], *expected]
+    assert single.leaderboards() == batch.leaderboards()
+    assert batch.jobs()[0]['done'] == 4
+    assert batch.jobs()[0]['status'] == 'complete'
+
+
+def test_completion_batch_rolls_back_all_results_on_invalid_peer(tmp_path):
+    store = league(tmp_path, player_counts=(2,3))
+    records = completion_fixture(store)
+    with pytest.raises(ValueError, match='never scheduled'):
+        store.complete_results([records[0], ({**records[1][0], 'game_id': 'missing'}, b'')])
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM games WHERE status='complete'").fetchone()[0] == 0
+        assert db.execute('SELECT count(*) FROM ratings').fetchone()[0] == 0
+    assert store.jobs()[0]['done'] == 0
+    completed = store.complete_results(records)
+    assert [r['sequence'] for r in completed] == list(range(4))
+
+
+@pytest.mark.parametrize('invalid', [False, True])
+def test_parallel_completion_burst_commits_together_and_preserves_valid_peers(tmp_path, monkeypatch, invalid):
+    from concurrent.futures import Future
+    from generals_arena.competitions import jobs
+    store = league(tmp_path, player_counts=(2,3))
+    records = completion_fixture(store)
+    if invalid:
+        records[1] = ({**records[1][0], 'game_id': 'missing'}, b'')
+    class Pool:
+        def __init__(self, *args): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def submit_native(self, entries, plans):
+            future = Future()
+            future.set_result([records[int(plans[0]['game_id'])]])
+            return future
+    monkeypatch.setattr(jobs, 'NativeMatchPool', Pool)
+    sizes = []
+    original = store.complete_results
+    def complete(batch):
+        sizes.append(len(batch))
+        return original(batch)
+    monkeypatch.setattr(store, 'complete_results', complete)
+    if invalid:
+        with pytest.raises(ValueError, match='never scheduled'):
+            run_jobs(store, workers=2)
+        assert sorted(sizes) == [1,1,1,1,4]
+        assert store.jobs()[0]['done'] == 3
+    else:
+        assert run_jobs(store, workers=2) == 4
+        assert sizes == [4]

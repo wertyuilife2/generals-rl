@@ -51,3 +51,61 @@ def test_exception_releases_a_slot_for_another_thread(tmp_path):
             with cpu_slot(directory=tmp_path, capacity=1):
                 return True
         assert pool.submit(acquire).result(timeout=3)
+
+
+def test_slots_reuse_descriptors_and_open_only_needed_files(tmp_path, monkeypatch):
+    from generals_arena.matches import resources
+    import builtins
+    opened = []
+    original = builtins.open
+    def tracked(*args, **kwargs):
+        stream = original(*args, **kwargs)
+        opened.append(stream)
+        return stream
+    monkeypatch.setattr(resources, 'open', tracked, raising=False)
+    for _ in range(20):
+        with cpu_slot(directory=tmp_path, capacity=4):
+            pass
+    assert len(opened) == 1
+    with cpu_slot(directory=tmp_path, capacity=4):
+        with cpu_slot(directory=tmp_path, capacity=4):
+            assert len(opened) == 2
+    assert all(not stream.closed for stream in opened)
+
+
+def test_threads_respect_shared_capacity_and_release_wakes_waiter(tmp_path):
+    acquired = threading.Event()
+    release = threading.Event()
+    def waiting():
+        with cpu_slot(directory=tmp_path, capacity=1):
+            acquired.set()
+            assert release.wait(3)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with cpu_slot(directory=tmp_path, capacity=1):
+            future = pool.submit(waiting)
+            assert not acquired.wait(.05)
+        try:
+            assert acquired.wait(2)
+        finally:
+            release.set()
+        future.result(timeout=3)
+
+
+def test_forked_child_opens_independent_lock_descriptors(tmp_path):
+    context = multiprocessing.get_context('fork')
+    parent, child = context.Pipe()
+    process = context.Process(target=_hold_slot, args=(tmp_path, child))
+    try:
+        with cpu_slot(directory=tmp_path, capacity=1):
+            process.start()
+            child.close()
+            assert not parent.poll(.1)
+        assert parent.poll(3) and parent.recv() == 'acquired'
+        parent.send('release')
+        process.join(3)
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.kill()
+        process.join(3)
+        parent.close()

@@ -460,23 +460,34 @@ class CompetitionStore:
         return disabled
 
     def complete_result(self, result, blob):
+        return self.complete_results([(result, blob)])[0]
+
+    def complete_results(self, records):
+        """Commit a completion burst atomically, scoring each game in input order."""
+        if not records:
+            return []
+        completed = []
         with self.connect(write=True) as db:
-            row = db.execute("SELECT * FROM games WHERE id=?", (result["game_id"],)).fetchone()
-            if row is None:
-                raise ValueError("game was never scheduled")
-            if row["status"] == "complete":
-                return json.loads(row["result"])
-            plan = json.loads(row["plan"])
-            if row["status"] not in ("pending", "live") or any(result.get(key) != value for key, value in plan.items()):
-                raise ValueError("game plan/status mismatch")
             sequence = db.execute("SELECT COALESCE(MAX(sequence),-1)+1 FROM games").fetchone()[0]
-            result = {**result, "sequence": sequence}
-            self._score(db, result)
-            db.execute("UPDATE games SET status='complete',result=?,replay=?,sequence=?,finished=? WHERE id=?",
-                       (canonical(result), blob, sequence, time.time(), result["game_id"]))
-            if row["job_id"]:
-                db.execute("UPDATE jobs SET done=done+1,status=CASE WHEN done+1>=budget THEN 'complete' ELSE 'queued' END WHERE id=?", (row["job_id"],))
-        return result
+            for result, blob in records:
+                row = db.execute("SELECT * FROM games WHERE id=?", (result["game_id"],)).fetchone()
+                if row is None:
+                    raise ValueError("game was never scheduled")
+                if row["status"] == "complete":
+                    completed.append(json.loads(row["result"]))
+                    continue
+                plan = json.loads(row["plan"])
+                if row["status"] not in ("pending", "live") or any(result.get(key) != value for key, value in plan.items()):
+                    raise ValueError("game plan/status mismatch")
+                result = {**result, "sequence": sequence}
+                self._score(db, result)
+                db.execute("UPDATE games SET status='complete',result=?,replay=?,sequence=?,finished=? WHERE id=?",
+                           (canonical(result), blob, sequence, time.time(), result["game_id"]))
+                if row["job_id"]:
+                    db.execute("UPDATE jobs SET done=done+1,status=CASE WHEN done+1>=budget THEN 'complete' ELSE 'queued' END WHERE id=?", (row["job_id"],))
+                completed.append(result)
+                sequence += 1
+        return completed
 
     def abort_live(self, game_id=None):
         with self.connect(write=True) as db:

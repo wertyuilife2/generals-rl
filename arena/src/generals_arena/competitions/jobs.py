@@ -202,6 +202,8 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
             if not futures:
                 break
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            done.update(future for future in futures if future.done())
+            ready = []
             for future in done:
                 current_job, plan = futures.pop(future)
                 if future.cancelled():
@@ -214,13 +216,31 @@ def _run_parallel(store, workers, limit, progress, job_id=None):
                     if 'policy_error' in result:
                         store.fail_game(result, blob)
                         raise PolicyError(result['policy_error'], details=result.get('error_detail'))
-                    store.complete_result(result, blob)
-                    completed += 1
-                    if progress is not None:
-                        progress(completed)
+                    ready.append((current_job, result, blob))
                 except Exception as exc:
                     failed_jobs[current_job] = exc
                     first_error = first_error or exc
+            if ready:
+                try:
+                    store.complete_results([(result, blob) for _, result, blob in ready])
+                except Exception:
+                    # The transaction rolled back. Preserve valid peers even if
+                    # one result is malformed, as with individual commits.
+                    for current_job, result, blob in ready:
+                        try:
+                            store.complete_result(result, blob)
+                        except Exception as exc:
+                            failed_jobs[current_job] = exc
+                            first_error = first_error or exc
+                        else:
+                            completed += 1
+                            if progress is not None:
+                                progress(completed)
+                else:
+                    for _ in ready:
+                        completed += 1
+                        if progress is not None:
+                            progress(completed)
             if first_error is not None:
                 # Preserve results from started tasks; leave cancelled plans pending.
                 for future in futures:

@@ -1,11 +1,12 @@
 """A shared CPU budget for bulk matches, including independent Arena commands."""
 from contextlib import contextmanager
 import fcntl
-from functools import wraps
+from functools import wraps, lru_cache
 import os
 from pathlib import Path
 import tempfile
 import threading
+import weakref
 
 
 def cpu_capacity():
@@ -14,39 +15,91 @@ def cpu_capacity():
     return max(1, available - 2)
 
 
+_pools = weakref.WeakSet()
+
+
+class _Slots:
+    def __init__(self, directory, capacity):
+        self.directory = directory
+        self.files = [None] * capacity
+        self.offset = os.getpid() % capacity
+        self.busy = set()
+        self.changed = threading.Condition()
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _pools.add(self)
+
+    def __del__(self):
+        for stream in self.files:
+            if stream is not None:
+                stream.close()
+
+    @contextmanager
+    def lease(self):
+        # Threads share descriptors, so reserve locally before exposing the lease.
+        # Independent commands still exclude one another with flock.
+        with self.changed:
+            while True:
+                for step in range(len(self.files)):
+                    index = (self.offset + step) % len(self.files)
+                    if index in self.busy:
+                        continue
+                    stream = self.files[index]
+                    if stream is None:
+                        stream = self.files[index] = open(self.directory / f'{index}.lock', 'a')
+                    try:
+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        continue
+                    self.busy.add(index)
+                    break
+                else:
+                    # Local releases notify immediately; poll only for releases
+                    # in another process, whose condition variable is separate.
+                    self.changed.wait(None if len(self.busy) == len(self.files) else .005)
+                    continue
+                break
+        try:
+            yield
+        finally:
+            with self.changed:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+                self.busy.remove(index)
+                self.changed.notify()
+
+
+_pool_lock = threading.Lock()
+
+
+@lru_cache(maxsize=32)
+def _slots(directory, capacity):
+    return _Slots(directory, capacity)
+
+
+def _after_fork():
+    global _pool_lock
+    # Never reuse inherited condition locks or flock descriptions in the child.
+    _pool_lock = threading.Lock()
+    for pool in list(_pools):
+        for stream in pool.files:
+            if stream is not None:
+                stream.close()
+    _slots.cache_clear()
+
+
+os.register_at_fork(after_in_child=_after_fork)
+
+
 @contextmanager
 def cpu_slot(*, directory=None, capacity=None):
-    """Lease one CPU while computing; the OS releases it on process death.
-
-    Wait outside SQLite transactions and process lifecycle locks. A separate
-    open file description per caller also excludes other threads in this process.
-    """
+    """Lease a CPU using reusable, lazily opened cross-process lock files."""
     capacity = cpu_capacity() if capacity is None else capacity
     if type(capacity) is not int or capacity < 1:
         raise ValueError('CPU capacity must be a positive integer')
     directory = Path(directory) if directory is not None else Path(tempfile.gettempdir()) / f'generals-arena-cpu-{os.getuid()}'
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    files = [open(directory / f'{index}.lock', 'a') for index in range(capacity)]
-    selected = None
-    offset = (os.getpid() + threading.get_native_id()) % capacity
-    try:
-        while selected is None:
-            for index in range(capacity):
-                stream = files[(index+offset) % capacity]
-                try:
-                    fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    continue
-                selected = stream
-                break
-            if selected is None:
-                threading.Event().wait(.05)
+    with _pool_lock:
+        slots = _slots(directory.absolute(), capacity)
+    with slots.lease():
         yield
-    finally:
-        if selected is not None:
-            fcntl.flock(selected, fcntl.LOCK_UN)
-        for stream in files:
-            stream.close()
 
 
 def cpu_bounded(function):
