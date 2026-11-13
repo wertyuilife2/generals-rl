@@ -49,20 +49,19 @@ static bool better(const Candidate &a, const Candidate &b) {
 }
 static wide movable(wide army, bool half) { return std::max<wide>(0,half ? army/2 : army-1); }
 static i64 encode(int source, int direction, bool half) { return 1+i64(source)*8+direction*2+half; }
-static int choose(Random &rng, const std::vector<double> &scores, double temperature) {
-    double maximum=*std::max_element(scores.begin(),scores.end()), sum=0;
-    std::vector<double> probabilities;
-    for(double value:scores) {
-        double weight=std::exp(std::max(-700.,std::min(0.,(value-maximum)/std::max(temperature,1e-6))));
-        probabilities.push_back(weight); sum+=weight;
+static int choose(Random &rng, const double *scores, int count, double temperature, double *probabilities) {
+    double maximum=*std::max_element(scores,scores+count), sum=0;
+    for(int i=0;i<count;++i) {
+        double weight=std::exp(std::max(-700.,std::min(0.,(scores[i]-maximum)/std::max(temperature,1e-6))));
+        probabilities[i]=weight; sum+=weight;
     }
-    // Match Generator.choice: normalized probabilities, cumsum, renormalize CDF.
+    // Preserve the normalized CDF's arithmetic and the single random draw.
     double cumulative=0;
-    for(double &value:probabilities) { value/=sum; cumulative+=value; value=cumulative; }
+    for(int i=0;i<count;++i) { probabilities[i]/=sum; cumulative+=probabilities[i]; probabilities[i]=cumulative; }
     double draw=rng.uniform();
-    for(std::size_t i=0;i<probabilities.size();++i)
-        if(draw<probabilities[i]/cumulative) return int(i);
-    return int(probabilities.size())-1;
+    for(int i=0;i<count;++i)
+        if(draw<probabilities[i]/cumulative) return i;
+    return count-1;
 }
 
 class Policy {
@@ -72,19 +71,30 @@ public:
     std::vector<int> terrain, structure, owner, path;
     std::vector<i64> army, seen;
     std::vector<std::array<int,4>> graph;
+    // Per-seat scratch storage retains capacity across decisions.
+    std::vector<int> owned,sources,attacks,cities,frontiers,cellX,cellY,searchParent,searchQueue;
+    std::vector<i64> threats;
+    std::vector<double> sourceScores,sourceProbabilities,friendlyValue;
+    std::vector<std::uint8_t> explorable;
+    std::vector<Candidate> choices;
     Policy(int k,int p):kind(k),pid(p) {}
     void remember(const Observation &o,const Options &options) {
         if(h!=o.height || w!=o.width) {
             h=o.height; w=o.width; n=h*w;
             terrain.assign(n,UNKNOWN); structure.assign(n,UNKNOWN); owner.assign(n,UNKNOWN_OWNER);
             army.assign(n,-1); seen.assign(n,-1); path.clear(); graph.resize(n);
-            for(int c=0;c<n;++c) graph[c]={c>=w?c-w:-1,c%w<w-1?c+1:-1,c<n-w?c+w:-1,c%w?c-1:-1};
+            cellX.resize(n); cellY.resize(n);
+            for(int c=0;c<n;++c) {
+                cellX[c]=c%w; cellY[c]=c/w;
+                graph[c]={c>=w?c-w:-1,cellX[c]<w-1?c+1:-1,c<n-w?c+w:-1,cellX[c]?c-1:-1};
+            }
         }
         for(int c=0;c<n;++c) {
             if(o.visible[c]) {
                 terrain[c]=o.terrain[c]; structure[c]=o.structure[c]; owner[c]=o.owner[c];
                 army[c]=o.army[c]; seen[c]=o.tick;
-            } else {
+            } else if(owner[c]!=UNKNOWN_OWNER || army[c]!=-1) {
+                // Unseen cells already in the unknown state need no writes.
                 if((o.tick-seen[c]>options.memory_ttl && structure[c]!=GENERAL) || owner[c]==pid)
                     owner[c]=UNKNOWN_OWNER;
                 army[c]=-1;
@@ -121,86 +131,117 @@ public:
         if(!action) path.clear();
         return action;
     }
-    std::vector<Candidate> candidates(const Observation &o,const Options &options,Random &rng) {
-        std::vector<int> owned,sources,attacks,cities,expansion,frontiers(n);
-        std::vector<i64> threats(n);
+    std::vector<Candidate> &candidates(const Observation &o,const Options &options,Random &rng) {
+        owned.clear(); sources.clear(); attacks.clear(); cities.clear(); choices.clear();
+        int expansionCount=0; explorable.resize(n);
+        frontiers.resize(n); threats.resize(n); friendlyValue.resize(n);
         for(int c=0;c<n;++c) {
             if(o.owner[c]==pid) {
                 owned.push_back(c); if(o.army[c]>1) sources.push_back(c);
+                frontiers[c]=0;
                 std::uint64_t threat=0;
                 for(int target:graph[c]) if(target>=0 && terrain[target]!=MOUNTAIN) {
                     frontiers[c]+=owner[target]!=pid;
                     if(o.owner[target]>=0 && o.owner[target]!=pid) threat+=std::max<i64>(o.army[target],0);
                 }
                 threats[c]=i64(threat);
+                double value=3.+std::min(double(o.army[c]),100.)*.06+frontiers[c];
+                value+=std::min<i64>(threats[c],100)*.15;
+                value+=(threats[c]!=0 && structure[c]==GENERAL)*20.;
+                friendlyValue[c]=value;
             }
             if(owner[c]>=0 && owner[c]!=pid) attacks.push_back(c);
             if(structure[c]==CITY && owner[c]!=pid) cities.push_back(c);
-            if((owner[c]==EMPTY || owner[c]==UNKNOWN_OWNER) && terrain[c]!=MOUNTAIN) expansion.push_back(c);
+            explorable[c]=(owner[c]==EMPTY || owner[c]==UNKNOWN_OWNER) && terrain[c]!=MOUNTAIN;
+            expansionCount+=explorable[c];
         }
-        if(sources.empty()) return {};
+        if(sources.empty()) return choices;
         auto source_score=[&](int c){return double(o.army[c])*(1.+.25*(frontiers[c]!=0));};
-        std::sort(sources.begin(),sources.end(),[&](int a,int b){double x=source_score(a),y=source_score(b); return x>y || (x==y && a<b);});
-        sources.resize(std::min<int>(sources.size(),options.max_sources));
+        int sourceCount=std::min<int>(sources.size(),options.max_sources);
+        std::partial_sort(sources.begin(),sources.begin()+sourceCount,sources.end(),[&](int a,int b){double x=source_score(a),y=source_score(b); return x>y || (x==y && a<b);});
+        sources.resize(sourceCount);
         if(sources.size()>1) {
-            std::vector<double> scores; for(int c:sources) scores.push_back(std::log1p(double(o.army[c])));
-            int index=choose(rng,scores,options.temperature), selected=sources[index];
+            sourceScores.clear(); for(int c:sources) sourceScores.push_back(std::log1p(double(o.army[c])));
+            sourceProbabilities.resize(sourceScores.size());
+            int index=choose(rng,sourceScores.data(),int(sourceScores.size()),options.temperature,sourceProbabilities.data()), selected=sources[index];
             sources.erase(sources.begin()+index); sources.insert(sources.begin(),selected);
         }
         const std::array<std::array<int,3>,3> strategies={{{MERGE,EXPLORE,ATTACK},{EXPAND,CAPTURE,GATHER},{FORTIFY,GATHER,EXPAND}}};
-        std::vector<Candidate> result;
-        std::vector<int> distance(n);
+        choices.reserve(sources.size()*12);
         for(int source:sources) {
-            for(int c=0;c<n;++c) distance[c]=std::abs(c/w-source/w)+std::abs(c%w-source%w);
+            const int sy=cellY[source],sx=cellX[source];
+            auto distance=[&](int target) { return std::abs(cellY[target]-sy)+std::abs(cellX[target]-sx); };
             for(int s:strategies[kind]) {
-                std::vector<Candidate> group;
+                // Targets are unique within a group; score/target is a total
+                // order, so retaining its first four preserves partial_sort.
+                std::array<Candidate,4> group;
+                int count=0;
+                auto add=[&](Candidate candidate) {
+                    int at=count;
+                    if(at==4) { if(!better(candidate,group[3])) return; at=3; }
+                    else ++count;
+                    while(at>0 && better(candidate,group[at-1])) { group[at]=group[at-1]; --at; }
+                    group[at]=candidate;
+                };
                 if(s==ATTACK || s==CAPTURE) {
                     for(int target:(s==ATTACK?attacks:cities)) {
                         i64 defending=std::max<i64>(army[target],0);
-                        if(o.army[source]-distance[target]<=defending) continue;
+                        int d=distance(target);
+                        if(o.army[source]-d<=defending) continue;
                         double value=structure[target]==GENERAL?50.:structure[target]==CITY?18.:8.;
-                        value=value/(distance[target]+1)+std::min(double(o.army[source]-defending),100.)*.01;
-                        group.push_back({source,target,s,value});
+                        value=value/(d+1)+std::min(double(o.army[source]-defending),100.)*.01;
+                        add({source,target,s,value});
                     }
                 } else if(s==EXPLORE || s==EXPAND) {
-                    auto nearest=expansion;
-                    int count=std::min<int>(16,nearest.size());
-                    std::partial_sort(nearest.begin(),nearest.begin()+count,nearest.end(),[&](int a,int b){return distance[a]<distance[b] || (distance[a]==distance[b] && a<b);});
+                    std::array<int,16> nearest;
+                    int count=std::min(16,expansionCount),found=0;
+                    int horizontalReach=std::max(sx,w-1-sx);
+                    // Manhattan rings ordered by row, then column give exactly
+                    // the original (distance, cell index) ordering.
+                    for(int d=0;found<count;++d) {
+                        for(int y=std::max(0,sy-d);y<=std::min(h-1,sy+d) && found<count;++y) {
+                            int dx=d-std::abs(y-sy);
+                            // Skip the middle band whose two endpoints are
+                            // outside the map, including very narrow maps.
+                            if(dx>horizontalReach) { y=sy+d-horizontalReach-1; continue; }
+                            int left=sx-dx,right=sx+dx,row=y*w;
+                            if(left>=0 && explorable[row+left]) nearest[found++]=row+left;
+                            if(found<count && dx>0 && right<w && explorable[row+right]) nearest[found++]=row+right;
+                        }
+                    }
                     for(int j=0;j<count;++j) {
-                        int target=nearest[j]; if(distance[target]>=o.army[source]) continue;
+                        int target=nearest[j],d=distance(target); if(d>=o.army[source]) continue;
                         int unknown=0; for(int neighbor:graph[target]) if(neighbor>=0 && terrain[neighbor]==UNKNOWN) ++unknown;
-                        group.push_back({source,target,s,(5.+.4*unknown)/(distance[target]+1)});
+                        add({source,target,s,(5.+.4*unknown)/(d+1)});
                     }
                 } else {
                     if(structure[source]==GENERAL && threats[source]>o.army[source]/2) continue;
                     for(int target:owned) {
                         if(target==source) continue;
                         if(s==FORTIFY ? threats[target]==0 : !(o.army[target]>o.army[source] || (o.army[target]==o.army[source] && target<source))) continue;
-                        double value=3.+std::min(double(o.army[target]),100.)*.06+frontiers[target];
-                        value+=std::min<i64>(threats[target],100)*.15;
-                        value+=(threats[target]!=0 && structure[target]==GENERAL)*20.;
-                        value/=distance[target]+1;
-                        group.push_back({source,target,s,value});
+                        double value=friendlyValue[target]/(distance(target)+1);
+                        add({source,target,s,value});
                     }
                 }
-                int count=std::min<int>(4,group.size());
-                std::partial_sort(group.begin(),group.begin()+count,group.end(),better);
-                result.insert(result.end(),group.begin(),group.begin()+count);
+                choices.insert(choices.end(),group.begin(),group.begin()+count);
             }
         }
-        return result;
+        return choices;
     }
     std::vector<int> plan(const Candidate &candidate,const Observation &o) {
         ++search_attempts;
-        std::vector<std::uint8_t> blocked(n);
-        for(int c=0;c<n;++c) blocked[c]=terrain[c]==MOUNTAIN ||
-            (owner[c]!=pid && owner[c]!=EMPTY && owner[c]!=UNKNOWN_OWNER && army[c]>=o.army[candidate.source]-1);
-        if(blocked[candidate.source] || blocked[candidate.target]) return {};
-        std::vector<int> parent(n,-1), queue; queue.reserve(n);
+        const i64 limit=o.army[candidate.source]-1;
+        auto blocked=[&](int c) {
+            return terrain[c]==MOUNTAIN ||
+                (owner[c]!=pid && owner[c]!=EMPTY && owner[c]!=UNKNOWN_OWNER && army[c]>=limit);
+        };
+        if(blocked(candidate.source) || blocked(candidate.target)) return {};
+        searchParent.assign(n,-1); searchQueue.clear(); searchQueue.reserve(n);
+        auto &parent=searchParent; auto &queue=searchQueue;
         parent[candidate.source]=candidate.source; queue.push_back(candidate.source);
         for(std::size_t head=0;head<queue.size();++head) {
             int cell=queue[head]; if(cell==candidate.target) break;
-            for(int next:graph[cell]) if(next>=0 && !blocked[next] && parent[next]<0) { parent[next]=cell; queue.push_back(next); }
+            for(int next:graph[cell]) if(next>=0 && parent[next]<0 && !blocked(next)) { parent[next]=cell; queue.push_back(next); }
         }
         if(parent[candidate.target]<0) return {};
         std::vector<int> route{candidate.target};
@@ -240,18 +281,20 @@ public:
         remember(o,options);
         if(kind==3) return random_action(o,rng);
         if((pending=follow(o,options))) return pending;
-        auto choices=candidates(o,options,rng);
+        auto &choices=candidates(o,options,rng);
         const std::array<std::array<int,3>,3> order={{{MERGE,EXPLORE,ATTACK},{EXPAND,CAPTURE,GATHER},{FORTIFY,GATHER,EXPAND}}};
+        int remaining[7]{};
+        for(const auto &candidate:choices) ++remaining[candidate.strategy];
         int attempts=std::min<int>(options.max_attempts,choices.size());
         for(int j=0;j<attempts;++j) {
-            std::vector<int> strategies; std::vector<double> weights;
-            for(int k=0;k<3;++k) if(std::any_of(choices.begin(),choices.end(),[&](const Candidate &c){return c.strategy==order[kind][k];})) {
-                strategies.push_back(order[kind][k]); weights.push_back(options.weights[k]);
+            int strategies[3],count=0; double weights[3],probabilities[3];
+            for(int k=0;k<3;++k) if(remaining[order[kind][k]]) {
+                strategies[count]=order[kind][k]; weights[count++]=options.weights[k];
             }
-            if(strategies.empty()) break;
-            int s=strategies[choose(rng,weights,options.temperature)], best=-1;
+            if(!count) break;
+            int s=strategies[choose(rng,weights,count,options.temperature,probabilities)], best=-1;
             for(int k=0;k<int(choices.size());++k) if(choices[k].strategy==s && (best<0 || choices[k].score>choices[best].score)) best=k;
-            Candidate candidate=choices[best]; choices.erase(choices.begin()+best);
+            Candidate candidate=choices[best]; choices.erase(choices.begin()+best); --remaining[s];
             auto route=plan(candidate,o); if(route.empty()) continue;
             path=std::move(route); strategy=s; path_tick=o.tick;
             if((pending=follow(o,options))) return pending;

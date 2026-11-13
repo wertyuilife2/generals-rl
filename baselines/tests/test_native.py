@@ -50,3 +50,34 @@ def test_noncontiguous_observations_are_copied_without_modification():
         assert a.rng.bit_generator.state == b.rng.bit_generator.state
     for key in changes:
         np.testing.assert_array_equal(changes[key], getattr(obs, key))
+
+
+@pytest.mark.parametrize('kind', ['aggressive', 'expansion', 'defensive'])
+@pytest.mark.parametrize('source_limit', [0, 1, 12])
+def test_planner_scratch_storage_survives_map_size_changes(kind, source_limit):
+    reused = create_controller(kind, seed=31)
+    reused.max_sources = source_limit
+    try:
+        for width, height in [(15, 17), (33, 35), (15, 63), (63, 15), (17, 15), (15, 17)]:
+            state = generate_map(MapConfig(width, height, 2), 45)
+            general = int(state.general_pos[0])
+            y, x = divmod(general, width)
+            yy, xx = np.indices(state.owner.shape)
+            domain = ((abs(yy-y) + abs(xx-x) <= 4)
+                      & (state.layout.terrain == 0)
+                      & (state.structure != 2))
+            state.owner[domain] = 0
+            state.army[domain] = 20
+            state.army.ravel()[general] = 30
+            obs = observe(state, 0)
+            fresh = create_controller(kind, seed=0)
+            try:
+                fresh.max_sources = source_limit
+                fresh.rng.bit_generator.state = reused.rng.bit_generator.state
+                assert reused.act(obs) == fresh.act(obs)
+                assert reused.path == fresh.path
+                assert reused.rng.bit_generator.state == fresh.rng.bit_generator.state
+            finally:
+                fresh.close()
+    finally:
+        reused.close()
