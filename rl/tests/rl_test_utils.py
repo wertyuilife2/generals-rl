@@ -3,7 +3,7 @@ from dataclasses import asdict
 
 import torch
 
-from generals_rl.cts import runner_config
+from generals_rl.config import default_training_config
 from generals_rl.task import TaskConfig
 
 
@@ -11,12 +11,21 @@ GROUPS = {"policy": ["policy"], "critic": ["critic"]}
 MAP_GROUPS = {"policy": ["policy", "knowledge"], "critic": ["critic", "policy", "knowledge"]}
 
 
-def light_policy_config():
-    return {"class_name": "generals_rl.spatial_ppo.LightSpatialPPOPolicy",
-            "action_distribution": "categorical", "spatial_channels": 16,
-            "history_length": 4, "players": 2, "map_width": 9, "map_height": 9,
-            "map_planes": 14, "public_dim": 13,
-            "actor_obs_normalization": False, "critic_obs_normalization": False}
+def stacked_vit_config():
+    """Pin the full-map H4/late/scalar architecture exercised by legacy tests."""
+    config = default_training_config()
+    config['task'].update(width=23, height=23, random_maps=True, history_length=4,
+                          feature_set='stacked', map_curriculum=None)
+    config['runner']['policy'].update(map_width=23, map_height=23, history_length=4,
+                                      knowledge_channels=11, feature_set='stacked',
+                                      critic_fusion='late', value_distribution='scalar')
+    return config
+
+
+def vit_policy_config():
+    options = stacked_vit_config()['runner']['policy']
+    options.update(map_width=9, map_height=9, amp_bfloat16=False, compile_forward=False)
+    return options
 
 
 def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory=False):
@@ -25,37 +34,42 @@ def spatial_observations(count=4, *, width=9, height=9, history_length=4, memory
     layout = ObservationLayout(width, height, history_length=history_length,
                                knowledge_channels=11 if memory else 0)
     frames = torch.randn(count, history_length, layout.frame_dim)
-    maps = frames[..., :14 * layout.cells].reshape(count, history_length, 14, layout.cells)
+    maps = frames[..., :13 * layout.cells].reshape(count, history_length, 13, layout.cells)
     maps[:, :, 4:6].zero_()
     maps[:, :, 4:6, width + 1] = 1
     values = {"policy": frames.flatten(1), "single_obs": frames[:, -1].clone(),
-              "critic": frames[:, -1].clone(),
-              "action_mask": torch.ones(count, layout.num_actions, dtype=torch.bool)}
+              "critic": torch.cat((frames[:, -1, layout.cells:12 * layout.cells], frames[:, -1, 13 * layout.cells:]), -1),
+              "action_mask": torch.ones(count, layout.num_actions, dtype=torch.bool),
+              "valid_cells": torch.ones(count, layout.cells, dtype=torch.bool)}
     if memory:
         values["knowledge"] = torch.randn(count, layout.knowledge_dim)
     return TensorDict(values, [count])
 
 
 def small_training_config(*, task_overrides=None, runner_overrides=None):
-    """Bounded CPU fixture for the supported v32 information-policy lifecycle."""
+    """Bounded CPU ViT fixture; production defaults live only in default.json."""
     task = dict(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=4, max_episode_steps=3,
                 history_length=4, opponent="self_play", seed=19,
                 mountain_density=0, city_density=0, threads=1,
-                combat_features=True, king_threat_distance=True)
+                combat_features=True, king_threat_distance=True, persistent_knowledge=True)
     task.update(task_overrides or {})
     options = dict(rollout_steps=4, learning_epochs=2, mini_batches=2)
     options.update(runner_overrides or {})
-    runner = runner_config(**options)
-    runner["obs_groups"] = GROUPS.copy()
-    runner.pop("storage_obs_keys", None)
-    runner["policy"] = light_policy_config()
-    runner["policy"].update(class_name="generals_rl.information_ppo.InformationSpatialPPOPolicy",
-                            own_king_geometry=True, wait_move_factorization=True)
-    runner["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO",
-                                teacher_env_ratio=0,
-                                schedule="fixed", desired_kl=None)
-    return {"task": asdict(TaskConfig(**task)), "runner": runner, "torch_threads": 1,
-            "evaluation": {"enabled": False}}
+    runner = default_training_config()['runner']
+    runner.update(num_steps_per_env=options['rollout_steps'], save_interval=2000,
+                  storage_history={}, storage_codec=None)
+    runner.pop('storage_obs_keys')
+    runner['policy'] = vit_policy_config()
+    runner['policy'].update(map_width=task['width'], map_height=task['height'])
+    runner['algorithm'].update(num_learning_epochs=options['learning_epochs'],
+                              num_mini_batches=options['mini_batches'],
+                              schedule='fixed', desired_kl=None, gamma=.995,
+                              physical_minibatch_size=None, amp_bfloat16=False,
+                              use_clipped_value_loss=True, value_loss_coef=1.)
+    return {'task': asdict(TaskConfig(**task)), 'runner': runner, 'torch_threads': 1,
+            'self_play': {'pool_size': 2, 'retain_seed': False, 'snapshot_interval': 50,
+                          'stochastic': True},
+            'evaluation': {'enabled': False}}
 
 
 def assert_nested_equal(test, actual, expected):

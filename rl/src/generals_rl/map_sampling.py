@@ -2,10 +2,8 @@
 import numpy as np
 import torch
 
-from generals.core.mapgen import generate_map
-from generals.protocol import STATE_DTYPES, state_shape
-from generals.core.batch import pack_states
-from generals.core.state import MapLayout
+from generals.protocol import STATE_DTYPES
+from .map_bank import build_bank as _build_bank, load_bank, pad_state
 
 
 def _replace_initial(backend, rows=None, arrays=None, stats=None, rng=None):
@@ -59,65 +57,37 @@ def _replace_initial(backend, rows=None, arrays=None, stats=None, rng=None):
         backend._initial_rng[rows] = rng
 
 
-def pad_state(state, width, height):
-    """Pad only RL storage; no padding semantics enter the environment protocol."""
-    h, w = state.owner.shape
-    if h > height or w > width:
-        raise ValueError("sampled map exceeds the policy canvas")
-    valid = np.zeros((height, width), dtype=bool)
-    valid[:h, :w] = True
-    padding = ((0, height - h), (0, width - w))
-    result = state.copy()
-    result.layout = MapLayout(np.pad(state.layout.terrain, padding, constant_values=1))
-    for name, fill in (("structure", 0), ("owner", -1), ("army", 0)):
-        setattr(result, name, np.pad(getattr(state, name), padding, constant_values=fill))
-    for name in ("general_pos", "spawn_pos"):
-        old = getattr(state, name)
-        setattr(result, name, np.where(old >= 0, old // w * width + old % w, -1).astype(np.int32))
-    return result, valid.ravel()
-
-
-def _build_bank(config, size, seed, *, width, height):
-    cells, players = width * height, config.players
-    arrays = {name: np.empty(state_shape(name, size, cells, players), dtype=dtype)
-              for name, dtype in STATE_DTYPES.items()}
-    valid = np.empty((size, cells), dtype=bool)
-    seeds = np.random.SeedSequence([seed, 0x4D4150]).generate_state(size, dtype=np.uint64)
-    for index, map_seed in enumerate(seeds):
-        state, valid[index] = pad_state(generate_map(config, int(map_seed)), width, height)
-        packed, _, _ = pack_states([state])
-        for name in arrays:
-            arrays[name][index] = packed[name][0]
-    stats = np.empty((size, players, 3), dtype=np.int64)
-    for pid in range(players):
-        owned = arrays["owner"] == pid
-        stats[:, pid, 0] = np.where(owned, arrays["army"], 0).sum(axis=1)
-        stats[:, pid, 1] = owned.sum(axis=1)
-        stats[:, pid, 2] = (owned & (arrays["structure"] == 1)).sum(axis=1)
-    rng = np.random.SeedSequence([seed, 0x524E47]).generate_state(size, dtype=np.uint32)
-    rng[rng == 0] = 1
-    return arrays, stats, rng, valid
-
-
 class MapSampler:
     """Uniform replacement from a pre-generated bank, independently of learner RNG.
 
     Native initial/current storage is owned by the backend. Bank selections are
     copied only into requested reset lanes, so active games keep their maps.
     """
-    def __init__(self, env, config, size, *, seed):
+    def __init__(self, env, config, size, *, seed, curriculum=None,
+                 cache_dir=None, generation_workers=1, refresh_reuse=0, refresh_chunk_size=1024,
+                 prefetch_chunks=8):
         self.backend = getattr(env, "unwrapped", env)
         if isinstance(size, bool) or not isinstance(size, int) or size < 1:
             raise ValueError("map bank size must be a positive integer")
+        if type(prefetch_chunks) is not int or prefetch_chunks < 1:
+            raise ValueError('map prefetch chunks must be a positive integer')
         if self.backend.auto_reset:
             raise ValueError("map sampling requires auto_reset=False")
         if self.backend.players != config.players:
             raise ValueError("map bank and backend player counts must match")
         _replace_initial(self.backend)
         self.size = size
+        self.curriculum = curriculum
+        self.position = 0.
         self.tensor = isinstance(self.backend.state["army"], torch.Tensor)
-        self.arrays, self.stats, self.rng, self.bank_valid = _build_bank(
-            config, size, seed, width=self.backend.width, height=self.backend.height)
+        bank, self.bank_info = load_bank(config, size, seed, width=self.backend.width,
+            height=self.backend.height, curriculum=curriculum, cache_dir=cache_dir,
+            workers=min(generation_workers, max(1, (size+255)//256)), builder=_build_bank)
+        self.arrays, self.stats, self.rng, self.bank_valid = bank
+        self.stream = None
+        self.sampled_games = 0
+        self.level_ids = (np.zeros(self.backend.batch_size, dtype=np.int64)
+                          if curriculum is not None else None)
         self.valid = np.ones((self.backend.batch_size, self.backend.width * self.backend.height), dtype=bool)
         if self.tensor:
             self.device = self.backend.state["army"].device
@@ -125,35 +95,110 @@ class MapSampler:
                            for name, value in self.arrays.items()}
             self.bank_valid = torch.from_numpy(self.bank_valid).to(self.device)
             self.valid = torch.from_numpy(self.valid).to(self.device)
+            if self.level_ids is not None:
+                self.level_ids = torch.from_numpy(self.level_ids).to(self.device)
             self.stats = torch.from_numpy(self.stats).to(self.device, copy=True)
             self.rng = torch.from_numpy(self.rng.view(np.int32)).to(self.device, copy=True)
             stream_seed = int(np.random.SeedSequence([seed, 0x53414D]).generate_state(1, dtype=np.uint64)[0])
             self.generator = torch.Generator(device=self.device).manual_seed(stream_seed)
         else:
             self.generator = np.random.default_rng(np.random.SeedSequence([seed, 0x53414D]))
+        if refresh_reuse:
+            from .map_stream import MapStream
+            self.stream = MapStream(config, size, seed, width=self.backend.width, height=self.backend.height,
+                curriculum=curriculum, workers=generation_workers, chunk_size=refresh_chunk_size,
+                reuse=refresh_reuse, prefetch_chunks=prefetch_chunks)
 
-    def reset(self, mask=None):
+    def _refresh(self, count):
+        initial_draw = self.sampled_games == 0
+        self.sampled_games += count
+        if self.stream is None or initial_draw:
+            return
+        levels = self.curriculum.levels if self.curriculum is not None else 1
+        for start, size, (arrays, stats, rng, valid) in self.stream.consume(count):
+            rows = np.concatenate([np.arange(level*self.size+start, level*self.size+start+size) for level in range(levels)])
+            if self.tensor:
+                rows = torch.as_tensor(rows, device=self.device)
+                values = {**arrays, 'stats': stats, 'rng': rng.view(np.int32), 'valid': valid}
+                targets = {**self.arrays, 'stats': self.stats, 'rng': self.rng, 'valid': self.bank_valid}
+                for name, value in values.items():
+                    # Owned pageable CPU arrays; copies and consumers share the
+                    # current stream, so no host synchronization per field is needed.
+                    targets[name].index_copy_(0, rows, torch.from_numpy(value).to(self.device, non_blocking=True))
+            else:
+                for name, value in arrays.items():
+                    self.arrays[name][rows] = value
+                self.stats[rows], self.rng[rows], self.bank_valid[rows] = stats, rng, valid
+
+    def close(self):
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+
+    def set_transitions(self, transitions):
+        """Only future resets observe this schedule; live games are untouched."""
+        self.position = self.curriculum.position(transitions)
+
+    def metrics(self):
+        stream = self.stream
+        result = dict(map_bank_cache_hit=float(self.bank_info['cache_hit']),
+            map_bank_load_seconds=self.bank_info['load_seconds'], map_sampled_games=self.sampled_games,
+            map_introduced_base_maps=self.size+(stream.introduced if stream else 0),
+            map_refresh_wait_seconds=stream.wait_seconds if stream else 0.)
+        if self.curriculum is None:
+            return result
+        if self.tensor:
+            mean = self.level_ids.float().mean().item()
+            final = (self.level_ids == self.curriculum.levels - 1).float().mean().item()
+        else:
+            mean = float(self.level_ids.mean())
+            final = float((self.level_ids == self.curriculum.levels - 1).mean())
+        return dict(result, map_position=self.position, map_level_mean=mean, map_final_fraction=final)
+
+    def reset(self, mask=None, *, _rows=None):
+        # Task-internal callers may reuse their already compacted mask indices.
         backend = self.backend
         if self.tensor:
             if mask is not None and (not isinstance(mask, torch.Tensor) or mask.dtype != torch.bool
                     or mask.shape != (backend.batch_size,) or mask.device != self.device):
                 raise ValueError("map sampling reset mask must be bool [batch] on backend device")
-            rows = torch.arange(backend.batch_size, device=self.device) if mask is None else torch.where(mask)[0]
+            rows = (_rows if _rows is not None else
+                    torch.arange(backend.batch_size, device=self.device) if mask is None else torch.where(mask)[0])
             if not rows.numel():
                 return backend.state
+            self._refresh(len(rows))
             selected = torch.randint(self.size, (rows.numel(),), generator=self.generator, device=self.device)
+            if self.curriculum is not None:
+                location = self.position * (self.curriculum.levels - 1)
+                level = int(location)
+                if location > level:
+                    selected += self.size * (level + (torch.rand(rows.numel(), generator=self.generator,
+                                             device=self.device) < location - level).long())
+                elif level:
+                    selected += self.size * level
             arrays = {name: value.index_select(0, selected) for name, value in self.arrays.items()}
             stats, rng = self.stats.index_select(0, selected), self.rng.index_select(0, selected)
         else:
             if mask is not None and (not isinstance(mask, np.ndarray) or mask.dtype != bool
                                      or mask.shape != (backend.batch_size,)):
                 raise ValueError("map sampling reset mask must be bool [batch]")
-            rows = np.arange(backend.batch_size) if mask is None else np.flatnonzero(mask)
+            rows = _rows if _rows is not None else np.arange(backend.batch_size) if mask is None else np.flatnonzero(mask)
             if not len(rows):
                 return backend.state
+            self._refresh(len(rows))
             selected = self.generator.integers(self.size, size=len(rows))
+            if self.curriculum is not None:
+                location = self.position * (self.curriculum.levels - 1)
+                level = int(location)
+                if location > level:
+                    selected += self.size * (level + (self.generator.random(len(rows)) < location - level))
+                elif level:
+                    selected += self.size * level
             arrays = {name: value[selected] for name, value in self.arrays.items()}
             stats, rng = self.stats[selected], self.rng[selected]
-        self.valid[rows] = self.bank_valid[selected]
+        if self.curriculum is not None:
+            self.level_ids[rows] = selected // self.size
+        valid = self.bank_valid[selected]
+        self.valid[rows] = valid
         _replace_initial(backend, rows, arrays, stats, rng)
         return backend.reset(mask)

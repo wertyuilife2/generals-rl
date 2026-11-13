@@ -42,7 +42,7 @@ def arena_recording(directory, adjacent):
         engine.close()
     path = directory/'game.json.gz'
     path.write_bytes(encode_replay(initial, actions, digests))
-    return {'game_id':'testgame','opponent':'reference','candidate_seat':0,'ticks':state.tick,
+    return {'entrant_ids': ['candidate', 'reference'], 'game_id':'testgame','opponent':'reference','candidate_seat':0,'ticks':state.tick,
             'initial_digest':initial_digest,'final_digest':state_digest(state),'winner_seat':state.winner_id,
             'replay':str(path),'outcome':'win' if state.winner_id==0 else 'draw'}
 

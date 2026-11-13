@@ -6,7 +6,6 @@ from unittest.mock import patch
 import torch
 
 from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
-from generals_rl.spatial_ppo import LightSpatialPPOPolicy
 from generals_rl.student_ppo import StudentPPO
 from rl_test_utils import assert_nested_equal
 from rl_test_utils import MAP_GROUPS, spatial_observations
@@ -225,13 +224,9 @@ class StudentMicrobatchTests(unittest.TestCase):
     def _mask_validation_pair(self, kind):
         torch.manual_seed(928)
         obs = map_observations(7)
-        if kind == "map":
-            models = [ScaledInformationSpatialPPOPolicy(obs, MAP_GROUPS, 649, map_width=9, map_height=9, backbone="vit", model_size="1m", knowledge_channels=11)
-                      for _ in range(2)]
-        else:
-            groups = {"policy": ["policy"], "critic": ["critic"]}
-            models = [LightSpatialPPOPolicy(obs, groups, 649, map_width=9, map_height=9, spatial_channels=4, wait_move_factorization=True)
-                      for _ in range(2)]
+        models = [ScaledInformationSpatialPPOPolicy(
+            obs, {key: [*value, 'valid_cells'] for key, value in MAP_GROUPS.items()}, 649,
+            map_width=9, map_height=9, share_backbone=kind == 'shared') for _ in range(2)]
         models[1].load_state_dict(models[0].state_dict())
         # Reference follows the original per-physical public validation path.
         models[0].validate_action_mask = None
@@ -251,7 +246,7 @@ class StudentMicrobatchTests(unittest.TestCase):
         return obs, *algorithms
 
     def test_logical_mask_validation_preserves_probabilities_gradients_adam_lr_and_rng(self):
-        for kind in ("spatial", "map"):
+        for kind in ("independent", "shared"):
             with self.subTest(kind=kind):
                 obs, reference, candidate = self._mask_validation_pair(kind)
                 with torch.no_grad():
@@ -271,7 +266,7 @@ class StudentMicrobatchTests(unittest.TestCase):
                         torch.testing.assert_close(left.grad, right.grad, rtol=0, atol=0)
 
     def test_invalid_late_chunk_is_rejected_before_forward_and_public_mask_guards_remain(self):
-        for kind in ("spatial", "map"):
+        for kind in ("independent", "shared"):
             with self.subTest(kind=kind):
                 obs, _, candidate = self._mask_validation_pair(kind)
                 invalid = obs.clone()

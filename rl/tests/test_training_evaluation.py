@@ -58,7 +58,8 @@ def report_for(job, elo=100):
             'elo': elo, 'elo_ci': {'lower': elo - 20, 'upper': elo + 20, 'half_width': 20},
             'games': job['expected_games'], 'expected_games': job['expected_games'], 'errors': [],
             'device': job['device'], 'backend': job['backend'],
-            'by_opponent': {name: {'games': per_opponent} for name in opponents},
+            'by_opponent': {name: {'games': per_opponent, 'wins': 0, 'losses': 0,
+                                   'draws': per_opponent} for name in opponents},
             'results': [{'game_id': f'{name}-{index}', 'opponent': name}
                         for name in opponents for index in range(per_opponent)]}
 
@@ -73,6 +74,7 @@ def complete(evaluator, job, elo=100):
 def test_settings_use_one_based_updates_and_only_configure_evaluation_execution():
     value = TrainingEvalConfig(every_n_updates=3, maps_per_opponent=2, backend='cpu')
     assert value.every_n_updates == 3 and value.maps_per_opponent == 2
+    assert value.decision_limit_ms == 50
     assert [value.due(update) for update in (0, 1, 2, 3, 4, 6)] == [False, False, False, True, False, True]
     assert not TrainingEvalConfig(enabled=False, every_n_updates=3).due(3)
     assert 'inference' not in asdict(value)
@@ -86,11 +88,44 @@ def test_default_evaluation_uses_native_cpu_environment_and_independent_model_de
     config = json.loads(files('generals_rl').joinpath('default.json').read_text())
     settings = TrainingEvalConfig(**config['evaluation'])
     assert settings.backend == 'cpu' and settings.device == 'cuda:0'
+    assert settings.decision_limit_ms == 50
+
+
+def test_legacy_gpu_evaluation_keeps_inference_device_and_explicit_profile():
+    profile = {'explicit': 'unchanged'}
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        settings = TrainingEvalConfig(backend='gpu', device='cuda:3', profile=profile, batch_size=256)
+    assert asdict(settings)['backend'] == 'cpu'
+    assert settings.device == 'cuda:3' and settings.batch_size == 256
+    assert settings.profile == profile and settings.synchronous
+
+
+def test_resume_legacy_gpu_starts_new_scores_and_preserves_original_index(evaluator, tmp_path):
+    job = enqueue(evaluator, 2)
+    complete(evaluator, job, elo=800)
+    index = evaluator.directory / 'index.json'
+    old = json.loads(index.read_text())
+    old['deployment'].update(backend='gpu', device='cuda:0')
+    old['profile_id'] = 'retired-executor-profile'
+    index.write_text(json.dumps(old))
+    original = index.read_bytes()
+    with pytest.warns(FutureWarning, match='legacy GPU reports remain unchanged'):
+        resumed = PeriodicEvaluator(evaluator.settings, small_config(), tmp_path / 'new', None,
+                                    resume=job['checkpoint'], resume_updates=2)
+    assert not resumed.jobs and not resumed.pending and resumed.best_completed is None
+    assert index.read_bytes() == original
+    migrated = json.loads((resumed.directory / 'index.json').read_text())
+    assert migrated['deployment']['backend'] == 'cpu' and migrated['best'] is None
+    assert migrated['migration']['source_index_sha256'] == sha256(original).hexdigest()
+    assert migrated['migration']['source_profile_id'] == 'retired-executor-profile'
+    reloaded = PeriodicEvaluator(evaluator.settings, small_config(), tmp_path / 'new', None)
+    assert reloaded.migration == resumed.migration
 
 
 @pytest.mark.parametrize('values', [
     {'enabled': 'yes'}, {'every_n_updates': 0}, {'maps_per_opponent': True}, {'batch_size': -1},
     {'max_ticks': 0}, {'seed': -1}, {'cpu_threads': 0}, {'final_top_k': -1},
+    {'decision_limit_ms': 0}, {'decision_limit_ms': True}, {'decision_limit_ms': 1.5},
     {'final_games_multiplier': 0}, {'keep_snapshots': 0}, {'backend': 'gpu'}, {'backend': 'other'},
     {'device': None}, {'device': 'invalid'}, {'device': 'mps'}, {'timeout_seconds': True},
     {'timeout_seconds': 0}, {'timeout_seconds': float('inf')},
@@ -115,6 +150,7 @@ def test_dedicated_gpu_requires_disjoint_training_visibility():
             settings.validate_training_devices('cuda:0')
     settings.validate_training_devices('cpu')
     shared = TrainingEvalConfig(device='cuda', cuda_visible_devices='0', allow_shared_gpus=True)
+    assert shared.synchronous
     with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1'}):
         shared.validate_training_devices('cuda:0')
 
@@ -263,8 +299,9 @@ def test_unavailable_candidates_remain_in_curves_but_cannot_be_best_or_finalists
     assert [job['completed_ppo_updates'] for job in restored._candidates()] == [4]
 
 
-def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monkeypatch):
-    from generals_arena.competitions.evaluation import make_profile, profile_id
+@pytest.mark.parametrize('decision_limit_ms', [10, 50])
+def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monkeypatch, decision_limit_ms):
+    from generals_arena.competitions.evaluation import make_profile, profile_id, load_profile
     root = tmp_path / 'profiles'
     root.mkdir()
     (root / 'weights.dat').write_bytes(b'opaque weights')
@@ -274,8 +311,11 @@ def test_training_profile_freezes_paths_relative_to_profile_file(tmp_path, monke
     path = root / 'profile.json'
     path.write_text(json.dumps(profile))
     monkeypatch.chdir(tmp_path)
-    evaluator = PeriodicEvaluator(TrainingEvalConfig(profile=str(path)), small_config(), tmp_path / 'run', None)
-    assert evaluator.profile_id == profile_id(path)
+    evaluator = PeriodicEvaluator(TrainingEvalConfig(profile=str(path), decision_limit_ms=decision_limit_ms),
+                                 small_config(), tmp_path / 'run', None)
+    assert evaluator.profile_id == profile_id(dict(load_profile(path), decision_limit_ms=decision_limit_ms))
+    assert evaluator.profile['decision_limit_ms'] == decision_limit_ms
+    assert json.loads(path.read_text())['decision_limit_ms'] == 10
     job = enqueue(evaluator, 2)
     assert profile_id(job['profile_path']) == evaluator.profile_id
 
@@ -302,7 +342,7 @@ def test_top_k_confirmation_is_one_joint_job_and_changes_best(tmp_path):
     final = evaluator.confirmation
     assert set(final['policies']) == {f'{2:064x}', f'{4:064x}'}
     assert final['profile_id'] != evaluator.profile_id
-    assert final['expected_games'] == 44  # 2*5 reference pairs + one finalist pair, 2 maps*2 seats.
+    assert final['expected_games'] == 68  # 2*8 reference pairs + one finalist pair, 2 maps*2 seats.
     assert evaluator.best_completed['completed_ppo_updates'] == 2
     assert evaluator.best_completed['stage'] == 'confirmation'
     assert evaluator.best_completed['report'] == final['report']
@@ -323,10 +363,7 @@ def test_gpu_worker_routing_without_cuda_context(tmp_path, dedicated):
     job = enqueue(evaluator, 2)
     process = SimpleNamespace(pid=123, poll=lambda: None)
     with patch.dict(os.environ, {'CUDA_VISIBLE_DEVICES': '0,1', 'PYTHONPATH': 'preserved'}), \
-         patch('generals_rl.training_evaluation.subprocess.Popen', return_value=process) as popen, \
-         patch('generals_rl.training_evaluation.torch.cuda.is_initialized', return_value=True), \
-         patch('generals_rl.training_evaluation.torch.cuda.synchronize') as sync, \
-         patch('generals_rl.training_evaluation.torch.cuda.empty_cache') as empty:
+         patch('generals_rl.training_evaluation.subprocess.Popen', return_value=process) as popen:
         evaluator.poll()
     command = popen.call_args.args[0]
     assert command[command.index('-m') + 1:command.index('-m') + 3] == ['generals_arena', 'evaluate']
@@ -335,7 +372,6 @@ def test_gpu_worker_routing_without_cuda_context(tmp_path, dedicated):
     env = popen.call_args.kwargs['env']
     assert env['CUDA_VISIBLE_DEVICES'] == ('7' if dedicated else '0,1')
     assert env['PYTHONPATH'] == 'preserved' and env['OPENBLAS_NUM_THREADS'] == '1'
-    assert sync.call_count == empty.call_count == int(not dedicated)
     evaluator.running = None  # This is a routing stub, never a live process.
 
 
@@ -353,6 +389,11 @@ def test_real_training_evaluates_periodic_and_final_and_preserves_rng_and_optimi
     assert [job['completed_ppo_updates'] for job in jobs] == [2, 3]
     assert jobs[-1]['final'] is True
     for job in jobs:
+        report = json.loads(Path(job['report']).read_text())
+        assert report['profile']['decision_limit_ms'] == 50
+        for game in report['results']:
+            for row in game['decision_timing']:
+                assert row['limit_ns'] == (None if row['seat'] == game['candidate_seat'] else 50_000_000)
         saved = torch.load(job['checkpoint'], weights_only=True, map_location='cpu')
         assert saved['iter'] + 1 == job['completed_ppo_updates']
         assert saved['infos']['policy_spec'] and saved['infos']['source_id']
@@ -363,8 +404,32 @@ def test_real_training_evaluates_periodic_and_final_and_preserves_rng_and_optimi
         assert_nested_equal(unittest.TestCase(), actual[key], expected[key])
     events = EventAccumulator(str(tmp_path / 'enabled')).Reload()
     assert [point.step for point in events.Scalars('Arena/elo')] == [2, 3]
+    for name in ('aggressive', 'expansion', 'defensive', 'random', 'kestrel-v7', 'razor-v8', 'aegis-v2', 'WAIT'):
+        assert [p.step for p in events.Scalars(f'Arena/win_rate/{name}')] == [2, 3]
+    for metric in ('baseline4_mean_win_rate', 'heuristic3_mean_win_rate', 'mean_win_rate'):
+        assert [p.step for p in events.Scalars(f'Arena/{metric}')] == [2, 3]
+    assert all(job['expected_games'] == 16 for job in jobs)
+    assert len(list((tmp_path / 'enabled/evaluations/opponents').glob('*.zip'))) == 3
     best = json.loads((tmp_path / 'enabled/best_model.json').read_text())
     assert Path(best['bundle']).is_dir() and Path(best['checkpoint']).is_file()
+
+
+def test_outcome_metrics_keep_original_baselines_and_exclude_wait(evaluator):
+    from generals_arena.policies.references import BASELINE_NAMES, HEURISTIC_NAMES
+    logged = {}
+    evaluator.writer = SimpleNamespace(add_scalar=lambda tag, value, step: logged.update({tag: value}))
+    report = {'by_opponent': {
+        **{name: dict(games=10, wins=5, draws=2) for name in BASELINE_NAMES},
+        **{name: dict(games=10, wins=0, draws=4) for name in HEURISTIC_NAMES},
+        'WAIT': dict(games=10, wins=10, draws=0)},
+        'results': [dict(opponent='aegis-v2', candidate_seat=0,
+                         decision_timing=[dict(seat=1, timeouts=1)])]}
+    evaluator._log_outcomes(report, 'Arena', 1)
+    assert logged['Arena/baseline4_mean_win_rate'] == .5
+    assert logged['Arena/heuristic3_mean_win_rate'] == 0
+    assert logged['Arena/mean_win_rate'] == pytest.approx(2 / 7)
+    assert logged['Arena/win_rate/WAIT'] == 1
+    assert logged['Arena/timeouts/aegis-v2'] == 1
 
 
 def test_resume_into_new_output_recovers_pending_job_and_keeps_optimizer(tmp_path):
@@ -469,7 +534,7 @@ def test_real_cpu_training_runs_joint_confirmation_and_resumes(tmp_path):
     index = json.loads((output/'evaluations/index.json').read_text())
     report = json.loads(Path(index['confirmation']['report']).read_text())
     assert index['confirmation']['status'] == 'completed'
-    assert len(report['candidates']) == 2 and report['games'] == 44
+    assert len(report['candidates']) == 2 and report['games'] == 68
     a, b = [row['entrant_id'] for row in report['candidates']]
     assert report['win_matrix'][a][b]['games'] == 4
     assert json.loads((output/'best_model.json').read_text())['confirmation_complete']

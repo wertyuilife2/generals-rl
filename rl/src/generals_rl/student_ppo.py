@@ -32,7 +32,8 @@ class StudentPPO(PPO):
                  ppo_monitor=True, ppo_probe_samples=8192, ppo_probe_batch_size=1024,
                  physical_minibatch_size=None, amp_bfloat16=False,
                  adaptive_lr_min=1e-5, adaptive_lr_max=1e-2,
-                 betas=(0.9, 0.999), weight_decay=0.0, **kwargs):
+                 betas=(0.9, 0.999), weight_decay=0.0, advantage_top_fraction=1.0,
+                 **kwargs):
         self.teacher_environment_count(num_envs, teacher_env_ratio)
         if not isinstance(policy, CategoricalActorCritic):
             raise TypeError("StudentPPO requires CategoricalActorCritic")
@@ -60,6 +61,10 @@ class StudentPPO(PPO):
             raise ValueError("initial learning_rate must be within adaptive LR bounds")
         if kwargs.get("rnd_cfg") is not None or kwargs.get("symmetry_cfg") is not None:
             raise ValueError("student-only PPO does not support RND or symmetry")
+        if (isinstance(advantage_top_fraction, bool) or not isinstance(advantage_top_fraction, (int, float))
+                or not math.isfinite(advantage_top_fraction) or not 0 < advantage_top_fraction <= 1):
+            raise ValueError("advantage_top_fraction must be finite and in (0, 1]")
+        self.advantage_top_fraction = float(advantage_top_fraction)
         if (physical_minibatch_size is not None
                 and (isinstance(physical_minibatch_size, bool)
                      or not isinstance(physical_minibatch_size, int)
@@ -94,6 +99,17 @@ class StudentPPO(PPO):
             raise ValueError("PPO epoch and minibatch counts must be positive")
         self._check_sample_count()
         parameters = [parameter for parameter in policy.parameters() if parameter.requires_grad]
+        actor_ids = {id(p) for p in policy.actor.parameters()}
+        critic_ids = {id(p) for p in policy.critic.parameters()}
+        # Separate forwards can release actor activations before building the
+        # critic graph, even when both branches accumulate into shared weights.
+        # Policies opt in only when this avoids duplicating a shared backbone
+        # forward. Both losses still precede one reduction, clip and Adam step.
+        self._separate_backward = (
+            getattr(policy, 'separate_actor_critic_backward', False)
+            or (not getattr(policy, 'share_backbone', False)
+                and not actor_ids.intersection(critic_ids)
+                and {id(p) for p in parameters} <= actor_ids | critic_ids))
         # Keep the default single group, including parameter ordering and Adam
         # execution, identical to the original implementation.
         self.optimizer = torch.optim.Adam(parameters, lr=learning_rate, betas=betas, weight_decay=weight_decay)
@@ -105,6 +121,10 @@ class StudentPPO(PPO):
         self.monitor = PPOUpdateMonitor(enabled=ppo_monitor, probe_samples=ppo_probe_samples,
                                         probe_batch_size=ppo_probe_batch_size)
         self.update_metrics = {}
+        self.value_distribution = getattr(policy, "value_distribution", None)
+        self._classification_value = self.value_distribution is not None and self.value_distribution.kind != "scalar"
+        if self._classification_value and self.use_clipped_value_loss:
+            raise ValueError("classification values require use_clipped_value_loss=False")
 
     def restore_learning_rates(self):
         """Restore the shared scheduler scalar from a single-group Adam state."""
@@ -115,6 +135,20 @@ class StudentPPO(PPO):
         if (self._custom_learning_rates and self.schedule == "adaptive"
                 and not self.adaptive_lr_min <= self.learning_rate <= self.adaptive_lr_max):
             raise ValueError("checkpoint actor LR is outside configured adaptive LR bounds")
+
+    def act(self, obs):
+        # Keep canonical student rows and obtain logits/value together. The
+        # shared policy encodes each row once; CTS teacher gathers are avoided.
+        if self.policy.is_recurrent:
+            self.transition.hidden_states = self.policy.get_hidden_states()
+        _, values = self.policy.action_probabilities_and_value(obs)
+        self.transition.actions = self.policy.distribution.sample().unsqueeze(-1).detach()
+        self.transition.values = values.detach()
+        self.transition.actions_log_prob = self.policy.get_actions_log_prob(self.transition.actions).detach()
+        self.transition.action_mean = self.policy.action_mean.detach()
+        self.transition.action_sigma = self.policy.action_std.detach()
+        self.transition.observations = obs
+        return self.transition.actions
 
     def _adapt_learning_rate(self, kl_mean):
         """Actor KL drives the shared actor/critic learning rate."""
@@ -144,15 +178,20 @@ class StudentPPO(PPO):
         self.update_metrics = {}
         try:
             self.monitor.begin(self)
-            # The disabled path remains upstream PPO.update, including its RNG
-            # draws, reduction order and observer lifecycle.
+            indices, selection_metrics = self._advantage_sample_indices()
+            # Independent, unchunked execution retains upstream PPO.update.
+            # Shared encoders need the explicit actor/critic update adapter.
             # Distributed minibatch normalization uses the same adapter with
             # one physical chunk when memory splitting is disabled. Upstream
             # PPO would otherwise normalize each rank's advantages locally.
             use_adapter = (self._chunked_update or self._custom_learning_rates
+                           or getattr(self.policy, 'share_backbone', False) or self._classification_value
+                           or indices is not None
                            or (self.is_multi_gpu and self.normalize_advantage_per_mini_batch))
-            losses = self._update_microbatched() if use_adapter else super().update()
+            losses = self._update_microbatched(indices=indices) if use_adapter else super().update()
             self.update_metrics = self.monitor.finish(self)
+            self.update_metrics.update(selection_metrics)
+            self.update_metrics.update(getattr(self, "value_metrics", {}))
             if self.monitor.enabled:
                 self.update_metrics.update(actor_learning_rate=self.learning_rate,
                                            critic_learning_rate=self.learning_rate)
@@ -162,7 +201,39 @@ class StudentPPO(PPO):
         finally:
             self.monitor.release()
 
-    def _update_microbatched(self):
+    @torch.no_grad()
+    def _advantage_sample_indices(self):
+        """AverageJoe-style rank-local top-|global-standardized A| selection.
+
+        Keep the configured number of minibatches/epochs. Thus filtering
+        reduces their sample count, not the number of optimizer steps.
+        """
+        if self.advantage_top_fraction == 1:
+            return None, {}
+        storage = self.storage
+        steps, envs = storage.num_transitions_per_env, storage.num_envs
+        advantages = storage.advantages[:steps]
+        standardized = self._normalize_advantages(advantages)
+        scores = standardized.transpose(0, 1).flatten()
+        keep = int(scores.numel() * self.advantage_top_fraction)
+        keep -= keep % self.num_mini_batches
+        minimum = self.num_mini_batches * (2 if self.normalize_advantage_per_mini_batch else 1)
+        if keep < minimum:
+            raise ValueError("advantage filtering leaves too few samples for the configured minibatches")
+        magnitude, selected = scores.abs().topk(keep, sorted=False)
+        selected = selected[torch.randperm(keep, device=self.device)]
+        selected_done = storage.dones[selected % steps, selected // steps].float()
+        metrics = {"advantage_top_fraction": self.advantage_top_fraction,
+                   "retained_fraction": keep / (steps * envs),
+                   "available_samples_per_rank": float(steps * envs),
+                   "retained_samples_per_rank": float(keep),
+                   "selected_positive_fraction": float((scores[selected] > 0).float().mean()),
+                   "selected_done_fraction": float(selected_done.mean()),
+                   "selected_abs_advantage_mean": float(magnitude.mean()),
+                   "selected_abs_advantage_min": float(magnitude.min())}
+        return (selected.new_empty(0), selected), metrics
+
+    def _update_microbatched(self, *, indices=None):
         """Memory-bounded execution of existing logical categorical PPO batches.
 
         Losses/adaptive-KL mirror vendored algorithms/ppo.py:246-317; gradient
@@ -173,11 +244,13 @@ class StudentPPO(PPO):
         """
         mean_losses = {"value": 0.0, "surrogate": 0.0, "entropy": 0.0}
         physical_batches = 0
+        self.value_metrics = {}
         logical_batch_size = 0
         mask_validator = getattr(self.policy, "validate_action_mask", None)
         for (obs, actions, old_values, advantages, returns, old_log_probs,
              _old_mean, _old_std, _hidden, _masks) in self.storage.mini_batch_generator(
-                 self.num_mini_batches, self.num_learning_epochs):
+                 self.num_mini_batches, self.num_learning_epochs,
+                 **({"indices": indices} if indices is not None else {})):
             count = obs.batch_size[0]
             logical_batch_size = count
             if self.normalize_advantage_per_mini_batch:
@@ -202,11 +275,14 @@ class StudentPPO(PPO):
                     # Unlike act(), probability evaluation consumes no policy
                     # sampling RNG. One full-batch draw below preserves the
                     # upstream update's otherwise-unused sample call.
-                    if mask_validator is None:
+                    if not self._separate_backward:
+                        _, values = self.policy.action_probabilities_and_value(
+                            obs[sl], validate_mask=mask_validator is None,
+                            **({"raw_value": True} if self._classification_value else {}))
+                    elif mask_validator is None:
                         self.policy.action_probabilities(obs[sl])
                     else:
                         self.policy.action_probabilities(obs[sl], validate_mask=False)
-                    values = self.policy.evaluate(obs[sl])
                 if self.policy.distribution.logits.dtype != torch.float32:
                     self.policy.distribution = Categorical(
                         logits=self.policy.distribution.logits.float(), validate_args=False)
@@ -218,17 +294,37 @@ class StudentPPO(PPO):
                 surrogate = -advantage * ratio
                 clipped_surrogate = -advantage * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
                 surrogate_loss = torch.maximum(surrogate, clipped_surrogate).mean()
-                values = values.float()
-                target, old_value = returns[sl].float(), old_values[sl].float()
-                value_losses = (values - target).pow(2)
-                if self.use_clipped_value_loss:
-                    clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
-                    value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
-                value_loss = value_losses.mean()
                 entropy_loss = entropy.mean()
                 weight = (end - start) / count
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_loss
-                (loss * weight).backward()
+                actor_loss = surrogate_loss - self.entropy_coef * entropy_loss
+                if self._separate_backward:
+                    if actor_loss.requires_grad:
+                        (actor_loss * weight).backward()
+                    if physical_batches == 0:
+                        self.monitor.capture_actor_gradients(self.policy, end - start)
+                    with (torch.autocast('cuda', dtype=torch.bfloat16)
+                          if self.amp_bfloat16 else nullcontext()):
+                        values = self.policy.evaluate(obs[sl], **({"raw_value": True} if self._classification_value else {}))
+                values = values.float()
+                target, old_value = returns[sl].float(), old_values[sl].float()
+                if self._classification_value:
+                    value_loss = self.value_distribution.loss(values, target)
+                    if physical_batches == 0:
+                        self.value_metrics.update({k: float(v) for k, v in
+                            self.value_distribution.diagnostics(values, target).items()})
+                else:
+                    value_losses = (values - target).pow(2)
+                    if self.use_clipped_value_loss:
+                        clipped_value = old_value + (values - old_value).clamp(-self.clip_param, self.clip_param)
+                        value_losses = torch.maximum(value_losses, (clipped_value - target).pow(2))
+                    value_loss = value_losses.mean()
+                if self._separate_backward:
+                    if value_loss.requires_grad:
+                        (self.value_loss_coef * value_loss * weight).backward()
+                else:
+                    ((actor_loss + self.value_loss_coef * value_loss) * weight).backward()
+                if self._separate_backward and physical_batches == 0:
+                    self.monitor.capture_critic_gradients()
                 for key, value in (("value", value_loss), ("surrogate", surrogate_loss),
                                    ("entropy", entropy_loss)):
                     batch_losses[key] += value.detach() * weight
@@ -261,10 +357,15 @@ class StudentPPO(PPO):
             "physical_minibatch_size": float(self.physical_minibatch_size or logical_batch_size),
             "logical_minibatch_size": float(logical_batch_size),
             "microbatches": float(physical_batches), "amp_bfloat16": float(self.amp_bfloat16),
+            "separate_actor_critic_backward": float(self._separate_backward),
         }
         return {key: value / updates for key, value in mean_losses.items()}
 
     def process_env_step(self, obs, rewards, dones, extras):
+        if extras.get('has_bootstrap_timeouts') is False:
+            # The bridge already resolved this on the host. Skip CTS's CUDA
+            # any()/zero-multiplies without changing its actual timeout path.
+            extras = {key: value for key, value in extras.items() if key != 'time_outs'}
         if extras.get("terminal_observations") is None:
             timeouts = extras.get("time_outs")
             if timeouts is not None and bool(timeouts.any()):
@@ -286,7 +387,9 @@ class StudentPPO(PPO):
         # uses only the active prefix; no return or normalization formula is copied.
         self._check_sample_count()
         if not self.is_multi_gpu or self.normalize_advantage_per_mini_batch:
-            return MoECTS.compute_returns(self, obs)
+            result = MoECTS.compute_returns(self, obs)
+            self._check_value_targets()
+            return result
         # Let CTS compute unchanged GAE, then normalize the active advantages
         # using moments from every rank rather than separate local populations.
         self.normalize_advantage_per_mini_batch = True
@@ -295,6 +398,16 @@ class StudentPPO(PPO):
         finally:
             self.normalize_advantage_per_mini_batch = False
         self.storage.advantages = self._normalize_advantages(self.storage.advantages)
+        self._check_value_targets()
+
+    def _check_value_targets(self):
+        if self._classification_value:
+            target = self.storage.returns[:self.storage.num_transitions_per_env]
+            valid = (torch.isfinite(target) & (target.abs() <= 1 + 1e-4)).all()
+            if target.is_cuda:
+                torch._assert_async(valid, "bounded value requires returns within [-1,1]")
+            elif not bool(valid):
+                raise ValueError("bounded value requires returns within [-1,1]")
 
     @torch.no_grad()
     def _normalize_advantages(self, advantages):

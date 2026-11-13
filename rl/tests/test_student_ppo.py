@@ -1,4 +1,5 @@
 """Student PPO numerical equivalence, timeout bootstrap and supported-model lifecycle."""
+import pytest
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
@@ -293,8 +294,9 @@ class StudentPPOTests(unittest.TestCase):
                 jobs = json.loads((run / "evaluations/index.json").read_text())["jobs"]
                 self.assertEqual(jobs[0]["status"], "completed")
                 report = json.loads(Path(jobs[0]["report"]).read_text())
-                self.assertEqual((report["games"], report["device"]), (10, "cpu"))
-                self.assertEqual(set(report["by_opponent"]), {*AI_KINDS, "WAIT"})
+                self.assertEqual((report["games"], report["device"]), (16, "cpu"))
+                self.assertEqual(set(report["by_opponent"]),
+                                 {*AI_KINDS, "kestrel-v7", "razor-v8", "aegis-v2", "WAIT"})
                 self.assertTrue(all(metrics["games"] == 2 for metrics in report["by_opponent"].values()))
                 self.assertEqual(report["status"], "completed")
                 self.assertTrue(math.isfinite(report["elo"]))
@@ -302,3 +304,47 @@ class StudentPPOTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_top_quarter_uses_centered_absolute_advantage_and_env_major_indices():
+    alg = algorithm(observation(2), advantage_top_fraction=.25)
+    alg.storage.advantages.copy_(torch.tensor([8., 9., 10., 11., 12., 13., 14., 100.]).reshape(4, 2, 1))
+    indices, metrics = alg._advantage_sample_indices()
+    assert not len(indices[0])
+    assert set(indices[1].tolist()) == {0, 7}
+    assert metrics['retained_fraction'] == .25
+    assert metrics['selected_positive_fraction'] == .5
+
+
+
+def test_filtered_ppo_retains_epochs_minibatches_and_updates_both_heads():
+    torch.set_num_threads(1)
+    obs = observation(8)
+    alg = algorithm(obs, advantage_top_fraction=.25, physical_minibatch_size=2)
+    alg.num_learning_epochs = 2
+    collect(alg, obs)
+    before = {k: p.clone() for k, p in alg.policy.named_parameters()}
+    with patch.object(alg.optimizer, 'step', wraps=alg.optimizer.step) as steps:
+        losses = alg.update()
+    assert steps.call_count == 4
+    assert {int(s['step']) for s in alg.optimizer.state.values()} == {4}
+    assert alg.update_metrics['retained_samples_per_rank'] == 8
+    assert alg.update_metrics['available_samples_per_rank'] == 32
+    assert alg.update_metrics['logical_minibatch_size'] == 4
+    assert all(torch.isfinite(torch.tensor(x)) for x in losses.values())
+    for head in ('actor', 'critic'):
+        assert any(not torch.equal(before[k], p) for k, p in alg.policy.named_parameters() if k.startswith(head))
+
+
+
+@pytest.mark.parametrize('fraction', (0, -.1, True, float('nan'), float('inf'), 1.01))
+def test_invalid_retention_is_rejected(fraction):
+    with pytest.raises(ValueError, match='advantage_top_fraction'):
+        algorithm(observation(2), advantage_top_fraction=fraction)
+
+
+
+def test_insufficient_retained_samples_fail_before_an_optimizer_step():
+    alg = algorithm(observation(2), advantage_top_fraction=.01)
+    with pytest.raises(ValueError, match='too few samples'):
+        alg._advantage_sample_indices()

@@ -1,4 +1,4 @@
-"""Joint categorical math and the fresh Light PPO/history/eval wiring."""
+"""Joint categorical math and the ViT PPO/history/eval wiring."""
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
@@ -10,32 +10,17 @@ import unittest
 from unittest.mock import patch
 
 import torch
-from torch import nn
-from torch.distributions import Categorical, kl_divergence
+from torch.distributions import kl_divergence
 
 from generals import MapConfig
 from generals_arena.competitions.evaluation import evaluate
 from generals_arena.competitions.evaluation import make_profile
 from generals_rl.export import export_policy
 from generals_rl.self_play import HistoricalPolicyPool
-from generals_rl.spatial_ppo import LightSpatialPPOPolicy
+from generals_rl.policy.distributions import make_distribution, greedy_actions
 from generals_rl.train import train
-from rl_test_utils import light_policy_config
-from rl_test_utils import assert_nested_equal, small_training_config
-from rl_test_utils import GROUPS, spatial_observations as observations
-
-
-def construct(obs, **options):
-    return LightSpatialPPOPolicy(obs, GROUPS, 649, map_width=9, map_height=9, own_king_geometry=True, **options)
-
-
-class FixedLogits(nn.Module):
-    def __init__(self, logits):
-        super().__init__()
-        self.logits = nn.Parameter(logits)
-
-    def forward(self, inputs):
-        return self.logits[:inputs.shape[0]]
+from rl_test_utils import small_training_config
+from rl_test_utils import spatial_observations as observations
 
 
 class WaitMoveFactorizationTests(unittest.TestCase):
@@ -43,33 +28,6 @@ class WaitMoveFactorizationTests(unittest.TestCase):
     def setUpClass(cls):
         torch.set_num_threads(1)
 
-    def test_default_flat_math_initialization_and_strict_flag(self):
-        obs = observations()
-        rng = torch.get_rng_state()
-        default = construct(obs)
-        torch.set_rng_state(rng)
-        explicit = construct(obs, wait_move_factorization=False)
-        torch.set_rng_state(rng)
-        factored = construct(obs, wait_move_factorization=True)
-        assert_nested_equal(self, explicit.state_dict(), default.state_dict())
-        assert_nested_equal(self, factored.state_dict(), default.state_dict())
-        logits = default.actor(obs["policy"])
-        reference = Categorical(logits=logits.masked_fill(~obs["action_mask"], torch.finfo(logits.dtype).min), validate_args=False)
-        torch.testing.assert_close(default.action_probabilities(obs), reference.probs, rtol=0, atol=0)
-        torch.testing.assert_close(default.entropy, reference.entropy(), rtol=0, atol=0)
-        torch.testing.assert_close(default.act_inference(obs), reference.probs.argmax(-1, keepdim=True), rtol=0, atol=0)
-        rng = torch.get_rng_state()
-        expected = reference.sample().unsqueeze(-1)
-        torch.set_rng_state(rng)
-        torch.testing.assert_close(explicit.act(obs), expected, rtol=0, atol=0)
-        torch.testing.assert_close(explicit.get_actions_log_prob(expected), reference.log_prob(expected.squeeze(-1)), rtol=0, atol=0)
-        prior = factored.action_probabilities(obs).detach().clone()
-        changed = obs.clone()
-        changed["critic"] += 100; changed["single_obs"] += 100
-        torch.testing.assert_close(factored.action_probabilities(changed), prior, rtol=0, atol=0)
-        for invalid in (1, 0, "true", None):
-            with self.subTest(invalid=invalid), self.assertRaisesRegex(TypeError, "must be boolean"):
-                construct(obs, wait_move_factorization=invalid)
 
     def test_joint_analytic_oracle_mask_gradients_and_shared_group_mode(self):
         obs = observations(count=6)
@@ -80,59 +38,47 @@ class WaitMoveFactorizationTests(unittest.TestCase):
         obs["action_mask"][0, :3] = True; obs["action_mask"][1, 1:3] = True
         obs["action_mask"][2, 0] = True; obs["action_mask"][3, :5] = True
         obs["action_mask"][4:, :3] = True
-        policy = construct(obs, wait_move_factorization=True)
-        policy.actor = FixedLogits(logits)
+        logits.requires_grad_()
         # Stochastic policy construction/sampling must not compute group argmax.
         with patch.object(torch.Tensor, "argmax", side_effect=AssertionError("unexpected greedy computation")):
-            probabilities = policy.action_probabilities(obs)
-            actions = policy.act(obs)
+            distribution = make_distribution(logits, obs["action_mask"], factorized=True)
+            probabilities = distribution.probs
+            actions = distribution.sample().unsqueeze(-1)
         self.assertTrue(bool(obs["action_mask"].gather(1, actions).all()))
         torch.testing.assert_close(probabilities[0, :3], torch.tensor([.25, .30, .45], dtype=torch.float64))
         torch.testing.assert_close(probabilities[1, :3], torch.tensor([0., .4, .6], dtype=torch.float64))
         self.assertEqual(probabilities[2, 0].item(), 1.)
         entropy = -.25 * math.log(.25) - .75 * math.log(.75) + .75 * (-.4 * math.log(.4) - .6 * math.log(.6))
-        self.assertAlmostEqual(policy.entropy[0].item(), entropy)
-        torch.testing.assert_close(kl_divergence(policy.distribution, policy.distribution), torch.zeros(6, dtype=torch.float64), rtol=0, atol=0)
-        greedy = policy.act_inference(obs)
+        self.assertAlmostEqual(distribution.entropy()[0].item(), entropy)
+        torch.testing.assert_close(kl_divergence(distribution, distribution), torch.zeros(6, dtype=torch.float64), rtol=0, atol=0)
+        greedy = greedy_actions(probabilities, factorized=True)
         torch.testing.assert_close(greedy[:, 0], torch.tensor([2, 2, 0, 1, 0, 1]), rtol=0, atol=0)
         self.assertEqual(probabilities[3].argmax().item(), 0)  # JointMAP differs.
         chosen = torch.tensor([[2], [2], [0], [1], [0], [1]])
-        logp = policy.get_actions_log_prob(chosen)
+        logp = distribution.log_prob(chosen.squeeze(-1))
         self.assertAlmostEqual(logp[0].item(), math.log(.45))
         (-logp[:3].sum()).backward()
-        torch.testing.assert_close(policy.actor.logits.grad[0, :3], torch.tensor([.25, .4, -.4], dtype=torch.float64))
-        self.assertEqual(policy.actor.logits.grad[1, 0].item(), 0.)
-        self.assertTrue(bool((policy.actor.logits.grad[2] == 0).all()))
-        self.assertTrue(bool((policy.actor.logits.grad[~obs["action_mask"]] == 0).all()))
+        torch.testing.assert_close(logits.grad[0, :3], torch.tensor([.25, .4, -.4], dtype=torch.float64))
+        self.assertEqual(logits.grad[1, 0].item(), 0.)
+        self.assertTrue(bool((logits.grad[2] == 0).all()))
+        self.assertTrue(bool((logits.grad[~obs["action_mask"]] == 0).all()))
 
-    def test_finite_float32_edges_and_actual_empty_light_actor(self):
+    def test_finite_float32_edges(self):
         obs = observations(count=3)
         obs["action_mask"].zero_(); obs["action_mask"][:, :3] = True
         logits = torch.zeros(3, 649)
         logits[:, :3] = torch.tensor([[-1000., 1000., -1000.], [1000., 1000., -1000.], [0., 1000., 1000.]])
-        policy = construct(obs, wait_move_factorization=True)
-        policy.actor = FixedLogits(logits)
-        chosen = policy.act_inference(obs)
-        loss = -policy.get_actions_log_prob(chosen).sum() + .01 * policy.entropy.sum()
+        logits.requires_grad_()
+        distribution = make_distribution(logits, obs["action_mask"], factorized=True)
+        chosen = greedy_actions(distribution.probs, factorized=True)
+        loss = -distribution.log_prob(chosen.squeeze(-1)).sum() + .01 * distribution.entropy().sum()
         loss.backward()
-        self.assertTrue(bool(torch.isfinite(loss) & torch.isfinite(policy.actor.logits.grad).all()))
-        empty_policy = construct(obs, wait_move_factorization=True)
-        empty = obs[:0]
-        self.assertEqual(empty_policy.action_probabilities(empty).shape, (0, 649))
-        self.assertEqual(empty_policy.act_inference(empty).shape, (0, 1))
-        empty_policy.entropy.sum().backward()
-        self.assertTrue(all(p.grad is None or bool(torch.isfinite(p.grad).all()) for p in empty_policy.parameters()))
+        self.assertTrue(bool(torch.isfinite(loss) & torch.isfinite(logits.grad).all()))
 
-    def test_actual_two_update_light_PPO_pool_signature_and_fresh_CPU_eval(self):
+    def test_actual_two_update_vit_PPO_pool_signature_and_fresh_CPU_eval(self):
         cfg = small_training_config(task_overrides={"width": 9, "height": 9, "players": 2,
                 "history_length": 4, "combat_features": True, "king_threat_distance": True,
                 "critic_potential": False, "map_pool_size": 0})
-        cfg["runner"]["policy"] = light_policy_config()
-        cfg["runner"]["policy"]["class_name"] = "generals_rl.information_ppo.InformationSpatialPPOPolicy"
-        cfg["runner"]["policy"].update(own_king_geometry=True, wait_move_factorization=True)
-        cfg["runner"]["algorithm"].update(class_name="generals_rl.student_ppo.StudentPPO", teacher_env_ratio=0,
-                schedule="fixed", desired_kl=None)
-        cfg["runner"]["storage_obs_keys"] = ["policy", "critic", "action_mask"]
         cfg["self_play"] = {"pool_size": 2, "snapshot_interval": 1}
         cfg["evaluation"] = {"enabled": False}
         made = []
@@ -161,7 +107,6 @@ class WaitMoveFactorizationTests(unittest.TestCase):
                 maps_per_opponent=1, seed=19, max_ticks=3)
             report = evaluate(bundle, profile, batch_size=8)
             self.assertEqual(report["games"], 10)
-
 
 
 if __name__ == "__main__":

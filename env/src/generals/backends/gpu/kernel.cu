@@ -113,4 +113,19 @@ extern "C" int generals_launch(const Arguments *a,void *stream,int *resources){
     simulate<<<(a->batch+ENVS-1)/ENVS,BLOCK_THREADS,0,cudaStream_t(stream)>>>(*a);
     return cudaGetLastError();
 }
+// Explicit boundary commands share rules.h, but never copy the batch to CPU.
+__global__ void surrender(Arguments a,int pid,const bool *mask){
+    int lane=blockIdx.x*blockDim.x+threadIdx.x;
+    if(lane>=a.batch||(mask&&!mask[lane])||(a.horizon>0&&a.state.tick[lane]>=a.horizon))return;
+    generals::Cache cache{};
+    generals::Rules<> rules(a.state,lane,P,GENERALS_HEIGHT,GENERALS_WIDTH,cache,
+                            a.growth_cells+size_t(lane)*GENERALS_HEIGHT*GENERALS_WIDTH);
+    rules.surrender(pid);
+    a.cache_valid[lane]=false;
+    a.done[lane*2]=a.done[lane*2]||a.state.terminated[lane];
+}
+extern "C" int generals_surrender(const Arguments *a,int pid,const bool *mask,void *stream){
+    surrender<<<(a->batch+127)/128,128,0,cudaStream_t(stream)>>>(*a,pid,mask);
+    return cudaGetLastError();
+}
 extern "C" const char *generals_error(int status){return cudaGetErrorString(cudaError_t(status));}

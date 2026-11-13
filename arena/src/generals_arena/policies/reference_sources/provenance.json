@@ -1,0 +1,36 @@
+{
+  "upstream": "https://github.com/wertyuilife2/generals-rl",
+  "commit": "f85e36dbda15da7c473682d7332c5d0f44b2f93d",
+  "policies": {
+    "kestrel-v7": {
+      "source": "heristic/gpt-6-kestrel-v7",
+      "files": {
+        "params.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+        "policy.cpp": "65658be6340c7f6e15fe1dfae691c33449b53069542da2ce93835dd586d2ba4f"
+      }
+    },
+    "razor-v8": {
+      "source": "heristic/gpt-6-razor/v8",
+      "files": {
+        "controller.h": "a9811bef45005c3fbcd1183221043bb1fa71d0fc04f381e41cb1baa7ef84c0d7",
+        "operations.h": "0b890a4dec29ad89418b735e9f2d3312538c0f22b48ecc71fff361b62a1e2370",
+        "params.json": "4bbde15ff44a360fa2e25845e383d465b0179cf54cec5b5d9386e52c587c7ca0",
+        "planning.h": "01fc9a82f565e6a3fb4889e5c641fd2f4e6b622c6f3f4fc5b11956f40f58dd6a",
+        "policy.cpp": "efac54306c08c603d56e43fda7e4dad7ef725aa6f9f5e45b5d27ee2c24fca6be",
+        "strategy.h": "8757d41027f3405ae1998411deaecc1b594f053ae109bfbb80ab411d583abb7f",
+        "tactics.h": "c755797269a66cd83f14ac9ff39366555a85ef814f6b15d0dacc0bd512d99b92",
+        "warfare.h": "ecb2e7c1decc1b14eb89cb589e0103720a567273b15298275516d474412aeb03"
+      }
+    },
+    "aegis-v2": {
+      "source": "heristic/gpt-6-aegis-v1",
+      "files": {
+        "deployment.h": "618faeea389c775e370e739b4d36e382ddfb9be2a6e7e230acabe632ec497542",
+        "menace.h": "668e15c5dd7a5bf0462e1bfc06cfa921912cce30312df7813ef762f220744cd9",
+        "params.json": "06be03694c1adc696b159ee07e1163ae47b1dd92e5741fd0c1450925feb96d4f",
+        "policy.cpp": "6089ceb26793d80efef0c6eb7b3746d9af8f3ce63e59a9889efadf8138f2f38d",
+        "world_model.h": "770024a6f63bb0f331f58eef1e3a20689d8b4fd861809a3e2305a036d1e5f80f"
+      }
+    }
+  }
+}

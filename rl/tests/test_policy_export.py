@@ -14,7 +14,7 @@ from rl_policy_test_utils import make_checkpoint
 
 def test_new_checkpoint_exports_pinned_source_and_actor_only(tmp_path):
     torch.set_num_threads(1)
-    checkpoint, config = make_checkpoint(tmp_path, family='scaled')
+    checkpoint, config = make_checkpoint(tmp_path)
     config['model'] = {'codename': 'nova-ViT1M'}
     deployment = prepare_policy_source(config, tmp_path)
     saved = torch.load(checkpoint, weights_only=True)
@@ -47,7 +47,7 @@ def test_new_checkpoint_exports_pinned_source_and_actor_only(tmp_path):
 
 def test_source_drift_and_changed_resume_features_are_rejected(tmp_path):
     torch.set_num_threads(1)
-    checkpoint, config = make_checkpoint(tmp_path, family='scaled')
+    checkpoint, config = make_checkpoint(tmp_path)
     deployment = prepare_policy_source(config, tmp_path)
     modified = deepcopy(config)
     modified['task']['combat_features'] = not config['task']['combat_features']
@@ -78,7 +78,7 @@ def test_bundle_identity_binds_code_config_weights_and_not_location(tmp_path):
 
 
 def test_checkpoint_without_export_metadata_requires_configuration(tmp_path):
-    checkpoint, _ = make_checkpoint(tmp_path, family='scaled')
+    checkpoint, _ = make_checkpoint(tmp_path)
     (tmp_path/'run_config.json').unlink()
     with pytest.raises(ValueError, match='run_config'):
         export_policy(checkpoint, tmp_path/'bundle')
@@ -93,31 +93,11 @@ def test_deployment_sampling_is_owned_by_model_and_default_remains_stochastic():
     assert make_policy_spec(config)['inference']['mode'] == 'greedy'
 
 
-def test_task_memory_does_not_implicitly_add_an_actor_knowledge_input(tmp_path):
-    from generals_rl.config import task_config
-    from generals_rl.information_ppo import InformationSpatialPPOPolicy
-    from generals_rl.task import GeneralsTask
-    from rl_test_utils import small_training_config
-    from tensordict import TensorDict
-    config = small_training_config(task_overrides={'persistent_knowledge': True})
-    options = dict(config['runner']['policy'])
-    options.pop('class_name')
-    assert 'knowledge_channels' not in options
-    with GeneralsTask(task_config(config['task'])) as task:
-        inputs = TensorDict(task.get_observations(), [task.num_envs])
-        policy = InformationSpatialPPOPolicy(inputs, config['runner']['obs_groups'], 649, **options)
-    checkpoint = tmp_path/'checkpoint.pt'
-    torch.save({'model_state_dict': policy.state_dict(), 'iter': 0}, checkpoint)
-    bundle = export_policy(checkpoint, tmp_path/'bundle', run_config=config)
-    saved = json.loads((bundle/'model_config.json').read_text())
-    assert saved['network']['knowledge_channels'] == 0
-
-
 def test_moving_complete_run_keeps_pinned_export_and_resume_source(tmp_path):
     from generals_rl.export import resolve_policy_source
     root = tmp_path/'original'
     root.mkdir()
-    checkpoint, config = make_checkpoint(root, family='scaled')
+    checkpoint, config = make_checkpoint(root)
     deployment = prepare_policy_source(config, root)
     assert deployment['policy_spec']['model']['codename'].endswith('-original')
     saved = torch.load(checkpoint, weights_only=True)

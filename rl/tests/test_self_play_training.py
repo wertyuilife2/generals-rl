@@ -163,7 +163,7 @@ class SelfPlayTrainingTests(unittest.TestCase):
                     self.assertAlmostEqual(logged_lr[0].value, main_lr)
                     pool = json.loads((target / "history_pool/manifest.json").read_text())
                     self.assertEqual(pool["resume_source"]["iteration_cutoff"], expected_iteration)
-                    self.assertEqual(pool["resume_source"]["directory"], str(source / "history_pool"))
+                    self.assertEqual(pool["resume_source"]["directory"], str((source / "history_pool").resolve()))
                     self.assertEqual([s["iteration"] for s in pool["snapshots"]],
                                      [-1, expected_iteration, expected_iteration + 1])
                     self.assertTrue(pool["snapshots"][0]["seed"])

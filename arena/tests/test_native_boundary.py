@@ -57,7 +57,8 @@ def test_only_explicit_decision_phase_is_a_decision_timeout():
     assert not decision_timeout({'kind': 'policy_error', 'phase': 'decision'})
 
 
-def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(tmp_path, monkeypatch):
+@pytest.mark.parametrize('execution', ['isolated', 'batch'])
+def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(tmp_path, monkeypatch, execution):
     from dataclasses import asdict
     from generals import MapConfig
     from generals_arena.matches.runner import MatchRunner
@@ -65,8 +66,10 @@ def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(t
     from generals_arena.policies.entries import prepare_entrant
     import policy_test_utils
 
-    monkeypatch.setattr(policy_test_utils, 'SOURCE', policy_test_utils.SOURCE.replace(
-        '    def act(self, obs):', '    def act(self, obs):\n        import time\n        time.sleep(.6)'))
+    source = policy_test_utils.SOURCE
+    for signature in ('    def act(self, obs):', '    def act_batch(self, raw):'):
+        source = source.replace(signature, signature + '\n        import time\n        time.sleep(.6)')
+    monkeypatch.setattr(policy_test_utils, 'SOURCE', source)
     bundle = policy_test_utils.make_bundle(tmp_path / 'slow-package')
     package = prepare_entrant({'name': 'slow-package', 'kind': 'package', 'bundle': str(bundle)})
     native = prepare_entrant(snapshot_policy(tmp_path / 'archive',
@@ -75,7 +78,14 @@ def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(t
     plan = dict(game_id='mixed', entrant_ids=list(entries), instance_ids=[0, 1],
                 controller_seeds=[2, 3], map_seed=42, map=asdict(MapConfig(25, 25, 2, .1, .05)))
     # Twenty .6s decisions exceed the former 11.2s match budget.
-    with MatchRunner(entries, max_ticks=20) as runner:
+    with MatchRunner(entries, max_ticks=20, execution=execution) as runner:
         results, _ = runner.run([plan])
     assert results[0]['ticks'] == 20 and results[0]['reason'] == 'tick_limit'
     assert 'policy_error' not in results[0]
+    assert not results[0].get('forfeits')
+    timings = {row['seat']: row for row in results[0]['decision_timing']}
+    assert timings[0]['limit_ns'] == 10_000_000
+    assert timings[1]['limit_ns'] is None
+    assert timings[1]['calls'] == 20
+    assert timings[1]['max_ns'] > 10_000_000
+    assert timings[1]['timeouts'] == timings[1]['errors'] == 0

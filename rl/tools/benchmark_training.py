@@ -7,7 +7,6 @@ the transition numerator. Profile work is a separate additional full update.
 """
 from contextlib import nullcontext, redirect_stdout
 from copy import deepcopy
-from dataclasses import asdict
 from hashlib import sha256
 import argparse
 import io
@@ -20,13 +19,14 @@ from time import perf_counter
 
 import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
+from rsl_rl.utils import resolve_callable
 
-from generals_rl.config import merge_config, seed_everything, task_config
-from generals_rl.cts import GeneralsCTSVecEnv, runner_config
+from generals_rl.config import configure_observations, resolve_training_config, seed_everything, task_config
+from generals_rl.cts import GeneralsCTSVecEnv
 from generals_rl.curriculum import CurriculumConfig, RolloutCurriculum
 from generals_rl.distributed_training import DistributedConfig
 from generals_rl.self_play_training import SelfPlayConfig, prepare_self_play
-from generals_rl.task import GeneralsTask, TaskConfig
+from generals_rl.task import GeneralsTask
 from generals_rl.policy.precision import matmul_precision
 
 
@@ -66,34 +66,55 @@ def synchronize(device):
         torch.cuda.synchronize(device)
 
 
-def estimate_storage(observations, num_envs, rollout_steps, keys=None):
+def estimate_storage(observations, num_envs, rollout_steps, keys=None, history_lengths=None, observation_codec=None):
     selected = list(observations.keys()) if keys is None else list(keys)
     if not selected or len(set(selected)) != len(selected):
         raise ValueError("storage observation keys must be nonempty and unique")
     fields = {}
+    history_lengths = history_lengths or {}
+    prefix_bytes = 0
     for key in selected:
         value = observations[key]
         if value.shape[0] != num_envs:
             raise ValueError("storage observation batch does not match per-rank environments")
+        length = history_lengths.get(key, 1)
+        if (isinstance(length, bool) or not isinstance(length, int) or length < 1
+                or value.shape[-1] % length):
+            raise ValueError(f'invalid flattened history length for {key}')
+        frame_bytes = value.numel() // num_envs * value.element_size() // length
+        if observation_codec is not None:
+            example = value.reshape(num_envs, length, -1)[:, -1] if key in history_lengths else value
+            encoded = observation_codec.encode(key, example)
+            leaves = encoded.values(include_nested=True, leaves_only=True) if hasattr(encoded, 'batch_size') else [encoded]
+            frame_bytes = sum(v.numel() * v.element_size() for v in leaves) // num_envs
         fields[key] = {"shape_per_environment": list(value.shape[1:]), "dtype": str(value.dtype),
-                       "bytes_per_transition": value.numel() // num_envs * value.element_size()}
+                       "history_length": length, "bytes_per_transition": frame_bytes}
+        prefix_bytes += (length - 1) * num_envs * frame_bytes
     obs_bytes = sum(field["bytes_per_transition"] for field in fields.values())
     # Student categorical storage: five fp32 scalar buffers, one int64 action,
     # one uint8 done. No old649-class mean/std or teacher distillation buffers.
     scalar_bytes = 5 * 4 + 8 + 1
+    history_metadata = (num_envs * rollout_steps * 4 + sum(history_lengths.values()) * 8
+                        if history_lengths else 0)
+    observation_storage = obs_bytes * num_envs * rollout_steps + prefix_bytes
     return {"observation_fields": fields, "observation_bytes_per_transition": obs_bytes,
             "auxiliary_bytes_per_transition": scalar_bytes,
             "bytes_per_transition": obs_bytes + scalar_bytes,
-            "observation_storage_bytes": obs_bytes * num_envs * rollout_steps,
-            "total_storage_bytes": (obs_bytes + scalar_bytes) * num_envs * rollout_steps,
-            "scope": "rollout storage only; excludes live env, optimizer, gradients, indices, probes and activations"}
+            "history_prefix_bytes": prefix_bytes, "history_metadata_bytes": history_metadata,
+            "observation_storage_bytes": observation_storage,
+            "total_storage_bytes": observation_storage + scalar_bytes * num_envs * rollout_steps + history_metadata,
+            "scope": "rollout storage only; excludes live env, optimizer, gradients, minibatch permutations, probes and activations"}
 
 
 def actual_storage_bytes(storage):
-    obs = sum(value.numel() * value.element_size() for value in storage.observations.values())
+    # History views share a backing allocation with their rollout-start prefix.
+    obs = sum(value.untyped_storage().nbytes()
+              for value in storage.observations.values(include_nested=True, leaves_only=True))
     auxiliary = sum(value.numel() * value.element_size() for name in
-                    ("rewards", "actions", "dones", "values", "actions_log_prob", "returns", "advantages", "mu", "sigma")
+                    ("rewards", "actions", "dones", "values", "actions_log_prob", "returns", "advantages", "mu", "sigma",
+                     "_history_starts")
                     if isinstance(value := getattr(storage, name, None), torch.Tensor))
+    auxiliary += sum(value.numel() * value.element_size() for value in storage._history_offsets.values())
     return {"observation_storage_bytes": obs, "auxiliary_storage_bytes": auxiliary,
             "total_storage_bytes": obs + auxiliary}
 
@@ -172,6 +193,8 @@ def complete_update(runner, obs, *, profile=None):
             obs, rewards, dones = obs.to(device), rewards.to(device), dones.to(device)
             with torch.profiler.record_function("Benchmark/store_and_timeout_bootstrap") if marked else nullcontext():
                 alg.process_env_step(obs, rewards, dones, extras)
+            if runner.cfg.get('release_terminal_observations', False):
+                extras.pop('terminal_observations', None)
             if profile and step + 1 == profile.ticks:
                 profile.stop()
         synchronize(device)
@@ -280,15 +303,7 @@ def prepare_historical_benchmark(task, runner, config, output, distributed, *, f
 
 
 def resolve_config(args, context):
-    overrides = json.loads(args.config.read_text())
-    config = merge_config({"task": asdict(TaskConfig(opponent="current_self_play",
-                                                          combat_features=True, king_threat_distance=True,
-                                                          persistent_knowledge=True)),
-                           "runner": runner_config(), "torch_threads": 1}, overrides)
-    # Model constructors accept complete policy subtrees; keep architecture
-    # overrides independent of the default policy constructor.
-    if "policy" in overrides.get("runner", {}):
-        config["runner"]["policy"] = deepcopy(overrides["runner"]["policy"])
+    config = resolve_training_config(json.loads(args.config.read_text()))
     task, run = config["task"], config["runner"]
     for name in ("global_num_envs", "num_envs", "rollout_steps", "logical_batch_size",
                  "physical_minibatch_size", "inference_chunk_size"):
@@ -316,7 +331,7 @@ def resolve_config(args, context):
         raise ValueError("historical_pool_fill requires historical self_play")
     if args.rollout_steps is not None:
         run["num_steps_per_env"] = args.rollout_steps
-    total = task["num_envs"] * run["num_steps_per_env"]
+    total = task["num_envs"] * run["num_steps_per_env"] * (2 if task.get('train_both_sides') else 1)
     if args.logical_batch_size is not None:
         if total % args.logical_batch_size:
             raise ValueError("per-rank NT must divide logical_batch_size exactly")
@@ -329,11 +344,14 @@ def resolve_config(args, context):
         run["policy"]["amp_bfloat16"] = run["algorithm"]["amp_bfloat16"] = args.amp_bfloat16
     if (run["algorithm"].get("teacher_env_ratio") != 0
             or not run["algorithm"]["class_name"].endswith("StudentPPO")
-            or run["algorithm"]["num_learning_epochs"] != 4):
-        raise ValueError("benchmark requires student-only PPO with four complete epochs")
+            or type(run["algorithm"]["num_learning_epochs"]) is not int
+            or run["algorithm"]["num_learning_epochs"] < 1):
+        raise ValueError("benchmark requires student-only PPO with a positive epoch count")
     if run["algorithm"]["num_mini_batches"] < 1 or total % run["algorithm"]["num_mini_batches"]:
         raise ValueError("NT must divide the number of PPO minibatches exactly")
-    settings = task_config(task)
+    config = configure_observations(config)
+    task, run = config['task'], config['runner']
+    settings = task_config(config['task'])
     if settings.reward.potential_gamma is not None and settings.reward.potential_gamma != run["algorithm"].get("gamma"):
         raise ValueError("reward potential_gamma and algorithm.gamma must match")
     config["evaluation"] = {"enabled": False}
@@ -372,8 +390,11 @@ def benchmark(args):
                 GeneralsTask(settings) as task:
             env = GeneralsCTSVecEnv(task)
             observations = env.get_observations()
+            codec = config['runner'].get('storage_codec')
+            codec = resolve_callable(codec)(observations) if codec is not None else None
             estimated = estimate_storage(observations, task.num_envs, config["runner"]["num_steps_per_env"],
-                                         config["runner"].get("storage_obs_keys"))
+                                         config["runner"].get("storage_obs_keys"),
+                                         config["runner"].get("storage_history"), codec)
             if task.device.type == "cuda":
                 free, total_device = torch.cuda.mem_get_info(task.device)
                 estimated.update(cuda_free_before_runner_bytes=free, total_device_bytes=total_device)
@@ -385,6 +406,9 @@ def benchmark(args):
                 if estimated["total_storage_bytes"] > free * args.max_storage_fraction:
                     raise MemoryError(f"rollout storage alone needs {estimated['total_storage_bytes']} bytes, "
                                       f"exceeding {args.max_storage_fraction:.0%} of currently free CUDA memory ({free})")
+            # Shapes are now recorded. Retaining this initial full H4 batch
+            # throughout timing adds GBs that the real train() entry never owns.
+            del observations, codec
             with redirect_stdout(io.StringIO()) if context["rank"] else nullcontext():
                 runner = BenchmarkRunner(env, deepcopy(config["runner"]), log_dir=None, device=str(task.device))
                 historical = None
@@ -393,7 +417,7 @@ def benchmark(args):
                         task, runner, rank_config, output, distributed, fill=args.historical_pool_fill)
                 elif context["rank"] == 0:
                     prepare_self_play(task, runner, rank_config, output)
-                elif settings.opponent == "current_self_play":
+                elif settings.opponent == "current_self_play" and not task.train_both_sides:
                     selfplay = SelfPlayConfig(**config.get("self_play", {}))
                     task.opponent.attach_policy(runner.alg.policy, stochastic=selfplay.stochastic,
                                                 seed=selfplay.seed + context["rank"])
@@ -453,6 +477,13 @@ def benchmark(args):
             algorithm = config["runner"]["algorithm"]
             performance = aggregate_ranks(ranks, task.num_envs, runner.cfg["num_steps_per_env"],
                                           algorithm["num_learning_epochs"], algorithm["num_mini_batches"])
+            player_count = task.num_envs // task.num_games
+            performance.update(
+                physical_games_per_rank=task.num_games, training_trajectories_per_rank=task.num_envs,
+                player_transitions_per_second=performance['transitions_per_second'],
+                board_ticks_per_second=performance['transitions_per_second'] / player_count,
+                board_ticks_measured_global=performance['fresh_transitions_measured_global'] // player_count,
+                train_both_sides=task.train_both_sides)
             minimum = args.minimum_tps if args.minimum_tps is not None else (
                 20000 if config["runner"]["policy"].get("model_size", "").lower() == "100m" else 50000)
             report = {"kind": "complete_student_ppo_benchmark", "config": config, "ranks": ranks,

@@ -1,8 +1,12 @@
 """Actual PPO rollout boundaries, TB values, and curriculum resume contracts."""
+from dataclasses import replace
+from types import SimpleNamespace
+import torch
+from generals_rl.curriculum import CurriculumConfig, RolloutCurriculum
+from generals_rl.mdp.rewards import RewardConfig, ShapedReward
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
-import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,11 +16,12 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.train import train
+from rl_test_utils import small_training_config
 
 
 class CurriculumTrainingTests(unittest.TestCase):
     def config(self):
-        config = json.loads((Path(__file__).parents[1] / "configs/v32.json").read_text())
+        config = small_training_config()
         config.pop("curriculum", None)
         config["task"].update(num_envs=8, backend="cpu", device="cpu",
                               max_episode_steps=8, map_pool_size=0)
@@ -112,3 +117,31 @@ class CurriculumTrainingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_potential_and_tick_decay_reconstruct_from_original_coefficients():
+    base = RewardConfig(territory=.1, cities=.2, army=.01, tick=-.01, potential_gamma=.99)
+    cfg = CurriculumConfig(tick_decay=True, potential_decay=True, tick_end_iteration=4,
+                           gamma_final=1., gamma_end_iteration=2)
+    reward = ShapedReward(base)
+    alg = SimpleNamespace(gamma=.99)
+    course = RolloutCurriculum(cfg, alg, reward)
+    for i in (0, 2, 4, 8, 2):
+        metrics = course.apply(i)
+        scale = max(0., 1-i/4)
+        assert metrics['potential_scale'] == scale
+        assert reward.config == replace(base, tick=base.tick*scale, territory=base.territory*scale,
+                                         cities=base.cities*scale, army=base.army*scale,
+                                         potential_gamma=.99+.01*min(i/2, 1))
+        assert reward.config.win == 1. and reward.config.loss == -1.
+        assert alg.gamma == reward.config.potential_gamma
+
+
+def test_sparse_reward_at_gamma_one_has_only_terminal_outcomes():
+    reward = ShapedReward(RewardConfig(territory=0., cities=0., army=0., tick=0., potential_gamma=1.))
+    done = torch.tensor([False, True, True, False])
+    alive = torch.tensor([True, True, False, True])
+    result = reward.evaluate(torch.rand(4, 3)*100, torch.rand(4, 3)*100, done,
+        torch.tensor([False, False, False, True]), torch.tensor([-1, 0, 1, -1]), alive,
+        torch.zeros(4, dtype=torch.long))
+    torch.testing.assert_close(result.total, torch.tensor([0., 1., -1., 0.]), rtol=0, atol=0)

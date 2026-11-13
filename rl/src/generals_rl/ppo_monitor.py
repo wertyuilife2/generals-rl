@@ -48,6 +48,36 @@ class PPOUpdateMonitor:
     def release(self):
         self.observations = self.old_logits = None
         self.rollout_statistics = None
+        self._shared_parameters = self._actor_gradients = ()
+
+    @torch.no_grad()
+    def capture_actor_gradients(self, policy, samples):
+        """Sample the first local microbatch before reduction/clipping.
+
+        Called only on sequential actor/critic updates. The main rank writes
+        these diagnostics; they are not global or rollout-averaged gradients.
+        """
+        if not self.enabled or not getattr(policy, 'share_backbone', False):
+            return
+        self._shared_parameters = tuple(policy.actor.encoder.backbone.parameters())
+        self._actor_gradients = tuple(p.grad.detach().clone() if p.grad is not None else torch.zeros_like(p)
+                                      for p in self._shared_parameters)
+        self.metrics['shared_grad_probe_samples'] = float(samples)
+
+    @torch.no_grad()
+    def capture_critic_gradients(self):
+        """Read the accumulated critic contribution, then free the probe copy."""
+        if not self._actor_gradients:
+            return
+        pairs = tuple(zip(self._shared_parameters, self._actor_gradients))
+        a2 = sum(g.square().sum() for _, g in pairs)
+        c2 = sum((p.grad - g).square().sum() for p, g in pairs)
+        dot = sum(((p.grad - g) * g).sum() for p, g in pairs)
+        self.metrics.update(shared_actor_grad_norm=float(a2.sqrt()),
+            shared_critic_grad_norm=float(c2.sqrt()),
+            shared_critic_actor_grad_ratio=float((c2 / a2.clamp_min(1e-20)).sqrt()),
+            shared_actor_critic_grad_cosine=float(dot / (a2*c2).sqrt().clamp_min(1e-20)))
+        self._shared_parameters = self._actor_gradients = ()
 
     def _logits(self, policy):
         distribution = policy.distribution
@@ -94,7 +124,7 @@ class PPOUpdateMonitor:
         keys = list(dict.fromkeys([*algorithm.policy.obs_groups["policy"], "action_mask"] +
                                   (["single_obs"] if "single_obs" in storage.observations else [])))
         # Env-major indexing matches CTS, without copying or flattening the rollout.
-        self.observations = storage.observations.select(*keys)[indices % steps, indices // steps]
+        self.observations = storage.observation_batch(indices % steps, indices // steps, keys=keys)
         self.old_logits = self._logits(algorithm.policy)
         self.metrics["probe_samples"] = float(count)
         self.metrics["probe_cache_bytes"] = float(sum(t.numel() * t.element_size() for t in self.observations.values()) +

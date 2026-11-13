@@ -131,6 +131,12 @@ def test_recorded_afk_rechecks_warning_and_retains_last_survivor(backend):
     assert final.death_order.tolist() == [0, 1] and final.kills.tolist() == [0, 0]
     assert final.leave_tick.tolist() == [71, 71]
     assert final.warn_afk.tolist() == [0, 0]
+    if backend != 'reference':
+        device = 'cuda' if backend == 'gpu' else backend
+        with VecEnv.from_states([final], device=device) as env:
+            assert state_digest(env.to_states()[0]) == state_digest(final)
+            env.reset()
+            assert state_digest(env.to_states()[0]) == state_digest(final)
 
 
 @pytest.mark.parametrize('device', ['cpu', 'cuda', 'mps'])
@@ -187,3 +193,32 @@ def test_new_maps_do_not_warn_or_eliminate_inactive_players(backend, players):
             assert not current.warn_afk.any()
             assert current.alive.all() and not current.terminated
         assert current.tick == 130
+
+
+@pytest.mark.parametrize('packed', [False, True])
+@pytest.mark.parametrize('horizon', [0, 1])
+def test_cuda_surrender_keeps_state_on_device_and_respects_mask_and_horizon(monkeypatch, packed, horizon):
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA unavailable')
+    from generals import MapConfig
+    from generals.core.batch import generate_states
+    states = generate_states(MapConfig(9, 9, 2), 3, seed=84)
+    for index, state in enumerate(states):
+        state.tick = index
+    with VecEnv.from_states(states, device='cpu', episode_ticks=horizon) as cpu, \
+            VecEnv.from_states(states, device='cuda', episode_ticks=horizon) as gpu:
+        gpu.unwrapped.configure_step(packed_metadata=packed)
+        mask = torch.tensor([True, False, False, False, True, False], device='cuda')[::2]
+        assert not mask.is_contiguous()
+        pointers = {name: value.data_ptr() for name, value in gpu.state.items()}
+        with monkeypatch.context() as guard:
+            guard.setattr(torch.Tensor, 'cpu', lambda *a, **kw: pytest.fail('surrender copied state to CPU'))
+            gpu.surrender(0, mask)
+        cpu.surrender(0, np.array([True, False, True]))
+        assert pointers == {name: value.data_ptr() for name, value in gpu.state.items()}
+        for _ in range(2):
+            assert [state_digest(s) for s in gpu.to_states()] == [state_digest(s) for s in cpu.to_states()]
+            np.testing.assert_array_equal(gpu.done.cpu().numpy(), cpu.done)
+            cpu.step(np.zeros((3, 2), np.int64))
+            gpu.step(torch.zeros((3, 2), dtype=torch.int64, device='cuda'))

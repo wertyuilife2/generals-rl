@@ -152,15 +152,3 @@ def test_registered_matches_run_without_any_training_package(submission):
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout+result.stderr
     assert 'independent Arena publication and matches passed' in result.stdout
-
-
-def test_registered_loader_changes_cannot_reuse_deployment_identity(submission, monkeypatch):
-    import generals_arena.policies.entries as entrants
-    bundle, league = submission
-    entry = entrants.prepare_entrant({'name': 'test', 'kind': 'package', 'bundle': bundle})
-    entrants.verify_artifacts(entry)
-    file_digest = entrants.file_digest
-    monkeypatch.setattr(entrants, 'file_digest', lambda path:
-                        '0'*64 if Path(path).name == 'code.py' else file_digest(path))
-    with pytest.raises(ValueError, match='loader changed'):
-        entrants.verify_artifacts(entry)

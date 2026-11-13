@@ -90,7 +90,9 @@ class GPUEnv:
         live_count = s["alive"].sum(dim=1)
         bad |= ((s["tick"] < 0) | (s["terminated"] != (live_count <= 1))).any()
         winner = torch.where(live_count == 1, s["alive"].to(torch.int32).argmax(dim=1), -1)
-        bad |= (s["winner"] != winner).any()
+        # AFK processing may remove the final survivor after caching the winner.
+        bad |= ((live_count > 0) & (s["winner"] != winner)).any()
+        bad |= ((s["winner"] < -1) | (s["winner"] >= self.players)).any()
         indices = torch.arange(n, device=self.device)[None, :]
         expected_general = torch.zeros_like(structure, dtype=torch.bool)
         for pid in range(self.players):
@@ -183,8 +185,18 @@ class GPUEnv:
 
     def surrender(self, player_id, mask=None):
         self._require_open()
-        from generals.core.lifecycle import surrender_batch
-        surrender_batch(self, player_id, mask)
+        if self.kernel_kind != 'cuda':
+            from generals.core.lifecycle import surrender_batch
+            return surrender_batch(self, player_id, mask)
+        player_id = _integer('player_id', player_id, 0)
+        if player_id >= self.players:
+            raise ValueError('invalid player id')
+        if mask is not None and (not isinstance(mask, torch.Tensor) or mask.dtype != torch.bool
+                or mask.device != self.device or mask.shape != (self.batch_size,)):
+            raise ValueError('surrender mask must be bool [batch] on the environment device')
+        if self._step_kernel is None:
+            self.configure_step()
+        self._step_kernel.surrender(player_id, mask)
 
     def reset(self, mask=None):
         """Restore initial state/RNG and clear diagnostics, for selected lanes."""

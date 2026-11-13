@@ -9,11 +9,15 @@ class ObservationLayout:
     width: int
     height: int
     history_length: int = 4
-    map_planes: int = 14
+    map_planes: int = 13
     public_dim: int = 13
     knowledge_channels: int = 0
+    feature_set: str = "stacked"
 
     def __post_init__(self):
+        from .features import FEATURE_SETS
+        if self.feature_set not in FEATURE_SETS:
+            raise ValueError("unsupported feature_set")
         for name in ("width", "height", "history_length", "map_planes", "public_dim"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -30,12 +34,25 @@ class ObservationLayout:
         return self.map_planes * self.cells + self.public_dim
 
     @property
+    def privileged_planes(self):
+        return self.map_planes - 2
+
+    @property
+    def privileged_dim(self):
+        return self.privileged_planes * self.cells + self.public_dim
+
+    @property
     def history_dim(self):
         return self.history_length * self.frame_dim
 
     @property
     def knowledge_dim(self):
-        return self.knowledge_channels * self.cells
+        return self.knowledge_channels * self.cells + self.public_extra_dim
+
+    @property
+    def public_extra_dim(self):
+        from .features import feature_recipe
+        return feature_recipe(self.feature_set).public_extra_dim
 
     @property
     def num_actions(self):
@@ -57,19 +74,28 @@ class ObservationLayout:
         return frame[:, :self.map_planes * self.cells].reshape(
             frame.shape[0], self.map_planes, self.height, self.width)
 
+    def privileged_maps(self, frame):
+        if frame.ndim != 2 or frame.shape[-1] != self.privileged_dim:
+            raise ValueError("privileged observation shape does not match observation layout")
+        return frame[:, :self.privileged_planes * self.cells].reshape(
+            frame.shape[0], self.privileged_planes, self.height, self.width)
+
     def memory_maps(self, knowledge, batch_size):
         if knowledge is None or knowledge.shape != (batch_size, self.knowledge_dim):
             raise ValueError("knowledge shape does not match observation layout")
-        return knowledge.reshape(batch_size, self.knowledge_channels, self.height, self.width)
+        return knowledge[:, :self.knowledge_channels * self.cells].reshape(
+            batch_size, self.knowledge_channels, self.height, self.width)
 
     def with_geometry(self, width, height):
         return replace(self, width=width, height=height)
 
 
-def own_king_coordinates(current_maps):
+def own_king_coordinates(current_maps, valid_cells=None):
     """Relative XY derived exclusively from the supplied current observation."""
     n, _, height, width = current_maps.shape
     marker = (current_maps[:, 4].bool() & current_maps[:, 5].bool()).flatten(1)
+    if valid_cells is not None:
+        marker = marker & valid_cells
     valid = marker.sum(1).eq(1)
     position = marker.long().argmax(1)
     rows = torch.arange(height, device=current_maps.device, dtype=current_maps.dtype)

@@ -14,6 +14,7 @@ from .actions import make_action_space
 from .actor import build_actor
 from .config import FeatureConfig
 from .distributions import action_probabilities, greedy_actions
+from .features import feature_recipe
 from .knowledge import KnowledgeState
 from .observations import ObservationHistory, make_observation_encoder
 from .precision import matmul_precision, validate_precision
@@ -102,7 +103,7 @@ class PolicyRuntime:
         if capacity <= self.capacity:
             return
         old = self.capacity
-        frame_dim = (12 + self.features.players) * self.features.width * self.features.height + 5 * self.features.players + 3
+        frame_dim = self.actor.layout.frame_dim
         frames = torch.zeros(capacity, self.features.history_length, frame_dim, device=self.device)
         if old:
             frames[:old] = self.history.frames
@@ -116,10 +117,14 @@ class PolicyRuntime:
             setattr(self, name, value)
         if self.features.persistent_knowledge:
             memory = KnowledgeState(capacity, self.features.width, self.features.height, self.features.players,
-                                    self.device, age_scale=self.features.knowledge_age_scale)
+                                    self.device, age_scale=self.features.knowledge_age_scale,
+                                    remember_dynamics=feature_recipe(self.features.feature_set).dynamic_memory,
+                                    terrain_distances=feature_recipe(self.features.feature_set).terrain_distances)
             if old:
                 for name in memory._fields:
                     getattr(memory, name)[:old] = getattr(self.knowledge, name)
+                if memory.paths is not None:
+                    memory.paths.copy_prefix(self.knowledge.paths)
             self.knowledge = memory
         self.capacity = capacity
 
@@ -188,10 +193,12 @@ class PolicyRuntime:
             self.history.frames[rows] = frames
             self._initialized[rows] |= active
         inputs = {"policy": frames.flatten(1), "single_obs": frame,
-                  "action_mask": self.action_space.mask(batch, players)}
+                  "action_mask": self.action_space.mask(batch, players), "valid_cells": batch.valid_cells}
         if self.knowledge is not None:
             self.knowledge.update(batch, players, mask=active, lane_ids=rows, visible=visible)
-            inputs["knowledge"] = self.knowledge.encode(batch.state["tick"], players, lane_ids=rows).flatten(1)
+            inputs["knowledge"] = self.knowledge.features(batch.state["tick"], players, lane_ids=rows)
+        if feature_recipe(self.features.feature_set).half_precision:
+            inputs["knowledge"] = inputs["knowledge"].half().float()
         return inputs
 
     def _uniforms(self, rows, active):
@@ -216,7 +223,11 @@ class PolicyRuntime:
             with matmul_precision(*self.precision), torch.autocast(
                     self.device.type, dtype=torch.bfloat16,
                     enabled=self.amp_bfloat16 and self.device.type == "cuda"):
-                logits = self.actor(inputs["policy"], inputs.get("knowledge")).float()
+                if self.config["network"]["family"] == "scaled":
+                    logits = self.actor(inputs["policy"], inputs.get("knowledge"), inputs["valid_cells"])
+                else:
+                    logits = self.actor(inputs["policy"], inputs.get("knowledge"))
+                logits = logits.float()
             with torch.autocast(self.device.type, enabled=False):
                 probabilities = action_probabilities(logits, inputs["action_mask"], factorized=self.factorized,
                                                        validate_mask=False)

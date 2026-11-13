@@ -13,6 +13,8 @@ from generals_arena.matches.replay import verified_replay
 def policy(tmp_path, body):
     source = tmp_path / 'batch.cpp'
     source.write_text('''#include "arena_policy.h"
+#include <chrono>
+#include <thread>
 struct State { std::uint64_t seed, hash; };
 extern "C" void *arena_create(int, std::uint64_t seed, const char *) { return new State{seed,seed}; }
 extern "C" void arena_destroy(void *p) { delete static_cast<State *>(p); }
@@ -98,6 +100,32 @@ def test_hard_timeout_only_forfeits_its_lane_and_seat_and_other_matches_complete
     assert not results[1].get('forfeits')
     for result, blob in captured:
         assert len(list(verified_replay(blob, result))) == result['ticks']+1
+
+
+@pytest.mark.parametrize('execution', ['isolated', 'batch'])
+def test_training_budget_survives_timeout_recovery_without_changing_arena_default(tmp_path, execution):
+    entry = policy(tmp_path, '''
+    if(s.seed==42 && o->tick==2) { for(;;) {} }
+    if(s.seed==7) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    return 0;
+''')
+    schedule = plans(entry, 3, [[7,42,12], [7,21,22]])
+    entries = {entry['entrant_id']: entry}
+    # The slow survivor must retain 50ms while its peer forfeits and the match
+    # is restored. A subsequent ordinary Arena run must still use 10ms.
+    for limit, options in ((50, {'decision_limit_ms': 50}), (10, {})):
+        with MatchRunner(entries, max_ticks=6, execution=execution, **options) as runner:
+            results, _ = runner.run(schedule)
+        assert all('policy_error' not in row for row in results)
+        assert [e['seat'] for e in results[0]['forfeits']] == ([1] if limit == 50 else [0, 1])
+        assert [e['seat'] for e in results[1].get('forfeits', [])] == ([] if limit == 50 else [0])
+        for row in results:
+            assert all(e['limit_ns'] == limit * 1_000_000 for e in row.get('forfeits', []))
+            assert all(m['limit_ns'] == limit * 1_000_000 for m in row['decision_timing'])
+        if limit == 50:
+            assert results[0]['ticks'] == results[1]['ticks'] == 6
+            slow = next(m for m in results[0]['decision_timing'] if m['seat'] == 0)
+            assert slow['calls'] == 6 and slow['max_ns'] > 10_000_000 and slow['timeouts'] == 0
 
 
 def test_invalid_native_action_fails_only_its_match(tmp_path):

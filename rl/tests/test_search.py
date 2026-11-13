@@ -34,7 +34,7 @@ class JointTickSimulatorTests(unittest.TestCase):
                 np.testing.assert_array_equal(actual_arrays[name], expected_arrays[name])
 
     def assert_native_parity(self, initial, joint_actions, *, episode_ticks=0):
-        """Compare the independent Python rule path with the native CPU step."""
+        """Check branch ownership and adapter parity against a native CPU lane."""
         env = CPUEnv.from_states(
             [initial], threads=1,
             auto_reset=False, episode_ticks=episode_ticks,

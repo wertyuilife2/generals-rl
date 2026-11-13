@@ -1,15 +1,35 @@
 """The selected recipe works as a CLI default and a small real CPU run."""
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 from copy import deepcopy
 import io
 import json
-from pathlib import Path
+import os
 from unittest.mock import patch
 
+import pytest
 import torch
 
-from generals_rl.config import DEFAULT_ITERATIONS, default_training_config
+from generals_rl.config import DEFAULT_ITERATIONS, configure_observations, default_training_config
 from generals_rl.train import main, train
+
+
+@pytest.mark.parametrize('device,initialized,environment,expected', [
+    ('cuda', False, {}, {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:True'}),
+    ('cuda', False, {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:False'},
+     {'PYTORCH_CUDA_ALLOC_CONF': 'expandable_segments:False'}),
+    ('cuda', False, {'PYTORCH_ALLOC_CONF': 'backend:cudaMallocAsync'},
+     {'PYTORCH_ALLOC_CONF': 'backend:cudaMallocAsync'}),
+    ('cuda', True, {}, {}),
+    ('cpu', False, {}, {}),
+])
+def test_allocator_defaults_preserve_explicit_settings_and_initialized_cuda(device, initialized, environment, expected):
+    with patch.dict(os.environ, environment, clear=True), \
+            patch('generals_rl.train.torch.cuda.is_initialized', return_value=initialized), \
+            patch('generals_rl.train.distributed_process_group', return_value=nullcontext()), \
+            patch('generals_rl.train._train'):
+        train({'task': {'device': device}}, 'unused', iterations=1)
+        assert {key: value for key, value in os.environ.items()
+                if key in ('PYTORCH_ALLOC_CONF', 'PYTORCH_CUDA_ALLOC_CONF')} == expected
 
 
 def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
@@ -20,7 +40,15 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert execute.call_args.kwargs["iterations"] == DEFAULT_ITERATIONS == 224
     assert execute.call_args.kwargs["steps_per_env"] is None
     assert expected['evaluation']['profile'] is None
-    assert 8 * expected["task"]["num_envs"] * expected["runner"]["num_steps_per_env"] * 224 == 939_524_096
+    assert expected['task']['feature_set'] == 'temporal_paths'
+    assert expected['runner']['policy']['critic_fusion'] == 'early_shared'
+    assert expected['runner']['policy']['value_distribution'] == 'hl_gauss'
+    assert expected['runner']['storage_history'] == {'policy': 8}
+    assert expected['runner']['storage_codec'] == 'generals_rl.rollout_codec.PathObservationCodec'
+    assert expected['runner']['algorithm']['physical_minibatch_size'] == 8192
+    assert expected['task']['opponent'] == 'current_self_play'
+    assert expected['task']['train_both_sides'] is True
+    assert 8 * expected["task"]["num_envs"] * 2 * expected["runner"]["num_steps_per_env"] * 224 == 3_758_096_384
     with patch("generals_rl.train.train") as execute:
         main(["--output", "unused-ticks", "--steps-per-env", "64"])
     assert execute.call_args.kwargs["iterations"] is None
@@ -29,24 +57,17 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert default_training_config()["runner"]["policy"]["backbone"] == "vit"
 
 
-def test_other_model_config_replaces_the_policy_without_vit_fields(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    for name in ("v32.json", "v32-opt.json"):
-        old = json.loads((root / "configs" / name).read_text())
-        config = tmp_path / name
-        config.write_text(json.dumps(old))
-        with patch("generals_rl.train.train") as execute:
-            main(["--config", str(config), "--iterations", "1", "--output", str(tmp_path / "unused")])
-        actual = execute.call_args.args[0]
-        assert actual == old
-        assert "backbone" not in actual["runner"]["policy"]
-        assert "amp_bfloat16" not in actual["runner"]["algorithm"]
-        assert "gamma_final" not in actual["curriculum"]
-        assert actual["evaluation"]["every_n_updates"] == 100
-        assert actual["evaluation"]["maps_per_opponent"] == 200
-        assert actual["evaluation"].get("backend", "cpu") == "cpu"
-        assert actual["inference"] == {"mode": "stochastic", "precision": "from_config", "execution": "eager"}
-        assert execute.call_args.kwargs["iterations"] == 1
+def test_complete_recipe_does_not_inherit_new_defaults(tmp_path):
+    recipe = {'task': {'seed': 73},
+              'runner': {'num_steps_per_env': 32,
+                         'policy': {'class_name': 'custom.Policy'},
+                         'algorithm': {'class_name': 'custom.PPO'}}}
+    config = tmp_path / 'recipe.json'
+    config.write_text(json.dumps(recipe))
+    with patch('generals_rl.train.train') as execute:
+        main(['--config', str(config), '--iterations', '1', '--output', str(tmp_path / 'unused')])
+    assert execute.call_args.args[0] == recipe
+    assert execute.call_args.kwargs['iterations'] == 1
 
 
 def test_sparse_model_override_replaces_the_whole_policy(tmp_path):
@@ -78,7 +99,7 @@ def test_partial_override_and_resume_preserve_their_configuration_boundaries(tmp
 def test_selected_vit_recipe_completes_cpu_updates_and_resumes(tmp_path):
     config = default_training_config()
     config["task"].update(backend="cpu", device="cpu", num_envs=2, map_pool_size=0,
-                          max_episode_steps=3, mountain_density=0, city_density=0)
+                          map_curriculum=None, max_episode_steps=3, mountain_density=0, city_density=0)
     config["runner"].update(num_steps_per_env=4, save_interval=1)
     config["runner"]["policy"].update(amp_bfloat16=False, compile_forward=False)
     config["runner"]["algorithm"].update(amp_bfloat16=False, num_learning_epochs=1,
@@ -91,15 +112,17 @@ def test_selected_vit_recipe_completes_cpu_updates_and_resumes(tmp_path):
         checkpoint = tmp_path / "first/checkpoint.pt"
         continued = train(config, tmp_path / "resumed", iterations=1, resume=str(checkpoint))
     saved = json.loads((tmp_path / "first/run_config.json").read_text())
-    assert config == original == saved
-    assert saved["self_play"]["pool_size"] == 8
-    assert saved["self_play"]["snapshot_interval"] == 1
+    assert config == original
+    assert saved == configure_observations(original)
+    assert saved['task']['train_both_sides'] is True
+    assert not (tmp_path / 'first/history_pool').exists()
     assert summary["iterations"] == 2
-    assert summary["self_play"]["episode_assignments"] > 0
+    assert summary['self_play']['new_publications'] == 0
+    assert summary['player_transitions'] == 2 * summary['board_ticks']
     assert saved["runner"]["algorithm"]["adaptive_lr_max"] == 1e-3
     weights = torch.load(tmp_path / "resumed/checkpoint.pt", weights_only=False, map_location="cpu")
     assert weights["iter"] == 2
     assert len(weights["optimizer_state_dict"]["param_groups"]) == 1
     assert 1e-5 <= weights["optimizer_state_dict"]["param_groups"][0]["lr"] <= 1e-3
     assert continued["iterations"] == 1
-    assert max(continued["self_play"]["pool_ids"]) > max(summary["self_play"]["pool_ids"])
+    assert continued['self_play']['pool_ids'] == summary['self_play']['pool_ids'] == []

@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 from time import perf_counter
+import warnings
 
 import torch
 
@@ -59,7 +60,8 @@ class TrainingEvalConfig:
     every_n_updates: int = 14
     profile: str | dict | None = None
     maps_per_opponent: int = 100
-    max_ticks: int = 2000
+    max_ticks: int = 2048
+    decision_limit_ms: int = 50
     seed: int = 1000042
     batch_size: int = 128
     cpu_threads: int = 1
@@ -77,7 +79,7 @@ class TrainingEvalConfig:
             if type(getattr(self, name)) is not bool:
                 raise TypeError(f'evaluation.{name} must be boolean')
         for name in ('every_n_updates', 'maps_per_opponent', 'max_ticks', 'seed', 'batch_size',
-                     'cpu_threads', 'final_top_k', 'final_games_multiplier'):
+                     'cpu_threads', 'final_top_k', 'final_games_multiplier', 'decision_limit_ms'):
             value = getattr(self, name)
             minimum = 0 if name in ('seed', 'batch_size', 'final_top_k') else 1
             if type(value) is not int or value < minimum:
@@ -95,8 +97,8 @@ class TrainingEvalConfig:
         if device.type not in ('cpu', 'cuda'):
             raise ValueError('evaluation.device must be a CPU or CUDA device string')
         object.__setattr__(self, 'device', str(device))
-        if self.backend != 'cpu':
-            raise ValueError('evaluation.backend must be cpu; evaluation.device selects CPU or CUDA model inference')
+        from generals_arena.matches.runner import native_backend
+        object.__setattr__(self, 'backend', native_backend(self.backend, self.device))
         if self.timeout_seconds is not None and (isinstance(self.timeout_seconds, bool)
                 or not isinstance(self.timeout_seconds, (int, float))
                 or not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0):
@@ -114,7 +116,8 @@ class TrainingEvalConfig:
 
     @property
     def synchronous(self):
-        return torch.device(self.device).type == 'cuda' and self.cuda_visible_devices is None
+        return (torch.device(self.device).type == 'cuda'
+                and (self.cuda_visible_devices is None or self.allow_shared_gpus))
 
     def due(self, completed_updates):
         return self.enabled and completed_updates > 0 and completed_updates % self.every_n_updates == 0
@@ -162,7 +165,8 @@ class PeriodicEvaluator:
 
     The persistent key is (policy_id, profile_id), never a transient history-pool
     index. CPU and dedicated GPU evaluation run asynchronously. Shared CUDA
-    pauses between complete PPO updates. Only the parent writes training logs.
+    pauses between complete PPO updates, after the caller releases every rank's
+    idle CUDA cache. Only the parent writes training logs.
     """
 
     def __init__(self, settings, run_config, output_dir, writer, *, on_complete=None,
@@ -178,16 +182,22 @@ class PeriodicEvaluator:
         self.latest_completed = self.best_completed = None
         self.budget_exhausted = False
         self.confirmation = None
+        self.migration = None
         if settings.profile is None:
+            from generals_arena.policies.references import training_opponents
             task = run_config['task']
             map_config = {key: task[key] for key in ('width', 'height', 'players', 'mountain_density', 'city_density') if key in task}
             if task.get('random_maps', True):
                 map_config.update(width=None, height=None)
             self.profile = make_profile(map_config, max_ticks=settings.max_ticks, seed=settings.seed,
-                                        maps_per_opponent=settings.maps_per_opponent)
+                                        maps_per_opponent=settings.maps_per_opponent,
+                                        opponents=training_opponents(self.directory / 'opponents'))
         else:
             from generals_arena.competitions.evaluation import load_profile
             self.profile = load_profile(settings.profile)
+        # Apply the training budget to both generated and explicit panels. The
+        # profile identity keeps scores under different deadlines separate.
+        self.profile['decision_limit_ms'] = settings.decision_limit_ms
         self.profile_id = profile_id(self.profile)
         self._restore(resume, resume_updates)
         self._save_index()
@@ -211,6 +221,16 @@ class PeriodicEvaluator:
         saved = json.loads(index.read_text())
         if saved.get('schema_version') != 1:
             raise ValueError('unsupported training Arena evaluation index; preserve old reports in their original run')
+        if imported and saved.get('deployment', {}).get('backend') == 'gpu':
+            # A checkpoint can resume learning, but scores from the retired executor
+            # must not enter the new panel's best-model selection or TensorBoard.
+            self.migration = {'kind': 'gpu_to_native_cpu', 'source_index': str(index),
+                              'source_index_sha256': _hash(index),
+                              'source_profile_id': saved['profile_id']}
+            warnings.warn('Starting a fresh native CPU evaluation history for the resumed checkpoint; '
+                          f'legacy GPU reports remain unchanged at {index}.', FutureWarning, stacklevel=2)
+            return
+        self.migration = saved.get('migration')
         if saved['profile_id'] != self.profile_id:
             raise ValueError('resumed Arena evaluation profile differs; use the original fixed evaluation profile')
         expected_deployment = self._deployment()
@@ -466,9 +486,6 @@ class PeriodicEvaluator:
             environment['CUDA_VISIBLE_DEVICES'] = ''
         elif self.settings.cuda_visible_devices is not None:
             environment['CUDA_VISIBLE_DEVICES'] = self.settings.cuda_visible_devices
-        elif torch.cuda.is_initialized():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
         return environment
 
     def _complete(self, job):
@@ -505,12 +522,33 @@ class PeriodicEvaluator:
                 self.writer.add_scalar(f'{prefix}/elo_upper95', interval['upper'], step)
             self.writer.add_scalar(f'{prefix}/games', job['expected_games'], step)
             self.writer.add_scalar(f'{prefix}/worker_seconds', job['worker_seconds'], step)
+            self._log_outcomes(report, prefix, step)
             self.writer.flush()
         if self.on_complete is not None and job['stage'] == 'periodic':
             self.on_complete(self._point(job))
         self._prune_snapshots()
         self._save_index()
         print(f"[arena] updates={job['completed_ppo_updates']} Elo={value:.1f} stage={job['stage']}", flush=True)
+
+    def _log_outcomes(self, report, prefix, step):
+        from generals_arena.policies.references import BASELINE_NAMES, HEURISTIC_NAMES
+        rates = {}
+        for name, row in report['by_opponent'].items():
+            games = row['games']
+            rates[name] = row['wins'] / games
+            for metric, value in (('win_rate', rates[name]), ('draw_rate', row['draws'] / games),
+                                  ('games', games)):
+                self.writer.add_scalar(f'{prefix}/{metric}/{name}', value, step)
+            timeouts = sum(timing.get('timeouts', 0) for game in report['results']
+                           if game.get('opponent') == name for timing in game.get('decision_timing', [])
+                           if timing['seat'] != game.get('candidate_seat'))
+            self.writer.add_scalar(f'{prefix}/timeouts/{name}', timeouts, step)
+        groups = {'baseline4_mean_win_rate': BASELINE_NAMES,
+                  'heuristic3_mean_win_rate': HEURISTIC_NAMES,
+                  'mean_win_rate': tuple(name for name in rates if name != 'WAIT')}
+        for metric, names in groups.items():
+            if names and all(name in rates for name in names):
+                self.writer.add_scalar(f'{prefix}/{metric}', sum(rates[name] for name in names) / len(names), step)
 
     def _point(self, job):
         return {'model_name': job.get('model_name'), **{key: job[key] for key in ('policy_id', 'profile_id', 'completed_ppo_updates', 'iteration',
@@ -583,6 +621,7 @@ class PeriodicEvaluator:
                     'directory': str(self.directory),
                     'profile_id': self.profile_id,
                     'deployment': self._deployment(), 'selection': self._selection(),
+                    'migration': self.migration,
                     'jobs': self.jobs, 'best': self.best_completed, 'confirmation': self.confirmation})
 
     def _deployment(self):

@@ -104,7 +104,7 @@ class VariableGeometryTests(unittest.TestCase):
             cells = width * height
             for privileged in (False, True):
                 encoded = encoder.encode(batch, ids, privileged=privileged)
-                self.assertEqual(tuple(encoded.shape), (4, 14 * cells + 13))
+                self.assertEqual(tuple(encoded.shape), (4, 13 * cells + 13))
                 for lane, state in enumerate(states):
                     expected_risk, expected_margin = combat_reference(state, int(ids[lane]), privileged)
                     torch.testing.assert_close(encoded[lane, 10 * cells:11 * cells],
@@ -164,8 +164,8 @@ class VariableGeometryTests(unittest.TestCase):
             self.addCleanup(task.close)
             result = task.step(torch.zeros(1, dtype=torch.long))
             cells = width * height
-            self.assertEqual(tuple(result.observations["policy"].shape), (1, 4 * (14 * cells + 13)))
-            self.assertEqual(tuple(result.observations["critic"].shape), (1, 14 * cells + 13))
+            self.assertEqual(tuple(result.observations["policy"].shape), (1, 4 * (13 * cells + 13)))
+            self.assertEqual(tuple(result.observations["critic"].shape), (1, 11 * cells + 13))
             self.assertEqual(tuple(result.observations["action_mask"].shape), (1, 1 + 8 * cells))
             self.assertEqual(tuple(result.observations["knowledge"].shape), (1, 11 * cells))
             self.assertIn("official_31_4_5", task.observation_encoder.semantics)

@@ -14,8 +14,7 @@ import torch
 from tensordict import TensorDict
 
 from generals import VecEnv
-from generals.core.engine import CoreEngine
-from generals.core.state import Action, GameState, MapLayout
+from generals.core.state import GameState, MapLayout
 from generals import MapConfig
 from generals_arena.competitions.evaluation import evaluate
 from generals_arena.competitions.evaluation import make_profile
@@ -23,8 +22,8 @@ from generals_rl.export import export_policy
 from generals_rl.mdp import (CombatObservationEncoder, GameBatch, LocalObservationEncoder,
                              make_observation_encoder)
 from generals_rl.self_play_training import prepare_self_play
-from generals_rl.information_ppo import InformationSpatialPPOPolicy
-from rl_test_utils import light_policy_config
+from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
+from rl_test_utils import vit_policy_config
 from generals_rl.task import GeneralsTask, TaskConfig
 
 torch.set_num_threads(1)
@@ -45,13 +44,12 @@ def combat_state(tick=0):
 
 
 def small_runner(task):
-    groups={"policy":["policy"],"critic":["critic"]}
-    options=light_policy_config()
-    options["class_name"]="generals_rl.information_ppo.InformationSpatialPPOPolicy"
+    groups={"policy":["policy", "knowledge", "valid_cells"],"critic":["critic", "policy", "knowledge", "valid_cells"]}
+    options=vit_policy_config()
     obs=TensorDict(task.get_observations(),batch_size=[task.num_envs])
     kwargs={key:value for key,value in options.items() if key!="class_name"}
     with redirect_stdout(io.StringIO()):
-        policy=InformationSpatialPPOPolicy(obs,groups,task.action_space.size,**kwargs)
+        policy=ScaledInformationSpatialPPOPolicy(obs,groups,task.action_space.size,**kwargs)
     runner=SimpleNamespace(alg=SimpleNamespace(policy=policy),cfg={"obs_groups":groups},
                            env=SimpleNamespace(get_observations=lambda:obs))
     return runner,{"runner":{"policy":options,"obs_groups":groups},
@@ -67,7 +65,7 @@ class CombatObservationTests(unittest.TestCase):
 
     def task(self,*,combat,opponent="wait",episode_ticks=8):
         cfg=TaskConfig(width=9, height=9, random_maps=False, map_pool_size=0, num_envs=2,max_episode_steps=episode_ticks,history_length=4,
-                       opponent=opponent,combat_features=combat,
+                       opponent=opponent,combat_features=combat,persistent_knowledge=True,
                        mountain_density=0,city_density=0)
         task=GeneralsTask(cfg,backend=self.backend([combat_state(),combat_state()],episode_ticks))
         self.addCleanup(task.close)
@@ -92,7 +90,7 @@ class CombatObservationTests(unittest.TestCase):
         states=[combat_state(tick) for tick in (1,49,184)]
         batch=GameBatch.from_backend(self.backend(states),"cpu")
         encoded=CombatObservationEncoder(1024).encode(batch,torch.zeros(3,dtype=torch.long))
-        self.assertEqual(tuple(encoded.shape),(3,1147))
+        self.assertEqual(tuple(encoded.shape),(3,1066))
         for lane,state in enumerate(states):
             army=state.army.ravel()
             risk=max(0,int(army[28])-1)
@@ -121,9 +119,9 @@ class CombatObservationTests(unittest.TestCase):
         ids=torch.tensor([0,0])
         encoder=CombatObservationEncoder(1024)
         local=encoder.encode(batch,ids)
-        torch.testing.assert_close(local[0,:13*81],local[1,:13*81],rtol=0,atol=0)
+        torch.testing.assert_close(local[0,:12*81],local[1,:12*81],rtol=0,atol=0)
         torch.testing.assert_close(local[0,-13:],local[1,-13:],rtol=0,atol=0)
-        self.assertFalse(torch.equal(local[0,13*81:14*81],local[1,13*81:14*81]))
+        self.assertFalse(torch.equal(local[0,12*81:13*81],local[1,12*81:13*81]))
         privileged=encoder.encode(batch,ids,privileged=True)
         self.assertFalse(torch.equal(privileged[0],privileged[1]))
         torch.testing.assert_close(encoder.encode(batch,ids),local,rtol=0,atol=0)
@@ -136,7 +134,7 @@ class CombatObservationTests(unittest.TestCase):
             before=original.step(torch.zeros(2,dtype=torch.long))
             after=combat.step(torch.zeros(2,dtype=torch.long))
             torch.testing.assert_close(before.reward,after.reward,rtol=0,atol=0)
-            self.assertEqual(tuple(after.observations["policy"].shape),(2,4588))
+            self.assertEqual(tuple(after.observations["policy"].shape),(2,4264))
             self.assertEqual(tuple(after.observations["action_mask"].shape),(2,649))
         continuing=combat.history.frames[1].clone()
         combat.reset(torch.tensor([True,False]),rotate=True)
@@ -179,7 +177,6 @@ class CombatObservationTests(unittest.TestCase):
                 report=evaluate(bundle,profile,batch_size=8,device="cpu",cpu_threads=1)
             self.assertEqual(report["games"],10)
             self.assertEqual(set(report["by_opponent"]),{"random","defensive","expansion","aggressive","WAIT"})
-
 
 
 if __name__=="__main__":

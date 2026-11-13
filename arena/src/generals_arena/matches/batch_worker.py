@@ -208,7 +208,7 @@ class BatchWorker:
                 current = (lane, *journal.headers[lane, 1:]) if lane >= 0 else (-1, -1, 0, 0)
                 if current != phase:
                     phase, entered = current, monotonic()
-                elif current[1] >= 0 and monotonic()-entered > 10:
+                elif current[1] >= 0 and monotonic()-entered > max(10, request.get('decision_limit_ms', 10) / 1000 + 2):
                     with _process_lifecycle:
                         self.process.kill()
                     break
@@ -231,7 +231,8 @@ class BatchWorker:
         if not (row[4] or row[5]):
             row[4 if timeout else 5] += 1
         details = {'kind': 'timeout' if timeout else 'policy_error', 'player': seat, 'tick': tick,
-                   'elapsed_ns': int(row[6]), 'limit_ns': native.DECISION_NS if stage == 2 else 2_000_000_000,
+                   'elapsed_ns': int(row[6]),
+                   'limit_ns': request.get('decision_limit_ms', 10) * 1_000_000 if stage == 2 else 2_000_000_000,
                    'phase': {1: 'initialization', 2: 'decision', 3: 'destruction'}.get(stage, 'worker'),
                    'exitcode': self.process.exitcode}
         return {'error': 'native batch policy exited', 'details': details, 'lane': lane}
@@ -260,8 +261,9 @@ class BatchWorker:
                 recovered = journal.extract(lane, players, ticks)
                 worker = MatchWorker()
                 worker.journal, worker.plan = recovered, plan
-                worker.config = SimpleNamespace(max_ticks=ticks)
-                worker.context = {'entries': entries, 'max_ticks': ticks}
+                limit = options.get('decision_limit_ms', 10)
+                worker.config = SimpleNamespace(max_ticks=ticks, decision_limit_ms=limit)
+                worker.context = {'entries': entries, 'max_ticks': ticks, 'decision_limit_ms': limit}
                 worker.forfeits, worker.bounded = [], False
                 try:
                     if native.decision_timeout(details):

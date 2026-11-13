@@ -5,7 +5,7 @@
 本仓库原始导入 commit 为 `38c6cad003a293c50196e5d62a799ad59c8fb400`；两个子树的 Git 树哈希一致。
 未复制来源工作区的未提交修改。完整上游源码、测试及许可证保留。
 
-仅修改以下五个运行时源文件：
+修改以下六个运行时源文件：
 
 | 文件 | 修改与用途 |
 | --- | --- |
@@ -14,6 +14,28 @@
 | `algorithms/ppo.py` | Categorical 自适应 LR 使用已存动作 log-prob 的非负 KL 估计 `exp(log_ratio)-1-log_ratio`，无需完整旧分布；复用上游每 minibatch 的阈值、1.5倍调节、[1e-5,1e-2]界限及多卡归约。增加可选 minibatch observer，并取得原梯度裁剪函数的返回值；Normal KL、PPO loss/optimizer step 顺序不变。 |
 | `storage/rollout_storage_cts.py` | 分离动作与分布形状/dtype，保留 bool mask；按 env-major 索引逐批读取 rollout；支持有效时间前缀。新增默认开启的 `store_action_std` / `store_action_mean`；关闭时对应 `sigma` / `mu` 为 `None`，不分配、写入或取样缓存。Categorical 关闭标准差，StudentPPO 另关闭旧动作分布均值。 |
 | `runners/on_policy_runner_cts.py` | 使用已有 callable resolver；配置离散动作、分布形状、算法的 teacher 数量工厂和标准差缓存开关；无日志目录时跳过周期保存。第二优化器可为 `None`，保存与恢复时兼容单优化器算法。可选 `storage_obs_keys` 仅筛选 rollout 存储键，默认完整保存；构造策略和实时 obs 保持完整。 |
+| `utils/logger_cts.py` | 汇总整个 rollout 出现的 episode 指标键，避免遗漏首次在后续 tick 才出现的统计。 |
+
+`runner.storage_history` 可指定堆叠观测的帧数，例如 `{"policy": 4}`。
+`runner.release_terminal_observations=true`可在每步timeout bootstrap与logger消费完成后，
+释放extras中的终局观测引用，避免把已不再使用的H4 payload保留到PPO更新期间。
+该选项默认false以保留上游行为；Generals双座默认启用，benchmark采用相同生命周期。
+不改变返回值、reward、bootstrap、GAE、采样或优化公式，旧配置缺省行为不变。
+
+CTS storage 对这些键仅保存每 tick 的当前帧、rollout 起点的 H−1 帧上下文和 episode 边界；
+采样时通过 `observation_batch(time_indices, env_indices, keys=...)` 无损重建完整观测。
+`storage.observations` 是物理存储，历史键的最后一维仅为单帧；算法与诊断工具统一通过上述方法读取。
+未指定的键保留原格式；省略配置时保持完整存储。该选项只用于 RL，要求输入为按时间顺序展平的
+固定帧窗口，且 episode 重置时重复首帧。当前 Generals task 满足此约定；训练入口校验 policy 帧数
+与 task 一致。观测、GAE、随机采样和 PPO 数学不变，覆盖异步重置、跨 rollout 和末尾短 rollout，
+CPU 与确定性 CUDA/BF16 的真实 PPO 更新、模型和 Adam 状态与完整存储精确一致。
+
+`runner.storage_codec` 可配置可解析的工厂类路径，工厂接收筛选后的逻辑观察TensorDict，返回
+`encode(key, value)`／`gather(key, storage, time_indices, env_indices)` 对象。
+前者返回Tensor或嵌套TensorDict作为物理存储，后者恢复原观察；可与历史去重组合。
+CTS只管理分配、前缀、episode索引和标量字段，不包含Generals特征知识。
+当前二值特征编解码器位于vendor外的 `generals_rl.rollout_codec`，CUDA融合gather和解码，
+连续FP32值不量化。PPO与KL probe仍统一调用 `observation_batch`，读取方不接触物理格式。
 
 默认 MoE-CTS 的 PPO/GAE、两个 optimizer、student PPO encoder 停止梯度、latent MSE、expert load balance 和网络结构沿用上游。
 Categorical KL 不使用标准差；logger 的 `Policy/mean_noise_std` 为兼容常数，不能用于分析离散探索。

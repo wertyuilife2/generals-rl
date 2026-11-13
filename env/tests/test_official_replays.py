@@ -104,7 +104,7 @@ def test_official_replay_gpu(name, device):
 
 
 def test_official_city_placement():
-    from generals.core.cities import _DuelCities
+    from city_reference import _DuelCities
     from generals.core.mapgen import _neighbors
     class RandomStream:
         def __init__(self, seed): self.value = seed
@@ -120,6 +120,17 @@ def test_official_city_placement():
         actual = planner.plan(10)
         assert [group[0] for group in actual] == [group['indexes'] for group in case['result']['groups']]
         assert planner.deficit == case['result']['fairnessDeficit']
+
+    # NumPy's integer stream differs from the fixture LCG; compare the native
+    # implementation directly with the Python oracle under identical seeds.
+    from generals.core.mapgen_native import duel_cities
+    for seed in range(32):
+        planner = _DuelCities(mountains, data['generals'],
+            _neighbors(data['width'], data['height']), np.random.default_rng(seed))
+        expected = planner.plan(10)
+        actual = duel_cities(mountains, data['generals'], data['width'], data['height'],
+                             np.random.default_rng(seed), 10)
+        assert actual == expected
 
 
 def test_official_ffa_city_placement_and_fallback():

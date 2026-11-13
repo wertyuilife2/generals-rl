@@ -12,11 +12,12 @@ import torch
 
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.train import train
+from rl_test_utils import small_training_config
 
 
 class CurrentSelfPlayTrainingTests(unittest.TestCase):
     def config(self):
-        config = json.loads((Path(__file__).parents[1] / "configs/v32-opt.json").read_text())
+        config = small_training_config()
         config["task"].update(num_envs=8, backend="cpu", device="cpu",
                               max_episode_steps=8, map_pool_size=0,
                               opponent="current_self_play")
@@ -24,7 +25,6 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
         config["runner"]["save_interval"] = 1
         config["runner"]["algorithm"].update(num_learning_epochs=1, num_mini_batches=2,
                                               ppo_probe_samples=8, ppo_probe_batch_size=4)
-        config["self_play"].update(snapshot_interval=1, pool_size=2)
         config["evaluation"] = {"enabled": False}
         config["training_control"] = {}
         return config
@@ -48,7 +48,7 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
         self.assertEqual(summary, json.loads((output / "summary.json").read_text()))
         return summary, checkpoint, observed
 
-    def test_live_policy_updates_and_export_snapshots_never_replace_opponent(self):
+    def test_live_policy_updates_and_checkpoints_without_history_pool(self):
         config = self.config()
         original = deepcopy(config)
         with tempfile.TemporaryDirectory() as directory:
@@ -62,18 +62,16 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
             self.assertNotIn("active_snapshot_counts", summary["self_play"])
             self.assertEqual(checkpoint["iter"], 2)
             policy = observed["runner"].alg.policy
-            self.assertEqual(sum(parameter.numel() for parameter in policy.parameters()), 28_666)
             for prefix in ("actor.", "critic."):
                 self.assertTrue(any(not torch.equal(value, observed["initial_model"][name])
                                     for name, value in policy.named_parameters() if name.startswith(prefix)))
             session = observed["session"]
-            self.assertIs(session.opponent.policy, policy)
-            self.assertEqual(session.pool.ids, (2, 3))
-            snapshot = session.pool.get(3).model
-            self.assertIsNot(snapshot, policy)
-            self.assertFalse(snapshot.training)
-            self.assertTrue(all(not parameter.requires_grad for parameter in snapshot.parameters()))
-            for name, value in snapshot.state_dict().items():
+            self.assertIsNone(session)
+            self.assertIs(observed['runner'].env.task.opponent.policy, policy)
+            self.assertFalse((output / 'history_pool').exists())
+            self.assertEqual(summary['self_play']['new_publications'], 0)
+            self.assertEqual(summary['self_play']['pool_ids'], [])
+            for name, value in policy.state_dict().items():
                 torch.testing.assert_close(value, checkpoint["model_state_dict"][name], rtol=0, atol=0)
             with torch.inference_mode():
                 local = observed["runner"].env.get_observations().exclude("critic")
@@ -94,7 +92,9 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
             self.assertEqual(summary["steps_per_environment"], 6)
             self.assertEqual(summary["environment_steps"], 8 * 6)
             self.assertEqual(checkpoint["iter"], 3)
-            self.assertIs(observed["session"].opponent.policy, observed["runner"].alg.policy)
+            self.assertIsNone(observed['session'])
+            self.assertIs(observed['runner'].env.task.opponent.policy, observed['runner'].alg.policy)
+            self.assertFalse((root / 'resume/history_pool').exists())
             self.assertFalse(summary["self_play"]["snapshots_used_for_training"])
 
 

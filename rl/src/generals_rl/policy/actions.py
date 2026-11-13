@@ -31,7 +31,8 @@ class EncodedActionSpace:
         active = state["alive"].gather(1, player_ids[:, None]).squeeze(1) & ~state["terminated"]
         moves = (owned[:, :, None] & in_bounds[None] &
                  (state["terrain"][:, targets] != 1) & batch.valid_cells[:, targets] & active[:, None, None])
-        moves = moves[..., None].expand(-1, -1, -1, 2).reshape(batch.num_envs, -1)
+        moves = moves[..., None].expand(-1, -1, -1, 2)
+        moves = moves.reshape(batch.num_envs, -1)
         # A terminal or eliminated player's observation still needs a valid
         # distribution. WAIT is its absorbing action.
         return torch.cat((torch.ones_like(active[:, None]), moves), -1)
@@ -42,6 +43,13 @@ class EncodedActionSpace:
         if actions.dtype not in (torch.int32, torch.int64):
             raise TypeError("encoded actions must be integer tensors")
         encoded = actions.reshape(-1).long()
+        if encoded.is_cuda:
+            # Keep validation on the device. Clamp the gather index so a bad
+            # action reaches our assertion rather than an unrelated OOB read.
+            allowed = mask.gather(1, encoded.clamp(0, self.size - 1)[:, None]).squeeze(1)
+            torch._assert_async(((encoded >= 0) & (encoded < self.size) & allowed).all(),
+                                'encoded action is out of range or masked at the joint decision boundary')
+            return encoded
         if bool(((encoded < 0) | (encoded >= self.size)).any()):
             raise ValueError("encoded action is out of range")
         if not bool(mask.gather(1, encoded[:, None]).all()):

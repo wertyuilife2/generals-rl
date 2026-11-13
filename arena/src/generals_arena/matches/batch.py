@@ -154,7 +154,7 @@ def _instances(entries, plans):
 @cpu_bounded
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
                   record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True,
-                  initial_states=None, prepared_states=None):
+                  initial_states=None, prepared_states=None, decision_limit_ms=10):
     """Schedule one homogeneous batch in the native Arena executor.
 
     native=False benchmarks the public policy bridge, not a second match loop.
@@ -164,6 +164,8 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
         return [], {}
     if backend != 'cpu':
         raise ValueError('Arena requires the native CPU backend; GPU/MPS simulation is available through VecEnv')
+    if not native and decision_limit_ms != 10:
+        raise ValueError('custom decision limits require the native policy execution path')
     config, roles = _instances(entries, plans)
     maps = {plan['map_seed']: None for plan in plans}
     for seed in maps:
@@ -188,7 +190,7 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
             eliminations = np.full((count, players), -1, np.int64)
             with bind_loop(env, groups, joint, invalid, eliminations, active, journal,
                            native_policies=native, topologies=[s.layout.topology_id for s in states],
-                           record=record_replays) as execution:
+                           record=record_replays, decision_limit_ms=decision_limit_ms) as execution:
                 while np.any(active):
                     execution.advance(max_ticks, timing)
                     for lane in np.flatnonzero(execution.ending):

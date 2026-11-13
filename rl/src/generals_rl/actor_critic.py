@@ -13,6 +13,10 @@ class CategoricalActorCritic(nn.Module):
     def evaluate(self, obs, is_teacher=False, **kwargs):
         raise NotImplementedError
 
+    def action_probabilities_and_value(self, obs, *, validate_mask=True):
+        options = {'validate_mask': validate_mask} if hasattr(self, 'validate_action_mask') else {}
+        return self.action_probabilities(obs, **options), self.evaluate(obs)
+
     def act(self, obs, is_teacher=False, **kwargs):
         self.action_probabilities(obs, is_teacher=is_teacher)
         return self.distribution.sample().unsqueeze(-1)

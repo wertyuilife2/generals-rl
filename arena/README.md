@@ -467,3 +467,5 @@ generals-arena tournament --entrants roster.json --config rules.json \
 generals-arena evaluate --candidates finalists.json --profile calibrated.json \
   --backend cpu --device cuda:0 --batch-size 0 --output outputs/arena/finalists
 ```
+
+训练评测 profile 可用 `decision_limit_ms` 配置原生策略的单步决策预算；普通 Arena 默认 10ms，RL 自动评测默认 50ms。评测 profile 默认 2048 ticks，Arena 联赛默认 3000 ticks。随机地图默认关闭开局 AFK 淘汰。

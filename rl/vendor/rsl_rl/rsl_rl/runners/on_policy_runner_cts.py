@@ -124,6 +124,10 @@ class OnPolicyRunnerCTS:
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.alg_cfg["rnd_cfg"] else None
                     # Book keeping
                     self.logger.process_env_step(rewards, dones, extras, intrinsic_rewards)
+                    # Bootstrap and logging have consumed this potentially large
+                    # reset-before-next-state payload; do not pin it through PPO.
+                    if self.cfg.get("release_terminal_observations", False):
+                        extras.pop("terminal_observations", None)
 
                 stop = time.time()
                 collect_time = stop - start
@@ -405,6 +409,9 @@ class OnPolicyRunnerCTS:
                 raise ValueError("storage_obs_keys must contain unique existing observation names")
             storage_obs = obs.select(*storage_obs_keys)
         categorical = actor_critic.action_distribution == "categorical"
+        codec = self.cfg.get('storage_codec')
+        if codec is not None:
+            codec = resolve_callable(codec)(storage_obs)
         storage = RolloutStorageCTS(
             "rl",
             self.env.num_envs,
@@ -419,6 +426,8 @@ class OnPolicyRunnerCTS:
             action_dtype=torch.long if categorical else torch.float32,
             store_action_std=not categorical,
             store_action_mean=getattr(alg_class, "requires_old_distribution", True),
+            history_lengths=self.cfg.get('storage_history'),
+            observation_codec=codec,
         )
 
         # Initialize the algorithm

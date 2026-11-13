@@ -3,15 +3,21 @@ import torch
 import torch.nn.functional as F
 
 from .state import GameBatch
+from .features import feature_recipe
 
 
 class LocalObservationEncoder:
-    semantics = "official_31_4_5_local_v1"
+    semantics = "official_31_4_5_local_cells13_v2"
     channels = ("visible", "plain", "mountain", "city", "general", "self",
                 "enemy", "empty", "neutral", "log_army")
 
-    def __init__(self, episode_ticks: int):
+    def __init__(self, episode_ticks: int, *, clock_scale_ticks=None):
         self.episode_ticks = episode_ticks
+        self.clock_scale_ticks = clock_scale_ticks
+        if clock_scale_ticks is not None:
+            if type(clock_scale_ticks) is not int or clock_scale_ticks < 1:
+                raise ValueError('clock_scale_ticks must be a positive integer')
+            self.semantics += '_fixed_bounded_clock_v1'
 
     def visibility(self, batch: GameBatch, player_ids: torch.Tensor):
         owned = (batch.state["owner"] == player_ids[:, None]).float()
@@ -36,7 +42,6 @@ class LocalObservationEncoder:
         # including in multiplayer games. Hidden identities stay zero.
         identities = (owner[:, None] == order[:, :, None]) & visible[:, None]
         maps = torch.cat((maps, army[:, None], identities.float(),
-                          batch.valid_cells[:, None].float(),
                           batch.fog_obstacles(player_ids, visible)[:, None].float()), 1).flatten(1)
         # Relative player order starts at the learner; all army/territory/alive
         # totals are public. Opponent city counts are unknown in local mode.
@@ -50,7 +55,9 @@ class LocalObservationEncoder:
         public = torch.stack((torch.log1p(relative[..., 0]) / 10.0,
                               relative[..., 1] / cells, city, alive), -1).flatten(1)
         tick = s["tick"].float()
-        clock = torch.stack((tick / self.episode_ticks, (tick % 2) / 2, (tick % 50) / 50), -1)
+        elapsed = (tick / self.episode_ticks if self.clock_scale_ticks is None
+                   else (tick / self.clock_scale_ticks).clamp(0, 1))
+        clock = torch.stack((elapsed, (tick % 2) / 2, (tick % 50) / 50), -1)
         # Seat and clock expose the alternating base tie-break priority.
         seat = F.one_hot(player_ids, num_classes=batch.players).float()
         return torch.cat((maps, public, clock, seat), -1)
@@ -58,12 +65,28 @@ class LocalObservationEncoder:
 
 def make_observation_encoder(config, *, local_encoder=LocalObservationEncoder, combat_encoder=None, king_encoder=None):
     """Use one configured feature layout for learner, opponents and evaluation."""
+    clock = getattr(config, 'clock_scale_ticks', None)
+    options = {} if clock is None else {'clock_scale_ticks': clock}
     if config.combat_features:
         from .combat import CombatObservationEncoder
-        encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps)
+        encoder = (combat_encoder or CombatObservationEncoder)(config.max_episode_steps, **options)
     else:
-        encoder = local_encoder(config.max_episode_steps)
-    return (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
+        encoder = local_encoder(config.max_episode_steps, **options)
+    encoder = (king_encoder or KingThreatDistanceEncoder)(encoder) if config.king_threat_distance else encoder
+    return CompactPrecisionEncoder(encoder) if feature_recipe(getattr(config, "feature_set", "stacked")).half_precision else encoder
+
+
+class CompactPrecisionEncoder:
+    """Quantize normalized features before both rollout and stored PPO replay."""
+    def __init__(self, base):
+        self.base, self.channels = base, base.channels
+        self.semantics = base.semantics + "_fp16_transport_v1"
+
+    def visibility(self, batch, player_ids):
+        return self.base.visibility(batch, player_ids)
+
+    def encode(self, batch, player_ids, **options):
+        return self.base.encode(batch, player_ids, **options).half().float()
 
 
 class KingThreatDistanceEncoder:
@@ -111,15 +134,25 @@ class ObservationHistory:
         self.length = length
         self.frames = None
 
-    def reset(self, current, mask=None):
+    def reset(self, current, mask=None, *, rows=None):
         repeated = current[:, None].expand(-1, self.length, -1)
-        if self.frames is None or mask is None:
+        if rows is not None:
+            if mask is not None:
+                raise ValueError('choose reset rows or a reset mask')
+            self.frames = self.frames.index_copy(0, rows, repeated)
+        elif self.frames is None or mask is None:
             self.frames = repeated.clone()
         else:
-            self.frames[mask] = repeated[mask]
+            # Copy-on-write preserves terminal and pre-step observation views.
+            self.frames = torch.where(mask[:, None, None], repeated, self.frames)
 
-    def push(self, current):
-        self.frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)
+    def push(self, current, *, reset_rows=None):
+        frames = torch.cat((self.frames[:, 1:], current[:, None]), 1)
+        if reset_rows is not None:
+            # Only the newly allocated history is mutable; prior observations
+            # and stored timeout snapshots continue to own their old frames.
+            frames[reset_rows] = current[reset_rows, None]
+        self.frames = frames
 
     def flattened(self):
         return self.frames.flatten(1).clone()

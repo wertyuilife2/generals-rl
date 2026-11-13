@@ -20,9 +20,10 @@ def profile(*, maps=2, players=2, ticks=18):
                         maps_per_opponent=maps, seed=912)
 
 
-def test_batch_scalar_and_chunking_have_identical_games(tmp_path):
+@pytest.mark.parametrize('decision_limit_ms', [10, 50])
+def test_batch_scalar_and_chunking_have_identical_games(tmp_path, decision_limit_ms):
     bundle = make_bundle(tmp_path/'bundle')
-    settings = profile()
+    settings = dict(profile(), decision_limit_ms=decision_limit_ms)
     batch = evaluate(bundle, settings, tmp_path/'batch.json', batch_size=0)
     scalar = evaluate(bundle, settings, batch_size=0, scalar=True)
     chunks = evaluate(bundle, settings, batch_size=1)
@@ -32,6 +33,9 @@ def test_batch_scalar_and_chunking_have_identical_games(tmp_path):
     assert batch['wins'] + batch['losses'] + batch['draws'] == 8
     assert set(batch['by_opponent']) == {'random', 'WAIT'}
     assert batch['status'] == 'completed' and not batch['errors']
+    for game in batch['results'] + scalar['results'] + chunks['results']:
+        for row in game['decision_timing']:
+            assert row['limit_ns'] == (None if row['seat'] == game['candidate_seat'] else decision_limit_ms * 1_000_000)
     assert json.loads((tmp_path/'batch.json').read_text())['policy_id'] == batch['policy_id']
     maps = {}
     for game in batch['results']:
@@ -44,8 +48,14 @@ def test_profile_identity_pins_rules_seeds_opponents_and_budget():
     settings = profile()
     original = profile_id(settings)
     assert original == profile_id(deepcopy(settings))
-    for key, value in [('seed',914), ('maps_per_opponent',3), ('max_ticks',19), ('paired_seats',False)]:
+    for key, value in [('seed',914), ('maps_per_opponent',3), ('max_ticks',19), ('paired_seats',False), ('decision_limit_ms',50)]:
         assert profile_id(dict(settings, **{key:value})) != original
+    legacy = dict(settings)
+    del legacy['decision_limit_ms']
+    assert profile_id(legacy) == original  # Old explicit profiles retain 10ms.
+    for value in (0, -1, True, 1.5):
+        with pytest.raises(ValueError, match='decision_limit_ms'):
+            profile_id(dict(settings, decision_limit_ms=value))
     with pytest.raises(ValueError, match='fields'):
         profile_id(dict(settings, opponent_ratings={'random':100.}))
     with pytest.raises(ValueError, match='rating mode'):
@@ -93,10 +103,12 @@ def test_incompatible_capability_and_bad_profile_do_not_produce_results(tmp_path
         profile_id(dict(profile(), rating_policy='invented'))
 
 
-def test_arena_gpu_environment_requires_native_execution_binding(tmp_path):
+def test_legacy_gpu_evaluation_reports_native_cpu_and_keeps_model_device(tmp_path):
     bundle = make_bundle(tmp_path/'bundle')
-    with pytest.raises(ValueError, match='native CPU'):
-        evaluate(bundle, profile(maps=1,ticks=8), backend='gpu', device='cuda:0')
+    with pytest.warns(FutureWarning, match="backend='gpu'"):
+        report = evaluate(bundle, profile(maps=1,ticks=8), backend='gpu', device='cuda:0')
+    assert report['backend'] == 'cpu' and report['device'] == 'cuda:0'
+    assert not report['errors']
 
 
 def test_eliminated_candidate_is_a_loss_when_multiplayer_game_hits_limit(in_process_batch, tmp_path,monkeypatch):

@@ -1,5 +1,4 @@
 """Seeded standard 1v1/FFA random maps for the pinned official rules."""
-from collections import deque
 from functools import lru_cache
 import math
 import numpy as np
@@ -30,49 +29,13 @@ def _distance(a, b, width):
     return abs(a // width - b // width) + abs(a % width - b % width)
 
 
-def _spawn_score(source, mountains, neighbors):
-    counts = [0] * 15
-    seen, queue = {source}, deque([(source, 0)])
-    while queue:
-        cell, depth = queue.popleft()
-        counts[depth] += 1
-        if depth < 14:
-            for other in neighbors[cell]:
-                if other not in seen and not mountains[other]:
-                    seen.add(other)
-                    queue.append((other, depth + 1))
-    counts[1] = min(3, counts[1])
-    weight, score = int(1.18 ** 15), 0.
-    for depth in range(1, 15):
-        score += weight * counts[depth]
-        weight /= 1.18 if depth < 7 else 1.1
-        if depth < 5:
-            weight /= 1.6
-    return score
-
-
 def _spawns(mountains, p, width, neighbors, rng):
+    if p == 2:
+        from .mapgen_native import spawns
+        return spawns(mountains, width, rng)
     candidates = np.flatnonzero(~mountains)
     spacing = max(9, 9 * (1.8 - .1 * p))
     positions = [-1] * p
-    if p == 2:
-        scores = {}
-        fairness_retries = 0
-        for _ in range(1000):
-            positions = [int(candidates[int(rng.integers(len(candidates)))]) for _ in range(2)]
-            if _distance(*positions, width) <= spacing:
-                continue
-            required = 1 - (1 - (.5 - .005 * fairness_retries)) ** 4 - .02
-            if required <= 0:
-                return positions
-            for c in positions:
-                if c not in scores:
-                    scores[c] = _spawn_score(c, mountains, neighbors)
-            values = [scores[c] for c in positions]
-            if min(values) / max(1, max(values)) >= required:
-                return positions
-            fairness_retries += 1
-        return None
     seats = list(range(p))
     rng.shuffle(seats)
     for seat in seats:
@@ -87,25 +50,8 @@ def _spawns(mountains, p, width, neighbors, rng):
 
 
 def _valid(mountains, generals, cities, neighbors, width):
-    if len(cities) >= len(generals) and any(not any(_distance(g, c, width) <= 6 for c in cities) for g in generals):
-        return False
-    # Other generals are obstacles except when they are the endpoint. Preserve
-    # official accessibility without carving isolated plain pockets.
-    blocked = set(cities) | set(generals)
-    for source in generals[1:]:
-        for goal in generals[:2]:
-            seen, queue = {source}, deque([source])
-            while queue:
-                cell = queue.popleft()
-                if cell == goal:
-                    break
-                for other in neighbors[cell]:
-                    if other not in seen and not mountains[other] and (other == goal or other not in blocked):
-                        seen.add(other)
-                        queue.append(other)
-            else:
-                return False
-    return True
+    from .mapgen_native import valid
+    return valid(mountains, generals, cities, width)
 
 
 def generate_map(config: MapConfig, seed=42) -> GameState:

@@ -23,6 +23,7 @@ gpu = ["torch>=2.6"]
 simulate = ["generals-baselines"]
 
 [tool.setuptools.package-data]
+"generals.core" = ["mapgen_native.cpp"]
 "generals.protocol" = ["*.h"]
 "generals.backends" = ["rules.h"]
 "generals.backends.cpu" = ["step.cpp", "*.h"]

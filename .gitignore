@@ -10,6 +10,7 @@ outputs/
 *.pth
 doc/*
 !doc/README.md
+!doc/rl_training_design.md
 !doc/auto_research.md
 !doc/averagejoe_paper_comparison.md
 !doc/h200_scaling.md

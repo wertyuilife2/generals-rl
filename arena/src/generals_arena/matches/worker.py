@@ -132,7 +132,7 @@ def child_loop(connection):
                 break
             try:
                 if op in ('start','run','resume'):
-                    config = SimpleNamespace(max_ticks=request['max_ticks'])
+                    config = SimpleNamespace(max_ticks=request['max_ticks'], decision_limit_ms=request.get('decision_limit_ms', 10))
                     plan = request['plan']
                     journal = Journal(request['journal'], config.max_ticks, len(plan['entrant_ids']))
                     native.DIAGNOSTICS = journal
@@ -210,14 +210,14 @@ class MatchWorker:
         self.process.start()
         child.close()
 
-    def begin(self, entries, plan, *, max_ticks, run=False):
+    def begin(self, entries, plan, *, max_ticks, run=False, decision_limit_ms=10):
         self._start_process()
         if self.journal is not None:
             path = self.journal.path
             self.journal.close()
             path.unlink(missing_ok=True)
-        self.plan, self.config = plan, SimpleNamespace(max_ticks=max_ticks)
-        self.context, self.forfeits = {"entries": entries, "max_ticks": max_ticks,
+        self.plan, self.config = plan, SimpleNamespace(max_ticks=max_ticks, decision_limit_ms=decision_limit_ms)
+        self.context, self.forfeits = {"entries": entries, "max_ticks": max_ticks, "decision_limit_ms": decision_limit_ms,
             "view_seats": [seat for seat,key in enumerate(plan["entrant_ids"]) if entries[key]["kind"] == "human"]}, []
         # Process supervision is uniform; native per-decision watchdogs supply
         # exact deadlines. Python/NN adapters leave the decision header idle.
@@ -238,7 +238,8 @@ class MatchWorker:
             record[4 if timeout else 5] += 1
         elapsed = int(record[6]) if record is not None else 0
         details = {'kind':'timeout' if timeout else 'policy_error', 'player':seat if seat >= 0 else None,
-                   'tick':tick, 'elapsed_ns':elapsed, 'limit_ns':native.DECISION_NS if stage==2 else 2_000_000_000,
+                   'tick':tick, 'elapsed_ns':elapsed,
+                   'limit_ns':self.config.decision_limit_ms * 1_000_000 if stage==2 else 2_000_000_000,
                    'phase':{1:'initialization',2:'decision',3:'destruction'}.get(stage,'worker'),
                    'exitcode':self.process.exitcode}
         if decision_timeout(details):
@@ -274,7 +275,7 @@ class MatchWorker:
                     current = tuple(self.journal.header[1:4])
                     if current != phase:
                         phase, entered = current, monotonic()
-                    elif current[0] >= 0 and monotonic() - entered >= 10:
+                    elif current[0] >= 0 and monotonic() - entered >= max(10, self.config.decision_limit_ms / 1000 + 2):
                         break
             if not ready:
                 with _process_lifecycle:
@@ -316,12 +317,12 @@ class MatchWorker:
                        **self.context, 'plan':self.plan,
                        'journal':str(self.journal.path), 'forfeits':self.forfeits}
 
-    def run(self, entries, plan, *, max_ticks, stop=None):
+    def run(self, entries, plan, *, max_ticks, stop=None, decision_limit_ms=10):
         self.stop = stop
         try:
             if stop is not None and stop.is_set():
                 raise InterruptedError('match cancelled by scheduler')
-            response = self.begin(entries,plan,max_ticks=max_ticks,run=True)
+            response = self.begin(entries,plan,max_ticks=max_ticks,run=True,decision_limit_ms=decision_limit_ms)
             return response['result'], response['blob']
         finally:
             self.stop = None

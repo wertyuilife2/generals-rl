@@ -1,4 +1,4 @@
-"""Training lifecycle for historical opponents; the vendor runner is unchanged."""
+"""Bind live self-play or manage historical snapshot opponents."""
 from contextlib import redirect_stdout
 from copy import deepcopy
 from dataclasses import dataclass
@@ -52,9 +52,10 @@ class SelfPlaySession:
         if (iteration + 1) % self.config.snapshot_interval == 0:
             return self.publish(iteration, source={"kind": "learner_update"})
 
+
 def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_iteration=-1,
                       initial_source=None, read_only=False, opponent_seed=None):
-    """Bind a pool after policy loading, before the first game tick.
+    """Bind live actors or a historical pool before the first game tick.
 
     The original policy constructor is used only for feature shapes; snapshot
     inference receives local policy/single_obs/action_mask, optional knowledge,
@@ -69,6 +70,15 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
         return None
     settings = SelfPlayConfig(**config.get("self_play", {}))
     policy = runner.alg.policy
+    if task.config.opponent == "current_self_play":
+        # The runner already owns bounded checkpoints and Arena exports. Pure
+        # self-play needs no frozen models, manifest, copy, or disk publication.
+        if task.train_both_sides and not settings.stochastic:
+            raise ValueError('both-player PPO requires stochastic current self-play')
+        if not task.train_both_sides:
+            task.opponent.attach_policy(policy, stochastic=settings.stochastic,
+                                        seed=settings.seed if opponent_seed is None else opponent_seed)
+        return None
     policy_options = deepcopy(config["runner"]["policy"])
     policy_options.pop("class_name", None)
     obs_groups = deepcopy(runner.cfg["obs_groups"])
@@ -120,10 +130,5 @@ def prepare_self_play(task, runner, config, output_dir, *, resume=None, initial_
     if not read_only:
         session.publish(initial_iteration, source=provenance)
     seed = settings.seed if opponent_seed is None else opponent_seed
-    if task.config.opponent == "current_self_play":
-        # Snapshots are evaluation/export artifacts only. Every training
-        # opponent uses the live learner, which changes between PPO updates.
-        task.opponent.attach_policy(policy, stochastic=settings.stochastic, seed=seed)
-    else:
-        task.opponent.attach(pool, stochastic=settings.stochastic, seed=seed)
+    task.opponent.attach(pool, stochastic=settings.stochastic, seed=seed)
     return session

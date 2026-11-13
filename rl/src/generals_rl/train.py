@@ -6,6 +6,7 @@ from datetime import datetime
 from hashlib import sha256
 import json
 import math
+import os
 from pathlib import Path
 import resource
 import shutil
@@ -15,7 +16,7 @@ import torch
 import torch.distributed as dist
 from rsl_rl.runners import OnPolicyRunnerCTS
 
-from .config import DEFAULT_ITERATIONS, default_training_config, merge_config, seed_everything, task_config
+from .config import DEFAULT_ITERATIONS, configure_observations, resolve_training_config, seed_everything, task_config
 from .cts import GeneralsCTSVecEnv
 from .curriculum import CurriculumConfig, RolloutCurriculum
 from .distributed_training import DistributedConfig, distributed_process_group
@@ -29,6 +30,12 @@ from .training_control import TrainingControlConfig, TrainingController, Trainin
 def train(config, output_dir, *, iterations=None, steps_per_env=None, resume=None, warm_start=None):
     """Use equal torchrun environment shards; only rank zero writes artifacts."""
     distributed = DistributedConfig.from_env(config.get("task", {}).get("device", "cpu"))
+    # Valid-token batches allocate slightly different sizes. Configure before
+    # CUDA initialization, preserving either allocator variable from callers.
+    if (distributed.device.type == "cuda" and not torch.cuda.is_initialized()
+            and "PYTORCH_ALLOC_CONF" not in os.environ
+            and "PYTORCH_CUDA_ALLOC_CONF" not in os.environ):
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     with distributed_process_group(distributed):
         return _train(config, output_dir, iterations=iterations, steps_per_env=steps_per_env,
                       resume=resume, warm_start=warm_start, distributed=distributed)
@@ -73,6 +80,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     if "baseline_league" in config:
         raise ValueError("baseline_league training has been removed; use pure historical self-play. "
                          "Replay legacy v6-v8 experiments with their frozen source.")
+    config = configure_observations(config)
     if resume is not None and warm_start is not None:
         raise ValueError("resume and warm_start are mutually exclusive")
     precision = config.get("matmul_precision")
@@ -83,6 +91,11 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         raise ValueError("specify exactly one of iterations or steps_per_env")
     rollout_steps = config["runner"]["num_steps_per_env"]
     settings = task_config(config["task"])
+    storage_history = config['runner'].get('storage_history') or {}
+    if not isinstance(storage_history, dict):
+        raise ValueError('runner.storage_history must map observation keys to history lengths')
+    if 'policy' in storage_history and storage_history['policy'] != settings.history_length:
+        raise ValueError('storage policy history must match task.history_length')
     curriculum_settings = CurriculumConfig(**config.get("curriculum", {}))
     potential_gamma = settings.reward.potential_gamma
     if potential_gamma is not None:
@@ -90,11 +103,19 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         if isinstance(algorithm_gamma, bool) or algorithm_gamma != potential_gamma:
             raise ValueError("reward potential_gamma requires an explicit matching runner.algorithm.gamma")
     evaluation_settings = TrainingEvalConfig(**config.get("evaluation", {}))
+    if config.get('evaluation', {}).get('backend') == 'gpu':
+        config['evaluation']['backend'] = evaluation_settings.backend
     evaluation_settings.validate_training_devices(distributed.device)
     control_settings = TrainingControlConfig(**config.get("training_control", {}))
     controller = TrainingController(control_settings)
-    if settings.opponent in ("self_play", "current_self_play"):
-        SelfPlayConfig(**config.get("self_play", {}))
+    opponent_settings = (SelfPlayConfig(**config.get("self_play", {}))
+                         if settings.opponent in ("self_play", "current_self_play") else None)
+    if settings.train_both_sides:
+        if not opponent_settings.stochastic:
+            raise ValueError("both-player PPO requires stochastic current self-play")
+        if (config["runner"]["algorithm"]["class_name"] != "generals_rl.student_ppo.StudentPPO"
+                or config["runner"]["algorithm"].get("teacher_env_ratio", 0) != 0):
+            raise ValueError("both-player current self-play requires student-only StudentPPO")
     if rollout_steps < 1:
         raise ValueError("rollout steps must be positive")
     if steps_per_env is not None:
@@ -156,17 +177,22 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
     last_losses = None
     stop_reason = None
     warm_source = None
+    map_transitions = 0
     with matmul_precision(precision, cudnn_allow_tf32, cudnn_benchmark), GeneralsTask(settings) as task:
         runner = OnPolicyRunnerCTS(GeneralsCTSVecEnv(task), deepcopy(config["runner"]),
                                    str(output) if distributed.is_main else None, str(task.device))
         if resume:
-            runner.load(str(Path(resume).resolve()), map_location=str(task.device))
+            resume_info = runner.load(str(Path(resume).resolve()), map_location=str(task.device))
             # Restore the adaptive scheduler scalar and continue after the saved index.
             if hasattr(runner.alg, "restore_learning_rates"):
                 runner.alg.restore_learning_rates()
             else:
                 runner.alg.learning_rate = runner.alg.optimizer.param_groups[0]["lr"]
             runner.current_learning_iteration += 1
+            if settings.map_curriculum is not None:
+                map_transitions = resume_info['map_curriculum_transitions']
+                task.map_sampler.set_transitions(map_transitions)
+                task.reset()
         elif warm_start is not None:
             checkpoint = Path(warm_start).resolve()
             saved = torch.load(checkpoint, weights_only=True, map_location="cpu")
@@ -183,7 +209,6 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             # the same initial learner on every rank before publishing its seed.
             runner.alg.broadcast_parameters()
             self_play, history_error = None, None
-            opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
             if distributed.is_main:
                 try:
                     self_play = prepare_self_play(
@@ -218,10 +243,11 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             self_play = (prepare_self_play(task, runner, config, output, resume=resume,
                                            initial_iteration=runner.current_learning_iteration - 1,
                                            initial_source=warm_source) if distributed.is_main else None)
-            if not distributed.is_main:
-                opponent_settings = SelfPlayConfig(**config.get("self_play", {}))
+            if not distributed.is_main and not task.train_both_sides:
                 task.opponent.attach_policy(runner.alg.policy, stochastic=opponent_settings.stochastic,
                                             seed=distributed.rank_seed(opponent_settings.seed))
+        if evaluation_settings.enabled and evaluation_settings.synchronous:
+            distributed.prepare_for_evaluation()
         evaluator, evaluation_error = None, None
         if distributed.is_main and evaluation_settings.enabled:
             try:
@@ -258,6 +284,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             else:
                 metadata = dict(infos or {})
                 metadata.update(deployment, completed_ppo_updates=it + 1)
+                if settings.map_curriculum is not None:
+                    metadata['map_curriculum_transitions'] = map_transitions
                 metadata["run_config_sha256"] = sha256((output / "run_config.json").read_bytes()).hexdigest()
                 original_save(str(temporary), it=it, last_model=last_model, infos=metadata)
                 temporary.replace(path)
@@ -282,7 +310,9 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
         def on_update(**kwargs):
             nonlocal sampled_ticks, completed_updates, collection_seconds, update_seconds, last_losses, stop_reason
             nonlocal curriculum_metrics
+            nonlocal map_transitions
             sampled_ticks += runner.cfg["num_steps_per_env"]
+            map_transitions += distributed.global_transitions(task.num_games, runner.cfg['num_steps_per_env'])
             completed_updates += 1
             if task.device.type == "cuda" and distributed.is_distributed:
                 torch.cuda.synchronize(task.device)
@@ -304,6 +334,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
             original_log(**kwargs)
             absolute_updates = kwargs["it"] + 1
             due = evaluation_settings.due(absolute_updates)
+            if due and evaluation_settings.synchronous:
+                distributed.prepare_for_evaluation()
             hook_error = None
             if distributed.is_main:
                 try:
@@ -335,8 +367,16 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     writer.add_scalar(f"PPO/{name}", value, kwargs["it"])
                 for name, value in curriculum_metrics.items():
                     writer.add_scalar(f"Curriculum/{name}", value, kwargs["it"])
+                if task.map_sampler is not None:
+                    for name, value in task.map_sampler.metrics().items():
+                        prefix = 'Curriculum' if name in ('map_position', 'map_level_mean', 'map_final_fraction') else 'MapBank'
+                        writer.add_scalar(f'{prefix}/{name}', value, kwargs['it'])
                 global_transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
+                board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
                 writer.add_scalar("Perf/environment_steps", global_transitions, kwargs["it"])
+                writer.add_scalar("Perf/player_transitions", global_transitions, kwargs["it"])
+                writer.add_scalar("Perf/board_ticks", board_ticks, kwargs["it"])
+                writer.add_scalar("Perf/board_ticks_per_second", board_ticks / elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_seconds", elapsed, kwargs["it"])
                 writer.add_scalar("Perf/wall_fps", global_transitions / elapsed, kwargs["it"])
                 writer.add_scalar("Resource/peak_process_rss_bytes", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024, kwargs["it"])
@@ -374,6 +414,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 # This rollout's returns/update already used one fixed setting.
                 # Advance only before collecting the next rollout.
                 curriculum_metrics = curriculum.apply(kwargs["it"] + 1)
+                if settings.map_curriculum is not None:
+                    task.map_sampler.set_transitions(map_transitions)
 
         runner.logger.log = on_update
         try:
@@ -390,6 +432,8 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     runner.current_learning_iteration, source={"kind": "final_learner"}))
             elif self_play is not None:
                 self_play.publish(runner.current_learning_iteration, source={"kind": "final_learner"})
+            if evaluation_settings.enabled and evaluation_settings.synchronous:
+                distributed.prepare_for_evaluation()
             final_evaluation_error = None
             if evaluator is not None:
                 try:
@@ -409,6 +453,7 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                     raise final_evaluation_error
                 raise RuntimeError(f"rank-zero final Arena evaluation failed: {finalized['error']}")
             transitions = distributed.global_transitions(task.num_envs, sampled_ticks)
+            board_ticks = distributed.global_transitions(task.num_games, sampled_ticks)
             wall_seconds, = distributed.max_timings(perf_counter() - started)
             completed_episodes, terminated_episodes, truncated_episodes = distributed.sum_counts(
                 task.completed_episodes, task.terminated_episodes, task.truncated_episodes)
@@ -421,46 +466,55 @@ def _train(config, output_dir, *, iterations, steps_per_env, resume, warm_start,
                 "environment_transitions_per_second": transitions / (collection_seconds + update_seconds),
                 "wall_seconds": wall_seconds,
                 "wall_environment_transitions_per_second": transitions / wall_seconds,
+                "board_ticks_per_second": board_ticks / (collection_seconds + update_seconds),
+                "wall_board_ticks_per_second": board_ticks / wall_seconds,
                 "gpu_peak_allocated_bytes": int(peak_allocated) if task.device.type == "cuda" else None,
                 "gpu_peak_reserved_bytes": int(peak_reserved) if task.device.type == "cuda" else None,
             }
             summary = {
                 "iterations": completed_updates, "steps_per_environment": sampled_ticks,
                 "environment_steps": transitions, "performance": performance,
+                "player_transitions": transitions, "board_ticks": board_ticks,
+                "physical_games_per_rank": task.num_games,
+                "training_trajectories_per_rank": task.num_envs,
                 "completed_episodes": completed_episodes,
                 "terminated_episodes": terminated_episodes,
                 "truncated_episodes": truncated_episodes,
                 "teacher_envs": runner.alg.teacher_num_envs * distributed.world_size,
                 "student_envs": runner.alg.student_num_envs * distributed.world_size,
-                "last_losses": last_losses, "resume": resume,
+                "last_losses": last_losses, "resume": str(resume) if resume is not None else None,
                 "stop_reason": stop_reason or "budget",
                 "evaluation": evaluator.describe() if evaluator is not None else None,
             }
             if warm_source is not None:
                 summary["warm_start"] = warm_source
+            if settings.map_curriculum is not None:
+                summary['map_curriculum'] = dict(transitions=map_transitions, **task.map_sampler.metrics())
+            elif task.map_sampler is not None:
+                summary['map_bank'] = task.map_sampler.metrics()
             if self_play is not None:
                 summary["self_play"] = {
                     "pool_ids": list(self_play.pool.ids), "new_publications": self_play.publications,
                 }
-                if settings.opponent == "self_play":
-                    assignments = task.opponent.episode_assignments
-                    counts = {str(k): v for k, v in task.opponent.snapshot_counts().items()}
-                    if shared_history:
-                        ranks = [None] * distributed.world_size
-                        dist.all_gather_object(ranks, {"assignments": assignments, "counts": counts})
-                        assignments, counts = 0, {}
-                        for rank in ranks:
-                            assignments += rank["assignments"]
-                            for key, value in rank["counts"].items():
-                                counts[key] = counts.get(key, 0) + value
-                        summary["self_play"]["counts_scope"] = "global"
-                    summary["self_play"].update(
-                        episode_assignments=assignments,
-                        active_snapshot_counts=counts,
-                    )
-                else:
-                    summary["self_play"].update(mode="current_self_play", training_opponent="live_learner",
-                                                snapshots_used_for_training=False)
+                assignments = task.opponent.episode_assignments
+                counts = {str(k): v for k, v in task.opponent.snapshot_counts().items()}
+                if shared_history:
+                    ranks = [None] * distributed.world_size
+                    dist.all_gather_object(ranks, {"assignments": assignments, "counts": counts})
+                    assignments, counts = 0, {}
+                    for rank in ranks:
+                        assignments += rank["assignments"]
+                        for key, value in rank["counts"].items():
+                            counts[key] = counts.get(key, 0) + value
+                    summary["self_play"]["counts_scope"] = "global"
+                summary["self_play"].update(
+                    episode_assignments=assignments,
+                    active_snapshot_counts=counts,
+                )
+            elif settings.opponent == 'current_self_play':
+                summary['self_play'] = dict(mode='current_self_play', training_opponent='live_learner',
+                    train_both_sides=task.train_both_sides, pool_ids=[], new_publications=0,
+                    snapshots_used_for_training=False)
             if distributed.is_distributed:
                 summary["distributed"] = {"world_size": distributed.world_size,
                                           "num_envs_per_rank": task.num_envs,
@@ -498,29 +552,12 @@ def main(argv=None):
     initialization.add_argument("--resume", type=Path, help="restore policy, both optimizers and the available historical pool")
     initialization.add_argument("--warm-start", type=Path, help="load model weights into a fresh run with new optimizers and pool")
     args = parser.parse_args(argv)
-    if args.resume:
-        config = json.loads(args.resume.with_name("run_config.json").read_text())
-    else:
-        config = default_training_config()
-    if args.config:
-        overrides = json.loads(args.config.read_text())
-        previous_policy_class = config["runner"]["policy"]["class_name"]
-        runner_overrides = overrides.get("runner", {})
-        complete = ("task" in overrides and "num_steps_per_env" in runner_overrides
-                    and all(isinstance(runner_overrides.get(key), dict)
-                            and "class_name" in runner_overrides[key] for key in ("policy", "algorithm")))
-        # Complete recipes are independent baselines. Inheriting new AMP,
-        # curriculum or optimizer fields would silently change old experiments.
-        config = (deepcopy(overrides) if complete and not args.resume
-                  else merge_config(config, overrides))
-        policy = runner_overrides.get("policy")
-        if args.replace_policy or (isinstance(policy, dict) and
-                                   policy.get("class_name", previous_policy_class) != previous_policy_class):
-            if not isinstance(policy, dict) or "class_name" not in policy:
-                parser.error("--replace-policy requires --config with a complete runner.policy and class_name")
-            config["runner"]["policy"] = deepcopy(policy)
-    elif args.replace_policy:
-        parser.error("--replace-policy requires --config")
+    base = json.loads(args.resume.with_name("run_config.json").read_text()) if args.resume else None
+    overrides = json.loads(args.config.read_text()) if args.config else None
+    try:
+        config = resolve_training_config(overrides, base=base, replace_policy=args.replace_policy)
+    except ValueError as error:
+        parser.error(str(error))
     for field in ("num_envs", "opponent", "seed", "backend", "device"):
         value = getattr(args, field)
         if value is not None:

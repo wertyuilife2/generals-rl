@@ -1,0 +1,11 @@
+{
+  "runner": {
+    "policy": {
+      "inference_chunk_size": 1024
+    },
+    "algorithm": {
+      "physical_minibatch_size": 512
+    }
+  },
+  "run_id": "v32-temporal-paths-terminal-4090"
+}

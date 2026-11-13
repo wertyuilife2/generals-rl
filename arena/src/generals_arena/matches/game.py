@@ -85,7 +85,8 @@ class RecordedGame:
             self._eliminations = np.full((1,count), -1, np.int64)
             self.execution = self._stack.enter_context(bind_loop(self.env, self._groups, self._joint,
                 self._invalid, self._eliminations, self._active, journal,
-                topologies=[state.layout.topology_id], record=record))
+                topologies=[state.layout.topology_id], record=record,
+                decision_limit_ms=getattr(config, 'decision_limit_ms', 10)))
             self.initial_digest = self.execution.query(0)['initial_digest']
             self.execution.events(self.forfeits)
             self._timing = dict(observation_seconds=0., policy_seconds=0., step_seconds=0.)

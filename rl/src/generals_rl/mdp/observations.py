@@ -21,6 +21,13 @@ class KingThreatDistanceEncoder(PrivilegedVisibility, PublicKingEncoder):
     pass
 
 
+def encode_privileged(encoder, batch, player_ids):
+    """Current full-state features without constant visibility/fog channels."""
+    full = encoder.encode(batch, player_ids, privileged=True)
+    cells = batch.width * batch.height
+    return torch.cat((full[:, cells:12 * cells], full[:, 13 * cells:]), -1)
+
+
 def make_observation_encoder(config):
     from .combat import CombatObservationEncoder
     return shared_encoder(config, local_encoder=LocalObservationEncoder,

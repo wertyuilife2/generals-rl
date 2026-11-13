@@ -17,7 +17,7 @@ class LocalPolicy:
 
     def action_probabilities(self, observations, *, is_teacher=False):
         assert not is_teacher
-        assert set(observations.keys()) == {"policy", "single_obs", "action_mask"}
+        assert set(observations.keys()) == {"policy", "single_obs", "action_mask", "valid_cells"}
         self.inputs.append({key: value.clone() for key, value in observations.items()})
         weights = observations["action_mask"].float()
         # Nontrivial stochastic decisions, without touching the global RNG.

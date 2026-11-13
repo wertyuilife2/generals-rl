@@ -12,9 +12,17 @@ class FeatureConfig:
     king_threat_distance: bool
     persistent_knowledge: bool
     knowledge_age_scale: int = 2000
+    clock_scale_ticks: int | None = None
     random_maps: bool = True
+    feature_set: str = "stacked"
 
     def __post_init__(self):
+        if self.clock_scale_ticks is not None and (type(self.clock_scale_ticks) is not int or self.clock_scale_ticks < 1):
+            raise ValueError('features.clock_scale_ticks must be a positive integer or None')
+        from .features import feature_recipe
+        recipe = feature_recipe(self.feature_set)
+        if self.feature_set != "stacked" and (self.history_length != recipe.history_length or not self.persistent_knowledge):
+            raise ValueError("compact features require matching history and persistent memory")
         for name in ("width", "height", "players", "max_episode_steps", "history_length", "knowledge_age_scale"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:

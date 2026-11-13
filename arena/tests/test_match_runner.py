@@ -92,7 +92,7 @@ def test_isolated_stop_keeps_current_plan_uncommitted_and_closes_worker(monkeypa
     plans = plans_for(entry, count=1)
     original = deepcopy(plans)
     stop, closed = threading.Event(), []
-    def cancel(self, entries, plan, *, max_ticks, stop):
+    def cancel(self, entries, plan, *, max_ticks, stop, decision_limit_ms):
         stop.set()
         raise InterruptedError('scheduler cancellation')
     monkeypatch.setattr(MatchWorker, 'run', cancel)

@@ -1,14 +1,7 @@
-"""Dense-grid forward adapters shared by balanced-budget timm backbones.
-
-Scaled policy constructors own the supported total actor+critic budgets. The
-underlying ResNetV2 and DeiT-III blocks remain pinned to timm 1.0.30.
-"""
+"""Dense-grid forward adapter for the timm ViT backbone."""
 from __future__ import annotations
 
 from torch import Tensor, nn
-
-
-RESNET_DEPTHS = (3, 4, 6, 3)
 
 
 def _check_input(x: Tensor, in_channels: int) -> None:
@@ -18,19 +11,14 @@ def _check_input(x: Tensor, in_channels: int) -> None:
         raise ValueError("backbone map dimensions must be positive")
 
 
-class ResNetBackbone(nn.Module):
-    """Cell-preserving ResNetV2 forward; construction lives in scaled_ppo."""
-
-    def forward(self, x: Tensor) -> Tensor:
-        _check_input(x, self.in_channels)
-        return self.encoder.forward_features(x)
 
 
 class ViTBackbone(nn.Module):
-    """One-token-per-cell ViT forward; construction lives in scaled_ppo."""
+    """Non-overlapping patch-grid ViT forward; construction lives in policy.scaled."""
 
     def forward(self, x: Tensor) -> Tensor:
         _check_input(x, self.in_channels)
         n, _, h, w = x.shape
+        h, w = self.transformer.patch_embed.dynamic_feat_size((h, w))
         tokens = self.transformer.forward_features(x)
         return tokens.transpose(1, 2).reshape(n, self.out_channels, h, w)

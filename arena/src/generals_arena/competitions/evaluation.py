@@ -31,8 +31,8 @@ from generals_arena.matches.reporting import output_path
 from generals_arena.matches.reporting import replay_writer
 from generals_arena.matches.reporting import write_report
 
-def make_profile(map_config, *, max_ticks=2000, opponents=None, seed=1000042,
-                 maps_per_opponent=50, paired_seats=True, calibration=None):
+def make_profile(map_config, *, max_ticks=2048, opponents=None, seed=1000042,
+                 maps_per_opponent=50, paired_seats=True, calibration=None, decision_limit_ms=10):
     """Build a serializable, model-independent fixed evaluation gauntlet."""
     map_config = MapConfig(**map_config) if isinstance(map_config, dict) else map_config
     if not isinstance(map_config, MapConfig):
@@ -40,6 +40,7 @@ def make_profile(map_config, *, max_ticks=2000, opponents=None, seed=1000042,
     integer("max_ticks", max_ticks, 1)
     integer("seed", seed, 0)
     integer("maps_per_opponent", maps_per_opponent, 1)
+    integer("decision_limit_ms", decision_limit_ms, 1)
     if not isinstance(paired_seats, bool):
         raise TypeError("paired_seats must be boolean")
     if opponents is None:
@@ -55,7 +56,7 @@ def make_profile(map_config, *, max_ticks=2000, opponents=None, seed=1000042,
     if len(set(names)) != len(names):
         raise ValueError("opponent names must be unique")
     return {"schema_version": 3, "rules": RULES_PROTOCOL, "map": asdict(map_config),
-            "max_ticks": max_ticks, "opponents": opponents, "seed": seed,
+            "max_ticks": max_ticks, "opponents": opponents, "seed": seed, "decision_limit_ms": decision_limit_ms,
             "maps_per_opponent": maps_per_opponent, "paired_seats": paired_seats,
             "rating_policy": POLICY, "rating_mode": mode,
             "reference": "WAIT" if mode == "1v1" else None, "calibration": calibration}
@@ -82,15 +83,17 @@ def load_profile(profile):
 
 def _profile(profile):
     profile = load_profile(profile)
+    profile.setdefault('decision_limit_ms', 10)  # Profiles written before configurable decision budgets.
     required = {"schema_version", "rules", "map", "max_ticks", "opponents", "seed",
-                "maps_per_opponent", "paired_seats", "rating_policy", "rating_mode", "reference", "calibration"}
+                "maps_per_opponent", "paired_seats", "rating_policy", "rating_mode", "reference", "calibration", "decision_limit_ms"}
     if set(profile) != required:
         raise ValueError("invalid evaluation profile fields")
     if profile["schema_version"] != 3 or profile["rules"] != RULES_PROTOCOL or profile["rating_policy"] != POLICY:
         raise ValueError("unsupported evaluation rules/profile/rating version")
     normalized = make_profile(profile["map"], max_ticks=profile["max_ticks"], opponents=profile["opponents"],
                               seed=profile["seed"], maps_per_opponent=profile["maps_per_opponent"],
-                              paired_seats=profile["paired_seats"], calibration=profile['calibration'])
+                              paired_seats=profile["paired_seats"], calibration=profile['calibration'],
+                              decision_limit_ms=profile['decision_limit_ms'])
     if normalized != profile:
         raise ValueError("evaluation profile must match its map's rating mode and WAIT reference")
     entries = [prepare_entrant(spec) for spec in normalized["opponents"]]
@@ -112,8 +115,9 @@ def calibrated_ratings(profile, entries):
     from generals_arena.competitions.calibration import ESTIMATOR
     if (profile['rating_mode'] != '1v1' or calibration['estimator'] != ESTIMATOR
             or calibration['map'] != profile['map'] or calibration['max_ticks'] != profile['max_ticks']
-            or calibration['engine_sha256'] != source_digest('generals')):
-        raise ValueError('calibration requires its original 1v1 rules, map, tick cap and engine')
+            or calibration['engine_sha256'] != source_digest('generals')
+            or calibration.get('decision_limit_ms', 10) != profile.get('decision_limit_ms', 10)):
+        raise ValueError('calibration requires its original 1v1 rules, map, tick cap, decision limit and engine')
     references = calibration['references']
     if set(references) != {entry['name'] for entry in entries}:
         raise ValueError('calibration must cover exactly the configured reference policies')
@@ -193,7 +197,7 @@ def evaluate(bundle, profile, output=None, *, device='cpu', batch_size=128, back
     sink = replay_writer(output, enabled=record_replays)
     with MatchRunner(entries, max_ticks=profile["max_ticks"], device=device, backend=backend,
                      batch_size=batch_size, cpu_threads=cpu_threads, record_replays=record_replays,
-                     scalar=scalar) as runner:
+                     scalar=scalar, decision_limit_ms=profile['decision_limit_ms']) as runner:
         games, timings = runner.run(plans, on_result=sink)
     if len(candidates) == 1:
         for game in games:
@@ -214,7 +218,7 @@ def evaluate(bundle, profile, output=None, *, device='cpu', batch_size=128, back
               "profile_id": identity, "profile": profile, **scoring, 'candidates': summaries,
               "reference": profile["reference"], "expected_games": expected, "errors": [],
               "results": games, "wall_seconds": perf_counter() - started, "timing": timings,
-              "device": str(device), "backend": backend, "batch_size": batch_size,
+              "device": str(device), "backend": runner.backend, "batch_size": batch_size,
               "cpu_threads": cpu_threads, "timing_basis": "host_dispatch_wall_with_cuda_sync_in_transfer",
               "execution": next(iter(runner.execution_modes)) if len(runner.execution_modes) == 1 else "mixed",
               "execution_modes": sorted(runner.execution_modes)}

@@ -46,7 +46,7 @@ class KnowledgeState:
     _fields = ("terrain", "structure", "general_owner", "owner", "last_seen_tick")
 
     def __init__(self, num_envs: int, width: int, height: int, players: int,
-                 device="cpu", *, age_scale: int = 2000):
+                 device="cpu", *, age_scale: int = 2000, remember_dynamics=False, terrain_distances=False):
         for name, value in (("num_envs", num_envs), ("width", width),
                             ("height", height), ("players", players),
                             ("age_scale", age_scale)):
@@ -55,7 +55,12 @@ class KnowledgeState:
         self.num_envs, self.width, self.height, self.players = num_envs, width, height, players
         self.device = torch.device(device)
         self.age_scale = age_scale
-        self.channels = knowledge_channels(players)
+        self.remember_dynamics = remember_dynamics
+        self.channels = knowledge_channels(players) + (("last_seen_enemy_log_army",) if remember_dynamics else ())
+        if terrain_distances and (not remember_dynamics or players != 2):
+            raise ValueError("terrain distances require two-player dynamic memory")
+        if terrain_distances:
+            self.channels += ("own_general_distance", "known_enemy_general_distance")
         shape = (num_envs, players, width * height)
         # -1 terrain/structure/tick means unobserved; owner -1/-2 are legal
         # empty/neutral values, so its unknown sentinel is -3.
@@ -65,6 +70,20 @@ class KnowledgeState:
         self.general_owner = torch.full(shape, -1, dtype=torch.int16, device=self.device)
         self.owner = torch.full_like(self.general_owner, -3)
         self.last_seen_tick = torch.full(shape, -1, dtype=torch.int64, device=self.device)
+        self._spatial_fields = self._fields
+        if remember_dynamics:
+            self.army = torch.zeros(shape, dtype=torch.float32, device=self.device)
+            from .features import SCORE_HALF_LIVES, SCORE_FEATURES
+            self.score_current = torch.zeros(num_envs, players, SCORE_FEATURES, device=self.device)
+            self.score_ema = torch.zeros(num_envs, players, len(SCORE_HALF_LIVES), SCORE_FEATURES, device=self.device)
+            self.score_tick = torch.full((num_envs, players), -1, dtype=torch.long, device=self.device)
+            self.score_half_lives = self.score_current.new_tensor(SCORE_HALF_LIVES)
+            self._spatial_fields = self._fields + ("army",)
+            self._fields = self._spatial_fields + ("score_current", "score_ema", "score_tick")
+        self.paths = None
+        if terrain_distances:
+            from .paths import TerrainDistances
+            self.paths = TerrainDistances(num_envs, players, width, height, self.device)
 
     def _ids(self, player_ids, count=None):
         ids = torch.as_tensor(player_ids, device=self.device)
@@ -89,7 +108,7 @@ class KnowledgeState:
         if batch.device != self.device:
             raise ValueError("batch and knowledge memory must share a device")
         ids = self._ids(player_ids, batch.num_envs)
-        old = {name: self._select(getattr(self, name), ids, lane_ids) for name in self._fields}
+        old = {name: self._select(getattr(self, name), ids, lane_ids) for name in self._spatial_fields}
         state = batch.state
         if visible is None:
             owned = (state["owner"] == ids[:, None]).float()
@@ -102,7 +121,7 @@ class KnowledgeState:
                 raise ValueError("update mask must contain one boolean per lane")
             visible = visible & mask[:, None]
         rows = torch.arange(batch.num_envs, device=self.device) if lane_ids is None else lane_ids
-        for name in ("terrain", "structure", "owner"):
+        for name in ("terrain", "structure", "owner") + (("army",) if self.remember_dynamics else ()):
             field = getattr(self, name)
             field[rows, ids] = torch.where(visible, state[name].to(field.dtype), old[name])
         observed_general = visible & (state["structure"] == 2)
@@ -110,6 +129,24 @@ class KnowledgeState:
             visible, torch.where(observed_general, state["owner"].to(self.general_owner.dtype), -1), old["general_owner"])
         self.last_seen_tick[rows, ids] = torch.where(
             visible, state["tick"][:, None], old["last_seen_tick"])
+        if self.remember_dynamics:
+            active = torch.ones(batch.num_envs, dtype=torch.bool, device=self.device) if mask is None else mask
+            opponent = (ids + 1) % self.players
+            stats = batch.stats[torch.arange(batch.num_envs, device=self.device), opponent].float()
+            current = torch.stack((torch.log1p(stats[:, 0]) / 10.,
+                                   stats[:, 1] / batch.valid_cells.sum(1).clamp_min(1)), -1)
+            tick, previous = state["tick"], self.score_tick[rows, ids]
+            elapsed = (tick - previous).clamp_min(0).float()
+            retention = torch.exp2(-elapsed[:, None] / self.score_half_lives)[..., None]
+            old_ema = self.score_ema[rows, ids]
+            ema = retention * old_ema + (1 - retention) * current[:, None]
+            ema = torch.where((previous < 0)[:, None, None], current[:, None], ema)
+            self.score_ema[rows, ids] = torch.where(active[:, None, None], ema, old_ema)
+            self.score_current[rows, ids] = torch.where(active[:, None], current, self.score_current[rows, ids])
+            self.score_tick[rows, ids] = torch.where(active, tick, previous)
+        if self.paths is not None:
+            self.paths.update(self.terrain, self.general_owner, batch.fog_obstacles(ids, visible),
+                              batch.valid_cells, ids, lane_ids, mask)
 
     @torch.no_grad()
     def encode(self, tick, player_ids, lane_ids=None):
@@ -120,7 +157,7 @@ class KnowledgeState:
         if now.shape != (count,) or now.dtype not in (torch.int32, torch.int64):
             raise ValueError("tick must contain one integer clock per lane")
         terrain, structure, general_owner, owner, last_seen = (
-            self._select(getattr(self, name), ids, lane_ids) for name in self._fields)
+            self._select(getattr(self, name), ids, lane_ids) for name in type(self)._fields)
         explored = last_seen >= 0
         general = general_owner >= 0
         enemy_general = general & (general_owner != ids[:, None])
@@ -132,7 +169,29 @@ class KnowledgeState:
                               enemy_general, explored & ~general,
                               owner == -1, owner == -2), 1)
         planes = torch.cat((binary.float(), owners.float(), age[:, None]), 1)
+        if self.remember_dynamics:
+            army = self._select(self.army, ids, lane_ids)
+            enemy = (owner >= 0) & (owner != ids[:, None]) & explored
+            planes = torch.cat((planes, (torch.log1p(army) / 10. * enemy)[:, None]), 1)
+        if self.paths is not None:
+            planes = torch.cat((planes, self.paths.features(ids, lane_ids)), 1)
         return planes.reshape(count, len(self.channels), self.height, self.width)
+
+    def features(self, tick, player_ids, lane_ids=None):
+        maps = self.encode(tick, player_ids, lane_ids).flatten(1)
+        if self.remember_dynamics:
+            rows = torch.arange(self.num_envs, device=self.device) if lane_ids is None else lane_ids
+            ids = self._ids(player_ids, len(rows))
+            summary = self.score_current[rows, ids, None] - self.score_ema[rows, ids]
+            maps = torch.cat((maps, summary.flatten(1)), -1)
+        return maps
+
+    def exploration_metrics(self, player_ids, lane_ids=None):
+        """Episode diagnostics without materializing every memory plane."""
+        explored = self._select(self.last_seen_tick, player_ids, lane_ids) >= 0
+        general = self._select(self.general_owner, player_ids, lane_ids)
+        return {"explored_fraction": explored.float().mean(1),
+                "known_enemy_general": ((general >= 0) & (general != player_ids[:, None])).any(1).float()}
 
     @torch.no_grad()
     def reset(self, mask=None):
@@ -143,11 +202,13 @@ class KnowledgeState:
                 raise ValueError("reset mask must contain one boolean per lane")
         for name in self._fields:
             field = getattr(self, name)
-            value = -3 if name == "owner" else -1
+            value = 0 if name in ("army", "score_current", "score_ema") else -3 if name == "owner" else -1
             if mask is None:
                 field.fill_(value)
             else:
                 field[mask] = value
+        if self.paths is not None:
+            self.paths.reset(mask)
 
     def clone(self):
         """Independent memory for an alternate search branch or simulation."""
@@ -155,4 +216,6 @@ class KnowledgeState:
         result.__dict__ = self.__dict__.copy()
         for name in self._fields:
             setattr(result, name, getattr(self, name).clone())
+        if self.paths is not None:
+            result.paths = self.paths.clone()
         return result
