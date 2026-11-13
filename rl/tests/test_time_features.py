@@ -51,7 +51,7 @@ def test_exported_actor_observes_the_same_fixed_clock_and_age(tmp_path):
     from generals_rl.policy.runtime import create_controller
     from rl_policy_test_utils import make_checkpoint
     from test_policy_runtime import battle_state, capture_inputs
-    checkpoint, config = make_checkpoint(tmp_path, family='scaled')
+    checkpoint, config = make_checkpoint(tmp_path)
     config['task'].update(num_envs=1, learner_seat=0, rotate_seats=False,
         max_episode_steps=4096, clock_scale_ticks=2048, knowledge_age_scale=512)
     bundle = export_policy(checkpoint, tmp_path/'bundle', run_config=config, completed_updates=1)

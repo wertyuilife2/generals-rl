@@ -1,8 +1,6 @@
 """Construct trainable actors without a PPO policy, critic or training package."""
 from collections.abc import Mapping
 
-from .cnn import (SpatialActor, SpatialTrunk, _PackedSpatialActor, add_actor_knowledge,
-                  add_own_king_geometry, light_trunk)
 from .layout import ObservationLayout
 from .features import feature_recipe
 
@@ -58,29 +56,4 @@ def build_actor(network, features):
         return _ScaledInformationActor(layout, size, alignment, head,
                                        network.get("mask_padding_tokens"), network.get("patch_size", 1),
                                        network.get("vit_config"))
-    if family not in ("spatial", "lightcnn", "information", "optimized"):
-        raise ValueError("unsupported actor family")
-    allowed = common | {"spatial_channels", "residual_blocks", "own_king_geometry", "knowledge_channels", "input_channel_alignment"}
-    if set(network) - allowed:
-        raise ValueError(f"unsupported CNN actor options: {sorted(set(network) - allowed)}")
-    channels, blocks = network.get("spatial_channels", 32 if family == "spatial" else 16), network.get("residual_blocks", 4)
-    for name, value in (("spatial_channels", channels), ("residual_blocks", blocks)):
-        if type(value) is not int or value < 1:
-            raise ValueError(f"{name} must be a positive integer")
-    actor = SpatialActor(channels, blocks, SpatialTrunk if family == "spatial" else light_trunk,
-                         layout=layout)
-    geometry = network.get("own_king_geometry", False)
-    if type(geometry) is not bool or family == "spatial" and geometry:
-        raise ValueError("invalid own_king_geometry for actor family")
-    if geometry:
-        add_own_king_geometry(actor)
-    if family in ("information", "optimized"):
-        add_actor_knowledge(actor, layout.knowledge_channels)
-    elif network.get("knowledge_channels", 0):
-        raise ValueError("this actor family does not consume knowledge")
-    if family == "optimized":
-        alignment = network.get("input_channel_alignment", 4)
-        if type(alignment) is not int or alignment < 0:
-            raise ValueError("input_channel_alignment must be a nonnegative integer")
-        actor = _PackedSpatialActor(actor, alignment)
-    return actor
+    raise ValueError("unsupported actor family; use frozen source for retired networks")

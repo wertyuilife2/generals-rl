@@ -4,7 +4,6 @@ from copy import deepcopy
 import io
 import json
 import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -58,24 +57,17 @@ def test_default_cli_uses_the_selected_recipe_and_explicit_budget_overrides():
     assert default_training_config()["runner"]["policy"]["backbone"] == "vit"
 
 
-def test_other_model_config_replaces_the_policy_without_vit_fields(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    for name in ("v32.json", "v32-opt.json"):
-        old = json.loads((root / "configs" / name).read_text())
-        config = tmp_path / name
-        config.write_text(json.dumps(old))
-        with patch("generals_rl.train.train") as execute:
-            main(["--config", str(config), "--iterations", "1", "--output", str(tmp_path / "unused")])
-        actual = execute.call_args.args[0]
-        assert actual == old
-        assert "backbone" not in actual["runner"]["policy"]
-        assert "amp_bfloat16" not in actual["runner"]["algorithm"]
-        assert "gamma_final" not in actual["curriculum"]
-        assert actual["evaluation"]["every_n_updates"] == 100
-        assert actual["evaluation"]["maps_per_opponent"] == 200
-        assert actual["evaluation"].get("backend", "cpu") == "cpu"
-        assert actual["inference"] == {"mode": "stochastic", "precision": "from_config", "execution": "eager"}
-        assert execute.call_args.kwargs["iterations"] == 1
+def test_complete_recipe_does_not_inherit_new_defaults(tmp_path):
+    recipe = {'task': {'seed': 73},
+              'runner': {'num_steps_per_env': 32,
+                         'policy': {'class_name': 'custom.Policy'},
+                         'algorithm': {'class_name': 'custom.PPO'}}}
+    config = tmp_path / 'recipe.json'
+    config.write_text(json.dumps(recipe))
+    with patch('generals_rl.train.train') as execute:
+        main(['--config', str(config), '--iterations', '1', '--output', str(tmp_path / 'unused')])
+    assert execute.call_args.args[0] == recipe
+    assert execute.call_args.kwargs['iterations'] == 1
 
 
 def test_sparse_model_override_replaces_the_whole_policy(tmp_path):

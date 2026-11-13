@@ -11,7 +11,7 @@ import torch
 
 from generals.core.state import Action, Direction
 from generals.vector import VecEnv
-from generals_rl.cts import GeneralsCTSVecEnv, runner_config
+from generals_rl.cts import GeneralsCTSVecEnv
 from generals_rl.mdp.rewards import RewardConfig
 from generals_rl.task import GeneralsTask, TaskConfig
 from generals_rl.train import train
@@ -105,7 +105,7 @@ class DualSelfPlayTests(unittest.TestCase):
         from rsl_rl.runners import OnPolicyRunnerCTS
         dual = self.task([capture_state(), capture_state()], horizon=1)
         env = GeneralsCTSVecEnv(dual)
-        config = runner_config(rollout_steps=2, learning_epochs=1, mini_batches=2)
+        config = small_training_config(runner_overrides=dict(rollout_steps=2, learning_epochs=1, mini_batches=2))['runner']
         config['policy'].update(map_width=3, map_height=3)
         config['algorithm'].update(ppo_monitor=False, gamma=.99, schedule='fixed', desired_kl=None)
         with contextlib.redirect_stdout(io.StringIO()):
@@ -153,7 +153,7 @@ class DualSelfPlayTests(unittest.TestCase):
         from unittest.mock import patch
         from rsl_rl.runners import OnPolicyRunnerCTS
         task = self.task([capture_state()], horizon=1)
-        config = runner_config(rollout_steps=2, learning_epochs=1, mini_batches=1)
+        config = small_training_config(runner_overrides=dict(rollout_steps=2, learning_epochs=1, mini_batches=1))['runner']
         config['policy'].update(map_width=3, map_height=3)
         config['release_terminal_observations'] = True
         config['algorithm'].update(ppo_monitor=False, schedule='fixed', desired_kl=None)

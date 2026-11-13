@@ -92,6 +92,7 @@ def test_arena_checkpoint_evaluation_replays_selected_games_exactly(tmp_path, mo
     initial = GameState(MapLayout(terrain), structure, owner, army,
                         np.ones(2, dtype=bool), np.array([0, 1], dtype=np.int32))
     monkeypatch.setattr("generals_arena.matches.batch.generate_map", lambda *args, **kwargs: initial.copy())
+    monkeypatch.setattr("generals_arena.matches.runner.initial_map", lambda *args, **kwargs: initial.copy())
     monkeypatch.setattr("generals.core.mapgen.generate_map", lambda *args, **kwargs: initial.copy())
     run = tmp_path / "run"
     with redirect_stdout(io.StringIO()):
@@ -107,7 +108,10 @@ def test_arena_checkpoint_evaluation_replays_selected_games_exactly(tmp_path, mo
     for case in demos["cases"]:
         assert case["native_core_replay_verified"]
         original = next(game for game in report["results"] if game["game_id"] == case["game_id"])
-        assert {key: value for key, value in case["match"].items() if key != "replay"} == original
+        # Recorded execution timings vary; every game receipt must still match.
+        excluded = {'replay', 'decision_timing'}
+        assert {key: value for key, value in case['match'].items() if key not in excluded} == {
+            key: value for key, value in original.items() if key not in excluded}
 
 
 @pytest.mark.parametrize('native_mode', ['wait', 'timeout'])
@@ -145,8 +149,9 @@ def test_demo_reproduction_ignores_native_latency_but_checks_game_evidence(tmp_p
     analyze.demos(checkpoint, report, output)
     recorded = json.loads((output / 'recorded_evaluation.json').read_text())
     assert report == original  # Comparing evidence must not rewrite archived diagnostics.
-    native_games = [game for game in recorded['results'] if 'decision_timing' in game]
+    native_games = [game for game in recorded['results'] if game['opponent'] == opponent['name']]
     assert len(native_games) == 2
+    assert all('decision_timing' in game for game in native_games)
     assert all(bool(game.get('forfeits')) == (native_mode == 'timeout') for game in native_games)
     for old, new in zip(report['results'], recorded['results'], strict=True):
         assert old['final_digest'] == new['final_digest'] and old['winner_seat'] == new['winner_seat']
@@ -235,5 +240,6 @@ def test_joint_confirmation_is_plotted_and_replays_the_same_candidate_matches(tm
     analyze.demos(analyze.checkpoint_for(best), best['data'], output)
     recorded = json.loads((output/'recorded_evaluation.json').read_text())
     assert recorded['win_matrix'] == original['win_matrix']
-    assert recorded['games'] == 44
+    # Two candidates versus seven policies + WAIT, plus their mutual games, on two paired maps.
+    assert recorded['games'] == original['games'] == 68
     assert all(game.get('replay') for game in recorded['results'])

@@ -30,7 +30,7 @@ conda run -n generals-rl python -m generals simulate --players 4 --games 10 --ma
 
 后续性能比较以每 tick 的 `env.step(action)` 加完成同步为准，排除决策时间。新测量结果写入 `outputs/`，稳定结论统一更新到上述文档。
 
-强化学习实现位于 `rl/`：默认采用 v32＋超时终止，包括9×9地图课程、双座纯自对弈、T512/E1/M256、early_shared ViT、temporal_paths 特征和 HL-Gauss128，奖励为稀疏±1、gamma=1；2048 tick到时记平局0、不bootstrap。包内 `generals_rl/default.json` 提供配置，`python -m generals_rl.train` 默认训练224轮；单卡和八卡启动、CPU开发覆盖及历史 LightCNN 对照见 [RL使用说明](rl/README.md)。历史v32结果见 [路径与时限消融](doc/terrain_distance_20261110_results.md)，完整版本记录见 [训练日志](doc/rl_train_log.md)。
+强化学习实现位于 `rl/`：默认采用 v32＋超时终止，包括9×9地图课程、双座纯自对弈、T512/E1/M256、early_shared ViT、temporal_paths 特征和 HL-Gauss128，奖励为稀疏±1、gamma=1；2048 tick到时记平局0、不bootstrap。包内 `generals_rl/default.json` 提供配置，`python -m generals_rl.train` 默认训练224轮；单卡和八卡启动、CPU开发覆盖见 [RL使用说明](rl/README.md)。历史v32结果见 [路径与时限消融](doc/terrain_distance_20261110_results.md)，完整版本记录见 [训练日志](doc/rl_train_log.md)。
 
 手写策略的接口、安装和测试见 [Baseline 使用说明](baselines/README.md)。
 

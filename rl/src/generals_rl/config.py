@@ -29,6 +29,26 @@ def merge_config(base, updates):
     return result
 
 
+def resolve_training_config(overrides=None, *, base=None, replace_policy=False):
+    """Share CLI/benchmark defaults without contaminating complete recipes or resumes."""
+    overrides = overrides or {}
+    resume = base is not None
+    base = default_training_config() if base is None else base
+    runner = overrides.get('runner', {})
+    complete = ('task' in overrides and 'num_steps_per_env' in runner
+                and all(isinstance(runner.get(key), dict) and 'class_name' in runner[key]
+                        for key in ('policy', 'algorithm')))
+    result = deepcopy(overrides) if complete and not resume else merge_config(base, overrides)
+    policy = runner.get('policy')
+    previous_class = base['runner']['policy']['class_name']
+    if replace_policy or (isinstance(policy, dict)
+                          and policy.get('class_name', previous_class) != previous_class):
+        if not isinstance(policy, dict) or 'class_name' not in policy:
+            raise ValueError('--replace-policy requires --config with a complete runner.policy and class_name')
+        result['runner']['policy'] = deepcopy(policy)
+    return result
+
+
 def task_config(values):
     values = deepcopy(values)
     if isinstance(values.get("reward"), dict):

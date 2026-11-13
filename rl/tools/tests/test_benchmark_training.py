@@ -1,5 +1,4 @@
 """Real complete CPU PPO work and synthetic distributed critical-path accounting."""
-from copy import deepcopy
 from contextlib import redirect_stdout
 from datetime import timedelta
 import importlib.util
@@ -14,6 +13,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from tensordict import TensorDict
+from rl_test_utils import small_training_config
 
 
 spec = importlib.util.spec_from_file_location(
@@ -57,7 +57,7 @@ def test_storage_estimate_preserves_boolean_mask_and_matches_real_allocation(his
 def test_real_cpu_rollout_gae_updates_exclude_warmup_and_refuse_overwrite(tmp_path, monkeypatch, profile, compact, packed, epochs):
     for name in ("WORLD_SIZE", "RANK", "LOCAL_RANK"):
         monkeypatch.delenv(name, raising=False)
-    config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
+    config = small_training_config(runner_overrides={"learning_epochs": 4})
     config["task"].update(backend="cpu", device="cpu", num_envs=8, max_episode_steps=4,
                           map_pool_size=0, opponent="current_self_play")
     config["runner"]["num_steps_per_env"] = 2
@@ -108,7 +108,7 @@ def test_real_cpu_rollout_gae_updates_exclude_warmup_and_refuse_overwrite(tmp_pa
 
 
 def test_invalid_discount_is_rejected_before_output_or_environment(tmp_path, monkeypatch):
-    config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
+    config = small_training_config(runner_overrides={"learning_epochs": 4})
     config["task"]["reward"]["potential_gamma"] = .9
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(config))
@@ -124,8 +124,9 @@ def test_topology_and_explicit_global_environment_count(tmp_path, opponent):
         "world_size": 8, "rank": 3, "local_rank": 3}
     with pytest.raises(ValueError):
         bench.topology({"WORLD_SIZE": "8", "RANK": "8"})
-    config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
-    config["task"]["opponent"] = opponent
+    config = small_training_config(runner_overrides={"learning_epochs": 4})
+    config["task"].update(opponent=opponent, backend="gpu", device="cuda:0")
+    config["runner"]["num_steps_per_env"] = 32
     path = tmp_path / "global.json"
     path.write_text(json.dumps(config))
     # Capture resolved settings without instantiating any GPU model or process group.
@@ -170,7 +171,7 @@ def test_runner_borrows_existing_group_without_initializing_it_again(monkeypatch
 
 
 def historical_config():
-    config = json.loads((Path(__file__).resolve().parents[2] / "configs/v32.json").read_text())
+    config = small_training_config(runner_overrides={"learning_epochs": 4})
     config["task"].update(backend="cpu", device="cpu", num_envs=64, max_episode_steps=4,
                           map_pool_size=0, opponent="self_play")
     config["runner"]["num_steps_per_env"] = 2
@@ -181,15 +182,15 @@ def historical_config():
 
 
 def frozen_actor_observer(model_ids):
-    from generals_rl.information_ppo import InformationSpatialPPOPolicy
-    original = InformationSpatialPPOPolicy.action_probabilities
+    from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
+    original = ScaledInformationSpatialPPOPolicy.action_probabilities
 
     def probabilities(model, *args, **kwargs):
         if not any(parameter.requires_grad for parameter in model.parameters()):
             model_ids.add(id(model))
         return original(model, *args, **kwargs)
 
-    return patch.object(InformationSpatialPPOPolicy, "action_probabilities", probabilities)
+    return patch.object(ScaledInformationSpatialPPOPolicy, "action_probabilities", probabilities)
 
 
 @pytest.mark.parametrize("fill", (False, True))

@@ -1,4 +1,4 @@
-"""Storage-only observation selection preserves real Light PPO updates."""
+"""Storage-only observation selection preserves real ViT PPO updates."""
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
@@ -11,14 +11,13 @@ from generals_rl.config import seed_everything, task_config
 from generals_rl.cts import GeneralsCTSVecEnv
 from generals_rl.mdp import RewardConfig
 from generals_rl.self_play_training import prepare_self_play
-from rl_test_utils import light_policy_config
 from generals_rl.task import GeneralsTask
 from rsl_rl.runners import OnPolicyRunnerCTS
 from rl_test_utils import assert_nested_equal, small_training_config
 
 
-STORAGE_KEYS = ["policy", "critic", "action_mask"]
-FULL_KEYS = {*STORAGE_KEYS, "single_obs", "valid_cells"}
+STORAGE_KEYS = ["policy", "critic", "action_mask", "knowledge", "valid_cells"]
+FULL_KEYS = {*STORAGE_KEYS, "single_obs"}
 
 
 def config():
@@ -27,8 +26,6 @@ def config():
                         "seed": 20261013, "combat_features": True,
                         "king_threat_distance": True,                         "map_pool_size": 8, "reward": RewardConfig(potential_gamma=.995)},
         runner_overrides={"learning_epochs": 1})
-    cfg["runner"]["policy"] = light_policy_config()
-    cfg["runner"]["policy"]["own_king_geometry"] = True
     cfg["runner"]["algorithm"].update(
         class_name="generals_rl.student_ppo.StudentPPO", teacher_env_ratio=0,
         schedule="fixed", desired_kl=None, gamma=.995)
@@ -96,8 +93,8 @@ class StorageObsKeysTests(unittest.TestCase):
                         assert_nested_equal(self, actual[key], reference[key])
                 expected_keys = FULL_KEYS if selected is None else set(STORAGE_KEYS)
                 self.assertEqual(actual["storage_keys"], expected_keys)
-                # A subset drops the FP32 current frame and the auxiliary boolean cell mask.
-                saved_bytes = 0 if selected is None else 4 * 4 * (1066 * 4 + 81)
+                # A subset drops the redundant FP32 current frame.
+                saved_bytes = 0 if selected is None else 4 * 4 * (1066 * 4)
                 self.assertEqual(reference["payload"] - actual["payload"], saved_bytes)
 
     def test_invalid_storage_keys_rejected(self):

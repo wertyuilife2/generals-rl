@@ -1,5 +1,13 @@
 # RL training log
 
+## 消融代码清理（2026-11-12，第二批）
+
+移除旧 Spatial / LightCNN / Information / Optimized CNN 训练类、CNN actor 工厂分支及早期 `rl/configs/v32*.json`，与当前 temporal_paths v32 无关。ViT 直接继承 categorical 训练基类，原先借用 CNN 类的 mask、分布和推理方法原样迁入。移除 `cts.runner_config`；训练 CLI 和 benchmark 共用配置解析，完整配方、稀疏覆盖和 resume 的配置边界保留。
+
+通用测试迁到 ViT，保留历史池、双座、分布式、微批次、压缩、课程、续训及导出验证；删除仅验证退役 CNN 的测试。修正工具测试中旧地图缓存注入位置、七对手确认赛场次、原生决策计时与回放字段假设。实验记录、曲线和 vendor 源码均保留，当前默认仍为 v32 + 超时终止。
+
+验证：CPU 全量回归覆盖 576 个主用例（52 项需要 GPU 而跳过），发现的失效 fixture/断言已修复并定向复测通过；另已通过 6 项 GPU 编译前向/反向回归。清理前后默认方案缩小为 CPU 2 对局、T4、2 轮 PPO，全部模型参数与优化器状态逐位一致，带冻结源码的旧 checkpoint 可重新导出。仅执行短测试，未启动正式训练。退役架构的复现继续使用冻结源码或 `76cacef`。
+
 ## 消融代码清理（2026-11-12，第一批）
 
 默认方案仍为 v32 + 超时终止。删除零和联合 critic（`joint_critic`）及配对 minibatch、D4、ResNet、pyramid 和 `temporal_dedup` 专属实现及测试。保留 advantage 筛样、`late` / `early_shared` / `post_attention` / `joint_independent` critic 融合、actor/critic 拼 batch 前向、scalar / HL-Gauss / 两端点 CE，以及地图池、历史池、特征、压缩和训练效率优化。`joint_independent` 是独立网络的特权融合，不是本次删除的联合零和 critic。

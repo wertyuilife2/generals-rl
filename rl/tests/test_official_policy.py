@@ -79,20 +79,6 @@ def test_defaults_pin_2048_ticks_and_uncalibrated_official_profile():
     assert TaskConfig().random_maps and TrainingEvalConfig().profile is None
 
 
-def test_light_runner_helper_accepts_official_task_inputs():
-    from generals_rl.cts import runner_config
-    config = TaskConfig(num_envs=2, map_pool_size=4, opponent='wait',
-                        persistent_knowledge=True, combat_features=True, king_threat_distance=True)
-    with GeneralsTask(config) as task:
-        runner = runner_config(); options = runner['policy'].copy()
-        policy = resolve_callable(options.pop('class_name'))(
-            TensorDict(task.get_observations(), [2]), runner['obs_groups'], task.action_space.size, **options)
-        with torch.no_grad():
-            probabilities = policy.action_probabilities(TensorDict(task.get_observations(), [2]))
-        assert probabilities.shape == (2, 1 + 8 * 23 * 23)
-        torch.testing.assert_close(probabilities.sum(1), torch.ones(2))
-
-
 def test_terminal_actor_features_publish_enemy_city_count():
     from generals import MapConfig, VecEnv
     from generals.core.mapgen import generate_map
@@ -130,8 +116,6 @@ def test_short_training_saves_exports_and_evaluates_official_maps(tmp_path):
         width=23, height=23, random_maps=True, map_pool_size=8,
         max_episode_steps=2048, mountain_density=.5, city_density=.5,
         persistent_knowledge=True), runner_overrides={'learning_epochs': 1})
-    config['runner']['policy'].update(map_width=23, map_height=23, knowledge_channels=11,
-                                      critic_actor_information=True)
     config['runner']['obs_groups'] = {'policy': ['policy', 'knowledge'],
                                      'critic': ['critic', 'policy', 'knowledge']}
     config['self_play'] = {'pool_size': 2, 'snapshot_interval': 1}

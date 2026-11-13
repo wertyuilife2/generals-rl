@@ -16,12 +16,6 @@ from generals_arena.util import canonical
 from generals_arena.util import file_digest
 
 
-_FAMILIES = {
-    'SpatialPPOPolicy': 'spatial', 'LightSpatialPPOPolicy': 'lightcnn',
-    'InformationSpatialPPOPolicy': 'information',
-    'OptimizedInformationSpatialPPOPolicy': 'optimized',
-    'ScaledInformationSpatialPPOPolicy': 'scaled',
-}
 _FEATURES = dict(width=23, height=23, players=2, max_episode_steps=2048, history_length=4, random_maps=True,
                  combat_features=False,
                  king_threat_distance=False, persistent_knowledge=False, feature_set="stacked")
@@ -31,29 +25,25 @@ def make_policy_spec(run_config):
     """Deployment options owned by RL, independent of Arena's manifest schema."""
     task, options = run_config['task'], run_config['runner']['policy']
     name = options['class_name'].rsplit('.', 1)[-1]
-    if name not in _FAMILIES:
+    if name != 'ScaledInformationSpatialPPOPolicy':
         raise ValueError(f'policy {name} has no deployable actor')
     if options.get('actor_obs_normalization', False):
         raise ValueError('export requires the supported explicit, unnormalized feature policy')
     features = {key: task.get(key, default) for key, default in _FEATURES.items()}
     # Keep specifications lacking these keys identical for legacy packages.
     features.update({key: task[key] for key in ('clock_scale_ticks', 'knowledge_age_scale') if key in task})
-    network = {'family': _FAMILIES[name]}
-    common = ('spatial_channels', 'residual_blocks', 'own_king_geometry', 'knowledge_channels',
-              'input_channel_alignment', 'wait_move_factorization', 'amp_bfloat16')
-    keys = (('backbone', 'model_size', 'spatial_mode', 'head_channels', 'input_channel_alignment',
-             'wait_move_factorization', 'amp_bfloat16', 'mask_padding_tokens', 'patch_size') if network['family'] == 'scaled' else common)
+    network = {'family': 'scaled'}
+    keys = ('backbone', 'model_size', 'spatial_mode', 'head_channels', 'input_channel_alignment',
+            'wait_move_factorization', 'amp_bfloat16', 'mask_padding_tokens', 'patch_size')
     network.update({key: options[key] for key in keys if key in options})
     if 'model_size' in network and isinstance(network['model_size'], str):
         network['model_size'] = network['model_size'].lower()
-    if network['family'] == 'scaled' and network.get('backbone', 'vit') == 'vit':
+    if network.get('backbone', 'vit') == 'vit':
         from .policy.scaled import vit_configuration
         network['vit_config'] = list(vit_configuration(network.get('model_size', '1m'),
                                                        options.get('share_backbone', True)))
-    network.setdefault('wait_move_factorization', network['family'] == 'scaled')
+    network.setdefault('wait_move_factorization', True)
     network.setdefault('amp_bfloat16', False)
-    if network['family'] in ('information', 'optimized'):
-        network.setdefault('knowledge_channels', 0)
     model = {'codename': run_config.get('model', {}).get('codename') or run_config.get('run_id', 'policy'),
              'training_seed': task.get('seed', 42)}
     if run_config.get('run_id'):

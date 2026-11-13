@@ -19,10 +19,11 @@ from rsl_rl.runners import OnPolicyRunnerCTS
 from generals_rl.self_play import HistoricalPolicyPool
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.train import train
+from rl_test_utils import small_training_config
 
 
 def small_config():
-    config = json.loads((Path(__file__).parents[1] / "configs/v32-opt.json").read_text())
+    config = small_training_config(task_overrides={'opponent': 'current_self_play'})
     config["task"].update(num_envs=4, backend="cpu", device="cpu", map_pool_size=0,
                           max_episode_steps=4)
     config["runner"]["num_steps_per_env"] = 4

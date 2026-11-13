@@ -7,7 +7,6 @@ the transition numerator. Profile work is a separate additional full update.
 """
 from contextlib import nullcontext, redirect_stdout
 from copy import deepcopy
-from dataclasses import asdict
 from hashlib import sha256
 import argparse
 import io
@@ -22,12 +21,12 @@ import torch
 from rsl_rl.runners import OnPolicyRunnerCTS
 from rsl_rl.utils import resolve_callable
 
-from generals_rl.config import configure_observations, merge_config, seed_everything, task_config
-from generals_rl.cts import GeneralsCTSVecEnv, runner_config
+from generals_rl.config import configure_observations, resolve_training_config, seed_everything, task_config
+from generals_rl.cts import GeneralsCTSVecEnv
 from generals_rl.curriculum import CurriculumConfig, RolloutCurriculum
 from generals_rl.distributed_training import DistributedConfig
 from generals_rl.self_play_training import SelfPlayConfig, prepare_self_play
-from generals_rl.task import GeneralsTask, TaskConfig
+from generals_rl.task import GeneralsTask
 from generals_rl.policy.precision import matmul_precision
 
 
@@ -304,15 +303,7 @@ def prepare_historical_benchmark(task, runner, config, output, distributed, *, f
 
 
 def resolve_config(args, context):
-    overrides = json.loads(args.config.read_text())
-    config = merge_config({"task": asdict(TaskConfig(opponent="current_self_play",
-                                                          combat_features=True, king_threat_distance=True,
-                                                          persistent_knowledge=True)),
-                           "runner": runner_config(), "torch_threads": 1}, overrides)
-    # Model constructors accept complete policy subtrees; keep architecture
-    # overrides independent of the default policy constructor.
-    if "policy" in overrides.get("runner", {}):
-        config["runner"]["policy"] = deepcopy(overrides["runner"]["policy"])
+    config = resolve_training_config(json.loads(args.config.read_text()))
     task, run = config["task"], config["runner"]
     for name in ("global_num_envs", "num_envs", "rollout_steps", "logical_batch_size",
                  "physical_minibatch_size", "inference_chunk_size"):

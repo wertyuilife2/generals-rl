@@ -7,7 +7,6 @@ from generals_rl.mdp.rewards import RewardConfig, ShapedReward
 from contextlib import redirect_stdout
 from copy import deepcopy
 import io
-import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,11 +16,12 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.train import train
+from rl_test_utils import small_training_config
 
 
 class CurriculumTrainingTests(unittest.TestCase):
     def config(self):
-        config = json.loads((Path(__file__).parents[1] / "configs/v32.json").read_text())
+        config = small_training_config()
         config.pop("curriculum", None)
         config["task"].update(num_envs=8, backend="cpu", device="cpu",
                               max_episode_steps=8, map_pool_size=0)
@@ -135,7 +135,6 @@ def test_potential_and_tick_decay_reconstruct_from_original_coefficients():
                                          potential_gamma=.99+.01*min(i/2, 1))
         assert reward.config.win == 1. and reward.config.loss == -1.
         assert alg.gamma == reward.config.potential_gamma
-
 
 
 def test_sparse_reward_at_gamma_one_has_only_terminal_outcomes():

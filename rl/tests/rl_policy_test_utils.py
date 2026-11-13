@@ -13,22 +13,10 @@ from generals_rl.task import GeneralsTask
 from rl_test_utils import small_training_config
 
 
-def make_checkpoint(directory, seed=7, filename="checkpoint.pt", family="information", history_length=4):
+def make_checkpoint(directory, seed=7, filename="checkpoint.pt"):
     config = small_training_config(task_overrides={"opponent": "wait", "persistent_knowledge": True,
-                                                   "max_episode_steps": 32, "history_length": history_length})
-    config["runner"]["obs_groups"] = {"policy": ["policy", "knowledge"],
-                                      "critic": ["critic", "policy", "knowledge"]}
+                                                   "max_episode_steps": 32})
     options = config["runner"]["policy"]
-    options.update(history_length=history_length, knowledge_channels=11, critic_actor_information=True)
-    if family == "optimized":
-        options["class_name"] = "generals_rl.optimized_ppo.OptimizedInformationSpatialPPOPolicy"
-    elif family == "scaled":
-        options.pop("spatial_channels")
-        options.pop("critic_actor_information")
-        options.update(class_name="generals_rl.scaled_ppo.ScaledInformationSpatialPPOPolicy",
-                       backbone="vit", model_size="1m", spatial_mode="dense")
-        config["runner"]["obs_groups"]["policy"].append("valid_cells")
-        config["runner"]["obs_groups"]["critic"].append("valid_cells")
     policy_options = deepcopy(options)
     policy_type = resolve_callable(policy_options.pop("class_name"))
     with torch.random.fork_rng(devices=[]), GeneralsTask(task_config(config["task"])) as task:
@@ -44,7 +32,7 @@ def make_checkpoint(directory, seed=7, filename="checkpoint.pt", family="informa
 def make_submission(directory, *, seed=7, codename='test-ViT', updates=3):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    checkpoint, training = make_checkpoint(directory, seed=seed, family='scaled')
+    checkpoint, training = make_checkpoint(directory, seed=seed)
     training['model'] = {'codename': codename}
     source = prepare_policy_source(training, directory)
     bundle = export_policy(checkpoint, directory/'bundle', run_config=training,

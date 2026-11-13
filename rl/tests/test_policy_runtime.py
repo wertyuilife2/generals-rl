@@ -30,7 +30,7 @@ from tensordict import TensorDict
 @pytest.fixture
 def policy_files(tmp_path):
     torch.set_num_threads(1)
-    checkpoint, config = make_checkpoint(tmp_path, family="scaled")
+    checkpoint, config = make_checkpoint(tmp_path)
     config["task"].update(max_episode_steps=1024)
     (tmp_path/"run_config.json").write_text(json.dumps(config))
     bundle = export_policy(checkpoint, tmp_path/"bundle", run_config=config,

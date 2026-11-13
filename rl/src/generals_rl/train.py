@@ -16,7 +16,7 @@ import torch
 import torch.distributed as dist
 from rsl_rl.runners import OnPolicyRunnerCTS
 
-from .config import DEFAULT_ITERATIONS, configure_observations, default_training_config, merge_config, seed_everything, task_config
+from .config import DEFAULT_ITERATIONS, configure_observations, resolve_training_config, seed_everything, task_config
 from .cts import GeneralsCTSVecEnv
 from .curriculum import CurriculumConfig, RolloutCurriculum
 from .distributed_training import DistributedConfig, distributed_process_group
@@ -552,29 +552,12 @@ def main(argv=None):
     initialization.add_argument("--resume", type=Path, help="restore policy, both optimizers and the available historical pool")
     initialization.add_argument("--warm-start", type=Path, help="load model weights into a fresh run with new optimizers and pool")
     args = parser.parse_args(argv)
-    if args.resume:
-        config = json.loads(args.resume.with_name("run_config.json").read_text())
-    else:
-        config = default_training_config()
-    if args.config:
-        overrides = json.loads(args.config.read_text())
-        previous_policy_class = config["runner"]["policy"]["class_name"]
-        runner_overrides = overrides.get("runner", {})
-        complete = ("task" in overrides and "num_steps_per_env" in runner_overrides
-                    and all(isinstance(runner_overrides.get(key), dict)
-                            and "class_name" in runner_overrides[key] for key in ("policy", "algorithm")))
-        # Complete recipes are independent baselines. Inheriting new AMP,
-        # curriculum or optimizer fields would silently change old experiments.
-        config = (deepcopy(overrides) if complete and not args.resume
-                  else merge_config(config, overrides))
-        policy = runner_overrides.get("policy")
-        if args.replace_policy or (isinstance(policy, dict) and
-                                   policy.get("class_name", previous_policy_class) != previous_policy_class):
-            if not isinstance(policy, dict) or "class_name" not in policy:
-                parser.error("--replace-policy requires --config with a complete runner.policy and class_name")
-            config["runner"]["policy"] = deepcopy(policy)
-    elif args.replace_policy:
-        parser.error("--replace-policy requires --config")
+    base = json.loads(args.resume.with_name("run_config.json").read_text()) if args.resume else None
+    overrides = json.loads(args.config.read_text()) if args.config else None
+    try:
+        config = resolve_training_config(overrides, base=base, replace_policy=args.replace_policy)
+    except ValueError as error:
+        parser.error(str(error))
     for field in ("num_envs", "opponent", "seed", "backend", "device"):
         value = getattr(args, field)
         if value is not None:

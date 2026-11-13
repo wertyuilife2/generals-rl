@@ -50,20 +50,17 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 地图课程按全局board ticks固定阈值；减少GPU数会使课程在更多PPO轮后结束。正式八卡实验的评估脚本额外检查U112并另做best/final独立种子复评；通用入口保留每20轮＋最终评估和top3复评机制，不依赖实验机的绝对路径。
 全尺寸地图需同时覆盖 `task.width=task.height=23, task.random_maps=true` 和 `runner.policy.map_width=runner.policy.map_height=23`，并重新评估显存与课程预算；当前默认质量结果只覆盖9×9。
 持续换图可设置 `task.map_refresh_reuse>0`；常驻池大小与累计新图数量分开控制，`map_prefetch_chunks=8`独立于CPU生成进程数。1v1生成和课程图搜索已迁至C++，固定种子的地图保持一致；首次reset不提前替换初始池。参数与复现边界见[地图池设计](../doc/rl_training_design.md)，速度和容量见[原生生成实测](../doc/rl_native_mapgen_20261111.md)。固定池仍是默认，以便和已完成实验比较。
-历史网络预设 [v32](configs/v32.json)／[v32-opt](configs/v32-opt.json) 使用当前默认2048上限；
-它们是早期LightCNN，与本轮路径v32不同。复现已完成实验请使用其归档 `run_config.json` 与冻结源码。
+早期 LightCNN 的 `v32`／`v32-opt` 与本轮路径 v32 不同，已从当前训练入口移除。复现退役网络与消融请使用其归档 `run_config.json` 与冻结源码，或清理前提交 `76cacef`；历史记录和曲线保留。
 
 ## 配置覆盖与恢复
 
-`--config FILE.json` 接受完整训练配方或稀疏覆盖。包含 `task`、`runner.num_steps_per_env` 以及 policy／algorithm 类名的完整配方独立加载，避免混入新默认的 AMP、学习率或课程设置。稀疏配置覆盖包内默认；同一 policy class 递归合并，更换 `runner.policy.class_name` 时替换整个 policy 子树。若需要清除同 class 的旧字段，使用 `--replace-policy` 并提供完整 `runner.policy`。
+训练和 `rl/tools/benchmark_training.py` 共用配置解析；`--config FILE.json` 接受完整训练配方或稀疏覆盖。包含 `task`、`runner.num_steps_per_env` 以及 policy／algorithm 类名的完整配方独立加载，避免混入新默认的 AMP、学习率或课程设置。稀疏配置覆盖包内默认；同一 policy class 递归合并，更换 `runner.policy.class_name` 时替换整个 policy 子树。若需要清除同 class 的旧字段，使用 `--replace-policy` 并提供完整 `runner.policy`。
 
 新默认显式设置 `task.time_limit_mode="terminal_draw"`。旧完整配置和恢复配置缺少该字段时仍按历史 `bootstrap` 语义解析；可显式选择任一模式。rollout在未结束的对局中截断时仍正常bootstrap。
 
-[`v32.json`](configs/v32.json) 与 [`v32-opt.json`](configs/v32-opt.json) 是已迁移到当前配置字段的 LightCNN 对照，需显式选择：
+从当前方案的 checkpoint 继续训练：
 
 ```bash
-python -m generals_rl.train --config rl/configs/v32.json --output outputs/rl/v32-control
-python -m generals_rl.train --config rl/configs/v32-opt.json --output outputs/rl/v32-opt-control
 python -m generals_rl.train --resume outputs/rl/my-run/checkpoint.pt --iterations 224 --output outputs/rl/resumed
 ```
 
@@ -97,7 +94,7 @@ python -m generals_rl.train --config cpu.json --iterations 1 --output outputs/rl
 | `curriculum.potential_decay` | 线性衰减territory/cities/army shaping；终点缺省沿用tick课程终点 |
 | `runner.policy.critic_fusion` | `late`、`early_shared`、`post_attention`、`joint_independent` |
 | `runner.policy.value_distribution` | `scalar`、128-bin `hl_gauss`、两端点 `binary_ce` |
-| `task.feature_set` | 默认 `temporal_paths`；另有 `stacked`、`compact`、`temporal`、`temporal_dedup` |
+| `task.feature_set` | 默认 `temporal_paths`；另有 `stacked`、`compact`、`temporal` |
 | `runner.algorithm.advantage_top_fraction` | 默认1；小于1时按标准化advantage绝对值筛样 |
 | `runner.policy.patch_size` | 默认1；3使用非重叠patch并恢复逐格动作logit |
 

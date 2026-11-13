@@ -10,7 +10,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from .spatial_ppo import SpatialPPOPolicy
+from .actor_critic import CategoricalActorCritic
+from .policy.distributions import make_distribution, greedy_actions
 from .value_distribution import ValueDistribution
 from .policy.features import feature_recipe, public_features
 from .policy.layout import ObservationLayout
@@ -164,7 +165,7 @@ def _compiled_frozen_actor_forward(batch_size):
     return torch.compile(forward, dynamic=False, fullgraph=True, options=options)
 
 
-class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
+class ScaledInformationSpatialPPOPolicy(CategoricalActorCritic):
     """Copy the local encoder for independent weights, or reuse its features.
 
     ViT1M uses a wider local encoder when shared to retain a comparable total
@@ -397,6 +398,23 @@ class ScaledInformationSpatialPPOPolicy(SpatialPPOPolicy):
             for target, value in zip(output, values):
                 target[start:end].copy_(value)
         return output if joint else output[0]
+
+    def validate_action_mask(self, obs):
+        """Check a complete logical PPO batch before splitting its forwards."""
+        mask = obs.get("action_mask")
+        if mask is None:
+            raise ValueError("categorical policies require action_mask")
+        mask = mask.to(device=obs["policy"].device, dtype=torch.bool)
+        if mask.shape != (len(obs["policy"]), self.num_actions) or not mask.any(dim=-1).all():
+            raise ValueError("action_mask must match logits and contain a legal action in every row")
+
+    def _probabilities_from_logits(self, logits, mask, *, validate_mask=True):
+        self.distribution = make_distribution(logits, mask, factorized=self.wait_move_factorization,
+                                               validate_mask=validate_mask)
+        return self.distribution.probs
+
+    def act_inference(self, obs):
+        return greedy_actions(self.action_probabilities(obs), factorized=self.wait_move_factorization)
 
     def action_probabilities(self, obs, is_teacher=False, *, validate_mask=True):
         if is_teacher:

@@ -12,11 +12,12 @@ import torch
 
 from generals_rl.self_play_training import prepare_self_play
 from generals_rl.train import train
+from rl_test_utils import small_training_config
 
 
 class CurrentSelfPlayTrainingTests(unittest.TestCase):
     def config(self):
-        config = json.loads((Path(__file__).parents[1] / "configs/v32-opt.json").read_text())
+        config = small_training_config()
         config["task"].update(num_envs=8, backend="cpu", device="cpu",
                               max_episode_steps=8, map_pool_size=0,
                               opponent="current_self_play")
@@ -61,7 +62,6 @@ class CurrentSelfPlayTrainingTests(unittest.TestCase):
             self.assertNotIn("active_snapshot_counts", summary["self_play"])
             self.assertEqual(checkpoint["iter"], 2)
             policy = observed["runner"].alg.policy
-            self.assertEqual(sum(parameter.numel() for parameter in policy.parameters()), 27_082)
             for prefix in ("actor.", "critic."):
                 self.assertTrue(any(not torch.equal(value, observed["initial_model"][name])
                                     for name, value in policy.named_parameters() if name.startswith(prefix)))

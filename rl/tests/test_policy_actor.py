@@ -12,9 +12,6 @@ from generals_rl.policy.actor import build_actor
 from generals_rl.policy.distributions import action_probabilities, select_action
 from generals_rl.policy.layout import ObservationLayout, own_king_coordinates
 from generals_rl.scaled_ppo import ScaledInformationSpatialPPOPolicy
-from generals_rl.spatial_ppo import SpatialPPOPolicy, LightSpatialPPOPolicy
-from generals_rl.information_ppo import InformationSpatialPPOPolicy
-from generals_rl.optimized_ppo import OptimizedInformationSpatialPPOPolicy
 
 
 NETWORK = {"family": "scaled", "backbone": "vit", "model_size": "1m", "head_channels": 128,
@@ -105,48 +102,21 @@ class PolicyActorTests(unittest.TestCase):
                 self.assertEqual({key: value.shape for key, value in original.actor.state_dict().items()},
                                  {key: value.shape for key, value in frozen.state_dict().items()})
 
-    def test_retained_families_share_actor_keys_outputs_and_gradients(self):
+    def test_actor_keys_outputs_and_gradients_match_training(self):
         obs = observations(2)
-        basic_groups = {"policy": ["policy"], "critic": ["critic"]}
-        cases = [
-            ("spatial", SpatialPPOPolicy, {}, {}, basic_groups),
-            ("lightcnn", LightSpatialPPOPolicy, {"own_king_geometry": True},
-             {"own_king_geometry": True}, basic_groups),
-            ("information", InformationSpatialPPOPolicy,
-             {"knowledge_channels": 11, "own_king_geometry": True, "critic_actor_information": True},
-             {"knowledge_channels": 11, "own_king_geometry": True}, GROUPS),
-            ("optimized", OptimizedInformationSpatialPPOPolicy,
-             {"knowledge_channels": 11, "own_king_geometry": True, "critic_actor_information": True},
-             {"knowledge_channels": 11, "own_king_geometry": True}, GROUPS),
-        ]
-        cases.append(("scaled", ScaledInformationSpatialPPOPolicy, {}, {}, SCALED_GROUPS))
-        for family, policy_class, options, network, groups in cases:
-            with self.subTest(family=family, network=network):
-                original = policy_class(obs, groups, 649, map_width=9, map_height=9, **options)
-                features = dict(FEATURES, persistent_knowledge=family in ("information", "optimized", "scaled"))
-                shared = build_actor(dict(network, family=family), features)
-                self.assertEqual(list(shared.state_dict()), list(original.actor.state_dict()))
-                shared.load_state_dict(original.actor.state_dict(), strict=True)
-                for actor in (original.actor, shared):
-                    self.assertTrue(actor.training)
-                    self.assertTrue(all(parameter.requires_grad for parameter in actor.parameters()))
-                original_probabilities = original.action_probabilities(obs)
-                if family == "scaled":
-                    logits = shared(obs["policy"], obs["knowledge"], obs["valid_cells"])
-                else:
-                    logits = shared(obs["policy"], obs["knowledge"]) if family in ("information", "optimized") else shared(obs["policy"])
-                probabilities = action_probabilities(logits, obs["action_mask"], factorized=original.wait_move_factorization)
-                torch.testing.assert_close(probabilities, original_probabilities, rtol=0, atol=0)
-                (-original_probabilities[:, 0].log().mean()).backward()
-                (-probabilities[:, 0].log().mean()).backward()
-                for (name, parameter), (_, reference) in zip(shared.named_parameters(), original.actor.named_parameters()):
-                    self.assertIsNotNone(parameter.grad, name)
-                    torch.testing.assert_close(parameter.grad, reference.grad, rtol=0, atol=0, msg=name)
-        # The export's generic scaled family uses the training constructor default.
-        default_actor = build_actor({"family": "scaled"}, FEATURES)
-        original = ScaledInformationSpatialPPOPolicy(obs, SCALED_GROUPS, 649, map_width=9, map_height=9)
-        self.assertEqual({key: value.shape for key, value in default_actor.state_dict().items()},
-                         {key: value.shape for key, value in original.actor.state_dict().items()})
+        original = training_policy(obs)
+        shared = build_actor({'family': 'scaled'}, FEATURES)
+        self.assertEqual(list(shared.state_dict()), list(original.actor.state_dict()))
+        shared.load_state_dict(original.actor.state_dict(), strict=True)
+        original_probabilities = original.action_probabilities(obs)
+        logits = shared(obs['policy'], obs['knowledge'], obs['valid_cells'])
+        probabilities = action_probabilities(logits, obs['action_mask'], factorized=True)
+        torch.testing.assert_close(probabilities, original_probabilities, rtol=0, atol=0)
+        (-original_probabilities[:, 0].log().mean()).backward()
+        (-probabilities[:, 0].log().mean()).backward()
+        for (name, parameter), (_, reference) in zip(shared.named_parameters(), original.actor.named_parameters()):
+            self.assertIsNotNone(parameter.grad, name)
+            torch.testing.assert_close(parameter.grad, reference.grad, rtol=0, atol=0, msg=name)
 
     def test_config_rejects_unsupported_architectures_or_feature_schemas(self):
         for change in ({"family": "unsupported"}, {"model_size": "2m"},
