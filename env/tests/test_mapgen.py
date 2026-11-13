@@ -43,7 +43,7 @@ def test_official_shapes_spawns_cities_and_connectivity(players,density):
         if len(cities)>=players:
             for g in s.general_pos:assert min(abs(g//w-c//w)+abs(g%w-c%w) for c in cities)<=6
         assert np.all(s.army.ravel()[s.general_pos]==1)
-        assert s.afk_turn==(71 if players==2 else 121)
+        assert s.afk_turn == 0
     assert len(shapes)>1
 
 

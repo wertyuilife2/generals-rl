@@ -90,7 +90,7 @@ def test_departure_grace_credit_and_public_city_memory():
 
 
 @pytest.mark.parametrize('backend', ['reference', 'cpu', 'gpu', 'mps'])
-def test_live_afk_rechecks_warning_and_retains_last_survivor(backend):
+def test_recorded_afk_rechecks_warning_and_retains_last_survivor(backend):
     """Live 31.4.5 checkAfks/killPlayer, unlike the replay UI, caches winners."""
     if backend in ('gpu', 'mps'):
         torch = pytest.importorskip('torch')
@@ -160,3 +160,30 @@ def test_batched_surrender_matches_reference_through_grace(device, players, tick
             env.step(actions)
             for engine in references:
                 if not engine.state.terminated: engine.step([Action.wait()] * players)
+
+
+@pytest.mark.parametrize('backend', ['cpu', 'gpu', 'mps'])
+@pytest.mark.parametrize('players', [2, 4, 8])
+def test_new_maps_do_not_warn_or_eliminate_inactive_players(backend, players):
+    from generals import MapConfig
+    from generals.core.mapgen import generate_map
+    if backend != 'cpu':
+        torch = pytest.importorskip('torch')
+        available = (torch.cuda.is_available() if backend == 'gpu' else
+                     torch.backends.mps.is_available() and hasattr(torch.mps, 'compile_shader'))
+        if not available:
+            pytest.skip('GPU unavailable')
+    state = generate_map(MapConfig(players=players), 42)
+    assert state.afk_turn == 0
+    with VecEnv.from_states([state], device='cuda' if backend == 'gpu' else backend,
+                            episode_ticks=200, auto_reset=False) as env:
+        actions = np.zeros((1, players), np.int64)
+        if backend != 'cpu':
+            actions = torch.as_tensor(actions, device=env.device)
+        for _ in range(130):
+            env.step(actions)
+            env.check_errors()
+            current = env.to_states()[0]
+            assert not current.warn_afk.any()
+            assert current.alive.all() and not current.terminated
+        assert current.tick == 130

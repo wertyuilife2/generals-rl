@@ -87,16 +87,15 @@ def test_invalid_human_queue_entries_are_drained_in_one_tick(tmp_path):
         live.close()
 
 
-def test_live_afk_cached_winner_scores_as_a_win():
+def test_wait_players_survive_opening_until_external_tick_limit():
     from generals_arena.matches.results import seat_outcome
     roster = [{'name': name, 'kind': 'custom', 'version': 'test-wait-v1',
                'factory': 'generals_arena.policies.builtin:create_wait_controller'} for name in ('wait1', 'wait2')]
-    report = tournament(roster, MatchConfig(MapConfig(players=2), max_ticks=2000), maps_per_group=1, seed=42)
+    report = tournament(roster, MatchConfig(MapConfig(players=2), max_ticks=150), maps_per_group=1, seed=42)
     for result in report['results']:
-        assert result['reason'] == 'afk' and result['ticks'] == 71
-        assert result['final_alive'] == [False, False] and result['winner_seat'] == 1
-        assert result['placements'] == [2, 1]
-        assert seat_outcome(result, 1) == 'win' and seat_outcome(result, 0) == 'loss'
+        assert result['reason'] == 'tick_limit' and result['ticks'] == 150
+        assert result['final_alive'] == [True, True] and result['winner_seat'] is None
+        assert seat_outcome(result, 1) == seat_outcome(result, 0) == 'draw'
         samples = match_statistics(result, result['kills'])
         assert all(sample['kill_index'] == 0 for sample in samples.values())
 

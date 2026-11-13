@@ -146,7 +146,7 @@ def generate_map(config: MapConfig, seed=42) -> GameState:
                 structure[c], owner[c], army[c] = 2, pid, 1
             state = GameState(MapLayout(terrain.astype(np.uint8).reshape(shape)), structure.reshape(shape),
                               owner.reshape(shape), army.reshape(shape), np.ones(p, dtype=bool),
-                              np.asarray(generals, dtype=np.int32), afk_turn=71 if p == 2 else 121)
+                              np.asarray(generals, dtype=np.int32))
             state.validate()
             return state
     raise ValueError('cannot generate an official map with these dimensions and densities')
