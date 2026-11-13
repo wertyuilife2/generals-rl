@@ -154,3 +154,59 @@ def test_unpack_extracts_verified_snapshot(tmp_path, monkeypatch):
     assert root.name == expected
     assert (root/'policy.so').is_file()
     assert (root/'params.json').read_text() == '{}'
+
+
+def test_worker_shares_code_across_maps_and_slots_but_resets_instances(tmp_path, monkeypatch):
+    from pathlib import Path
+    from generals_arena.matches.cache import RuntimeCache
+    from generals_arena.matches.batch import _PolicyGroup
+    from generals_arena.matches.config import MatchConfig
+    from generals_arena.policies.entries import prepare_entrant
+
+    source = tmp_path/'counter.cpp'
+    source.write_text('''#include "arena_policy.h"
+extern "C" void *arena_create(int, std::uint64_t, const char *) { return new int(0); }
+extern "C" void arena_destroy(void *p) { delete static_cast<int *>(p); }
+extern "C" std::int64_t arena_act(void *p, const ArenaObservation *) { return ++*static_cast<int *>(p); }
+''')
+    bundle = tmp_path/'counter.zip'
+    native.build_bundle(source, bundle)
+    entry = prepare_entrant(dict(name='counter', kind='cpp', bundle=str(bundle)))
+    original = Path.read_bytes
+    reads = []
+    def read(path):
+        if path == bundle:
+            reads.append(path)
+        return original(path)
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    cache = RuntimeCache()
+    first_rules = MatchConfig(MapConfig(15, 17, 2))
+    second_rules = MatchConfig(MapConfig(25, 25, 2))
+    groups = []
+    try:
+        for rules, slot in [(first_rules,0),(first_rules,1),(second_rules,0)]:
+            groups.append(_PolicyGroup(entry, rules, [0], [42], cache=cache, slot=slot))
+        children = [group.controller._children[0] for group in groups]
+        assert len({id(child._resources) for child in children}) == 1
+        assert len({child.instance for child in children}) == 3
+        obs = observe(generate_map(first_rules.map, 17), 0)
+        assert [child.act(obs).encode() for child in children] == [1,1,1]
+        assert children[0].act(obs).encode() == 2
+        assert children[1].act(obs).encode() == 2
+        for group in groups:
+            group.close()
+        groups.clear()
+        # Already-loaded resources survive controller eviction and disk cache loss.
+        cache.trim(0)
+        import shutil
+        shutil.rmtree(children[0].root)
+        bundle.unlink()
+        group = _PolicyGroup(entry, first_rules, [0], [42], cache=cache, slot=3)
+        groups.append(group)
+        assert group.controller._children[0].act(obs).encode() == 1
+        assert len(reads) == 1
+    finally:
+        for group in groups:
+            group.close()
+        cache.close()
+    assert not cache.resources

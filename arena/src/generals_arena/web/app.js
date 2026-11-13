@@ -21,7 +21,7 @@ let metaSignature = '';
 let tierBoundaries = [];
 const tierLayoutObserver = new ResizeObserver(positionTierLabels);
 tierLayoutObserver.observe($('ranking-panel'));
-let token = '', accounts = null, accountLeague = null, accountBusy = false, showSignup = false;
+let selectedPlayerId = '', accounts = null, accountLeague = null, accountBusy = false, showSignup = false;
 let accountSignature = '', opponentSignature = '';
 let opponentChoices = [];
 let live = null, board = null, sending = false;
@@ -32,9 +32,9 @@ let replayController = null;
 const formatter = new Intl.NumberFormat('zh-CN');
 const number = n => formatter.format(n);
 function notice(message = '') { $('notice').hidden = !message; $('notice').textContent = message; }
-async function api(path, body, auth = true, credential = token, signal = undefined) {
+async function api(path, body, withPlayer = true, accountId = selectedPlayerId, signal = undefined) {
   const headers = {};
-  if (credential && auth) headers.Authorization = `Bearer ${credential}`;
+  if (accountId && withPlayer) headers['X-Arena-Player'] = accountId;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST', headers, body: body === undefined ? undefined : JSON.stringify(body), signal});
   const data = await response.json();
@@ -74,9 +74,14 @@ function renderMeta(value) {
   if (accountLeague !== league) {
     accountLeague = league;
     accounts = new Accounts(localStorage, league);
-    token = accounts.token;
     player = null; live = null;
     accountSignature = '';
+  }
+  accounts.update(meta.entrants);
+  selectedPlayerId = accounts.active;
+  if (player && player.entrant_id !== selectedPlayerId) {
+    pollController?.abort();
+    player = null; live = null; input.reset(); outbox.length = 0;
   }
   names = new Map(meta.entrants.map(e => [e.entrant_id, e.name]));
   colors = new Map(meta.entrants.map(e => [e.entrant_id, entrantColor(e).color]));
@@ -330,20 +335,20 @@ function renderOpponents() {
   $('opponents-hint').textContent = active ? '当前账号有进行中的对局，结束后可重新选择对手。'
     : players ? '逐个选择算法，也可保留随机匹配。同一算法可重复出场。' : '人数与对手随机；选择固定人数后，可以指定每个对手。';
 }
-async function restorePlayer(credential = token) {
-  if (!credential || accountBusy) return;
+async function restorePlayer(accountId = selectedPlayerId) {
+  if (!accountId || accountBusy) return;
   accountBusy=true;renderPlayer();
   try {
     const [nextPlayer,nextLive] = await Promise.all([
-      api('/api/me',undefined,true,credential), api('/api/play/active',undefined,true,credential),
+      api('/api/me',undefined,true,accountId), api('/api/play/active',undefined,true,accountId),
     ]);
-    activatePlayer(nextPlayer,nextLive,credential);
+    activatePlayer(nextPlayer,nextLive);
   } finally {accountBusy=false;renderPlayer();}
 }
-function activatePlayer(nextPlayer,nextLive,credential) {
-  accounts.remember(nextPlayer,credential);
+function activatePlayer(nextPlayer,nextLive) {
+  accounts.remember(nextPlayer);
   pollController?.abort();
-  token=credential;player=nextPlayer;live=nextLive;
+  selectedPlayerId=nextPlayer.entrant_id;player=nextPlayer;live=nextLive;
   input.reset();outbox.length=0;showSignup=false;
   $('player-rating').textContent='';
 }
@@ -397,6 +402,7 @@ function updateLive(value, force=false) {
   if(dialogMode!=='live'||!$('board-dialog').open)return;
   board=live.board;
   $('board-title').textContent=`${live.entrants.length} 人排位 · ${board.width} × ${board.height}`;
+  $('board-status').hidden = false;
   $('board-status').textContent=live.error?`本局未计分：${live.error}`:live.done?`对局结束 · ${live.result.winner_seat==null?'达到时限，存活者并列':`${live.entrants[live.result.winner_seat].name} 获胜`} · 已计入 ${live.entrants.length === 2 ? '1v1' : 'FFA'} 排行榜`:`Tick ${board.tick} / ${live.max_ticks} · ${board.alive[board.player_id]?'局部视野 · 输入立即排队，每 tick 执行一步':'你已被淘汰，等待对局结束后计分'}`;
   $('surrender').disabled = live.done || !board.alive[board.player_id] || board.forfeited?.includes(board.player_id);
   draw();renderGamePlayers(live.entrants);
@@ -417,27 +423,27 @@ async function openLive() {
   } finally { renderPlayer(); }
 }
 const input = new MoveInput(()=>draw(),command=>{
-  outbox.push({gameId:live.game_id,credential:token,command});flushCommands();
+  outbox.push({gameId:live.game_id,accountId:selectedPlayerId,command});flushCommands();
 });
 async function flushCommands() {
   if(sending)return;
   sending=true;
   try {
     while(outbox.length) {
-      const pending=outbox[0], {gameId,credential,command}=pending;
+      const pending=outbox[0], {gameId,accountId,command}=pending;
       try {
-        const value=await api(`/api/play/${gameId}/commands`,command,true,credential);
+        const value=await api(`/api/play/${gameId}/commands`,command,true,accountId);
         if(outbox[0]===pending)outbox.shift();
-        if(token!==credential || live?.game_id!==gameId)continue;
+        if(selectedPlayerId!==accountId || live?.game_id!==gameId)continue;
         updateLive(value);
         $('board-error').textContent='';
       } catch(error) {
-        if(token!==credential || live?.game_id!==gameId){if(outbox[0]===pending)outbox.shift();continue;}
+        if(selectedPlayerId!==accountId || live?.game_id!==gameId){if(outbox[0]===pending)outbox.shift();continue;}
         $('board-error').textContent=error.status?error.message:'连接中断，正在重试操作…';
         if(!error.status){setTimeout(flushCommands,300);break;}
         outbox.length=0;input.pending=[];
-        const value=await api(`/api/play/${gameId}`,undefined,true,credential);
-        if(token!==credential || live?.game_id!==gameId)continue;
+        const value=await api(`/api/play/${gameId}`,undefined,true,accountId);
+        if(selectedPlayerId!==accountId || live?.game_id!==gameId)continue;
         input.next=value.last_command_id+1;updateLive(value,true);break;
       }
     }
@@ -455,6 +461,7 @@ async function openReplay(id) {
   playerNames = ''; $('game-players').replaceChildren();
   showDialog('replay'); setReplayLoading(true); notice();
   $('board-title').textContent = `对局回放 · ${id.slice(0,8)}`;
+  $('board-status').hidden = true;
   $('board-status').textContent = '';
   $('turn-counter').textContent = '—'; $('replay-tick').textContent = '';
   try {
@@ -463,7 +470,6 @@ async function openReplay(id) {
     replay = data; timeline = new ReplayTimeline(data.frames); frame = 0;
     $('timeline').max = data.frames.length - 1;
     $('board-title').textContent = `${data.result.map.players} 人对局回放 · ${id.slice(0,8)}`;
-    $('board-status').textContent = `${data.result.map.width} × ${data.result.map.height} · ${data.result.policy_error ? '策略违规中断 · 未计分' : ({surrender:'弃权结算',capture:'将军被占领',afk:'未扩张自动弃权',idle_limit:'长时间无有效行动',game_limit:'官方对局时限',tick_limit:'达到评估时限'}[data.result.reason] || data.result.reason)} · 已校验全部已执行动作与状态`;
     setReplayLoading(false); seek(0); $('board').focus();
   } catch (error) {
     if (controller !== replayController || error.name === 'AbortError') return;
@@ -568,28 +574,23 @@ $('cancel-signup').addEventListener('click',()=>{showSignup=false;renderPlayer()
 $('play-account').addEventListener('change',async()=>{
   const account=accounts.entries.find(entry=>entry.entrant_id===$('play-account').value);
   if(!account || account.entrant_id===player?.entrant_id)return;
-  try{await restorePlayer(account.token);notice();await loadRank();}catch(e){notice(e.message);}
+  try{await restorePlayer(account.entrant_id);notice();await loadRank();}catch(e){notice(e.message);}
 });
 $('play-players').addEventListener('change',renderPlayer);
 $('signup-form').addEventListener('submit',async event=>{
   event.preventDefault();if(accountBusy)return;accountBusy=true;renderPlayer();
   try{
     const data=await api('/api/players',{name:$('player-name').value},false);
-    activatePlayer(data.entrant,null,data.token);$('player-name').value='';notice();await refresh();
+    activatePlayer(data.entrant,null);$('player-name').value='';notice();await refresh();
   }catch(e){notice(e.message);}finally{accountBusy=false;renderPlayer();}
 });
-$('recover-form').addEventListener('submit',async event=>{
-  event.preventDefault();if(accountBusy)return;
-  try{await restorePlayer($('recover-token').value.trim());$('recover-token').value='';notice('账号已恢复并加入列表');await refresh();}
-  catch(e){notice(e.message);}
-});
-$('copy-token').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(token);notice('身份凭证已复制。请保存在你自己的密码管理器中。');}catch(e){notice('浏览器未允许复制凭证。请允许剪贴板权限后重试。');}});
 $('start-game').addEventListener('click',()=>openLive().catch(e=>notice(e.message)));
 async function refresh(){
   renderMeta(await api('/api/meta'));
-  if(player&&!accountBusy&&!$('board-dialog').open){
-    const credential=token,value=await api('/api/play/active',undefined,true,credential);
-    if(token===credential){live=value;renderPlayer();}
+  if(selectedPlayerId && !player && !accountBusy) await restorePlayer();
+  else if(player&&!accountBusy&&!$('board-dialog').open){
+    const accountId=selectedPlayerId,value=await api('/api/play/active',undefined,true,accountId);
+    if(selectedPlayerId===accountId){live=value;renderPlayer();}
   }
   await loadRank();if(tab==='history')await loadHistory();
   if($('connection').textContent!=='联赛在线')$('connection').textContent='联赛在线';
@@ -598,17 +599,13 @@ async function poll(){
   if(polling)return;
   if(!(player&&dialogMode==='live'&&live&&!live.done&&$('board-dialog').open))return;
   polling=true;
-  const id=live.game_id,credential=token,controller=new AbortController();pollController=controller;
-  try{const value=await api(`/api/play/${id}?after=${Math.max(0,input.revision)}`,undefined,true,credential,controller.signal);if(token===credential&&live?.game_id===id)updateLive(value);}
-  catch(e){if(e.name!=='AbortError'&&token===credential&&live?.game_id===id)$('board-error').textContent=e.message;}
+  const id=live.game_id,accountId=selectedPlayerId,controller=new AbortController();pollController=controller;
+  try{const value=await api(`/api/play/${id}?after=${Math.max(0,input.revision)}`,undefined,true,accountId,controller.signal);if(selectedPlayerId===accountId&&live?.game_id===id)updateLive(value);}
+  catch(e){if(e.name!=='AbortError'&&selectedPlayerId===accountId&&live?.game_id===id)$('board-error').textContent=e.message;}
   finally{if(pollController===controller)pollController=null;polling=false;setTimeout(poll,50);}
 }
 (async()=>{
   try{await refresh();}catch(e){notice(e.message);$('connection').textContent='连接异常';return;}
-  if(token){
-    try{await restorePlayer();await loadRank();}
-    catch(e){notice(e.status===403?'保存的玩家凭证无法用于此联赛，请恢复身份或创建玩家。':e.message);renderPlayer();}
-  }
 })();
 setInterval(poll,1000);
 setInterval(()=>{if(!document.hidden&&!$('board-dialog').open)refresh().catch(e=>{$('connection').textContent='连接中断';notice(e.message);});},5000);

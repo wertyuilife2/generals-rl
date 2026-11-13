@@ -23,7 +23,7 @@ def test_reset_without_backup_and_resume_reuses_registered_jobs(tmp_path):
     assert not report.exists()
     assert store.leaderboard()['completed_games'] == 0
     assert store.ratings() == {}
-    assert store.authenticate(account['token']) == account['entrant']['entrant_id']
+    assert store.select_account(account['entrant']['entrant_id']) == account['entrant']['entrant_id']
     assert all(j['budget'] == 3 and j['done'] == 0 for j in store.jobs())
     assert {j['name'] for j in store.jobs()} == {'bot','random'}
     assert next(j for j in store.jobs() if j['name']=='bot')['id'] == job

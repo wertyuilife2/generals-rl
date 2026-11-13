@@ -9,11 +9,7 @@ from generals_arena.util import canonical, digest, file_digest, source_digest
 
 
 def _policy_implementation(policy_sha256):
-    return {"custom_version": digest({
-        "policy_sha256": policy_sha256,
-        "loader_sha256": digest({name: file_digest(Path(__file__).with_name(name))
-                                  for name in ("artifacts.py", "code.py")}),
-    })}
+    return {"custom_version": policy_sha256}
 
 
 def prepare_entrant(spec, *, base_dir=Path(".")):
@@ -47,7 +43,7 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
         kwargs = {"kind": spec["policy"]}
         implementation = {"generals_baselines": source_digest("generals_baselines")}
     elif kind == "cpp":
-        from .native import bundle_info, execution_fingerprint
+        from .native import bundle_info
         bundle = artifact("bundle", spec["bundle"])
         metadata = bundle_info(bundle)
         if version and version != metadata['version']:
@@ -55,8 +51,7 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
         version = metadata['version']
         factory = 'generals_arena.policies.native:create_controller'
         kwargs = {'bundle': bundle}
-        implementation = {'custom_version': digest({'bundle_version': version,
-                                                     'host_sha256': execution_fingerprint()})}
+        implementation = {'custom_version': version}
     elif kind == "package":
         from generals_arena.policies.artifacts import validate_bundle
         root = Path(spec["bundle"])
@@ -97,19 +92,11 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
 def verify_artifacts(entrant):
     """Verify registered bytes and return package metadata when applicable."""
     info = None
-    if entrant["kind"] == "cpp":
-        from .native import execution_fingerprint
-        implementation = {'custom_version': digest({'bundle_version': entrant['version'],
-                                                    'host_sha256': execution_fingerprint()})}
-        if entrant['implementation'] != implementation:
-            raise ValueError("native host changed after registration; use its recorded execution implementation")
     for key, path in entrant["artifact_paths"].items():
         if key == "bundle" and entrant["kind"] == "package":
             from generals_arena.policies.artifacts import validate_bundle
             info = validate_bundle(path)
             actual = info["policy_id"]
-            if entrant["implementation"] != _policy_implementation(info["manifest"]["artifacts"]["code"]["sha256"]):
-                raise ValueError("policy loader changed after registration; use the original loader or a new deployment")
         else:
             actual = file_digest(path)
         if actual != entrant["artifact_sha256"][key]:
@@ -117,12 +104,23 @@ def verify_artifacts(entrant):
     return info
 
 
-def load_controller(entrant, rules):
-    """Load one factory and check the shared controller and rules protocol."""
+def load_controller(entrant, rules=None, *, resources=None):
+    """Load a controller; defer map validation when its rules are not known yet."""
     kwargs = dict(entrant["factory_kwargs"])
     if entrant["kind"] == "cpp":
         # The native loader verifies the exact bytes it subsequently extracts.
         kwargs["expected_sha256"] = entrant["artifact_sha256"]["bundle"]
+        if resources is not None:
+            from .native import load_resources
+            key = kwargs['expected_sha256']
+            if key not in resources:
+                resources[key] = load_resources(kwargs['bundle'], key)
+            if hasattr(resources, 'move_to_end'):
+                resources.move_to_end(key)
+            kwargs['_resources'] = resources[key]
+            while len(resources) > 32:
+                del resources[next(iter(resources))]
+
     else:
         verify_artifacts(entrant)
     module, name = entrant["factory"].split(":")
@@ -135,7 +133,7 @@ def load_controller(entrant, rules):
                 callable(getattr(controller, method, None)) for method in ("reset", "act", "on_result")):
             raise TypeError(f"{entrant['name']} must implement reset, act, and on_result")
         validate = getattr(controller, "validate_rules", None)
-        if validate is not None:
+        if validate is not None and rules is not None:
             validate(rules.map, rules.visibility)
         return controller
     except BaseException:

@@ -17,12 +17,19 @@ struct Policy {
  uint64_t rng;
  int ter[MAXN],st[MAXN],own[MAXN],seen[MAXN],a[MAXN],lastOwn[MAXN];
  int nb[MAXN][4],gd[MAXN],fd[MAXN],ed[MAXN],unknown[MAXN],reserve[MAXN],targetDist[MAXN];
+ std::uint64_t searchTargets[MAXN/64];
  int dist[MAXN],force[MAXN],first[MAXN],parent[MAXN],queue[MAXN];
  double threat[MAXN];
- int threatETA[MAXN], attackCost[MAXN], nextAttackCost[MAXN];
+ int threatETA[MAXN], attackCost[MAXN], nextAttackCost[MAXN], attackGuard[MAXN];
+ int homeCells[MAXN],homeCount=0;
  int rememberedReserve=1, rememberedReserveTick=-1000;
  int closeAttackers[20], closeAttackerCount=0;
  int enemyGeneral[8], oldTotals[8]{}; double growth[8]{};
+ int armyCache[MAXN],fullMoveCache[MAXN],halfMoveCache[MAXN],defenseCache[MAXN],routeDelta[MAXN];
+ double fieldReward[MAXN][1];
+ unsigned char visionRow[MAXN];
+ short searchNeighbor[MAXN][4];
+ bool geometryReady=false;
  const ArenaObservation *o=nullptr;
  Policy(int player,uint64_t seed):p(player),rng(seed) {
   std::fill(ter,ter+MAXN,255);std::fill(st,st+MAXN,255);std::fill(own,own+MAXN,-3);
@@ -31,46 +38,92 @@ struct Policy {
  }
  uint64_t random(){rng^=rng<<13;rng^=rng>>7;rng^=rng<<17;return rng;}
  bool mine(int i)const{return i>=0 && o->owner[i]==p;}
- int army(int i)const{return int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));}
- int moveArmy(int i,bool half=false)const {int n=army(i);if((tick+1)%2==0 && st[i]>0 && st[i]<3)n++;else if((tick+1)%50==0&&st[i]==0)n++;return half?n/2:std::max(0,n-1);}
+ int army(int i)const{return armyCache[i];}
+ int moveArmy(int i,bool half=false)const {return half?halfMoveCache[i]:fullMoveCache[i];}
  void bfs(int root,int *out,bool friends=false,bool noCities=false){
   std::fill(out,out+N,INF);if(root<0)return;int h=0,z=0;queue[z++]=root;out[root]=0;
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||ter[v]==1||out[v]!=INF||(friends&&!mine(v))||(noCities&&st[v]==1&&!mine(v)))continue;out[v]=out[u]+1;queue[z++]=v;}}
  }
  void update(const ArenaObservation *obs){
+  int previousGeneral=g;
   o=obs;tick=int(o->tick);g=o->general_pos;
-  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
+  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;for(int k=0;k<4;k++)searchNeighbor[i][k]=nb[i][k];}}
+  bool mapChanged=!geometryReady||g!=previousGeneral;
+  for(int i=0;i<N;i++)armyCache[i]=int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));
   for(int i=0;i<N;i++){
+   int previousTerrain=ter[i];
+   if(o->visible[i]&&ter[i]!=o->terrain[i])mapChanged=true;
    lastOwn[i]=own[i];if(o->visible[i]){ter[i]=o->terrain[i];st[i]=o->structure[i];own[i]=o->owner[i];a[i]=army(i);seen[i]=tick;if(st[i]==2&&own[i]>=0&&own[i]!=p)enemyGeneral[own[i]]=i;}
    else if(own[i]==p){own[i]=-3;a[i]=0;}
    else if(own[i]>=0&&!o->alive[own[i]]){own[i]=-3;a[i]=std::max(1,a[i]/2);if(st[i]==2)st[i]=1;}
+   // Update incoming edges only when this cell changes passability.
+   // Four fixed direction slots preserve the reference BFS's tie order.
+   if((previousTerrain==1)!=(ter[i]==1))for(int k=0;k<4;k++){
+    int u=nb[i][k];if(u>=0)searchNeighbor[u][(k+2)%4]=(ter[i]==1)?-1:i;
+   }
    reserve[i]=1;threat[i]=0;threatETA[i]=INF;
   }
+  // Observation and remembered terrain are fixed for this decision. Keep the
+  // original growth-before-action expressions, evaluated once per cell.
+  for(int i=0;i<N;i++){
+   int n=armyCache[i];
+   if((tick+1)%2==0&&st[i]>0&&st[i]<3)n++;
+   else if((tick+1)%50==0&&st[i]==0)n++;
+   fullMoveCache[i]=std::max(0,n-1);halfMoveCache[i]=n/2;
+   if(mine(i))defenseCache[i]=0;
+   else if(own[i]<0)defenseCache[i]=std::max(0,a[i]);
+   else{
+    int add=(st[i]>0&&st[i]<3)?std::max(0,tick-seen[i])/2:0;
+    defenseCache[i]=a[i]+std::min(add,200)+int(o->visible[i]&&(((tick+1)%2==0&&st[i]>0&&st[i]<3)||((tick+1)%50==0&&st[i]==0)));
+   }
+  }
   for(int e=0;e<o->players;e++){if(!o->alive[e])enemyGeneral[e]=-1;oldTotals[e]=int(o->total_army[e]);}
-  bfs(g,gd,false,false);
+  if(mapChanged)bfs(g,gd,false,false);
   std::fill(ed,ed+N,INF);int h=0,z=0;
   for(int i=0;i<N;i++)if(o->visible[i]&&own[i]>=0&&own[i]!=p){ed[i]=0;queue[z++]=i;}
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v>=0&&ter[v]!=1&&ed[v]==INF){ed[v]=ed[u]+1;queue[z++]=v;}}}
-  for(int i=0;i<N;i++){
-   unknown[i]=0;int x=i%W,y=i/W;for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){int xx=x+dx,yy=y+dy;if(xx>=0&&xx<W&&yy>=0&&yy<H&&ter[yy*W+xx]==255)unknown[i]++;}
+  // Separable 3x3 stencil: integer sums/masks are exactly the original
+  // nine-cell scan, with no repeated coordinate divisions inside searches.
+  if(mapChanged){
+  for(int row=0;row<N;row+=W)for(int x=0;x<W;x++){
+   int c=row+x;
+   if(mapChanged)visionRow[c]=(x>0&&ter[c-1]==255?1:0)|(ter[c]==255?2:0)|(x+1<W&&ter[c+1]==255?4:0);
   }
+  for(int c=0;c<N;c++){
+   if(mapChanged){
+    unsigned bits=(c>=W?visionRow[c-W]:0)|(unsigned(visionRow[c])<<3)|(c+W<N?unsigned(visionRow[c+W])<<6:0);
+    unknown[c]=__builtin_popcount(bits);
+   }
+  }
+  }
+  geometryReady=true;
   // Minimum troop loss of an enemy route to our general, up to 12 moves.
   // Our current blocking armies and neutral city garrisons really do absorb
   // attackers. Third-party troops are not trusted as permanent protection.
   // Costs are positive, so considering walks cannot create free army cycles.
+  // Only these cells can produce a threat in the original twelve layers.
+  // Preserve their row-major order, including equal-strength tie handling.
+  homeCount=0;bool hasHomeThreat=false;
+  for(int u=0;u<N;u++)if(u!=g&&ter[u]!=1&&gd[u]<=12){
+   homeCells[homeCount++]=u;
+   if(o->visible[u]&&own[u]>=0&&own[u]!=p&&a[u]>1)hasHomeThreat=true;
+  }
+  if(hasHomeThreat){
+  attackGuard[g]=0;
+  for(int j=0;j<homeCount;j++){
+   int c=homeCells[j];attackGuard[c]=mine(c)?army(c):
+    (o->visible[c]&&own[c]==-2?std::max(0,a[c]):0);
+  }
   std::fill(attackCost,attackCost+N,INF);attackCost[g]=0;
   for(int d=1;d<=12;d++){
    std::fill(nextAttackCost,nextAttackCost+N,INF);
-   for(int u=0;u<N;u++)if(u!=g&&ter[u]!=1&&gd[u]<=12){
+   for(int j=0;j<homeCount;j++){int u=homeCells[j];
+    // Cardinal-grid walks have the same parity as their shortest distance.
+    if(gd[u]>d||((gd[u]^d)&1))continue;
     int cost=INF;
     for(int k=0;k<4;k++){
      int v=nb[u][k];if(v<0||attackCost[v]>=INF)continue;
-     int guard=0;
-     if(v!=g){
-      if(mine(v))guard=army(v);
-      else if(o->visible[v]&&own[v]==-2)guard=std::max(0,a[v]);
-     }
-     cost=std::min(cost,attackCost[v]+guard+1);
+     cost=std::min(cost,attackCost[v]+attackGuard[v]+1);
     }
     nextAttackCost[u]=cost;
     if(o->visible[u]&&own[u]>=0&&own[u]!=p&&a[u]>1&&cost<INF){
@@ -82,6 +135,7 @@ struct Policy {
     }
    }
    std::copy(nextAttackCost,nextAttackCost+N,attackCost);
+  }
   }
   int need=1;closeAttackerCount=0;
   for(int i=0;i<N;i++)if(threatETA[i]<INF){
@@ -102,30 +156,34 @@ struct Policy {
   if(age>16)retained=rememberedReserve*std::max(0,28-age)/12;
   int garrison=tick>100?std::min(20,3+tick/60):1;
   reserve[g]=std::max(garrison,std::max(need,retained));
+  for(int i=0;i<N;i++){
+   if(mine(i)){
+    routeDelta[i]=std::max(0,army(i)-reserve[i]+1);
+    if(i==g&&reserve[i]>1)routeDelta[i]=0;
+   }else routeDelta[i]=-defenseCache[i]-(ter[i]==255?1:0);
+  }
  }
- int rememberedDefense(int i)const {
-  if(mine(i))return 0;
-  if(own[i]<0)return std::max(0,a[i]);
-  int add=(st[i]>0&&st[i]<3)?std::max(0,tick-seen[i])/2:0;
-  return a[i]+std::min(add,200)+int(o->visible[i] && (((tick+1)%2==0&&st[i]>0&&st[i]<3)||((tick+1)%50==0&&st[i]==0)));
- }
+ int rememberedDefense(int i)const {return defenseCache[i];}
  bool canDepart(int s,bool &half)const{
   half=false;int n=army(s);if(n<2)return false;
   if(reserve[s]>1){if(n-n/2>=reserve[s])half=true;else return false;}
   return true;
  }
  // Fast bounded breadth-first campaigns, keeping the strongest shortest route.
+ // FIFO depth order permits stopping at the bound. Force is initialized on
+ // first discovery; callers only consume cells with a finite distance.
  void search(int s,int initial,int depth){
-  std::fill(dist,dist+N,INF);std::fill(force,force+N,-INF);int h=0,z=0;
+  std::fill(dist,dist+N,INF);std::fill(searchTargets,searchTargets+(N+63)/64,0);int h=0,z=0;
   queue[z++]=s;dist[s]=0;force[s]=initial;first[s]=-1;parent[s]=-1;
-  while(h<z){int u=queue[h++];if(dist[u]>=depth)continue;
-   for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||ter[v]==1||v==s)continue;int d=dist[u]+1;if(dist[v]<d)continue;
-    int f=force[u];if(u!=s)f-=1;
-    if(mine(v)){int take=std::max(0,army(v)-reserve[v]+1);if(v==g&&reserve[v]>1)take=0;f+=take;}
-    else f-=rememberedDefense(v)+(ter[v]==255?1:0);
+  while(h<z){int u=queue[h++];if(dist[u]>=depth)break;
+   const int d=dist[u]+1, departure=force[u]-int(u!=s), direction=first[u];
+   #pragma GCC unroll 4
+   for(int k=0;k<4;k++){int v=searchNeighbor[u][k];if(v<0||v==s)continue;if(dist[v]<d)continue;
+    int f=departure+routeDelta[v];
     if(f<1)continue;
-    if(dist[v]==INF){dist[v]=d;queue[z++]=v;}
-    if(f>force[v]){force[v]=f;first[v]=(u==s?k:first[u]);parent[v]=u;}
+    bool fresh=dist[v]==INF;
+    if(fresh){dist[v]=d;queue[z++]=v;if(!mine(v))searchTargets[v>>6]|=std::uint64_t(1)<<(v&63);}
+    if(fresh||f>force[v]){force[v]=f;first[v]=(u==s?k:direction);parent[v]=u;}
    }
   }
  }
@@ -191,6 +249,29 @@ struct Policy {
   }}
   return best;
  }
+ // Score components shared by every source. Keep each addition in its
+ // original order so cached values preserve floating-point comparisons.
+ void cacheFieldRewards(){
+  for(int v=0;v<N;v++)if(!mine(v)){
+   bool enemy=own[v]>=0&&own[v]!=p;int ndef=rememberedDefense(v);
+   for(int scout=0;scout<1;scout++){double reward;
+      reward=1.8+(enemy?2.1:0)+unknown[v]*.22;
+      if(ter[v]==255)reward+=.6;
+      if(enemy&&ndef>3)reward+=std::min(6.0,ndef*.06);
+      // A modest bias toward penetrating a weaker opponent also buys vision
+      // of its general, without committing to an unlocated speculative rush.
+      if(enemy){
+       double advantage=double(o->total_army[p])/std::max<int64_t>(1,o->total_army[own[v]]);
+       if(advantage>1.5)reward+=.45+unknown[v]*.07;
+       if(advantage>2.5)reward+=.35;
+      }
+      // Maintain a broad, connected productive domain.
+      if(gd[v]<8)reward+=.3;
+      if(tick<80)reward+=unknown[v]*.10;
+    fieldReward[v][scout]=reward;
+   }
+  }
+ }
  int64_t act(const ArenaObservation *obs){
   if(obs->width*obs->height>MAXN||obs->general_pos<0)return 0;
   update(obs);Candidate best;
@@ -218,11 +299,31 @@ struct Policy {
   if(tick>=50&&tick<200&&o->total_land[p]>=22&&ed[g]>8){
    for(int c=0;c<N;c++)if(st[c]==1&&own[c]<0&&gd[c]<=7){saveCity=true;break;}
   }
+  cacheFieldRewards();
   for(int s:sources){
    bool half=false;if(!canDepart(s,half))continue;
    int moving=moveArmy(s,half);if(moving<=0)continue;
+   // These tactical adjustments depend on the first step, not on the final
+   // campaign target. Store hazards individually to preserve subtraction order
+   // and therefore the original floating-point tie behavior exactly.
+   double stepRisk[4]{},stepHazard[4][4]{};int hazardCount[4]{};
+   for(int direction=0;direction<4;direction++){
+    int dest=nb[s][direction];if(dest<0)continue;
+    stepRisk[direction]=risk(s,dest,moving);
+    if(own[dest]!=p){
+     int remain=moving-rememberedDefense(dest);
+     for(int k=0;k<4;k++){
+      int e=nb[dest][k];
+      if(e>=0&&e!=s&&o->visible[e]&&own[e]>=0&&own[e]!=p&&a[e]>remain+2)
+       stepHazard[direction][hazardCount[direction]++]=std::min(5.,a[e]*.025);
+     }
+    }
+   }
    search(s,moving,32);
-   for(int v=0;v<N;v++)if(v!=s&&dist[v]<INF&&!mine(v)){
+   for(int word=0;word<(N+63)/64;word++){
+    std::uint64_t bits=searchTargets[word];
+    while(bits){
+    int v=word*64+__builtin_ctzll(bits);bits&=bits-1;
     int d=dist[v];if(d>24&&st[v]!=2)continue;
     if(saveCity&&s==g&&st[v]==0)continue;
     int ndef=rememberedDefense(v);bool enemy=own[v]>=0&&own[v]!=p;
@@ -239,19 +340,7 @@ struct Policy {
       if(d<=4&&force[v]>=8)reward+=3.0+(enemy?2.0:0.0);
       if(force[v]<4)reward*=.72;
     }else{
-      reward=1.8+(enemy?2.1:0)+unknown[v]*.22;
-      if(ter[v]==255)reward+=.6;
-      if(enemy&&ndef>3)reward+=std::min(6.0,ndef*.06);
-      // A modest bias toward penetrating a weaker opponent also buys vision
-      // of its general, without committing to an unlocated speculative rush.
-      if(enemy){
-       double advantage=double(o->total_army[p])/std::max<int64_t>(1,o->total_army[own[v]]);
-       if(advantage>1.5)reward+=.45+unknown[v]*.07;
-       if(advantage>2.5)reward+=.35;
-      }
-      // Maintain a broad, connected productive domain.
-      if(gd[v]<8)reward+=.3;
-      if(tick<80)reward+=unknown[v]*.10;
+      reward=fieldReward[v][0];
     }
     double lost=std::max(0,moving-force[v]);
     double den=d+.8+lost/(income*2.5+2);
@@ -261,14 +350,11 @@ struct Policy {
     if(v==oldTarget)score*=1.13;
     if(s==oldSource)score*=1.025;
     if(city&&tick<95)score*=.75;
-    int dest=nb[s][first[v]];
-    score-=risk(s,dest,moving);
-    // Do not pour a small stack into a visible enemy hammer.
-    if(!king&&dest>=0&&own[dest]!=p){
-      int remain=moving-rememberedDefense(dest);
-      for(int k=0;k<4;k++){int e=nb[dest][k];if(e>=0&&e!=s&&o->visible[e]&&own[e]>=0&&own[e]!=p&&a[e]>remain+2)score-=std::min(5.,a[e]*.025);}
-    }
+    int direction=first[v];
+    score-=stepRisk[direction];
+    if(!king)for(int k=0;k<hazardCount[direction];k++)score-=stepHazard[direction][k];
     if(score>best.score)best={score,s,v,first[v],half};
+    }
    }
   }
   // Mobilize productive interiors: marginal delivery per action, directed toward

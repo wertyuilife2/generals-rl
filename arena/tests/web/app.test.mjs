@@ -84,27 +84,29 @@ test('application boots, switches rating pools and refreshes without scope error
     '/api/meta','/api/leaderboard?mode=ffa','/api/leaderboard?mode=1v1']);
 });
 
-test('lobby migrates its existing account, adds and switches accounts, and submits selected opponents', async t=>{
+test('a fresh browser lists league accounts, switches them, creates an account and submits selected opponents', async t=>{
   const html=await readFile(new URL('../../src/generals_arena/web/index.html',import.meta.url),'utf8');
   const ids=new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(([,id])=>[id,new Element()]));
-  const accounts={a:{entrant_id:'a',name:'Alice',kind:'human'},b:{entrant_id:'b',name:'Bob',kind:'human'}};
-  const values=new Map([['generals-arena-token:accounts-test','token-a']]),requests=[];
+  const accounts={a:{entrant_id:'a',name:'Alice',kind:'human'},b:{entrant_id:'b',name:'Bob',kind:'human'},
+    c:{entrant_id:'c',name:'Charlie',kind:'human'}};
+  const values=new Map(),requests=[];
   const meta={league_id:'accounts-test',anchor:'wait',config:{player_counts:[2,4],tick_seconds:.5},
     map_ranges:{2:[18,23],4:[20,26]},jobs:[],entrants:[
       {entrant_id:'wait',name:'WAIT',kind:'cpp'}, {entrant_id:'bot',name:'bot-v1',kind:'cpp'},
-      {entrant_id:'disabled',name:'disabled-v1',kind:'cpp',disqualified:true},accounts.a]};
+      {entrant_id:'disabled',name:'disabled-v1',kind:'cpp',disqualified:true},accounts.a,accounts.b]};
   const globals={
     document:{getElementById:id=>ids.get(id),createElement:()=>new Element(),querySelectorAll:()=>[]},
-    localStorage:{getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)},
+    localStorage:{getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},
     Image:class{},ResizeObserver:class{observe(){}},setInterval:()=>{},
     fetch:async(path,options)=>{
       requests.push({path,options});let data;
+      assert.equal(options.headers.Authorization,undefined);
       if(path==='/api/meta')data=meta;
       else if(path.startsWith('/api/leaderboard'))data={anchor:'wait',completed_games:0,ranking:[],win_matrix:{entrant_ids:[],cells:[]}};
-      else if(path==='/api/players'){meta.entrants.push(accounts.b);data={token:'token-b',entrant:accounts.b};}
+      else if(path==='/api/players'){meta.entrants.push(accounts.c);data={entrant:accounts.c};}
       else if(path==='/api/me'){
-        const key=options.headers.Authorization?.slice(-1);
-        if(!accounts[key])return {ok:false,status:403,json:async()=>({error:'invalid credential'})};
+        const key=options.headers['X-Arena-Player'];
+        if(!accounts[key])return {ok:false,status:403,json:async()=>({error:'select an existing human account'})};
         data=accounts[key];
       }
       else if(path==='/api/play/active')data=null;
@@ -122,18 +124,19 @@ test('lobby migrates its existing account, adds and switches accounts, and submi
   const settle=()=>new Promise(resolve=>setImmediate(resolve)), event={preventDefault(){}};
   await import('../../src/generals_arena/web/app.js?accounts-test');await settle();
   assert.equal(ids.get('player-label').textContent,'Alice');
-  assert.equal(ids.get('play-account').options.length,1);
+  assert.deepEqual(ids.get('play-account').options.map(option=>option.value),['a','b']);
+  ids.get('play-account').value='b';await ids.get('play-account').listeners.change();
+  assert.equal(ids.get('player-label').textContent,'Bob');
   ids.get('new-account').listeners.click();
   assert.equal(ids.get('signup').hidden,false);
-  ids.get('player-name').value='Bob';
+  ids.get('player-name').value='Charlie';
   await ids.get('signup-form').listeners.submit(event);
-  assert.equal(ids.get('play-account').options.length,2);
-  assert.equal(ids.get('player-label').textContent,'Bob');
+  assert.equal(ids.get('play-account').options.length,3);
+  assert.equal(ids.get('player-label').textContent,'Charlie');
   ids.get('play-account').value='a';await ids.get('play-account').listeners.change();
   assert.equal(ids.get('player-label').textContent,'Alice');
-  ids.get('recover-token').value='invalid';await ids.get('recover-form').listeners.submit(event);
-  assert.equal(ids.get('player-label').textContent,'Alice');
-  assert.equal(values.get('generals-arena-token:accounts-test'),'token-a');
+  assert.equal(ids.has('recover-form'),false);
+  assert.equal(ids.has('copy-token'),false);
   ids.get('play-players').value='4';ids.get('play-players').listeners.change();
   const selectors=ids.get('play-opponents').children.map(label=>label.children[1]);
   assert.equal(selectors.length,3);
@@ -141,9 +144,9 @@ test('lobby migrates its existing account, adds and switches accounts, and submi
   for(const select of selectors.slice(0,2)){select.value='bot';select.listeners.change();}
   await ids.get('start-game').listeners.click();
   const request=requests.findLast(r=>r.path==='/api/play');
-  assert.equal(request.options.headers.Authorization,'Bearer token-a');
+  assert.equal(request.options.headers['X-Arena-Player'],'a');
   assert.deepEqual(JSON.parse(request.options.body),{players:4,opponents:['bot','bot',null]});
-  assert.equal(JSON.parse(values.get('generals-arena-accounts:accounts-test')).accounts.length,2);
+  assert.deepEqual(JSON.parse(values.get('generals-arena-accounts:accounts-test')),{active:'a'});
 });
 
 test('replay opens immediately, cancels closed loads and ignores stale responses', async t => {

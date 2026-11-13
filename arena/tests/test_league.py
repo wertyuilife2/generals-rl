@@ -146,14 +146,17 @@ def test_queue_budget_idempotency_resume_rebuild_and_replay(tmp_path):
     assert add(store, games=1000)[1] == job_id
     assert run_jobs(store, limit=3) == 3
     assert store.jobs()[0]['done'] == 3
-    # One rotation remains; resume keeps the already scheduled map and seats.
+    # The rolling queue retains its pending plans without filling the whole budget.
     with store.connect() as db:
         pending = db.execute("SELECT id FROM games WHERE job_id=? AND status='pending'", (job_id,)).fetchall()
-    assert len(pending) == 4
+    assert 0 < len(pending) <= 4
     reopened = CompetitionStore(store.directory)
     assert run_jobs(reopened) == 4
     assert reopened.jobs()[0]['done'] == reopened.jobs()[0]['budget'] == 7
     assert reopened.jobs()[0]['status'] == 'complete'
+    with reopened.connect() as db:
+        for row in pending:
+            assert db.execute("SELECT status FROM games WHERE id=?", (row['id'],)).fetchone()[0] == 'complete'
     assert run_jobs(reopened) == 0
     report = reopened.leaderboard()
     assert report['completed_games'] == 7
@@ -248,11 +251,11 @@ def test_all_supported_seat_counts_can_finish_and_replay(tmp_path, players):
         replay_frames(gzip.compress(json.dumps(corrupted).encode()), result)
 
 
-def test_source_change_cannot_silently_change_existing_league(tmp_path):
+def test_source_change_does_not_block_existing_league(tmp_path):
     store = league(tmp_path)
     with patch('generals_arena.competitions.config.LeagueConfig.manifest', return_value={'rules_id':'changed'}):
-        with pytest.raises(ValueError, match='rules/source changed'):
-            add(store)
+        add(store)
+    assert run_jobs(store, limit=1) == 1
 
 
 def test_failure_is_unrated_and_retryable_and_workers_exclusive(in_process_batch, tmp_path):
@@ -297,13 +300,15 @@ def test_completion_is_atomic_and_duplicate_safe(tmp_path):
     assert store.jobs()[0]['done'] == 1
 
 
-def test_human_clock_authorization_fog_and_rated_completion(tmp_path):
+def test_human_account_selection_clock_fog_and_rated_completion(tmp_path):
     store = league(tmp_path, max_ticks=4, min_side=25, max_side=25)
     account = store.account('Alice')
     other = store.account('Bob')
-    human = store.authenticate(account['token'])
-    with pytest.raises(PermissionError):
-        store.authenticate('invalid')
+    human = store.select_account(account['entrant']['entrant_id'])
+    assert 'token' not in account
+    for invalid in ('', 'invalid', store.reference):
+        with pytest.raises(PermissionError):
+            store.select_account(invalid)
     with pytest.raises(ValueError, match='registered'):
         store.account('Alice')
     arena = LiveArena(store)
@@ -396,21 +401,42 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
             request('/api/meta', headers={'Host':'attacker.example'})
         assert error.value.code == 403
         _, raw = request('/api/players', {'name':'web-player'})
-        token = json.loads(raw)['token']
-        _, raw = request('/api/play', {'players':2}, {'Authorization':f'Bearer {token}'})
+        account = json.loads(raw)
+        assert 'token' not in account
+        human = account['entrant']['entrant_id']
+        selected = {'X-Arena-Player':human}
+        _, raw = request('/api/players', {'name':'other-player'})
+        other = json.loads(raw)['entrant']['entrant_id']
+        _, raw = request('/api/meta')
+        assert {e['entrant_id'] for e in json.loads(raw)['entrants'] if e['kind'] == 'human'} == {human, other}
+        for key in (human, other):
+            _, raw = request('/api/me', headers={'X-Arena-Player':key})
+            assert json.loads(raw)['entrant_id'] == key
+            _, raw = request('/api/play/active', headers={'X-Arena-Player':key})
+            assert json.loads(raw) is None
+        for invalid in ('missing', store.reference):
+            with pytest.raises(HTTPError) as error:
+                request('/api/me', headers={'X-Arena-Player':invalid})
+            assert error.value.code == 403
+        _, raw = request('/api/play', {'players':2}, selected)
         game = json.loads(raw)
         with pytest.raises(HTTPError) as error:
             request('/api/replay/' + game['game_id'])
         assert error.value.code == 400
         assert game['board']['tick'] == 0
-        auth = {'Authorization':f'Bearer {token}'}
+        with pytest.raises(HTTPError) as error:
+            request('/api/play/' + game['game_id'] + '/commands',
+                    {'id':1, 'op':'append', 'action':0}, {'X-Arena-Player':other})
+        assert error.value.code == 403
+        _, raw = request('/api/play/active', headers=selected)
+        assert json.loads(raw)['game_id'] == game['game_id']
         _, raw = request('/api/play/' + game['game_id'] + '/commands',
-                         {'id':1, 'op':'append', 'action':0}, auth)
+                         {'id':1, 'op':'append', 'action':0}, selected)
         assert json.loads(raw)['last_command_id'] == 1
         deadline = time.monotonic() + 3
         while not game['done'] and time.monotonic() < deadline:
             time.sleep(.02)
-            _, raw = request('/api/play/' + game['game_id'], headers=auth)
+            _, raw = request('/api/play/' + game['game_id'], headers=selected)
             game = json.loads(raw)
         assert game['done'] and not game['error']
         _, raw = request('/api/replay/' + game['game_id'])
@@ -421,6 +447,9 @@ def test_http_frontend_and_privacy_boundaries(tmp_path):
         assert leaderboard['completed_games'] == 1
         for row in leaderboard['ranking']:
             assert row['elo_delta'] is None
+            if row['entrant_id'] == other:
+                assert row['win_rate'] is row['survival_index'] is row['kill_index'] is None
+                continue
             assert 0 <= row['win_rate'] <= 1
             assert 0 <= row['survival_index'] <= 1
             assert 0 <= row['kill_index'] <= 1
@@ -675,7 +704,7 @@ def test_map_revision_preserves_players_results_scores_and_legacy_manifest(tmp_p
     store.resize_maps(15,20,35)
     assert store.config.side_range(8)==(30,35)
     assert store.manifest['rules_id']!=previous['rules_id']
-    assert store.authenticate(human['token'])==human['entrant']['entrant_id']
+    assert store.select_account(human['entrant']['entrant_id'])==human['entrant']['entrant_id']
     assert store.leaderboard()==before and store.matches()==records
     with store.connect() as db:
         history=json.loads(db.execute("SELECT value FROM meta WHERE key='rules_history'").fetchone()[0])

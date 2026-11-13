@@ -36,7 +36,8 @@ def choose_opponents(target, candidates, count, ratings, coverage, rng):
         nearby = [math.exp(-min(700, abs(ratings.get(key, default) - ratings.get(target, default)) / 300))
                   for key in available]
         underplayed = [1 / (1 + coverage.get(key, 0)) for key in available]
-        weights = [proximity * n / sum(nearby) + (1-proximity-exploration) * c / sum(underplayed)
+        nearby_total, coverage_total = sum(nearby), sum(underplayed)
+        weights = [proximity * n / nearby_total + (1-proximity-exploration) * c / coverage_total
                    + exploration / len(available) for n, c in zip(nearby, underplayed)]
         selected = rng.choices(available, weights=weights, k=1)[0]
         picked.append(selected)

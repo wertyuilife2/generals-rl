@@ -108,6 +108,8 @@ def snapshot(game, seats=()):
 
 
 def child_loop(connection):
+    from collections import OrderedDict
+    resources = OrderedDict()
     # Policy printing must not corrupt the CLI's JSON output.
     with open(os.devnull, 'w') as sink:
         os.dup2(sink.fileno(), 1)
@@ -134,7 +136,7 @@ def child_loop(connection):
                     plan = request['plan']
                     journal = Journal(request['journal'], config.max_ticks, len(plan['entrant_ids']))
                     native.DIAGNOSTICS = journal
-                    controllers = build_controllers(request["entries"], plan)
+                    controllers = build_controllers(request["entries"], plan, resources=resources)
                     forfeits = request.get('forfeits', [])
                     saved = journal.records.copy()
                     for event in forfeits:

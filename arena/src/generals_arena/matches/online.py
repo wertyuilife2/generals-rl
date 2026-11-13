@@ -21,6 +21,16 @@ def play_online(spec, options, *, games=1, output=None, seed=42, max_decisions=N
     if games > 1 and output is None:
         raise ValueError('multiple online games require an output directory')
     entrant = prepare_entrant(spec)
+    # Receipt requirements are known before matchmaking. Reject here instead
+    # of joining a real game and abandoning it on the first observation.
+    probe = load_controller(entrant)
+    try:
+        if getattr(probe, 'requires_move_results', False):
+            raise ValueError('controller requires authoritative move results unavailable online')
+    finally:
+        close = getattr(probe, 'close', None)
+        if close is not None:
+            close()
     def factory(obs):
         if entrant['kind'] == 'package':
             from generals_arena.policies.artifacts import validate_bundle, capabilities_supports

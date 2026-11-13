@@ -4,6 +4,7 @@ This is a policy host, not a game backend. Native code is trusted local code;
 the match process contains crashes/hangs but is not an OS security sandbox.
 """
 from functools import lru_cache
+from dataclasses import dataclass
 from contextlib import contextmanager
 from hashlib import sha256
 import io
@@ -38,20 +39,6 @@ class PolicyError(RuntimeError):
 
 def decision_timeout(details):
     return details.get('kind') == 'timeout' and details.get('phase') == 'decision'
-
-
-def execution_fingerprint():
-    """Bind the binary controller to its Python ABI and recovery process host."""
-    from generals.backends._build import source_bytes
-    from generals.protocol.native import INCLUDE
-    root = Path(__file__).resolve().parents[1]
-    return digest({'native_sha256': file_digest(Path(__file__)),
-                   'host_sha256': file_digest(Path(__file__).with_name('host.cpp')),
-                   'host_includes_sha256': sha256(source_bytes(Path(__file__).with_name('host.cpp'),
-                                                              include_dirs=[INCLUDE])).hexdigest(),
-                   'loop_sha256': sha256(source_bytes(root/'matches'/'native.cpp', include_dirs=[INCLUDE, INCLUDE.parent/'backends'])).hexdigest(),
-                   **{name: file_digest(root/'matches'/name) for name in
-                      ('native.py', 'batch.py', 'batch_worker.py', 'worker.py')}})
 
 
 def _private_cache():
@@ -143,7 +130,7 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
         for name in ('arena_policy.h', 'adapter.cpp', 'decision.h'):
             (root/name).write_bytes(((PROTOCOL_INCLUDE if name == "decision.h" else SDK)/name).read_bytes())
         result = subprocess.run([metadata['compiler_path'], *metadata['flags'], '-I', str(root),
-            '-I', str(source), str(root/'adapter.cpp'),
+            '-I', str(PROTOCOL_INCLUDE), '-I', str(source), str(root/'adapter.cpp'),
             *(str(source/name) for name in files if name.endswith('.cpp')),
             '-o', str(root/'policy.so')], capture_output=True, text=True, timeout=120)
         if result.returncode:
@@ -264,6 +251,36 @@ def _library(path):
     return lib
 
 
+def _runtime_library(root):
+    """Old submissions rebuild their SDK adapter automatically for the native loop."""
+    original = root/'policy.so'
+    if hasattr(_library(original), 'arena_host_decide'):
+        return original
+    # This key only avoids repeated compilation; it never rejects a submission.
+    adapter = SDK/'adapter.cpp'
+    key = digest({name: file_digest(path) for name, path in (
+        ('adapter', adapter), ('header', SDK/'arena_policy.h'),
+        ('decision', PROTOCOL_INCLUDE/'decision.h'))})
+    target = root/f'runtime-{key}.so'
+    with (root/'.runtime-build.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not target.is_file():
+            metadata = json.loads((root/'manifest.json').read_text())
+            compiler = shutil.which(os.environ.get('CXX', 'c++'))
+            if not compiler:
+                raise RuntimeError('a C++17 compiler is required (CXX)')
+            with tempfile.TemporaryDirectory(dir=root) as temporary:
+                output = Path(temporary)/'policy.so'
+                result = subprocess.run([compiler, *metadata['flags'], '-I', str(SDK),
+                    '-I', str(PROTOCOL_INCLUDE), '-I', str(root/'source'), str(adapter),
+                    *(str(root/'source'/name) for name in metadata['sources'] if name.endswith('.cpp')),
+                    '-o', str(output)], capture_output=True, text=True, timeout=120)
+                if result.returncode:
+                    raise ValueError(f'C++ policy compilation failed:\n{result.stderr}')
+                output.replace(target)
+    return target
+
+
 @lru_cache(maxsize=1)
 def _host():
     from generals.backends._build import build_extension
@@ -289,19 +306,35 @@ def metrics(values):
         'measurement': 'serial native policy decision wall time; excludes observations and IPC'}
 
 
+@dataclass(frozen=True)
+class NativeResources:
+    """Verified code and immutable parameters, shared without user instances."""
+    bundle: str
+    bundle_sha256: str
+    root: Path
+    library_path: Path
+    library: object
+    params: bytes
+
+
+def load_resources(bundle, expected_sha256=None):
+    bundle = str(Path(bundle).resolve())
+    root = _unpack(bundle, expected_sha256)
+    library_path = _runtime_library(root)
+    return NativeResources(bundle, root.name, root, library_path,
+                           _library(library_path), (root/'params.json').read_bytes())
+
+
 class NativeController:
     """Direct C ABI call. All policies and the env CPU engine share one match process."""
     batch_device = 'cpu'
     requires_isolation = True
-    def __init__(self, *, bundle, player_id=0, seed=0, expected_sha256=None, _source=None):
-        if _source is None:
-            self.bundle = str(Path(bundle).resolve())
-            self.root = _unpack(self.bundle, expected_sha256)
-            self.bundle_sha256 = self.root.name
-            self._params = (self.root/'params.json').read_bytes()
-        else:
-            self.bundle, self.bundle_sha256, self.root, self._params = (
-                _source.bundle, _source.bundle_sha256, _source.root, _source._params)
+    def __init__(self, *, bundle, player_id=0, seed=0, expected_sha256=None, _source=None, _resources=None):
+        self._resources = (_source._resources if _source is not None else
+                           _resources if _resources is not None else load_resources(bundle, expected_sha256))
+        resource = self._resources
+        self.bundle, self.bundle_sha256, self.root = resource.bundle, resource.bundle_sha256, resource.root
+        self._library_path, self._params = resource.library_path, resource.params
         self.lib, self.instance = None, None
         self.previous, self.player_id = None, player_id
         self.values = np.zeros(8, dtype=np.int64)
@@ -338,7 +371,7 @@ class NativeController:
                        else np.zeros(8, dtype=np.int64))
         self.values[:] = 0
         self._activate(1)
-        self.lib = _library(self.root/'policy.so')
+        self.lib = self._resources.library
         self._native_act = _host().act
         self._act_address = C.cast(self.lib.arena_host_act, C.c_void_p).value
         self.instance = self.lib.arena_host_create(self.player_id, int(seed),
@@ -455,5 +488,6 @@ class NativeController:
             self.__dict__.pop(name, None)
 
 
-def create_controller(*, bundle, player_id, seed, expected_sha256=None):
-    return NativeController(bundle=bundle, player_id=player_id, seed=seed, expected_sha256=expected_sha256)
+def create_controller(*, bundle, player_id, seed, expected_sha256=None, _resources=None):
+    return NativeController(bundle=bundle, player_id=player_id, seed=seed,
+                            expected_sha256=expected_sha256, _resources=_resources)

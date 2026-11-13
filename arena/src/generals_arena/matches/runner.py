@@ -13,26 +13,11 @@ from generals import MapConfig
 
 from generals_arena.policies.entries import load_controller
 from generals_arena.util import integer
-from generals_arena.util import source_digest
 from generals_arena.matches.resources import cpu_slot
 from generals_arena.matches.cache import initial_map
 
 
-def _verify_implementations(entries):
-    sources = {}
-    for entrant in entries:
-        if entrant["kind"] == "human":
-            continue
-        for package, expected in entrant["implementation"].items():
-            if package == "custom_version":
-                continue
-            if package not in sources:
-                sources[package] = source_digest(package)
-            if sources[package] != expected:
-                raise ValueError(f"registered source changed for {entrant['name']}; restore the recorded version")
-
-
-def build_controllers(entries, plan):
+def build_controllers(entries, plan, *, resources=None):
     """Create independent seat controllers against the planned map contract."""
     config = MapConfig(**plan["map"])
     if config.width is None or config.height is None:
@@ -45,13 +30,12 @@ def build_controllers(entries, plan):
     rules = SimpleNamespace(map=config, visibility="local")
     controllers = []
     try:
-        _verify_implementations(entries[key] for key in set(plan["entrant_ids"]))
         for key in plan["entrant_ids"]:
             entrant = entries[key]
             if entrant["kind"] == "human":
                 controllers.append(None)
                 continue
-            controllers.append(load_controller(entrant, rules))
+            controllers.append(load_controller(entrant, rules, resources=resources))
         return controllers
     except BaseException:
         for controller in controllers:
@@ -110,7 +94,6 @@ class MatchRunner:
         """Validate the complete schedule before any results can be emitted."""
         from generals_arena.policies.artifacts import capabilities_supports
         used = {key for plan in plans for key in plan["entrant_ids"]}
-        _verify_implementations(self.entries[key] for key in used)
         capabilities = {}
         for key in used:
             entry = self.entries[key]

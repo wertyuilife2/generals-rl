@@ -124,7 +124,7 @@ def test_failed_controller_reset_closes_partial_group_and_drops_cache(monkeypatc
         def act_batch(self,raw):
             raise AssertionError('never reached')
 
-    monkeypatch.setattr(batch,'load_controller',lambda *args: (Batched if batched else Scalar)())
+    monkeypatch.setattr(batch,'load_controller',lambda *args, **kwargs: (Batched if batched else Scalar)())
     cache = {}
     with pytest.raises(RuntimeError,match='reset failure'):
         batch._PolicyGroup({'entrant_id':'resource'},MatchConfig(),[0,1],[11,23],cache=cache,slot=0)
@@ -146,7 +146,7 @@ def test_multiplayer_eliminated_seat_receives_no_active_feedback(monkeypatch,tmp
     army.flat[0] = 20
     state = GameState(MapLayout(np.zeros(shape,np.uint8)),structure,owner,army,
                       np.ones(3,bool),np.array([0,1,80],np.int32))
-    monkeypatch.setattr(batch,'generate_map',lambda *args: state.copy())
+    monkeypatch.setattr(batch,'generate_map',lambda *args, **kwargs: state.copy())
     feedback = []
 
     class Probe:
@@ -157,7 +157,7 @@ def test_multiplayer_eliminated_seat_receives_no_active_feedback(monkeypatch,tmp
         def on_result_batch(self,raw):
             feedback.append(raw)
 
-    monkeypatch.setattr(batch,'load_controller',lambda *args: Probe())
+    monkeypatch.setattr(batch,'load_controller',lambda *args, **kwargs: Probe())
     records,_ = execute_batch(entries,[plans[0]],max_ticks=3)
     assert records[0][0]['final_alive'] == [True,False,True]
     dead = [row for row in feedback if row['player_ids'][0] == 1]
@@ -186,7 +186,7 @@ def test_bad_batch_action_count_never_broadcasts_to_other_matches(monkeypatch,si
         def reset_batch(self,seats,seeds): pass
         def act_batch(self,raw): return actions
 
-    monkeypatch.setattr(batch,'load_controller',lambda *args: Probe())
+    monkeypatch.setattr(batch,'load_controller',lambda *args, **kwargs: Probe())
     group = batch._PolicyGroup({'entrant_id':'wrong-count'},MatchConfig(),[0,1],[11,23])
     with pytest.raises(ValueError,match='one action per match'):
         group.act({})
@@ -208,7 +208,7 @@ def test_cache_isolates_complete_map_context_and_reuses_matching_chunks(monkeypa
             assert raw['width'] == self.width and raw['visibility'] == self.visibility
             return np.zeros(self.count,dtype=np.int64)
 
-    def load(entry,rules):
+    def load(entry,rules,*,resources=None):
         controller = MapBound()
         controller.validate_rules(rules.map,rules.visibility)
         created.append(controller)

@@ -1,5 +1,6 @@
 """Small shared-library builds, cached by source, compiler and exact flags."""
 import ctypes
+from collections import OrderedDict
 from hashlib import sha256
 from importlib.util import find_spec
 import os
@@ -11,13 +12,45 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 
 _openmp_runtime = None
+_source_fingerprints = OrderedDict()
+_source_lock = threading.RLock()
 
 
-def source_bytes(source, seen=None, include_dirs=()):
+def _source_version(path):
+    try:
+        value = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns, value.st_mode)
+
+
+def _track_dependency(dependencies, path, version):
+    if dependencies is not None:
+        key = os.path.abspath(path)
+        if key in dependencies and dependencies[key] != version:
+            raise ValueError(f'source changed during verification: {path}')
+        dependencies[key] = version
+
+
+def _unchanged(dependencies, aliases):
+    return (all(_source_version(path) == version for path, version in dependencies.items()) and
+            all(str(Path(path).resolve()) == resolved for path, resolved in aliases.items()))
+
+
+def source_bytes(source, seen=None, include_dirs=(), *, _dependencies=None, _aliases=None):
     """Include local headers in build identities (also handles profiling includes)."""
-    source = Path(source).resolve()
+    source = Path(source)
+    if _dependencies is not None:
+        _track_dependency(_dependencies, source, _source_version(source))
+    alias = os.path.abspath(source)
+    source = source.resolve()
+    if _aliases is not None and alias != str(source):
+        if alias in _aliases and _aliases[alias] != str(source):
+            raise ValueError(f'source changed during verification: {alias}')
+        _aliases[alias] = str(source)
     seen = set() if seen is None else seen
     if source in seen:
         return b""
@@ -26,9 +59,42 @@ def source_bytes(source, seen=None, include_dirs=()):
     headers = []
     for name in re.findall(rb'^\s*#include\s+"([^"]+)"', data, re.M):
         candidates = [root / name.decode() for root in (source.parent, *map(Path, include_dirs))]
-        header = next((path for path in candidates if path.is_file()), candidates[0])
-        headers.append(source_bytes(header, seen, include_dirs))
+        header = candidates[0]
+        for path in candidates:
+            version = _source_version(path)
+            _track_dependency(_dependencies, path, version)
+            if version is not None and stat.S_ISREG(version[-1]):
+                header = path
+                break
+        headers.append(source_bytes(header, seen, include_dirs, _dependencies=_dependencies, _aliases=_aliases))
     return data + b"".join(headers)
+
+
+def source_fingerprint(source, *, include_dirs=()):
+    """Same SHA-256 as source_bytes; cache bytes/graph until a dependency changes.
+
+    Check absent higher-priority include candidates too: a new local header must
+    invalidate a previous resolution through an include directory. Following
+    alias paths in the checks also detects symlink retargeting.
+    """
+    key = (os.path.abspath(source), tuple(os.path.abspath(root) for root in include_dirs))
+    with _source_lock:
+        cached = _source_fingerprints.get(key)
+        if cached is not None:
+            result, dependencies, aliases = cached
+            if _unchanged(dependencies, aliases):
+                _source_fingerprints.move_to_end(key)
+                return result
+        dependencies, aliases = {}, {}
+        data = source_bytes(key[0], include_dirs=key[1], _dependencies=dependencies, _aliases=aliases)
+        if not _unchanged(dependencies, aliases):
+            raise ValueError(f'source changed during verification: {source}')
+        result = sha256(data).hexdigest()
+        _source_fingerprints[key] = result, dependencies, aliases
+        _source_fingerprints.move_to_end(key)
+        while len(_source_fingerprints) > 128:
+            _source_fingerprints.popitem(last=False)
+        return result
 
 
 def openmp_flags():

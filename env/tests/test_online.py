@@ -236,6 +236,18 @@ class OnlineSessionTests(unittest.TestCase):
         self.assertTrue(wire.closed)
         self.assertEqual([event for event, _ in wire.sent], ['join_1v1', 'cancel'])
 
+    def test_main_1v1_can_request_unmarked_opponents(self):
+        wire = FakeTransport([('game_start', (start_packet(),)),
+                              ('game_update', (update_packet(),))])
+        with OnlineBackend(user_id='secret', queue='1v1', site='main',
+                           allow_bots=False, transport=wire) as backend:
+            backend.start()
+            self.assertEqual(wire.sent, [('join_1v1', ('secret', MAIN_CLIENT_KEY, None, None, False))])
+        for options in ({'site':'bot','queue':'1v1'}, {'site':'main','queue':'ffa'},
+                        {'site':'main','queue':'custom','room':'test'}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                OnlineBackend(user_id='secret', allow_bots=False, **options)
+
     def test_endpoint_selection_rejects_ambiguity_and_does_not_invent_replay_links(self):
         for options in ({'site': 'other'}, {'site': 'main', 'server': MAIN_SERVER}):
             with self.subTest(options=options), self.assertRaises(ValueError):

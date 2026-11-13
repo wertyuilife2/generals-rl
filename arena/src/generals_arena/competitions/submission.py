@@ -75,16 +75,23 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
         name = _alias(name)
     official = CompetitionStore(Path(league).resolve())
     official.verify_execution()
-    packaged = (Path(source)/'manifest.json').is_file()
-    if packaged:
+    registered = str(source).startswith('@')
+    if registered:
         if parameters is not None:
-            raise ValueError('--params applies to native policies')
-        spec = snapshot_bundle(official.directory, source, device=device)
-        official.validate_entrant_rules(spec)
+            raise ValueError('registered policies already include their parameters')
+        spec = select_policy(official.directory, source, entries=official.entrants())
+        packaged = spec['kind'] == 'package'
     else:
-        if device != 'cpu':
-            raise ValueError('--device applies to packaged policies')
-        spec = snapshot_policy(official.directory, source, parameters)
+        packaged = (Path(source)/'manifest.json').is_file()
+        if packaged:
+            if parameters is not None:
+                raise ValueError('--params applies to native policies')
+            spec = snapshot_bundle(official.directory, source, device=device)
+            official.validate_entrant_rules(spec)
+        else:
+            if device != 'cpu':
+                raise ValueError('--device applies to packaged policies')
+            spec = snapshot_policy(official.directory, source, parameters)
     version = spec['version']
     entry = prepare_entrant(spec) if packaged else None
     execution_id = (digest({key: entry[key] for key in ('factory', 'kwargs', 'implementation')})

@@ -60,11 +60,14 @@ struct Policy {
  int closeOwnerArmy[8], closeOwnerETA[8], closeOwnerSource[8];
  int coalitionNeed=0, coalitionETA=INF, coalitionDeadline=INF, coalitionSource=-1, coalitionCount=0;
  int enemyGeneral[8], oldTotals[8]{}; double growth[8]{};
- int armyCache[MAXN],fullMoveCache[MAXN],halfMoveCache[MAXN],defenseCache[MAXN],routeDelta[MAXN];
+ int armyCache[MAXN],fullMoveCache[MAXN],halfMoveCache[MAXN],defenseCache[MAXN],routeDelta[MAXN],routeLoss[MAXN];
  std::vector<int> sources,keep;
  std::vector<std::pair<int,int>> border;
+ unsigned char visionRow[MAXN],fogRow[MAXN];
+ short searchNeighbor[MAXN][4];
  bool geometryReady=false;
  Route beam[96],expanded[384];
+ const Route *ranked[384];
  double cellRank[MAXN];
  int treeParent[MAXN],treeOrder[MAXN],treeCount=0;
  int gatherForce[MAXN][13],gatherSource[MAXN][13],gatherDir[MAXN][13];
@@ -140,15 +143,21 @@ struct Policy {
   learnGrowth(obs);
   o=obs;tick=int(o->tick);g=o->general_pos;
   aliveCount=0;for(int e=0;e<o->players;e++)aliveCount+=o->alive[e]!=0;
-  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;cellX[i]=x;cellY[i]=y;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;}}
+  if(W==0){W=o->width;H=o->height;N=W*H;for(int i=0;i<N;i++){int x=i%W,y=i/W;cellX[i]=x;cellY[i]=y;nb[i][0]=y?i-W:-1;nb[i][1]=x+1<W?i+1:-1;nb[i][2]=y+1<H?i+W:-1;nb[i][3]=x?i-1:-1;for(int k=0;k<4;k++)searchNeighbor[i][k]=nb[i][k];}}
   bool mapChanged=!geometryReady;
   for(int i=0;i<N;i++)armyCache[i]=int(std::min<int64_t>(10000000,std::max<int64_t>(0,o->army[i])));
   for(int i=0;i<N;i++){
+   int previousTerrain=ter[i];
    if(o->visible[i]&&ter[i]!=o->terrain[i])mapChanged=true;
    if(!o->visible[i]&&o->terrain[i]==2&&ter[i]==255){ter[i]=2;mapChanged=true;}
    lastOwn[i]=own[i];if(o->visible[i]){ter[i]=o->terrain[i];st[i]=o->structure[i];own[i]=o->owner[i];a[i]=army(i);seen[i]=tick;if(st[i]==2&&own[i]>=0&&own[i]!=p)enemyGeneral[own[i]]=i;}
    else if(own[i]==p){own[i]=-3;a[i]=0;}
    else if(own[i]>=0&&!o->alive[own[i]]){own[i]=-3;a[i]=std::max(1,a[i]/2);if(st[i]==2)st[i]=1;}
+   // Update incoming edges only when this cell changes passability.
+   // Four fixed direction slots preserve the reference BFS's tie order.
+   if((previousTerrain==1||previousTerrain==2)!=(blocked(i)))for(int k=0;k<4;k++){
+    int u=nb[i][k];if(u>=0)searchNeighbor[u][(k+2)%4]=(blocked(i))?-1:i;
+   }
    reserve[i]=1;threat[i]=0;threatETA[i]=INF;
   }
   // Every search uses the same visible enemy adjacency. Cache it once
@@ -195,12 +204,19 @@ struct Policy {
   std::fill(ed,ed+N,INF);int h=0,z=0;
   for(int i=0;i<N;i++)if(o->visible[i]&&own[i]>=0&&own[i]!=p){ed[i]=0;queue[z++]=i;}
   while(h<z){int u=queue[h++];for(int k=0;k<4;k++){int v=nb[u][k];if(v>=0&&ter[v]!=1&&ed[v]==INF){ed[v]=ed[u]+1;queue[z++]=v;}}}
-  for(int i=0;i<N;i++){
-   fogGain[i]=0;int x=i%W,y=i/W;
-   if(mapChanged){unknown[i]=0;unknownMask[i]=0;}
-   for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
-    int xx=x+dx,yy=y+dy;
-    if(xx>=0&&xx<W&&yy>=0&&yy<H){int c=yy*W+xx;if(!o->visible[c]&&!blocked(c))fogGain[i]++;if(mapChanged&&ter[c]==255){unknown[i]++;unknownMask[i]|=1u<<((dy+1)*3+dx+1);}}
+  // Separable 3x3 stencil: integer sums/masks are exactly the original
+  // nine-cell scan, with no repeated coordinate divisions inside searches.
+  for(int row=0;row<N;row+=W)for(int x=0;x<W;x++){
+   int c=row+x;
+   if(mapChanged)visionRow[c]=(x>0&&ter[c-1]==255?1:0)|(ter[c]==255?2:0)|(x+1<W&&ter[c+1]==255?4:0);
+   fogRow[c]=int(!o->visible[c]&&!blocked(c))+int(x>0&&!o->visible[c-1]&&!blocked(c-1))+int(x+1<W&&!o->visible[c+1]&&!blocked(c+1));
+  }
+  for(int c=0;c<N;c++){
+   fogGain[c]=fogRow[c]+(c>=W?fogRow[c-W]:0)+(c+W<N?fogRow[c+W]:0);
+   if(mapChanged){
+    unsigned bits=(c>=W?visionRow[c-W]:0)|(unsigned(visionRow[c])<<3)|(c+W<N?unsigned(visionRow[c+W])<<6:0);
+    unknown[c]=__builtin_popcount(bits);
+    unknownMask[c]=bits;
    }
   }
   geometryReady=true;
@@ -231,6 +247,8 @@ struct Policy {
   for(int d=1;d<=12;d++){
    for(int j=0;j<homeCount;j++){
     int u=homeCells[j];if(u==g)continue;
+    // Cardinal-grid walks have the same parity as their shortest distance.
+    if(gd[u]>d||((gd[u]^d)&1)){nextAttackCost[u]=INF;continue;}
     int cost=INF;
     for(int k=0;k<4;k++){
      int v=nb[u][k];if(v<0||attackCost[v]>=INF)continue;
@@ -315,12 +333,14 @@ struct Policy {
    reserve[g]=std::max(reserve[g],raidNeed);
   }
   homeInfrastructure();
+  cacheScheduleMass();
 
   for(int i=0;i<N;i++){
    if(mine(i)){
     routeDelta[i]=std::max(0,army(i)-reserve[i]+1);
     if(i==g&&reserve[i]>1)routeDelta[i]=0;
    }else routeDelta[i]=-defenseCache[i]-(ter[i]==255?1:0);
+   routeLoss[i]=std::max(0,-routeDelta[i]);
   }
  }
  // Evaluate transport capacity only when home has actually lost access to
@@ -407,21 +427,26 @@ struct Policy {
   return exposure;
  }
  // Fast bounded breadth-first campaigns, keeping the strongest shortest route.
+ // FIFO depth order permits stopping at the bound. Force is initialized on
+ // first discovery; callers only consume cells with a finite distance.
  void search(int s,int initial,int depth){
-  std::fill(dist,dist+N,INF);std::fill(force,force+N,-INF);
+  std::fill(dist,dist+N,INF);
   std::fill(searchTargets,searchTargets+(N+63)/64,0);int h=0,z=0;
   queue[z++]=s;dist[s]=0;force[s]=initial;pathLoss[s]=0;first[s]=-1;parent[s]=-1;pathExposure[s]=0;
-  while(h<z){int u=queue[h++];if(dist[u]>=depth)continue;
-   for(int k=0;k<4;k++){int v=nb[u][k];if(v<0||blocked(v)||v==s)continue;int d=dist[u]+1;if(dist[v]<d)continue;
-    int f=force[u];if(u!=s)f-=1;
-    f+=routeDelta[v];
+  while(h<z){int u=queue[h++];if(dist[u]>=depth)break;
+   const int d=dist[u]+1, departure=force[u]-int(u!=s), direction=first[u];
+   const int spentBefore=pathLoss[u]+int(u!=s);
+   #pragma GCC unroll 4
+   for(int k=0;k<4;k++){int v=searchNeighbor[u][k];if(v<0||v==s)continue;if(dist[v]<d)continue;
+    int f=departure+routeDelta[v];
     if(f<1)continue;
-    if(dist[v]==INF){
+    bool fresh=dist[v]==INF;
+    if(fresh){
      dist[v]=d;queue[z++]=v;
      if(!mine(v))searchTargets[v>>6]|=std::uint64_t(1)<<(v&63);
     }
-    int spent=pathLoss[u]+int(u!=s)+(mine(v)?0:rememberedDefense(v)+int(ter[v]==255));
-    if(f>force[v]||(f==force[v]&&spent<pathLoss[v])){force[v]=f;pathLoss[v]=spent;first[v]=(u==s?k:first[u]);parent[v]=u;pathExposure[v]=std::max(pathExposure[u],landingExposure(u,v,f,parent,dist));}
+    int spent=spentBefore+routeLoss[v];
+    if(fresh||f>force[v]||(f==force[v]&&spent<pathLoss[v])){force[v]=f;pathLoss[v]=spent;first[v]=(u==s?k:direction);parent[v]=u;pathExposure[v]=std::max(pathExposure[u],landingExposure(u,v,f,parent,dist));}
    }
   }
  }
@@ -753,8 +778,9 @@ struct Policy {
    }
    // Twelve-step assembly uses fewer beam nodes than the ten-step base search.
    count=std::min(harvestActive?64:96,generated);
-   std::partial_sort(expanded,expanded+count,expanded+generated,[](const Route&a,const Route&b){return a.rank>b.rank;});
-   std::copy(expanded,expanded+count,beam);
+   for(int j=0;j<generated;j++)ranked[j]=expanded+j;
+   std::partial_sort(ranked,ranked+count,ranked+generated,[](const Route *a,const Route *b){return a->rank>b->rank;});
+   for(int j=0;j<count;j++)beam[j]=*ranked[j];
   }
   offer(bestProgram);
   return best;

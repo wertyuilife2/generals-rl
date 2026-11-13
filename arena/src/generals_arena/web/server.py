@@ -58,10 +58,7 @@ def make_server(store, host="127.0.0.1", port=8086):
                 pass
 
         def human(self):
-            auth = self.headers.get("Authorization", "")
-            if not auth.startswith("Bearer "):
-                raise PermissionError("player token required")
-            return store.authenticate(auth[7:])
+            return store.select_account(self.headers.get("X-Arena-Player", ""))
 
         def request_data(self):
             if self.headers.get("Content-Type", "").split(";")[0] != "application/json":

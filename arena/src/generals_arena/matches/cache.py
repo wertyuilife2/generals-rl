@@ -19,6 +19,10 @@ def initial_map(config, seed):
 
 class RuntimeCache(OrderedDict):
     """Retain resettable controllers, evicting only between execution leases."""
+    def __init__(self):
+        super().__init__()
+        self.resources = OrderedDict()
+
     def trim(self, capacity=32):
         while len(self) > capacity:
             _, controller = self.popitem(last=False)
@@ -28,3 +32,4 @@ class RuntimeCache(OrderedDict):
 
     def close(self):
         self.trim(0)
+        self.resources.clear()

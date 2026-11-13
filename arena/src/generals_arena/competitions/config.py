@@ -8,9 +8,7 @@ from generals import MapConfig
 from generals.protocol.rules import RULES_VERSION
 
 from generals_arena.util import digest
-from generals_arena.util import file_digest
 from generals_arena.util import integer
-from generals_arena.util import source_digest
 
 
 DEFAULT_LEAGUE = Path('outputs/arena/main')
@@ -80,15 +78,7 @@ class LeagueConfig:
                          city_density=float(rng.uniform(self.city_min, self.city_max)))
 
     def manifest(self):
-        package = Path(__file__).resolve().parents[1]
-        files = ("competitions/config.py", "competitions/matchmaking.py", "competitions/rating.py",
-                 "matches/game.py", "matches/observation.py", "web/live.py")
         value = {"schema": 7, "config": asdict(self), "rules": RULES_VERSION,
-                 "engine_sha256": source_digest("generals"),
-                 "implementation": {name: file_digest(package / name) for name in files},
-                 "matches_sha256": source_digest("generals_arena.matches"),
-                 "competitions_sha256": source_digest("generals_arena.competitions"),
-                 "policies_sha256": source_digest("generals_arena.policies"),
                  "rating": "independent-relative-gor-codeforces-v3",
                  "simulation_backend": "generals-native-cpu-v1",
                  "human_observation": "local-with-indistinguishable-fog-obstacles-v1",

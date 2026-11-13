@@ -62,7 +62,7 @@ class _PolicyGroup:
         self.entry, self.seats = entry, np.asarray(seats, dtype=np.int64)
         self.lanes = np.arange(len(self.seats))
         key = (entry["entrant_id"], slot, rules.map, rules.visibility)
-        self.controller = cache[key] if cache is not None and key in cache else load_controller(entry, rules)
+        self.controller = cache[key] if cache is not None and key in cache else load_controller(entry, rules, resources=getattr(cache, 'resources', None))
         if cache is not None and key in cache:
             if hasattr(cache, 'move_to_end'):
                 cache.move_to_end(key)
@@ -78,7 +78,7 @@ class _PolicyGroup:
                     self.cached = True
             else:
                 for index, (seat, seed) in enumerate(zip(seats, seeds, strict=True)):
-                    controller = self.controller if index == 0 else load_controller(entry, rules)
+                    controller = self.controller if index == 0 else load_controller(entry, rules, resources=getattr(cache, 'resources', None))
                     self.controllers.append(controller)
                     controller.reset(int(seat), int(seed))
         except BaseException:

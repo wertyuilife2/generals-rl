@@ -33,7 +33,7 @@ def test_native_sources_are_part_of_registered_version_identity(tmp_path, monkey
 
 
 @pytest.mark.parametrize('filename', ['native.py', 'worker.py', 'host.cpp'])
-def test_native_runtime_changes_invalidate_registered_execution(tmp_path, monkeypatch, filename):
+def test_native_runtime_changes_keep_registered_policy_usable(tmp_path, monkeypatch, filename):
     from generals_arena.policies import native
     from generals_arena.policies.artifacts import snapshot_policy
     from generals_arena.policies.entries import prepare_entrant, verify_artifacts
@@ -45,9 +45,8 @@ def test_native_runtime_changes_invalidate_registered_execution(tmp_path, monkey
     monkeypatch.setattr(native, 'file_digest', lambda path: '0'*64 if Path(path).name == filename else original(path))
     changed = prepare_entrant(spec)
     assert changed['version'] == entry['version']
-    assert changed['entrant_id'] != entry['entrant_id']
-    with pytest.raises(ValueError, match='native host changed'):
-        verify_artifacts(entry)
+    assert changed['entrant_id'] == entry['entrant_id']
+    verify_artifacts(entry)
 
 
 def test_only_explicit_decision_phase_is_a_decision_timeout():

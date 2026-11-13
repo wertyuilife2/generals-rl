@@ -18,12 +18,31 @@ from .resources import cpu_slot
 
 class BatchJournal:
     def __init__(self, path, count, ticks, players, *, create=False):
-        self.path, self.count = Path(path), count
-        size = (1 + count * (4 + 128 + ticks * players)) * 8
+        self.path = Path(path)
         self.file = self.path.open('w+b' if create else 'r+b')
+        self.memory = self.shape = None
+        self.configure(count, ticks, players, grow=create)
         if create:
-            self.file.truncate(size)
-        self.memory = mmap.mmap(self.file.fileno(), size)
+            self.reset()
+
+    def _release_views(self):
+        self.journals = self.header = self.records = None
+        self.active_lane = self.headers = self.all_records = self.committed = self.actions = None
+
+    def configure(self, count, ticks, players, *, grow=False):
+        """Rebind only between batches; keep the largest mapping for later reuse."""
+        shape = count, ticks, players
+        if self.shape == shape:
+            return
+        size = (1 + count * (4 + 128 + ticks * players)) * 8
+        self._release_views()
+        if self.memory is None or size > len(self.memory):
+            if self.memory is not None:
+                self.memory.close()
+            if grow and size > os.fstat(self.file.fileno()).st_size:
+                self.file.truncate(size)
+            self.memory = mmap.mmap(self.file.fileno(), 0)
+        self.shape, self.count = shape, count
         self.active_lane = np.ndarray((1,), np.int64, self.memory)
         self.headers = np.ndarray((count, 4), np.int64, self.memory, offset=8)
         offset = (1 + count * 4) * 8
@@ -33,10 +52,12 @@ class BatchJournal:
                                   offset=offset+count*128*8)
         self.journals = [SimpleNamespace(header=self.headers[i], records=self.all_records[i])
                          for i in range(count)]
-        if create:
-            self.active_lane[:] = -1
-            self.headers[:] = [0, -1, 0, 0]
-            self.all_records[:] = self.committed[:] = 0
+        self.select(0)
+
+    def reset(self):
+        # Old actions are unreachable beyond header[0], the committed prefix.
+        self.headers[:] = [0, -1, 0, 0]
+        self.all_records[:] = self.committed[:] = 0
         self.select(0)
 
     def select(self, lane):
@@ -66,8 +87,7 @@ class BatchJournal:
         return journal
 
     def close(self):
-        self.journals = self.header = self.records = None
-        self.active_lane = self.headers = self.all_records = self.committed = self.actions = None
+        self._release_views()
         self.memory.close()
         self.file.close()
 
@@ -82,6 +102,7 @@ def _child(connection):
     from generals.core.batch import PreparedState
     from collections import OrderedDict
     runtimes, maps, prepared = RuntimeCache(), OrderedDict(), {}
+    journal = None
     try:
         while (request := connection.recv()) is not None:
             received = request.pop('initial_states', {})
@@ -90,8 +111,14 @@ def _child(connection):
                 key = (MapConfig(**plan['map']), plan['map_seed'])
                 if key in maps:
                     maps.move_to_end(key)
-            journal = BatchJournal(request.pop('journal'), len(request['plans']),
-                                   request['max_ticks'], len(request['plans'][0]['entrant_ids']))
+            path = Path(request.pop('journal'))
+            shape = len(request['plans']), request['max_ticks'], len(request['plans'][0]['entrant_ids'])
+            if journal is None or journal.path != path:
+                if journal is not None:
+                    journal.close()
+                journal = BatchJournal(path, *shape)
+            else:
+                journal.configure(*shape)
             native.DIAGNOSTICS = journal
             try:
                 for key in received:
@@ -115,11 +142,12 @@ def _child(connection):
                                  'lane': details.get('lane', int(journal.active_lane[0]))})
             finally:
                 native.DIAGNOSTICS = None
-                journal.close()
     except (EOFError, BrokenPipeError):
         pass
     finally:
         runtimes.close()
+        if journal is not None:
+            journal.close()
         connection.close()
 
 
@@ -127,19 +155,20 @@ class BatchWorker:
     def __init__(self):
         self.process = self.connection = None
         self._sent_maps = set()
+        self._journal = None
 
     def _start(self):
         with _process_lifecycle:
             if self.process is not None and self.process.is_alive():
                 return
-            self.close()
+            self._stop_process()
             context = multiprocessing.get_context('spawn')
             self.connection, child = context.Pipe()
             self.process = context.Process(target=_child, args=(child,), daemon=True)
             self.process.start()
             child.close()
 
-    def close(self):
+    def _stop_process(self):
         self._sent_maps.clear()
         with _process_lifecycle:
             if self.process is not None:
@@ -148,6 +177,23 @@ class BatchWorker:
                 self.process.join()
                 self.connection.close()
                 self.process = self.connection = None
+
+    def close(self):
+        self._stop_process()
+        if self._journal is not None:
+            self._journal.close()
+            self._journal.path.unlink(missing_ok=True)
+            self._journal = None
+
+    def _prepare_journal(self, count, ticks, players):
+        if self._journal is None:
+            fd, path = tempfile.mkstemp(prefix='batch-', dir=native._private_cache())
+            os.close(fd)
+            self._journal = BatchJournal(path, count, ticks, players, create=True)
+        else:
+            self._journal.configure(count, ticks, players, grow=True)
+            self._journal.reset()
+        return self._journal
 
     def _exchange(self, request, journal):
         self._start()
@@ -196,11 +242,10 @@ class BatchWorker:
         while pending:
             current = [plan for _, plan in pending]
             ticks, players = options['max_ticks'], len(current[0]['entrant_ids'])
-            fd, path = tempfile.mkstemp(prefix='batch-', dir=native._private_cache())
-            os.close(fd)
-            journal = BatchJournal(path, len(current), ticks, players, create=True)
+            journal = self._prepare_journal(len(current), ticks, players)
             try:
-                response = self._exchange(dict(entries=entries, plans=current, journal=path, **options), journal)
+                response = self._exchange(dict(entries=entries, plans=current,
+                                              journal=str(journal.path), **options), journal)
                 if 'records' in response:
                     for (index, _), record in zip(pending, response['records'], strict=True):
                         output[index] = record
@@ -210,7 +255,7 @@ class BatchWorker:
                 details, lane = response['details'], response['lane']
                 if details.get('player') is None or not 0 <= lane < len(pending):
                     raise RuntimeError(response['error'])
-                self.close()  # Never destroy a timed-out native instance in-process.
+                self._stop_process()  # Preserve the journal until recovery extracts its prefix.
                 index, plan = pending.pop(lane)
                 recovered = journal.extract(lane, players, ticks)
                 worker = MatchWorker()
@@ -246,7 +291,8 @@ class BatchWorker:
                         output[index] = output[index][0], None
                 finally:
                     worker.close()
-            finally:
-                journal.close()
-                Path(path).unlink(missing_ok=True)
+            except BaseException:
+                # No child may still be writing when the next run resets this mapping.
+                self._stop_process()
+                raise
         return output, timing

@@ -31,7 +31,7 @@ class OnlineEndpoint:
             return user_id, username, MAIN_CLIENT_KEY, None
         return user_id, username
 
-    def join_event(self, queue, room, user_id):
+    def join_event(self, queue, room, user_id, *, allow_bots=True):
         if queue == 'custom':
             args = (room, user_id)
             if self.site == 'main':
@@ -41,8 +41,7 @@ class OnlineEndpoint:
         if self.site == 'main':
             args += (MAIN_CLIENT_KEY, None, None)
             if queue == '1v1':
-                # Match the official client's default queue_1v1_allow_bots.
-                args += (True,)
+                args += (allow_bots,)
         return ('join_1v1' if queue == '1v1' else 'play'), args
 
 

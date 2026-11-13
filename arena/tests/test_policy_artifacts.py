@@ -85,7 +85,7 @@ def test_manifest_paths_cannot_escape_or_overlap(tmp_path, path):
         artifacts.load_manifest(manifest)
 
 
-def test_symlink_and_loader_mutations_are_rejected(tmp_path, monkeypatch):
+def test_symlinks_are_rejected_but_loader_updates_are_allowed(tmp_path, monkeypatch):
     source = make_bundle(tmp_path/'source')
     path = source/'actor.pt'
     outside = tmp_path/'outside'
@@ -97,8 +97,7 @@ def test_symlink_and_loader_mutations_are_rejected(tmp_path, monkeypatch):
     outside.rename(path)
     entry = prepare_entrant({'name':'test','kind':'package','bundle':str(source)})
     monkeypatch.setattr('generals_arena.policies.entries._policy_implementation', lambda _: {'changed': True})
-    with pytest.raises(ValueError, match='loader changed'):
-        verify_artifacts(entry)
+    verify_artifacts(entry)
 
 
 def test_selection_uses_an_explicit_archive_path_and_supplied_entries(tmp_path):

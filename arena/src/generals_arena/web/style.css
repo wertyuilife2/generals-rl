@@ -151,7 +151,6 @@ tr:last-child td {border:0;}
 #signup,#player-lobby,#account-controls {padding:0 24px 20px;}
 #account-controls .input-row {margin-top:6px;}
 #play-account {flex:1;min-width:140px;}
-.player-card #copy-token {margin-left:auto;font-size:12px;}
 .match-setup > label {display:block;margin-bottom:6px;}
 .opponent-slots {display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px;}
 .opponent-slot {display:flex;flex-direction:column;gap:6px;min-width:0;}
@@ -159,8 +158,6 @@ tr:last-child td {border:0;}
 #signup .footnote,#player-lobby .footnote {padding:0;}
 .input-row {display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;}
 .input-row input {flex:1;min-width:130px;}
-.recover {padding:18px 24px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);}
-.recover summary {cursor:pointer;}
 .player-card {display:flex;align-items:center;gap:15px;background:rgba(70,130,180,.15);padding:15px;border:1px solid rgba(70,130,180,.3);border-radius:6px;margin-bottom:18px;}
 .player-card strong {font-size:17px;font-weight:500;}
 .avatar {font-size:32px;color:var(--accent);}

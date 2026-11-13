@@ -24,7 +24,8 @@ struct ArenaObservation {
     // Departure grace progress in [0,1], or -1 when no grace period is active.
     const double *neutralize_in;
     // Previous result is delivered inside the timed decision, never via an
-    // untimed policy callback. Null before the first decision.
+    // untimed policy callback. Null before the first decision and on backends
+    // (such as the official online server) without authoritative move receipts.
     const ArenaMoveResult *previous;
 };
 

@@ -130,7 +130,7 @@ def online_command(args):
             raise ValueError(f'credential environment variable {variable} is empty')
     options = dict(user_id=user_id, server=endpoint.server, queue=args.queue, room=args.room,
                    force_start=args.force_start, start_timeout=args.start_timeout,
-                   update_timeout=args.update_timeout)
+                   update_timeout=args.update_timeout, allow_bots=not args.no_bots)
     from generals_arena.policies.artifacts import select_policy
     from generals_arena.matches.online import play_online
     entries = None
@@ -165,6 +165,8 @@ def add_online_commands(commands):
     identity.add_argument('--user-id-env')
     play.add_argument('--account-dir', type=Path)
     play.add_argument('--queue', choices=('custom', '1v1', 'ffa'), default='custom')
+    play.add_argument('--no-bots', action='store_true',
+                      help='request main-site 1v1 matchmaking without marked bots')
     play.add_argument('--room')
     play.add_argument('--force-start', action='store_true')
     play.add_argument('--start-timeout', type=float, default=120.)
@@ -271,7 +273,7 @@ def main(argv=None):
 
 def add_submission_commands(commands):
     submit = commands.add_parser('commit', help='snapshot a native source or policy package and run its 1000-game evaluation')
-    submit.add_argument('source', type=Path, help='.cpp file, native source directory, or exported policy bundle')
+    submit.add_argument('source', type=Path, help='.cpp file, source directory, policy bundle, or @alias to resume a registered submission')
     submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
     submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
     submit.add_argument('--device', default='cpu', help='packaged policy device, e.g. cpu or cuda:0 (env remains CPU)')

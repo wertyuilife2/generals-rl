@@ -2,10 +2,8 @@
 from generals_arena.competitions.titles import rating_title
 from contextlib import contextmanager
 from dataclasses import replace
-from hashlib import sha256
 import json
 from pathlib import Path
-import secrets
 import sqlite3
 import time
 import threading
@@ -22,7 +20,6 @@ from generals_arena.competitions.rating import (CF_SCALE, FFA_MEAN, MODES, POLIC
 SCHEMA = """
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE entrants(id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE accounts(token_hash TEXT PRIMARY KEY, entrant_id TEXT UNIQUE REFERENCES entrants(id));
 CREATE TABLE jobs(id TEXT PRIMARY KEY, entrant_id TEXT NOT NULL REFERENCES entrants(id),
  budget INTEGER NOT NULL, done INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'queued',
  error TEXT, created REAL NOT NULL);
@@ -50,6 +47,10 @@ class CompetitionStore:
         if self.manifest.get("schema") != 7 or self.manifest.get('rules') != RULES_VERSION:
             raise ValueError("this league uses archived rules; initialize a new league directory")
         self.config = LeagueConfig(**self.manifest["config"])
+        from .indexes import VERSION, install
+        if meta.get('query_indexes') != VERSION:
+            with self.connect(write=True) as db:
+                install(db)
 
     @property
     def reference(self):
@@ -139,24 +140,19 @@ class CompetitionStore:
                 db.close()
 
     def verify_execution(self):
-        if canonical(self.config.manifest()) != canonical(self.manifest):
-            raise ValueError("league rules/source changed; use its original code or initialize a new league")
+        """Compatibility entry point: leagues use the currently installed runtime."""
 
     def resize_maps(self, min_side, max_side, side_cap):
         """Explicit map revision; preserve accounts, results, and rating history.
 
-        Only distribution/presentation may change here. A different engine,
-        scoring algorithm or scheduler still requires its own league.
+        Existing games retain their recorded map configuration.
         """
         config = replace(self.config, min_side=min_side, max_side=max_side, side_cap=side_cap)
         manifest = config.manifest()
         previous = self.manifest
-        for key in ("schema", "engine_sha256", "rating", "decision_timing", "matches_sha256", "competitions_sha256", "policies_sha256"):
+        for key in ("schema", "rules", "rating", "decision_timing"):
             if previous.get(key) != manifest[key]:
                 raise ValueError("map resize cannot change the engine or rating rules")
-        for name in ("matches/game.py", "matches/observation.py", "competitions/rating.py", "competitions/matchmaking.py"):
-            if previous["implementation"].get(name) != manifest["implementation"][name]:
-                raise ValueError("map resize cannot change simulation, scoring or scheduling code")
         with process_lock(self.directory, ".server.lock"), process_lock(self.directory, ".worker.lock"):
             with self.connect(write=True) as db:
                 current = json.loads(db.execute("SELECT value FROM meta WHERE key='manifest'").fetchone()[0])
@@ -326,22 +322,20 @@ class CompetitionStore:
     def account(self, name):
         if not isinstance(name, str) or not name.strip() or len(name.strip()) > 48:
             raise ValueError("name must contain 1–48 characters")
-        key, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
+        key = uuid.uuid4().hex
         entrant = {"entrant_id": key, "name": name.strip(), "kind": "human", "version": "human"}
         try:
             with self.connect(write=True) as db:
                 db.execute("INSERT INTO entrants VALUES (?,?,?,?)", (key, entrant["name"], "human", canonical(entrant)))
-                db.execute("INSERT INTO accounts VALUES (?,?)", (sha256(token.encode()).hexdigest(), key))
         except sqlite3.IntegrityError as exc:
-            raise ValueError("this name is already registered; restore its browser token or use another name") from exc
-        return {"token": token, "entrant": entrant}
+            raise ValueError("this name is already registered; select the existing account or use another name") from exc
+        return {"entrant": entrant}
 
-    def authenticate(self, token):
+    def select_account(self, entrant_id):
         with self.connect() as db:
-            row = db.execute("SELECT entrant_id FROM accounts WHERE token_hash=?",
-                             (sha256(token.encode()).hexdigest(),)).fetchone()
-        if row is None:
-            raise PermissionError("invalid player token")
+            row = db.execute("SELECT id FROM entrants WHERE id=? AND kind='human'", (entrant_id,)).fetchone()
+        if row is None or entrant_id in self.retired_entrant_ids():
+            raise PermissionError("select an existing human account")
         return row[0]
 
     def jobs(self):
@@ -408,15 +402,10 @@ class CompetitionStore:
 
     def pair_counts(self, target, mode=None):
         mode = validate_mode(mode or self.default_mode())
-        counts = {}
         with self.connect() as db:
-            for row in db.execute("SELECT plan FROM games WHERE status='complete' AND " + self._mode_predicate(mode)):
-                ids = json.loads(row[0])["entrant_ids"]
-                if target in ids:
-                    for key in set(ids):
-                        if key != target:
-                            counts[key] = counts.get(key, 0) + 1
-        return counts
+            return dict(db.execute("""SELECT right_id,games FROM matchup_coverage WHERE mode=? AND left_id=?
+                UNION ALL SELECT left_id,games FROM matchup_coverage WHERE mode=? AND right_id=?""",
+                (mode, target, mode, target)))
 
     def _score(self, db, result):
         ids = result["entrant_ids"]
@@ -549,34 +538,31 @@ class CompetitionStore:
         included, excluded = ids(include), ids(exclude)
         if not include_retired:
             excluded.update(self.retired_entrant_ids())
-        where, values = "status IN ('complete','aborted','failed')", []
+        where, values = "1", []
         if mode == '1v1':
-            where += " AND json_array_length(plan, '$.entrant_ids')=2"
+            where += " AND mode='1v1'"
         elif mode in ('multiplayer', 'ffa'):
-            where += " AND json_array_length(plan, '$.entrant_ids')>2"
-        if included:
-            where += """ AND (SELECT count(DISTINCT value) FROM json_each(plan, '$.entrant_ids')
-                WHERE value IN (SELECT value FROM json_each(?)))=?"""
-            values.extend((canonical(sorted(included)), len(included)))
-        if excluded:
-            where += """ AND NOT EXISTS (SELECT 1 FROM json_each(plan, '$.entrant_ids')
-                WHERE value IN (SELECT value FROM json_each(?)))"""
-            values.append(canonical(sorted(excluded)))
+            where += " AND mode='ffa'"
         if players is not None:
-            where += " AND json_array_length(plan, '$.entrant_ids')=?"
+            where += " AND players=?"
             values.append(players)
+        required = dict.fromkeys(included, 1)
         for key in dict.fromkeys(key for key in (entrant, opponent) if key):
             if not isinstance(key, str):
                 raise ValueError('entrant and opponent must be entrant IDs')
             # Selecting the same strategy twice means two distinct seats.
-            minimum = 2 if entrant == opponent == key else 1
-            where += " AND (SELECT count(*) FROM json_each(plan, '$.entrant_ids') WHERE value=?)>=?"
+            required[key] = 2 if entrant == opponent == key else 1
+        for key, minimum in sorted(required.items()):
+            where += " AND game_rowid IN (SELECT game_rowid FROM match_participants WHERE entrant_id=? AND copies>=?)"
             values.extend((key, minimum))
+        if excluded:
+            where += " AND game_rowid NOT IN (SELECT game_rowid FROM match_participants WHERE entrant_id IN (SELECT value FROM json_each(?)))"
+            values.append(canonical(sorted(excluded)))
         with self.connect() as db:
-            source = f"FROM games WHERE {where}"
+            source = f"FROM match_history WHERE {where}"
             total = db.execute(f"SELECT count(*) {source}", values).fetchone()[0]
             rows = db.execute(f"""SELECT id,status,plan,result,finished FROM games WHERE rowid IN (
-                SELECT rowid {source} ORDER BY sequence DESC,finished DESC LIMIT ? OFFSET ?
+                SELECT game_rowid {source} ORDER BY sequence DESC,finished DESC LIMIT ? OFFSET ?
                 ) ORDER BY sequence DESC,finished DESC""", (*values, limit, offset)).fetchall()
         return {"total": total, "matches": [{**json.loads(r["result"] or r["plan"]), "status": r["status"], "finished": r["finished"]} for r in rows]}
 

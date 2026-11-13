@@ -107,3 +107,29 @@ def test_invalid_native_action_fails_only_its_match(tmp_path):
     assert results[0]['reason'] == 'policy_error'
     assert results[0]['error_detail']['player'] == 0
     assert results[1]['reason'] == 'tick_limit'
+
+
+def test_worker_reuses_journal_across_shapes_and_restart(tmp_path):
+    entry = policy(tmp_path, 'return arena_move(o->general_pos, s.seed%4, 0);')
+    entries = {entry['entrant_id']: entry}
+    paths, processes = set(), []
+    with MatchRunner(entries, max_ticks=8, record_replays=True) as runner:
+        for trial, (count, players) in enumerate(((1, 2), (4, 4), (2, 2), (1, 2))):
+            schedule = plans(entry, players, [[100+i*8+p for p in range(players)] for i in range(count)])
+            captured = []
+            actual, _ = runner.run(schedule, on_result=lambda result, blob: captured.append((result, blob)))
+            worker = runner._batch_worker
+            paths.add(worker._journal.path)
+            processes.append(worker.process.pid)
+            for result, blob in captured:
+                assert all(row['calls'] == 8 for row in result.pop('decision_timing'))
+                assert len(list(verified_replay(blob, result))) == 9
+            expected, _ = run(entry, schedule, 8)
+            for result in expected:
+                result.pop('decision_timing')
+            assert actual == expected
+            if trial == 2:
+                worker._stop_process()  # A restarted child attaches the retained mapping.
+        assert len(paths) == 1
+        assert processes[0] == processes[1] == processes[2] != processes[3]
+    assert not next(iter(paths)).exists()

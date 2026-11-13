@@ -34,7 +34,7 @@ class OnlineBackend:
     supports_move_results = False
 
     def __init__(self, *, user_id, room=None, queue='custom', username=None,
-                 server=None, site=None, force_start=False,
+                 server=None, site=None, force_start=False, allow_bots=True,
                  start_timeout=120.0, update_timeout=15.0,
                  record=None, transport=None):
         if not isinstance(user_id, str) or not user_id.strip():
@@ -48,6 +48,11 @@ class OnlineBackend:
         if not isinstance(force_start, bool):
             raise TypeError('force_start must be boolean')
         self.endpoint = resolve_endpoint(site=site, server=server)
+        if not isinstance(allow_bots, bool):
+            raise TypeError('allow_bots must be boolean')
+        if not allow_bots and (self.endpoint.site != 'main' or queue != '1v1'):
+            raise ValueError('avoiding bots is supported only in main-site 1v1')
+        self.allow_bots = allow_bots
         if username is not None:
             validate_username(username, site=self.endpoint.site)
         for name, value in (('start_timeout', start_timeout), ('update_timeout', update_timeout)):
@@ -166,7 +171,8 @@ class OnlineBackend:
                 register_username(self.transport, self._user_id, self.username,
                                   timeout=self.update_timeout, server=self.server)
             self._joined = True
-            event, args = self.endpoint.join_event(self.queue, self.room, self._user_id)
+            event, args = self.endpoint.join_event(self.queue, self.room, self._user_id,
+                                                   allow_bots=self.allow_bots)
             self.transport.emit(event, *args)
             if self.force_start:
                 self.transport.emit('set_force_start', self.room, True)

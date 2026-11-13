@@ -58,3 +58,13 @@ def test_online_rejects_unsupported_package_shape_and_keeps_failed_attempt(tmp_p
     report = json.loads((output/'report.json').read_text())
     assert report['status'] == 'failed' and report['completed_games'] == 0
     assert report['games'][0]['error'] == 'ValueError'
+
+
+def test_receipt_dependent_policy_is_rejected_before_connecting(tmp_path):
+    def backend(**options):
+        pytest.fail('incompatible policy must never enter matchmaking')
+    output = tmp_path/'series'
+    with pytest.raises(ValueError, match='authoritative move results'):
+        play_online({'kind': 'baseline', 'name': 'aggressive', 'policy': 'aggressive'}, {},
+                    output=output, backend_factory=backend)
+    assert not output.exists()

@@ -1,6 +1,6 @@
 // Presentation adapted from bzy-nya.github.io/gen/js/renderer.js.
 // Uses server observations; no game rules or AI execution live in the browser.
-import { SVGIcons } from './svgIcons.js';
+import { TileIcons } from './svgIcons.js';
 import { decode } from './input.js';
 
 export const COLORS = ['rgba(255,0,0,.9)', 'rgba(39,146,255,.9)', 'rgba(0,128,0,.9)',
@@ -18,10 +18,10 @@ export class Battlefield {
     this.cellSize = 24;
     this.initialized = false;
     this.icons = {};
-    for (const [name, svg] of Object.entries(SVGIcons)) {
+    for (const [name, source] of Object.entries(TileIcons)) {
       const icon = new Image();
       icon.onload = () => {this.viewKey=null;this.draw();};
-      icon.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      icon.src = source;
       this.icons[name] = icon;
     }
     canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -123,7 +123,7 @@ export class Battlefield {
       ctx.fillRect(px,py,size,size);
       ctx.strokeStyle='#111';ctx.lineWidth=Math.max(1,size/26);ctx.strokeRect(px,py,size,size);
       const icon=this.icons[obstacle||terrain===1?'mountain':structure===2?'general':structure===1?'city':''];
-      if ((!fog || obstacle) && icon?.complete && icon.naturalWidth) ctx.drawImage(icon,px+size*.07,py+size*.07,size*.86,size*.86);
+      if ((!fog || obstacle) && icon?.complete && icon.naturalWidth) ctx.drawImage(icon,px,py,size,size);
       if (!fog && terrain!==1 && army>0) {
         ctx.font=`${Math.max(9,size/(army>=1000?2.8:2.2))}px Arial`;
         ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';

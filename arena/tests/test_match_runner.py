@@ -61,12 +61,12 @@ def test_whole_schedule_capability_check_precedes_any_execution(tmp_path, monkey
     assert callbacks == []
 
 
-def test_registered_implementation_change_is_rejected_before_batch(monkeypatch):
+def test_registered_implementation_change_uses_current_runtime():
     entry = prepare_entrant({"name": "random", "kind": "baseline", "policy": "random"})
-    monkeypatch.setattr("generals_arena.matches.runner.source_digest", lambda package: "changed")
+    entry['implementation'] = {'generals_baselines': 'previous-runtime'}
     with MatchRunner({entry["entrant_id"]: entry}, max_ticks=2) as runner:
-        with pytest.raises(ValueError, match="registered source changed"):
-            runner.run(plans_for(entry))
+        results, _ = runner.run(plans_for(entry))
+    assert len(results) == 3
 
 
 @pytest.mark.parametrize("field,value", [

@@ -119,7 +119,7 @@ def test_multiple_cpp_seats_share_one_serial_match_process(setup, tmp_path):
         'FILE *f=fopen(' + json.dumps(str(witness)) + ',"a"); fprintf(f,"%d\\n",int(getpid())); fclose(f); return 0;')
     path = code/'policy.cpp'
     path.write_text('#include <cstdio>\n'+path.read_text())
-    report = run([code, code], league=directory, games=2)
+    report = run([code, code], league=directory, games=2, workers=1)
     assert report['ok']
     pids = witness.read_text().splitlines()
     assert len(pids) == 16 and len(set(pids)) == 1
@@ -519,7 +519,7 @@ def test_commit_preflight_failure_and_interrupt_resume(setup,tmp_path,monkeypatc
         submissions.commit(code,league=directory,name='resumable')
     assert completed_games(official)==1
     monkeypatch.setattr(submissions,'run_jobs',original)
-    resumed = submissions.commit(code,league=directory)
+    resumed = submissions.commit('@resumable',league=directory)
     assert resumed['ok'] and resumed['completed_games']==3
     assert completed_games(official)==3
     assert len(official.jobs())==1

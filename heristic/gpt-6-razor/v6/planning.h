@@ -12,7 +12,7 @@ int proposalCount=0,missionTick=-1;
 int missionReceiptCell=-1,missionReceiptForce=0;
 std::int64_t missionAction=0;
 int supplyParent[MAXN],supplyArmy[MAXN],supplyLand[MAXN];
-int schedule[MAXN][13];
+int schedule[MAXN][13],scheduleBound[MAXN];
 signed char schedulePick[MAXN][4][13];
 int scheduleParent[MAXN],scheduleOrder[MAXN],scheduleMass[MAXN],scheduleCount=0;
 struct AttackRoute { short cell[9]; unsigned char length=0,owner=0; int strength=-INF; };
@@ -117,12 +117,14 @@ double cityUtility(int c,int remaining,int arrival)const {
 // Compute the exact set of edges used by a bounded friendly collection tree.
 // Each child subtree is disjoint, each selected edge costs one order, and the
 // reconstruction merges children before moving their parent toward the root.
-void scheduleTree(int root,int budget){
- std::fill(scheduleParent,scheduleParent+N,-2);
+void cacheScheduleMass(){
  for(int c=0;c<N;c++)if(mine(c)){
   scheduleMass[c]=ready(c);
   for(int k=0;k<4;k++){int v=nb[c][k];if(v>=0&&mine(v))scheduleMass[c]+=std::max(0,ready(v)-1);}
  }
+}
+void scheduleTree(int root,int budget){
+ std::fill(scheduleParent,scheduleParent+N,-2);
  scheduleCount=1;scheduleOrder[0]=root;scheduleParent[root]=-1;dist[root]=0;
  for(int j=0;j<scheduleCount;j++){
   int u=scheduleOrder[j];if(dist[u]>=budget)continue;
@@ -139,16 +141,20 @@ void scheduleTree(int root,int budget){
   }
  }
  for(int j=scheduleCount-1;j>=0;j--){
-  int u=scheduleOrder[j];schedule[u][0]=ready(u);
+  int u=scheduleOrder[j];schedule[u][0]=ready(u);scheduleBound[u]=0;
   for(int b=1;b<=budget;b++)schedule[u][b]=-INF;
   for(int k=0;k<4;k++){
    for(int b=0;b<=budget;b++)schedulePick[u][k][b]=-1;
    int child=nb[u][k];if(child<0||scheduleParent[child]!=u)continue;
-   for(int b=budget;b>=1;b--)for(int use=0;use<b;use++){
+   // Budgets beyond a subtree's edge count are all -INF. Skip only
+   // those impossible states, retaining descending b / ascending use ties.
+   int bound=std::min(budget,scheduleBound[u]+scheduleBound[child]+1);
+   for(int b=bound;b>=1;b--)for(int use=std::max(0,b-1-scheduleBound[u]);use<=std::min(b-1,scheduleBound[child]);use++){
     if(schedule[u][b-use-1]<0||schedule[child][use]<=1)continue;
     int value=schedule[u][b-use-1]+schedule[child][use]-1;
     if(value>schedule[u][b]){schedule[u][b]=value;schedulePick[u][k][b]=use;}
    }
+   scheduleBound[u]=bound;
   }
  }
 }
@@ -251,8 +257,13 @@ void campaignPrograms(double income){
   for(int mode=0;mode<modes;mode++){
    bool half=requiredHalf||mode;int moving=moveArmy(s,half);if(moving<1)continue;
    search(s,moving,32);
+   double stepRisk[4]{};
+   for(int k=0;k<4;k++)if(nb[s][k]>=0)stepRisk[k]=risk(s,nb[s][k],moving);
    double highest=-1e30;int target=-1;
-   for(int v=0;v<N;v++)if(!mine(v)&&dist[v]<INF&&first[v]>=0){
+   for(int word=0;word<(N+63)/64;word++){
+    std::uint64_t bits=searchTargets[word];
+    while(bits){
+    int v=word*64+__builtin_ctzll(bits);bits&=bits-1;
     int d=dist[v];bool enemy=own[v]>=0&&own[v]!=p,king=st[v]==2&&enemy,city=st[v]==1;
     if(!king&&d>24)continue;
     if(king&&force[v]<d/2+2)continue;
@@ -262,9 +273,10 @@ void campaignPrograms(double income){
     if(!king)reward+=networkBonus[v];
     double score=reward/(d+.8+pathLoss[v]/(income*2.5+2));
     if(king)score+=6./(1+.07*d);
-    int next=nb[s][first[v]];double hazard=risk(s,next,moving);if(hazard>=1000)continue;
+    double hazard=stepRisk[first[v]];if(hazard>=1000)continue;
     score-=hazard+(king?0:pathExposure[v]);
     if(score>highest){highest=score;target=v;}
+    }
    }
    if(target<0)continue;
    Program q;q.value=highest;q.goal=target;q.root=s;q.born=tick;q.kind=1;
