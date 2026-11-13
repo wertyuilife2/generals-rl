@@ -7,6 +7,7 @@
     "backend": "gpu",
     "device": "cuda:0",
     "max_episode_steps": 2048,
+    "time_limit_mode": "terminal_draw",
     "clock_scale_ticks": 2048,
     "knowledge_age_scale": 2000,
     "history_length": 8,
@@ -29,6 +30,7 @@
     "map_refresh_reuse": 0,
     "map_refresh_chunk_size": 1024,
     "map_prefetch_chunks": 8,
+    "d4_augmentation": false,
     "map_curriculum": {
       "warmup_transitions": 71303168,
       "end_transitions": 306184192,
@@ -83,6 +85,7 @@
       "share_backbone": true,
       "critic_privileged": true,
       "critic_fusion": "early_shared",
+      "joint_critic": false,
       "batch_shared_forward": false,
       "patch_size": 1,
       "value_distribution": "hl_gauss",
@@ -117,6 +120,7 @@
       "ppo_probe_samples": 8192,
       "ppo_probe_batch_size": 1024,
       "physical_minibatch_size": 8192,
+      "pair_minibatches": false,
       "amp_bfloat16": true,
       "adaptive_lr_min": 1e-05,
       "adaptive_lr_max": 0.001,
@@ -156,7 +160,7 @@
     "final_games_multiplier": 2
   },
   "torch_threads": 1,
-  "run_id": "v32_9x9_temporal_hl128_paths",
+  "run_id": "v32_9x9_temporal_hl128_paths_terminal",
   "matmul_precision": "high",
   "training_control": {
     "max_seconds": null,

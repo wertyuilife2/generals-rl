@@ -29,9 +29,9 @@ GPU按地形连通性／目标变化更新缓存；路径在行动时存入rollo
 
 ## Rollout与存储
 
-双座当前策略自对弈中，每局每tick生成两条玩家transition，GAE与奖励按座位分开。一次rollout内参数固定；对局可跨越多轮PPO。自然终局与外部时限截断分别记录，timeout使用重置前终局观测的critic值bootstrap。
+双座当前策略自对弈中，每局每tick生成两条玩家transition，GAE与奖励按座位分开。一次rollout内参数固定；对局可跨越多轮PPO。自然终局与时限到达分别记录；当前默认在episode时限处按平局0终止，后续价值为0。可选`bootstrap`模式使用重置前终局观测的critic值；未结束对局的rollout边界仍正常bootstrap。
 
-训练桥接层只为timeout行保存重置前快照；其余行直接构建下一步观测。结束的对局先重置模拟器和对应记忆，再统一编码一次局部观测、特权观测与动作mask，避免每次有对局结束就重复编码整个batch。timeout快照包含当时的历史、记忆和路径特征，历史推进及局部重置不修改已经交给rollout的张量。`GeneralsTask.step()`默认仍提供完整终局观测；只有桥接层显式使用`capture_all_terminals=False`，此时终局字段仅timeout行有效，没有timeout时桥接层复用下一步观测作为占位。奖励、时限与bootstrap语义不变。
+训练桥接层仅在`bootstrap`模式为timeout行保存重置前快照；`terminal_draw`模式无需此快照。结束的对局先重置模拟器和对应记忆，再统一编码一次局部观测、特权观测与动作mask，避免每次有对局结束就重复编码整个batch。timeout快照包含当时的历史、记忆和路径特征，历史推进及局部重置不修改已经交给rollout的张量。`GeneralsTask.step()`默认仍提供完整终局观测；只有桥接层显式使用`capture_all_terminals=False`，此时终局字段仅需bootstrap的timeout行有效；无需快照时复用下一步观测作为占位，PPO不读取该占位计算终局价值。
 
 CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保留异常检查；结束行索引在step内计算一次，供episode指标和reset复用。桥接层将是否存在bootstrap快照作为Python元数据交给PPO，避免无timeout时再次从GPU读取布尔值。异步断言失败会终止CUDA执行，不能依赖捕获该异常后继续使用同一CUDA上下文。
 
@@ -39,7 +39,7 @@ CUDA动作范围、mask和模拟器状态检查使用设备异步断言，CPU保
 
 存储实现与MDP表示分别配置。旧标准存储验证见[历史去重](history_storage_20261103.md)和[位打包](packed_storage_20261103.md)。
 
-实验开关`runner.algorithm.pair_minibatches`按同局、同tick成对打乱两座样本，所有玩家样本仍各使用一次；逻辑批与物理批均须容纳完整双座，暂不与advantage筛选组合。`task.time_limit_mode`默认`bootstrap`；可选`terminal_draw`在时限处接零后续价值，并令potential吸收。Task的`terminated/truncated`仍记录模拟器自然终局／时限原因，训练桥接层独立决定是否bootstrap；两种模式都切断reset处的GAE，rollout边界仍bootstrap，最后一tick自然胜负优先。
+实验开关`runner.algorithm.pair_minibatches`默认关闭；开启后按同局、同tick成对打乱两座样本，所有玩家样本仍各使用一次；逻辑批与物理批均须容纳完整双座，暂不与advantage筛选组合。包内默认配方显式设置`task.time_limit_mode="terminal_draw"`，在时限处接零后续价值，并令potential吸收；旧完整配置缺少该字段时，底层`TaskConfig`保留`bootstrap`默认值以兼容历史训练与恢复。Task的`terminated/truncated`仍记录模拟器自然终局／时限原因，训练桥接层独立决定是否bootstrap；两种模式都切断reset处的GAE，rollout边界仍bootstrap，最后一tick自然胜负优先。
 
 ## Actor与critic
 

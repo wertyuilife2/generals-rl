@@ -23,16 +23,16 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 
 ## 默认配置
 
-采用2026-11-10路径消融的 `v32_9x9_temporal_hl128_paths`，见[配置](../doc/terrain_distance_20261110.md)及[结果](../doc/terrain_distance_20261110_results.md)。这是训练配方；新run从头初始化，不自动加载该实验的权重。
+采用2026-11-10路径消融的 **v32＋超时终止**，run ID为 `v32_9x9_temporal_hl128_paths_terminal`：沿用v32固定地图池和非配对PPO采样，2048 tick到时记平局0、不bootstrap，D4和联合critic关闭。保留原生地图生成、缓存和观测构建优化。历史v32的[配置](../doc/terrain_distance_20261110.md)及[结果](../doc/terrain_distance_20261110_results.md)采用超时bootstrap；本组合未新增完整训练或胜率评测。新run从头初始化，不自动加载历史权重。
 
 | 项目 | 默认值 |
 |---|---|
 | 地图 | 固定9×9尺寸、随机地图，5级易图→官方图课程；每层图池65536张 |
-| Episode | 训练与评估均为 **2048 tick**，对9×9及全尺寸一致 |
+| Episode | 训练与评估均为 **2048 tick**，到时按平局0终止、后续价值为0；最后一tick自然胜负优先，对9×9及全尺寸一致 |
 | 地图生成／时间特征 | 初始池磁盘缓存、2个CPU生成worker，固定池不更新；clock尺度2048、记忆age尺度2000，与episode上限分开配置 |
 | 输入／网络 | `temporal_paths` H8/K14、40通道；ViT1M、`early_shared`、特权critic、patch1、分次前向/反向 |
 | 采样 | 每卡2048个真实对局、4096条玩家轨迹；T512 |
-| 更新 | E1/M256；每卡逻辑batch8192、物理batch8192；推理chunk2048 |
+| 更新 | E1/M256；每卡逻辑batch8192、物理batch8192；推理chunk2048；关闭双座配对采样 |
 | 预算 | 224轮PPO；八卡合计3,758,096,384条玩家transition |
 | 训练对手 | live current；双方轨迹均用于PPO |
 | 学习率 | categorical adaptive LR，范围 `[1e-5, 1e-3]`，desired KL=.01 |
@@ -56,6 +56,8 @@ RSL 使用本仓库源码。GPU 环境需要 `nvcc`；可用 `GENERALS_NVCC=/pat
 ## 配置覆盖与恢复
 
 `--config FILE.json` 接受完整训练配方或稀疏覆盖。包含 `task`、`runner.num_steps_per_env` 以及 policy／algorithm 类名的完整配方独立加载，避免混入新默认的 AMP、学习率或课程设置。稀疏配置覆盖包内默认；同一 policy class 递归合并，更换 `runner.policy.class_name` 时替换整个 policy 子树。若需要清除同 class 的旧字段，使用 `--replace-policy` 并提供完整 `runner.policy`。
+
+新默认显式设置 `task.time_limit_mode="terminal_draw"`。旧完整配置和恢复配置缺少该字段时仍按历史 `bootstrap` 语义解析；可显式选择任一模式。rollout在未结束的对局中截断时仍正常bootstrap。
 
 [`v32.json`](configs/v32.json) 与 [`v32-opt.json`](configs/v32-opt.json) 是已迁移到当前配置字段的 LightCNN 对照，需显式选择：
 
