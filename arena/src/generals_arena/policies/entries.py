@@ -119,12 +119,17 @@ def verify_artifacts(entrant):
 
 def load_controller(entrant, rules):
     """Load one factory and check the shared controller and rules protocol."""
-    verify_artifacts(entrant)
+    kwargs = dict(entrant["factory_kwargs"])
+    if entrant["kind"] == "cpp":
+        # The native loader verifies the exact bytes it subsequently extracts.
+        kwargs["expected_sha256"] = entrant["artifact_sha256"]["bundle"]
+    else:
+        verify_artifacts(entrant)
     module, name = entrant["factory"].split(":")
     factory = getattr(import_module(module), name, None)
     if not callable(factory):
         raise ValueError(f"controller factory is not callable: {entrant['factory']}")
-    controller = factory(player_id=0, seed=0, **entrant["factory_kwargs"])
+    controller = factory(player_id=0, seed=0, **kwargs)
     try:
         if not isinstance(controller, Controller) or not all(
                 callable(getattr(controller, method, None)) for method in ("reset", "act", "on_result")):
@@ -132,7 +137,6 @@ def load_controller(entrant, rules):
         validate = getattr(controller, "validate_rules", None)
         if validate is not None:
             validate(rules.map, rules.visibility)
-        verify_artifacts(entrant)
         return controller
     except BaseException:
         close = getattr(controller, 'close', None)

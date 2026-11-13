@@ -98,3 +98,59 @@ def test_native_cache_recovers_from_complete_and_partial_eviction(tmp_path):
     assert (native._unpack(bundle, expected)/'params.json').read_text() == '{}'
     shutil.rmtree(root)
     assert (native._unpack(bundle, expected)/'policy.so').read_bytes() == library
+
+
+def test_registered_native_load_reads_bundle_once_and_rejects_changes(tmp_path, monkeypatch):
+    from pathlib import Path
+    import pytest
+    from generals_arena.policies.entries import prepare_entrant, load_controller
+    from generals_arena.matches.config import MatchConfig
+
+    bundle = tmp_path/'policy.zip'
+    native.build_bundle(Path(__file__).resolve().parents[1]/'examples/cpp_wait', bundle)
+    entry = prepare_entrant(dict(name='wait', kind='cpp', bundle=str(bundle)))
+    original = Path.open
+    reads = []
+
+    def counted_open(path, *args, **kwargs):
+        if path == bundle and (not args or 'r' in args[0]):
+            reads.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', counted_open)
+    controller = load_controller(entry, MatchConfig())
+    try:
+        assert len(reads) == 1
+        controller.reset_batch([0, 1], [1, 2])
+        controller.reset_batch([1, 0], [3, 4])
+        assert len(reads) == 1
+    finally:
+        controller.close()
+    with original(bundle, 'ab') as stream:
+        stream.write(b'changed')
+    with pytest.raises(ValueError, match='policy bundle changed'):
+        load_controller(entry, MatchConfig())
+
+
+def test_unpack_extracts_verified_snapshot(tmp_path, monkeypatch):
+    from pathlib import Path
+    from generals_arena.util import file_digest
+
+    bundle = tmp_path/'policy.zip'
+    native.build_bundle(Path(__file__).resolve().parents[1]/'examples/cpp_wait', bundle)
+    expected = file_digest(bundle)
+    cache = tmp_path/'cache'
+    cache.mkdir()
+    monkeypatch.setattr(native, '_private_cache', lambda: cache)
+    metadata = native._bundle_metadata
+
+    def replace_after_read(archive):
+        result = metadata(archive)
+        bundle.write_bytes(b'replaced after snapshot')
+        return result
+
+    monkeypatch.setattr(native, '_bundle_metadata', replace_after_read)
+    root = native._unpack(bundle, expected)
+    assert root.name == expected
+    assert (root/'policy.so').is_file()
+    assert (root/'params.json').read_text() == '{}'

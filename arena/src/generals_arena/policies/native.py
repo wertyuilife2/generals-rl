@@ -171,7 +171,11 @@ def build_bundle(directory, destination, parameters=None, *, snapshot=None):
 
 def bundle_info(bundle):
     with ZipFile(bundle) as archive:
-        metadata = json.loads(archive.read('manifest.json'))
+        return _bundle_metadata(archive)
+
+
+def _bundle_metadata(archive):
+    metadata = json.loads(archive.read('manifest.json'))
     if metadata.get('protocol') != PROTOCOL or metadata.get('decision_limit_ns') != DECISION_NS:
         raise ValueError('unsupported C++ policy protocol or decision limit')
     if metadata['platform'] != [platform.system(), platform.machine()]:
@@ -179,13 +183,18 @@ def bundle_info(bundle):
     return metadata
 
 
-def _unpack(bundle, expected):
+def _unpack(bundle, expected=None):
     # The OS may purge its temporary directory while a long-running Arena
     # process is still alive.  Re-check the extracted artifact on every new
     # controller instead of caching a Path that may no longer exist.
-    if file_digest(bundle) != expected:
+    # Hash, inspect and extract the same snapshot, reading the bundle once.
+    payload = Path(bundle).read_bytes()
+    actual = sha256(payload).hexdigest()
+    if expected is not None and actual != expected:
         raise ValueError('policy bundle changed')
-    metadata = bundle_info(bundle)
+    expected = actual
+    with ZipFile(io.BytesIO(payload)) as archive:
+        metadata = _bundle_metadata(archive)
     parent = _private_cache()
     target = parent/expected
 
@@ -210,7 +219,7 @@ def _unpack(bundle, expected):
         with tempfile.TemporaryDirectory(dir=target.parent) as temporary:
             root = Path(temporary)/'artifact'
             root.mkdir(mode=0o700)
-            with ZipFile(bundle) as archive:
+            with ZipFile(io.BytesIO(payload)) as archive:
                 names = archive.namelist()
                 if len(names) != len(set(names)) or sum(i.file_size for i in archive.infolist()) > 100*1024*1024:
                     raise ValueError('invalid or oversized policy bundle')
@@ -284,11 +293,11 @@ class NativeController:
     """Direct C ABI call. All policies and the env CPU engine share one match process."""
     batch_device = 'cpu'
     requires_isolation = True
-    def __init__(self, *, bundle, player_id=0, seed=0, _source=None):
+    def __init__(self, *, bundle, player_id=0, seed=0, expected_sha256=None, _source=None):
         if _source is None:
             self.bundle = str(Path(bundle).resolve())
-            self.bundle_sha256 = file_digest(self.bundle)
-            self.root = _unpack(self.bundle, self.bundle_sha256)
+            self.root = _unpack(self.bundle, expected_sha256)
+            self.bundle_sha256 = self.root.name
             self._params = (self.root/'params.json').read_bytes()
         else:
             self.bundle, self.bundle_sha256, self.root, self._params = (
@@ -446,5 +455,5 @@ class NativeController:
             self.__dict__.pop(name, None)
 
 
-def create_controller(*, bundle, player_id, seed):
-    return NativeController(bundle=bundle, player_id=player_id, seed=seed)
+def create_controller(*, bundle, player_id, seed, expected_sha256=None):
+    return NativeController(bundle=bundle, player_id=player_id, seed=seed, expected_sha256=expected_sha256)
