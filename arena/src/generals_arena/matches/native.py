@@ -28,6 +28,14 @@ class _Status(C.Structure):
         (name, C.c_double) for name in ('observation', 'policy', 'step', 'bookkeeping')]
 
 
+class _Result(C.Structure):
+    _fields_ = [(name, C.c_int64) for name in ('ticks', 'winner', 'reason')] + [
+        (name, C.c_int64 * count) for name, count in (
+            ('eliminations', 8), ('invalid', 8), ('alive', 8), ('stats', 24),
+            ('kills', 8), ('death_order', 8), ('placements_twice', 8))] + [
+        ('initial_digest', C.c_char * 65), ('final_digest', C.c_char * 65)]
+
+
 @lru_cache(maxsize=1)
 def _library():
     from generals.backends._build import build_shared
@@ -41,6 +49,8 @@ def _library():
     lib.arena_loop_events.argtypes = [C.c_void_p, C.c_void_p, C.c_int]
     lib.arena_loop_restore.argtypes = [C.c_void_p, C.c_void_p, C.c_int64, C.c_int, C.c_int, C.POINTER(_Status)]
     lib.arena_loop_query.argtypes, lib.arena_loop_query.restype = [C.c_void_p, C.c_int, C.c_int, C.c_int], C.c_char_p
+    lib.arena_loop_result.argtypes = [C.c_void_p, C.c_int, C.POINTER(_Result)]
+    lib.arena_loop_result.restype = C.c_int
     return lib
 
 
@@ -66,6 +76,7 @@ class NativeLoop:
             (v['decision_timeout_ms'] or 0) * 1_000_000] for v in self.limits], dtype=np.int64)
         self.ending = np.zeros(b, bool)
         self.status = _Status()
+        self._result = _Result()
         policies = (PolicyABI * p)(*[binding.abi for binding in bindings])
         log = _Journal()
         self.metrics = journal.all_records if journal is not None else np.zeros((b, 8, 8), np.int64)
@@ -140,10 +151,23 @@ class NativeLoop:
         return data
 
     def query(self, kind, lane=0, seat=-1):
-        value = json.loads(self.query_bytes(kind, lane, seat))
-        if kind == 0:
-            value['decision_limits'] = [self.limits[g] for g in np.argsort(self.seats[:, lane])]
-        return value
+        if kind != 0:
+            return json.loads(self.query_bytes(kind, lane, seat))
+        self._require_open()
+        result = self._result
+        if self.lib.arena_loop_result(self.handle, lane, C.byref(result)):
+            raise RuntimeError(self.lib.arena_loop_error().decode())
+        p = self.env.players
+        stats = result.stats[:p*3]
+        return dict(ticks=result.ticks, winner_seat=None if result.winner < 0 else result.winner,
+            reason=('ongoing', 'capture', 'surrender', 'game_limit', 'idle_limit', 'afk', 'tick_limit')[result.reason],
+            elimination_ticks=[None if v < 0 else v for v in result.eliminations[:p]],
+            invalid_actions=result.invalid[:p], final_alive=[bool(v) for v in result.alive[:p]],
+            initial_digest=result.initial_digest.decode(), final_digest=result.final_digest.decode(),
+            final_stats=dict(army=stats[::3], territory=stats[1::3], cities=stats[2::3]),
+            kills=result.kills[:p], death_order=result.death_order[:p],
+            placements=[v // 2 if v % 2 == 0 else v / 2 for v in result.placements_twice[:p]],
+            decision_limits=[self.limits[g] for g in np.argsort(self.seats[:, lane])])
 
     def decision_timing(self, lane=0):
         from generals_arena.policies.native import metrics

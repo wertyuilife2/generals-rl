@@ -52,7 +52,7 @@ def test_noncontiguous_observations_are_copied_without_modification():
         np.testing.assert_array_equal(changes[key], getattr(obs, key))
 
 
-@pytest.mark.parametrize('kind', ['aggressive', 'expansion', 'defensive'])
+@pytest.mark.parametrize('kind', ['aggressive', 'expansion', 'defensive', 'random'])
 @pytest.mark.parametrize('source_limit', [0, 1, 12])
 def test_planner_scratch_storage_survives_map_size_changes(kind, source_limit):
     reused = create_controller(kind, seed=31)

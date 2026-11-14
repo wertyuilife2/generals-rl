@@ -50,6 +50,8 @@ static bool better(const Candidate &a, const Candidate &b) {
 static wide movable(wide army, bool half) { return std::max<wide>(0,half ? army/2 : army-1); }
 static i64 encode(int source, int direction, bool half) { return 1+i64(source)*8+direction*2+half; }
 static int choose(Random &rng, const double *scores, int count, double temperature, double *probabilities) {
+    // A forced choice still consumes the original random draw.
+    if(count==1) { rng.uniform(); return 0; }
     double maximum=*std::max_element(scores,scores+count), sum=0;
     for(int i=0;i<count;++i) {
         double weight=std::exp(std::max(-700.,std::min(0.,(scores[i]-maximum)/std::max(temperature,1e-6))));
@@ -68,17 +70,19 @@ class Policy {
 public:
     int kind, pid, h=0, w=0, n=0, search_attempts=0, strategy=MERGE;
     i64 path_tick=0, pending=0;
-    std::vector<int> terrain, structure, owner, path;
+    std::vector<int> terrain, structure, owner, path, route;
     std::vector<i64> army, seen;
     std::vector<std::array<int,4>> graph;
     // Per-seat scratch storage retains capacity across decisions.
     std::vector<int> owned,sources,attacks,cities,frontiers,cellX,cellY,searchParent,searchQueue;
     std::vector<i64> threats;
     std::vector<double> sourceScores,sourceProbabilities,friendlyValue;
-    std::vector<std::uint8_t> explorable;
+    std::vector<std::uint8_t> explorable, unknownNeighbors;
     std::vector<Candidate> choices;
     Policy(int k,int p):kind(k),pid(p) {}
+    template<bool CollectSources=false>
     void remember(const Observation &o,const Options &options) {
+        if constexpr(CollectSources)sources.clear();
         if(h!=o.height || w!=o.width) {
             h=o.height; w=o.width; n=h*w;
             terrain.assign(n,UNKNOWN); structure.assign(n,UNKNOWN); owner.assign(n,UNKNOWN_OWNER);
@@ -90,6 +94,7 @@ public:
             }
         }
         for(int c=0;c<n;++c) {
+            if constexpr(CollectSources)if(o.owner[c]==pid && o.army[c]>1)sources.push_back(c);
             if(o.visible[c]) {
                 terrain[c]=o.terrain[c]; structure[c]=o.structure[c]; owner[c]=o.owner[c];
                 army[c]=o.army[c]; seen[c]=o.tick;
@@ -156,6 +161,7 @@ public:
             expansionCount+=explorable[c];
         }
         if(sources.empty()) return choices;
+        unknownNeighbors.assign(n,255);
         auto source_score=[&](int c){return double(o.army[c])*(1.+.25*(frontiers[c]!=0));};
         int sourceCount=std::min<int>(sources.size(),options.max_sources);
         std::partial_sort(sources.begin(),sources.begin()+sourceCount,sources.end(),[&](int a,int b){double x=source_score(a),y=source_score(b); return x>y || (x==y && a<b);});
@@ -193,7 +199,7 @@ public:
                         add({source,target,s,value});
                     }
                 } else if(s==EXPLORE || s==EXPAND) {
-                    std::array<int,16> nearest;
+                    std::array<int,16> nearest, nearestDistance;
                     int count=std::min(16,expansionCount),found=0;
                     int horizontalReach=std::max(sx,w-1-sx);
                     // Manhattan rings ordered by row, then column give exactly
@@ -205,13 +211,17 @@ public:
                             // outside the map, including very narrow maps.
                             if(dx>horizontalReach) { y=sy+d-horizontalReach-1; continue; }
                             int left=sx-dx,right=sx+dx,row=y*w;
-                            if(left>=0 && explorable[row+left]) nearest[found++]=row+left;
-                            if(found<count && dx>0 && right<w && explorable[row+right]) nearest[found++]=row+right;
+                            if(left>=0 && explorable[row+left]) {nearestDistance[found]=d;nearest[found++]=row+left;}
+                            if(found<count && dx>0 && right<w && explorable[row+right]) {nearestDistance[found]=d;nearest[found++]=row+right;}
                         }
                     }
                     for(int j=0;j<count;++j) {
-                        int target=nearest[j],d=distance(target); if(d>=o.army[source]) continue;
-                        int unknown=0; for(int neighbor:graph[target]) if(neighbor>=0 && terrain[neighbor]==UNKNOWN) ++unknown;
+                        int target=nearest[j],d=nearestDistance[j]; if(d>=o.army[source]) continue;
+                        int unknown=unknownNeighbors[target];
+                        if(unknown==255) {
+                            unknown=0;for(int neighbor:graph[target])if(neighbor>=0 && terrain[neighbor]==UNKNOWN)++unknown;
+                            unknownNeighbors[target]=unknown;
+                        }
                         add({source,target,s,(5.+.4*unknown)/(d+1)});
                     }
                 } else {
@@ -228,58 +238,91 @@ public:
         }
         return choices;
     }
-    std::vector<int> plan(const Candidate &candidate,const Observation &o) {
+    bool plan(const Candidate &candidate,const Observation &o) {
         ++search_attempts;
         const i64 limit=o.army[candidate.source]-1;
         auto blocked=[&](int c) {
             return terrain[c]==MOUNTAIN ||
                 (owner[c]!=pid && owner[c]!=EMPTY && owner[c]!=UNKNOWN_OWNER && army[c]>=limit);
         };
-        if(blocked(candidate.source) || blocked(candidate.target)) return {};
+        if(blocked(candidate.source) || blocked(candidate.target)) return false;
         searchParent.assign(n,-1); searchQueue.clear(); searchQueue.reserve(n);
         auto &parent=searchParent; auto &queue=searchQueue;
         parent[candidate.source]=candidate.source; queue.push_back(candidate.source);
-        for(std::size_t head=0;head<queue.size();++head) {
-            int cell=queue[head]; if(cell==candidate.target) break;
-            for(int next:graph[cell]) if(next>=0 && parent[next]<0 && !blocked(next)) { parent[next]=cell; queue.push_back(next); }
+        // The first discovery fixes the same parent chain as dequeueing the
+        // target, without exploring the rest of its breadth-first frontier.
+        for(std::size_t head=0;head<queue.size() && parent[candidate.target]<0;++head) {
+            int cell=queue[head];
+            for(int next:graph[cell]) if(next>=0 && parent[next]==-1) {
+                if(blocked(next)) {parent[next]=-2;continue;}
+                parent[next]=cell;queue.push_back(next);
+            }
         }
-        if(parent[candidate.target]<0) return {};
-        std::vector<int> route{candidate.target};
+        if(parent[candidate.target]<0) return false;
+        route.clear();route.push_back(candidate.target);
         while(route.back()!=candidate.source) route.push_back(parent[route.back()]);
         std::reverse(route.begin(),route.end());
-        if(route.size()<2) return {};
+        if(route.size()<2) return false;
         wide strength=o.army[candidate.source];
         for(std::size_t i=1;i<route.size();++i) {
             int source=route[i-1],target=route[i];
             strength=movable(strength,half(candidate.strategy,source,target,o));
             if(owner[target]==pid) strength+=std::max<i64>(0,o.army[target]);
             else strength-=std::max<i64>(0,army[target]);
-            if(strength<=0) return {};
+            if(strength<=0) return false;
         }
-        return route;
+        return true;
     }
     i64 random_action(const Observation &o,Random &rng) {
-        std::vector<int> sources;
-        for(int c=0;c<n;++c) if(o.owner[c]==pid && o.army[c]>1) sources.push_back(c);
-        for(int i=int(sources.size())-1;i>0;--i) std::swap(sources[i],sources[rng.interval(i)]);
+        // NumPy callbacks mutate only RNG state; keep observation and callback
+        // addresses local across these opaque calls.
+        void *const state=rng.state;
+        const auto next32=rng.next32;
+        const auto uniform=rng.next_double;
+        const auto *const armies=o.army;
+        const auto *const owners=o.owner;
+        const auto *const structures=o.structure;
+        const auto *const neighbors=graph.data();
+        const auto *const terrains=terrain.data();
+        const int player=pid;
+        auto *const shuffled=sources.data();
+        const int count=int(sources.size());
+        // Descending Fisher-Yates bounds share a rejection mask until the next
+        // power of two. Keep exactly the same draws as Random::interval.
+        std::uint32_t mask=count>1?std::uint32_t(count-1):0;
+        mask|=mask>>1; mask|=mask>>2; mask|=mask>>4; mask|=mask>>8; mask|=mask>>16;
+        for(int i=count-1;i>0;--i) {
+            if(std::uint32_t(i)<=(mask>>1)) mask>>=1;
+            std::uint32_t index;
+            do { index=next32(state)&mask; } while(index>std::uint32_t(i));
+            std::swap(shuffled[i],shuffled[index]);
+        }
         double best=-std::numeric_limits<double>::infinity(); i64 action=0;
-        for(int source:sources) for(int direction=0;direction<4;++direction) {
-            int target=graph[source][direction]; if(target<0 || terrain[target]==MOUNTAIN) continue;
-            bool mode=o.army[source]>6 && rng.uniform()<.3;
-            wide moved=movable(o.army[source],mode);
-            double score=rng.uniform()*5.;
-            bool hostile=o.owner[target]!=pid && o.owner[target]!=EMPTY;
-            score+=o.owner[target]==EMPTY?2.:hostile?(moved>o.army[target]?1.5:-3.):o.army[target]>o.army[source]?.5:0.;
-            score+=(hostile && o.structure[target]==GENERAL && moved>o.army[target])*4.;
-            if(score>best) { best=score; action=encode(source,direction,mode); }
+        for(int i=0;i<count;++i) {
+            const int source=shuffled[i];
+            const i64 sourceArmy=armies[source],full=sourceArmy-1,halfArmy=sourceArmy/2;
+            const auto adjacent=neighbors[source];
+            for(int direction=0;direction<4;++direction) {
+                int target=adjacent[direction]; if(target<0 || terrains[target]==MOUNTAIN) continue;
+                const int targetOwner=owners[target];
+                const i64 targetArmy=armies[target];
+                const bool hostile=targetOwner!=player && targetOwner!=EMPTY;
+                const bool general=structures[target]==GENERAL;
+                bool mode=sourceArmy>6 && uniform(state)<.3;
+                i64 moved=mode?halfArmy:full;
+                double score=uniform(state)*5.;
+                score+=targetOwner==EMPTY?2.:hostile?(moved>targetArmy?1.5:-3.):targetArmy>sourceArmy?.5:0.;
+                score+=(hostile && general && moved>targetArmy)*4.;
+                if(score>best) { best=score; action=encode(source,direction,mode); }
+            }
         }
         return action;
     }
     i64 act(const Observation &o,const Options &options,Random &rng) {
         pending=0; search_attempts=0;
         if(o.player!=pid || o.terminated || !o.alive[pid]) { if(kind!=3) path.clear(); return 0; }
+        if(kind==3) {remember<true>(o,options);return random_action(o,rng);}
         remember(o,options);
-        if(kind==3) return random_action(o,rng);
         if((pending=follow(o,options))) return pending;
         auto &choices=candidates(o,options,rng);
         const std::array<std::array<int,3>,3> order={{{MERGE,EXPLORE,ATTACK},{EXPAND,CAPTURE,GATHER},{FORTIFY,GATHER,EXPAND}}};
@@ -295,8 +338,8 @@ public:
             int s=strategies[choose(rng,weights,count,options.temperature,probabilities)], best=-1;
             for(int k=0;k<int(choices.size());++k) if(choices[k].strategy==s && (best<0 || choices[k].score>choices[best].score)) best=k;
             Candidate candidate=choices[best]; choices.erase(choices.begin()+best); --remaining[s];
-            auto route=plan(candidate,o); if(route.empty()) continue;
-            path=std::move(route); strategy=s; path_tick=o.tick;
+            if(!plan(candidate,o)) continue;
+            path.swap(route); strategy=s; path_tick=o.tick;
             if((pending=follow(o,options))) return pending;
         }
         int best=-1;

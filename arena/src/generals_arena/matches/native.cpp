@@ -293,12 +293,20 @@ extern "C" int arena_loop_restore(Match *m,const I *actions,I ticks,int warm,int
         return result;
     }catch(const std::exception &e){error=e.what();return -1;}
 }
+extern "C" int arena_loop_result(Match *m,int l,record::Result *out) {
+    try {
+        if(l<0||l>=m->c.count||!out)throw std::runtime_error("invalid result binding");
+        auto &trace=m->traces[l];
+        m->lane(l).result(*out,m->c.invalid+std::size_t(l)*m->c.players,
+            m->c.eliminations+std::size_t(l)*m->c.players,trace.initial_digest,trace.topology);
+        return 0;
+    }catch(const std::exception &e){error=e.what();return -1;}
+}
 extern "C" const char *arena_loop_query(Match *m,int kind,int l,int seat) {
     try{
         if(l<0||l>=m->c.count)throw std::runtime_error("invalid lane");
         auto lane=m->lane(l);auto &trace=m->traces[l];
         switch(kind){
-        case 0:m->response=lane.result(m->c.invalid+std::size_t(l)*m->c.players,m->c.eliminations+std::size_t(l)*m->c.players,trace.initial_digest,trace.topology);break;
         case 1:m->response=trace.json(lane);break;
         case 2:m->response=lane.state();break;
         case 3:{if(seat<-1||seat>=m->c.players)throw std::runtime_error("invalid observer seat");
