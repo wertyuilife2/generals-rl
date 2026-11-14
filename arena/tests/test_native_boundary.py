@@ -58,7 +58,7 @@ def test_only_explicit_decision_phase_is_a_decision_timeout():
 
 
 @pytest.mark.parametrize('execution', ['isolated', 'batch'])
-def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(tmp_path, monkeypatch, execution):
+def test_native_match_forfeits_package_on_hard_timeout(tmp_path, monkeypatch, execution):
     from dataclasses import asdict
     from generals import MapConfig
     from generals_arena.matches.runner import MatchRunner
@@ -77,15 +77,11 @@ def test_native_match_does_not_charge_uncapped_package_against_cpp_wall_budget(t
     entries = {entry['entrant_id']: entry for entry in (native, package)}
     plan = dict(game_id='mixed', entrant_ids=list(entries), instance_ids=[0, 1],
                 controller_seeds=[2, 3], map_seed=42, map=asdict(MapConfig(25, 25, 2, .1, .05)))
-    # Twenty .6s decisions exceed the former 11.2s match budget.
     with MatchRunner(entries, max_ticks=20, execution=execution) as runner:
         results, _ = runner.run([plan])
-    assert results[0]['ticks'] == 20 and results[0]['reason'] == 'tick_limit'
     assert 'policy_error' not in results[0]
-    assert not results[0].get('forfeits')
-    timings = {row['seat']: row for row in results[0]['decision_timing']}
-    assert timings[0]['limit_ns'] == 10_000_000
-    assert timings[1]['limit_ns'] is None
-    assert timings[1]['calls'] == 20
-    assert timings[1]['max_ns'] > 10_000_000
-    assert timings[1]['timeouts'] == timings[1]['errors'] == 0
+    assert len(results[0]['forfeits']) == 1
+    event = results[0]['forfeits'][0]
+    assert event['seat'] == 1 and event['kind'] == 'timeout'
+    assert event['limit_ns'] == 50_000_000
+    assert event['hard_timeout_ns'] == 100_000_000

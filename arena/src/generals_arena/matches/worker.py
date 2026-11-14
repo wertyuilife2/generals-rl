@@ -132,7 +132,7 @@ def child_loop(connection):
                 break
             try:
                 if op in ('start','run','resume'):
-                    config = SimpleNamespace(max_ticks=request['max_ticks'], decision_limit_ms=request.get('decision_limit_ms', 10))
+                    config = SimpleNamespace(max_ticks=request['max_ticks'], decision_limit_ms=request.get('decision_limit_ms'))
                     plan = request['plan']
                     journal = Journal(request['journal'], config.max_ticks, len(plan['entrant_ids']))
                     native.DIAGNOSTICS = journal
@@ -210,7 +210,9 @@ class MatchWorker:
         self.process.start()
         child.close()
 
-    def begin(self, entries, plan, *, max_ticks, run=False, decision_limit_ms=10):
+    def begin(self, entries, plan, *, max_ticks, run=False, decision_limit_ms=None):
+        from generals_arena.policies.limits import freeze_plan
+        plan = freeze_plan(plan, entries, decision_limit_ms)
         self._start_process()
         if self.journal is not None:
             path = self.journal.path
@@ -221,25 +223,26 @@ class MatchWorker:
             "view_seats": [seat for seat,key in enumerate(plan["entrant_ids"]) if entries[key]["kind"] == "human"]}, []
         # Process supervision is uniform; native per-decision watchdogs supply
         # exact deadlines. Python/NN adapters leave the decision header idle.
-        self.bounded = False
         fd, path = tempfile.mkstemp(prefix='match-',dir=native._private_cache())
         os.close(fd)
         self.journal = Journal(path, max_ticks, len(plan['entrant_ids']), create=True)
         return self.call({'op':'run' if run else 'start', 'plan':plan,
             **self.context, 'journal':path})
 
-    def _failed(self):
+    def _failed(self, fallback=False):
         with _process_lifecycle:
             self.process.join(timeout=2)
         seat, tick, stage = map(int,self.journal.header[1:4])
         record = self.journal.records[seat] if seat >= 0 else None
-        timeout = record is not None and (record[7] == 1 or self.process.exitcode in (-signal.SIGALRM,128+signal.SIGALRM))
+        timeout = record is not None and ((fallback and stage == 2) or record[7] == 1 or self.process.exitcode in (-signal.SIGALRM,128+signal.SIGALRM))
         if record is not None and not (record[4] or record[5]):
             record[4 if timeout else 5] += 1
         elapsed = int(record[6]) if record is not None else 0
+        limits = self.plan.get('decision_limits', [{}]*len(self.plan['entrant_ids']))[seat] if seat >= 0 else {}
         details = {'kind':'timeout' if timeout else 'policy_error', 'player':seat if seat >= 0 else None,
                    'tick':tick, 'elapsed_ns':elapsed,
-                   'limit_ns':self.config.decision_limit_ms * 1_000_000 if stage==2 else 2_000_000_000,
+                   'limit_ns':limits.get('decision_budget_ms', self.config.decision_limit_ms or 10) * 1_000_000 if stage==2 else 2_000_000_000,
+                   'hard_timeout_ns':(limits.get('decision_timeout_ms') or 0)*1_000_000 or None,
                    'phase':{1:'initialization',2:'decision',3:'destruction'}.get(stage,'worker'),
                    'exitcode':self.process.exitcode}
         if decision_timeout(details):
@@ -256,32 +259,26 @@ class MatchWorker:
     def _exchange(self, request):
         try:
             self.connection.send(request)
-            # C++ watchdogs remain active in mixed matches. Opaque Python/NN
-            # policies have no decision deadline; they cannot inherit the
-            # native-only whole-match budget (including load/warmup time).
-            if self.bounded:
-                limit = 10+self.config.max_ticks*len(self.plan['entrant_ids'])*.03 if request['op'] in ('run','resume') else 10
-                ready = self.connection.poll(limit)
-            else:
-                # Also cover native library static initialization, before the
-                # C ABI watchdog is armed. Python inference leaves seat=-1.
-                phase, entered = None, monotonic()
-                while not (ready := self.connection.poll(.1 if self.stop is not None else 1)):
-                    if self.stop is not None and self.stop.is_set():
-                        with _process_lifecycle:
-                            self.process.kill()
-                            self.process.join()
-                        raise InterruptedError('match cancelled by scheduler')
-                    current = tuple(self.journal.header[1:4])
-                    if current != phase:
-                        phase, entered = current, monotonic()
-                    elif current[0] >= 0 and monotonic() - entered >= max(10, self.config.decision_limit_ms / 1000 + 2):
+            phase, entered = None, monotonic()
+            while not (ready := self.connection.poll(.1 if self.stop is not None else 1)):
+                if self.stop is not None and self.stop.is_set():
+                    with _process_lifecycle:
+                        self.process.kill()
+                        self.process.join()
+                    raise InterruptedError('match cancelled by scheduler')
+                current = tuple(self.journal.header[1:4])
+                if current != phase:
+                    phase, entered = current, monotonic()
+                elif current[0] >= 0:
+                    limits = self.plan['decision_limits'][current[0]]
+                    ceiling = max(10, (limits['decision_timeout_ms'] or limits['decision_budget_ms']) / 1000 + 2)
+                    if monotonic() - entered >= ceiling:
                         break
             if not ready:
                 with _process_lifecycle:
                     self.process.kill()
                     self.process.join()
-                return self._failed()
+                return self._failed(fallback=True)
             return self.connection.recv()
         except (EOFError,BrokenPipeError,ConnectionResetError):
             return self._failed()
@@ -317,7 +314,7 @@ class MatchWorker:
                        **self.context, 'plan':self.plan,
                        'journal':str(self.journal.path), 'forfeits':self.forfeits}
 
-    def run(self, entries, plan, *, max_ticks, stop=None, decision_limit_ms=10):
+    def run(self, entries, plan, *, max_ticks, stop=None, decision_limit_ms=None):
         self.stop = stop
         try:
             if stop is not None and stop.is_set():

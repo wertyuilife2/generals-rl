@@ -127,7 +127,7 @@ def test_native_snapshot_is_path_based_immutable_and_selectable(tmp_path):
     assert artifacts.snapshot_policy(directory, source) == first
     entry = prepare_entrant(first)
     assert artifacts.select_policy(directory, 'policy/' + first['version']) == first
-    assert artifacts.select_policy(directory, '@' + entry['name'], entries={entry['entrant_id']: entry}) == first
+    assert artifacts.select_policy(directory, '@' + entry['name'], entries={entry['entrant_id']: entry}) == {**first, 'execution': entry['execution']}
     source.write_text(source.read_text()+'\n// a new source version\n')
     assert artifacts.snapshot_policy(directory, source)['version'] != first['version']
     with Path(first['bundle']).open('ab') as stream:

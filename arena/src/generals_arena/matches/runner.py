@@ -49,7 +49,8 @@ def build_controllers(entries, plan, *, resources=None):
 def _batch_key(plan):
     """Rotation groups share instances even when their seat positions change."""
     return (json.dumps(plan["map"], sort_keys=True), tuple(plan.get('geometry', ())),
-            tuple(sorted(zip(plan["instance_ids"], plan["entrant_ids"]))))
+            tuple(sorted(zip(plan["instance_ids"], plan["entrant_ids"]))),
+            tuple(sorted(zip(plan['instance_ids'], (json.dumps(v, sort_keys=True) for v in plan.get('decision_limits', []))))))
 
 
 def resolve_geometries(plans):
@@ -83,9 +84,10 @@ def native_backend(backend, device):
 class MatchRunner:
     def __init__(self, entries, *, max_ticks, backend="cpu", device="cpu", batch_size=128,
                  cpu_threads=1, record_replays=False, scalar=False, execution="batch",
-                 worker=None, decision_limit_ms=10):
+                 worker=None, decision_limit_ms=None):
         integer("max_ticks", max_ticks, 1)
-        integer("decision_limit_ms", decision_limit_ms, 1)
+        if decision_limit_ms is not None:
+            integer("decision_limit_ms", decision_limit_ms, 1)
         integer("batch_size", batch_size)
         integer("cpu_threads", cpu_threads, 1)
         device = str(device)
@@ -169,7 +171,8 @@ class MatchRunner:
         Stopping leaves the un-emitted suffix untouched. Every native policy
         uses the same worker and per-decision watchdog boundary.
         """
-        plans = resolve_geometries(plans)
+        from generals_arena.policies.limits import freeze_plan
+        plans = resolve_geometries([freeze_plan(p, self.entries, self.decision_limit_ms) for p in plans])
         self._validate(plans)
         results, timing = [], {}
         ready = {}

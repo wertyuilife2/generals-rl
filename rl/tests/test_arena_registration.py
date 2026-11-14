@@ -42,7 +42,7 @@ def test_local_commit_is_immutable_resumable_and_selectable(submission, monkeypa
     assert all(Path(path).is_relative_to(league.directory) for path in entry['artifact_paths'].values())
     profile = report['policy_packages'][entry['entrant_id']]
     assert profile['manifest']['name'] == 'test-ViT-3'
-    assert profile['decision_deadline'] is None
+    assert profile['execution'] == dict(decision_budget_ms=50, decision_timeout_ms=100)
     assert submissions.commit(bundle,
                            league=league.directory, workers=1) == report
     with pytest.raises(ValueError, match='alias'):

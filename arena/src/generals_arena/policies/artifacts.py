@@ -214,6 +214,12 @@ def create_controller(*, bundle, device='cpu', player_id=0, seed=0):
                    device=device, player_id=player_id, seed=seed)
 
 
+def _registered_execution(spec, entries):
+    entry = next((entry for entry in (entries or {}).values()
+                  if entry['kind'] == spec['kind'] and entry['version'] == spec['version']), None)
+    return {**spec, 'execution': entry.get('execution', {})} if entry else spec
+
+
 def _resolve_policy(directory, version, *, device=None, entries=None):
     if not re.fullmatch('[a-f0-9]{64}', version):
         raise ValueError('policy/ requires a full version hash from a run or commit report')
@@ -222,12 +228,12 @@ def _resolve_policy(directory, version, *, device=None, entries=None):
         entry = next((entry for entry in (entries or {}).values()
                       if entry['kind'] == 'package' and entry['version'] == version), None)
         placement = device or (entry['factory_kwargs']['device'] if entry else 'cpu')
-        return {**resolve_bundle(directory, version, device=placement), 'name': f'package-{version[:16]}'}
+        return _registered_execution({**resolve_bundle(directory, version, device=placement), 'name': f'package-{version[:16]}'}, entries)
     metadata = json.loads((path / 'build.json').read_text())
     bundle = path / 'policy.zip'
     if metadata['version'] != version or file_digest(bundle) != metadata['bundle_sha256']:
         raise ValueError('archived policy artifact changed')
-    return {'name': f'cpp-{version[:16]}', 'kind': 'cpp', 'version': version, 'bundle': str(bundle)}
+    return _registered_execution({'name': f'cpp-{version[:16]}', 'kind': 'cpp', 'version': version, 'bundle': str(bundle)}, entries)
 
 
 def snapshot_policy(directory, source, parameters=None):
@@ -279,19 +285,22 @@ def select_policy(directory, value, parameters=None, device=None, entries=None):
             raise ValueError('@name must identify a registered native or packaged policy')
         if entry['name'] == 'WAIT' and entry['kind'] == 'custom' and entry['factory'] == wait_spec()['factory']:
             verify_artifacts(entry)
-            return wait_spec()
+            return {**wait_spec(), 'execution': entry.get('execution', {})}
+        if entry['kind'] == 'baseline':
+            return {'name': entry['name'], 'kind': 'baseline', 'policy': entry['factory_kwargs']['kind'],
+                    'execution': entry.get('execution', {})}
         if entry['kind'] not in ('cpp', 'package'):
             raise ValueError('@name must identify a registered native or packaged policy')
         verify_artifacts(entry)
         if entry['kind'] == 'package':
             return {'name': f'package-{entry["version"][:16]}', 'kind': 'package',
                     'version': entry['version'], 'bundle': entry['factory_kwargs']['bundle'],
-                    'device': device or entry['factory_kwargs']['device']}
+                    'device': device or entry['factory_kwargs']['device'], 'execution': entry.get('execution', {})}
         return {'name': f'cpp-{entry["version"][:16]}', 'kind': 'cpp',
-                'version': entry['version'], 'bundle': entry['artifact_paths']['bundle']}
+                'version': entry['version'], 'bundle': entry['artifact_paths']['bundle'], 'execution': entry.get('execution', {})}
     if (Path(value) / 'manifest.json').is_file():
         if parameters is not None:
             raise ValueError('--params applies to native policies')
         spec = snapshot_bundle(directory, value, device=device or 'cpu')
-        return {**spec, 'name': f'package-{spec["version"][:16]}'}
-    return snapshot_policy(directory, value, parameters)
+        return _registered_execution({**spec, 'name': f'package-{spec["version"][:16]}'}, entries)
+    return _registered_execution(snapshot_policy(directory, value, parameters), entries)

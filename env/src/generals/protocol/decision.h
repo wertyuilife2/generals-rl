@@ -47,31 +47,42 @@ static void install() {
 class Guard {
     sigset_t blocked, oldmask;
     std::int64_t limit;
+    bool armed;
 public:
-    Guard(Metrics *m, std::int64_t ns, bool act, std::int64_t current_tick=0, bool prepared=false):limit(ns) {
-        sigemptyset(&blocked); sigaddset(&blocked,SIGALRM);
-        sigprocmask(SIG_BLOCK,&blocked,&oldmask);
-        if(!prepared) {
-            struct sigaction current{};sigaction(SIGALRM,nullptr,&current);
-            if(current.sa_handler!=failed)install();
+    Guard(Metrics *m, std::int64_t ns, bool act, std::int64_t current_tick=0, bool prepared=false, std::int64_t hard_ns=-1):limit(ns),armed(hard_ns!=0) {
+        if(hard_ns<0)hard_ns=ns;
+        if(armed) {
+            sigemptyset(&blocked); sigaddset(&blocked,SIGALRM);
+            sigprocmask(SIG_BLOCK,&blocked,&oldmask);
+            if(!prepared) {
+                struct sigaction current{};sigaction(SIGALRM,nullptr,&current);
+                if(current.sa_handler!=failed)install();
+            }
         }
         active=m; decision=act; tick=current_tick; m->status=0;
         if(act) ++m->calls;
         started=now();
-        itimerval timer{}; timer.it_value.tv_sec=ns/1000000000;
-        timer.it_value.tv_usec=(ns%1000000000)/1000;
-        setitimer(ITIMER_REAL,&timer,nullptr);
-        sigprocmask(SIG_SETMASK,&oldmask,nullptr);
+        if(armed) {
+            itimerval timer{}; timer.it_value.tv_sec=hard_ns/1000000000;
+            timer.it_value.tv_usec=(hard_ns%1000000000)/1000;
+            setitimer(ITIMER_REAL,&timer,nullptr);
+            sigprocmask(SIG_SETMASK,&oldmask,nullptr);
+            started=now();
+        }
     }
     void done(int status=0) {
         auto elapsed=now()-started;
-        sigprocmask(SIG_BLOCK,&blocked,&oldmask);
-        itimerval zero{}; setitimer(ITIMER_REAL,&zero,nullptr);
+        if(armed) {
+            sigprocmask(SIG_BLOCK,&blocked,&oldmask);
+            itimerval zero{}; setitimer(ITIMER_REAL,&zero,nullptr);
+        }
         finish(elapsed,elapsed>limit ? 1 : status);
         active=nullptr;
-        sigset_t pending; sigpending(&pending);
-        if(sigismember(&pending,SIGALRM)) { int signal; sigwait(&blocked,&signal); }
-        sigprocmask(SIG_SETMASK,&oldmask,nullptr);
+        if(armed) {
+            sigset_t pending; sigpending(&pending);
+            if(sigismember(&pending,SIGALRM)) { int signal; sigwait(&blocked,&signal); }
+            sigprocmask(SIG_SETMASK,&oldmask,nullptr);
+        }
     }
 };
 }

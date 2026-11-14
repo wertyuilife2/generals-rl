@@ -68,6 +68,7 @@ def test_batch_keys_are_computed_once_per_plan_not_per_scan(monkeypatch, in_proc
 
 
 def test_device_actions_cross_explicit_host_boundary(monkeypatch):
+    import torch  # Initialize the tensor runtime before timed policy calls.
     import numpy as np
     from generals_arena.matches.batch import _PolicyGroup, execute_batch
     from test_native_loop import schedule

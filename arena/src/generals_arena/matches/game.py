@@ -76,6 +76,8 @@ class RecordedGame:
                         controller.reset_batch([seat], [plan['controller_seeds'][seat]])
                     else:
                         controller.reset(player_id=seat, seed=plan['controller_seeds'][seat])
+                if 'decision_limits' in plan:
+                    group.entry = {'execution': plan['decision_limits'][seat]}
                 group.controller = controller
                 group.controllers = [] if group.batch else [controller]
                 self._groups.append(group)
@@ -86,7 +88,7 @@ class RecordedGame:
             self.execution = self._stack.enter_context(bind_loop(self.env, self._groups, self._joint,
                 self._invalid, self._eliminations, self._active, journal,
                 topologies=[state.layout.topology_id], record=record,
-                decision_limit_ms=getattr(config, 'decision_limit_ms', 10)))
+                decision_limit_ms=getattr(config, 'decision_limit_ms', None)))
             self.initial_digest = self.execution.query(0)['initial_digest']
             self.execution.events(self.forfeits)
             self._timing = dict(observation_seconds=0., policy_seconds=0., step_seconds=0.)

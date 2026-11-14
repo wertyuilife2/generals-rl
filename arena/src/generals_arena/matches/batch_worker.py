@@ -197,6 +197,10 @@ class BatchWorker:
 
     def _exchange(self, request, journal):
         self._start()
+        fallback = False
+        from generals_arena.policies.limits import freeze_plan
+        request = dict(request)
+        request['plans'] = [freeze_plan(p, request['entries'], request.get('decision_limit_ms')) for p in request['plans']]
         try:
             request = dict(request)
             request['initial_states'] = {key: state for key, state in request.get('initial_states', {}).items()
@@ -208,10 +212,14 @@ class BatchWorker:
                 current = (lane, *journal.headers[lane, 1:]) if lane >= 0 else (-1, -1, 0, 0)
                 if current != phase:
                     phase, entered = current, monotonic()
-                elif current[1] >= 0 and monotonic()-entered > max(10, request.get('decision_limit_ms', 10) / 1000 + 2):
-                    with _process_lifecycle:
-                        self.process.kill()
-                    break
+                elif current[1] >= 0:
+                    limits = request['plans'][lane]['decision_limits'][current[1]]
+                    ceiling = max(10, (limits['decision_timeout_ms'] or limits['decision_budget_ms']) * journal.count / 1000 + 2)
+                    if monotonic()-entered > ceiling:
+                        fallback = True
+                        with _process_lifecycle:
+                            self.process.kill()
+                        break
             if self.connection.poll():
                 response = self.connection.recv()
                 self._sent_maps = set(response.pop('maps', ()))
@@ -227,12 +235,16 @@ class BatchWorker:
         if seat < 0:
             raise RuntimeError('native batch worker exited outside a policy call')
         row = journal.all_records[lane, seat]
-        timeout = row[7] == 1 or self.process.exitcode in (-signal.SIGALRM, 128+signal.SIGALRM)
+        timeout = (fallback and stage == 2) or row[7] == 1 or self.process.exitcode in (-signal.SIGALRM, 128+signal.SIGALRM)
         if not (row[4] or row[5]):
             row[4 if timeout else 5] += 1
+        plan = request['plans'][lane]
+        from generals_arena.policies.limits import freeze_plan
+        limits = freeze_plan(plan, request['entries'], request.get('decision_limit_ms'))['decision_limits'][seat]
         details = {'kind': 'timeout' if timeout else 'policy_error', 'player': seat, 'tick': tick,
                    'elapsed_ns': int(row[6]),
-                   'limit_ns': request.get('decision_limit_ms', 10) * 1_000_000 if stage == 2 else 2_000_000_000,
+                   'limit_ns': limits['decision_budget_ms'] * 1_000_000 if stage == 2 else 2_000_000_000,
+                   'hard_timeout_ns': (limits['decision_timeout_ms'] or 0)*1_000_000 or None,
                    'phase': {1: 'initialization', 2: 'decision', 3: 'destruction'}.get(stage, 'worker'),
                    'exitcode': self.process.exitcode}
         return {'error': 'native batch policy exited', 'details': details, 'lane': lane}
@@ -260,11 +272,13 @@ class BatchWorker:
                 index, plan = pending.pop(lane)
                 recovered = journal.extract(lane, players, ticks)
                 worker = MatchWorker()
+                from generals_arena.policies.limits import freeze_plan
+                plan = freeze_plan(plan, entries, options.get('decision_limit_ms'))
                 worker.journal, worker.plan = recovered, plan
-                limit = options.get('decision_limit_ms', 10)
+                limit = options.get('decision_limit_ms')
                 worker.config = SimpleNamespace(max_ticks=ticks, decision_limit_ms=limit)
                 worker.context = {'entries': entries, 'max_ticks': ticks, 'decision_limit_ms': limit}
-                worker.forfeits, worker.bounded = [], False
+                worker.forfeits = []
                 try:
                     if native.decision_timeout(details):
                         seat = details['player']

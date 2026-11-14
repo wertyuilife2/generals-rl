@@ -9,7 +9,8 @@ import time
 
 from generals_arena.policies.entries import prepare_entrant
 from generals_arena.policies.artifacts import select_policy
-from generals_arena.policies.native import DECISION_NS, decision_timeout
+from generals_arena.policies.native import decision_timeout
+from generals_arena.policies.limits import execution_limits
 from generals_arena.matches.results import EXECUTION_POLICY
 from generals_arena.competitions.config import DEFAULT_LEAGUE
 from generals_arena.competitions.jobs import run_jobs, worker_count
@@ -25,7 +26,7 @@ def package_profiles(entries):
     return {entry['entrant_id']: {
         'policy_id': entry['version'],
         'manifest': validate_bundle(entry['factory_kwargs']['bundle'])['manifest'],
-        'device': entry['factory_kwargs']['device'], 'decision_deadline': None,
+        'device': entry['factory_kwargs']['device'], 'execution': execution_limits(entry),
     } for entry in entries if entry['kind'] == 'package'}
 
 
@@ -74,6 +75,7 @@ def summarize(store, candidate, job_id):
     entrants = store.entrants()
     total = {'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
     candidate_violations = 0
+    budgets, deadlines = set(), set()
     for row in rows:
         if not row['result']:
             continue
@@ -84,6 +86,8 @@ def summarize(store, candidate, job_id):
         for record in result.get('decision_timing', []):
             if record['entrant_id'] != candidate:
                 continue
+            budgets.add(record.get('limit_ns'))
+            deadlines.add(record.get('hard_timeout_ns'))
             for key in ('calls', 'total_ns', 'timeouts', 'errors'):
                 total[key] += record[key]
             total['max_ns'] = max(total['max_ns'], record['max_ns'])
@@ -127,7 +131,8 @@ def summarize(store, candidate, job_id):
     return {'ok': job['status'] == 'complete' and not errors and not total['errors'],
             'job': job, 'completed_games': job['done'], 'by_players': by_players,
             'macro_pair_score': sum(values)/len(values) if values else None,
-            'timing': {**total, 'limit_ns': DECISION_NS}, 'violations': errors,
+            'timing': {**total, 'limit_ns': next(iter(budgets)) if len(budgets) == 1 else None,
+                       'hard_timeout_ns': next(iter(deadlines)) if len(deadlines) == 1 else None}, 'violations': errors,
             'candidate_violations': candidate_violations,
             'forfeits': forfeits, 'historical_timeout_games': historical_timeouts,
             'league_directory': str(store.directory.resolve())}
@@ -171,7 +176,8 @@ def run_trial(official, specs, rules, descriptor, planner, progress=None, worker
             players.append({**{k: entry[k] for k in ('entrant_id', 'name', 'kind', 'version')},
                 **{k: result[k] for k in ('by_players', 'macro_pair_score', 'timing', 'candidate_violations', 'forfeits')},
                 'seats': [i for i,e in enumerate(entries) if e['entrant_id'] == entry['entrant_id']]})
-        timing = {'limit_ns': DECISION_NS, 'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
+        budgets = {player['timing']['limit_ns'] for player in players}
+        timing = {'limit_ns': next(iter(budgets)) if len(budgets) == 1 else None, 'calls': 0, 'total_ns': 0, 'max_ns': 0, 'timeouts': 0, 'errors': 0}
         for player in players:
             for key in ('calls', 'total_ns', 'timeouts', 'errors'):
                 timing[key] += player['timing'][key]
@@ -224,7 +230,7 @@ def _export(report, output):
 
 
 def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
-        output=None, parameters=None, max_ticks=None, progress=None, workers="auto", device=None):
+        output=None, parameters=None, max_ticks=None, progress=None, workers="auto", device=None, execution=None):
     workers = worker_count(workers)
     integer('games', games, 1)
     integer('seed', seed)
@@ -236,16 +242,22 @@ def run(players, *, league=DEFAULT_LEAGUE, size='auto', games=1, seed=42,
     rules = replace(official.config, player_counts=(len(players),),
                     max_ticks=official.config.max_ticks if max_ticks is None else integer('max_ticks', max_ticks, 1))
     specs = [select_policy(official.directory, value, parameters, device=device, entries=official.entrants()) for value in players]
-    for spec in specs:
+    for selector, spec in zip(players, specs):
+        if execution and selector in execution:
+            spec['execution'] = {**spec.get('execution', {}), **execution[selector]}
         if spec['kind'] == 'package':
             official.validate_entrant_rules(spec)
     entries = [prepare_entrant(spec) for spec in specs]
     _validate_package_size(entries, rules, dimensions, len(players))
     descriptor = {'mode': 'run', 'players': [e['entrant_id'] for e in entries],
+                  'decision_limits': [e['execution'] for e in entries],
                   'games': games, 'seed': seed, 'size': dimensions, 'rules': rules.manifest(),
                   'rating_policy': POLICY, 'execution_policy': EXECUTION_POLICY}
     target = _export_target(official, output, digest(descriptor))
-    report = run_trial(official, specs, rules, descriptor,
-        lambda store, identity: fixed_seats(store.config, descriptor['players'], games, seed, identity, dimensions), progress, workers)
+    def planner(store, identity):
+        for plan in fixed_seats(store.config, descriptor['players'], games, seed, identity, dimensions):
+            plan['decision_limits'] = [descriptor['decision_limits'][i] for i in plan['instance_ids']]
+            yield plan
+    report = run_trial(official, specs, rules, descriptor, planner, progress, workers)
     _export(report, target)
     return report

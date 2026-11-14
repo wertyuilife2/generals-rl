@@ -31,6 +31,7 @@ def _preflight(official, spec, progress=None, workers=1):
     opponents = [select_policy(official.directory, 'baseline/'+kind, entries=official.entrants()) for kind in BASELINES]
     entries = [prepare_entrant(item) for item in [spec, *opponents]]
     descriptor = {'mode': 'preflight', 'players': [e['entrant_id'] for e in entries],
+                  'decision_limits': [e['execution'] for e in entries],
                   'games': 8, 'seed': 8675309, 'rules': official.manifest, 'rating_policy': POLICY,
                   'execution_policy': EXECUTION_POLICY}
     return run_trial(official, [spec, *opponents], official.config, descriptor,
@@ -68,7 +69,7 @@ def publication_ratings(leaderboards, entrant_id):
 
 
 def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progress=None,
-           workers=None, device='cpu'):
+           workers=None, device='cpu', execution=None):
     """One source version has one formal job, regardless of path or alias."""
     workers = worker_count(workers)
     if name is not None:
@@ -92,6 +93,12 @@ def commit(source, *, name=None, league=DEFAULT_LEAGUE, parameters=None, progres
             if device != 'cpu':
                 raise ValueError('--device applies to packaged policies')
             spec = snapshot_policy(official.directory, source, parameters)
+    if execution:
+        from generals_arena.policies.limits import execution_limits, configure
+        spec['execution'] = execution_limits({**spec, 'execution': {**spec.get('execution', {}), **execution}})
+        for existing in official.entrants().values():
+            if existing['kind'] == spec['kind'] and existing['version'] == spec['version']:
+                configure(official, existing['entrant_id'], execution)
     version = spec['version']
     entry = prepare_entrant(spec) if packaged else None
     execution_id = (digest({key: entry[key] for key in ('factory', 'kwargs', 'implementation')})

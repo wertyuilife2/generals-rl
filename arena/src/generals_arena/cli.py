@@ -253,7 +253,7 @@ def main(argv=None):
     try:
         if args.command in ('online', 'online-account'):
             return online_command(args)
-        if args.command in ('commit', 'run', 'status'):
+        if args.command in ('commit', 'run', 'status', 'configure'):
             return submission_command(args)
         if args.command in ("tournament", "evaluate"):
             return match_mode_command(args)
@@ -274,6 +274,8 @@ def main(argv=None):
 def add_submission_commands(commands):
     submit = commands.add_parser('commit', help='snapshot a native source or policy package and run its 1000-game evaluation')
     submit.add_argument('source', type=Path, help='.cpp file, source directory, policy bundle, or @alias to resume a registered submission')
+    submit.add_argument('--decision-budget', help='decision budget in milliseconds (heuristic: 10ms, RL: 50ms)')
+    submit.add_argument('--decision-timeout', help='hard timeout in milliseconds or off (default: 100ms)')
     submit.add_argument('--name', help='immutable display alias shown on the leaderboard')
     submit.add_argument('--params', type=Path, help='JSON object of fixed policy parameters')
     submit.add_argument('--device', default='cpu', help='packaged policy device, e.g. cpu or cuda:0 (env remains CPU)')
@@ -282,6 +284,8 @@ def add_submission_commands(commands):
     play = commands.add_parser('run', help='private games between explicit seats; never updates official ratings')
     play.add_argument('--player', action='append', required=True,
                       help='baseline/KIND, source.cpp, source directory, policy/HASH, or @alias; repeat for each seat')
+    play.add_argument('--decision-budget', action='append', default=[], metavar='PLAYER=MS', help='override a --player selector decision budget')
+    play.add_argument('--decision-timeout', action='append', default=[], metavar='PLAYER=MS|off', help='override a --player selector hard timeout')
     play.add_argument('--size', default='auto', help='auto, WIDTHxHEIGHT, or MIN:MAX')
     play.add_argument('--games', type=int, default=1)
     play.add_argument('--seed', type=int, default=42)
@@ -291,6 +295,11 @@ def add_submission_commands(commands):
     play.add_argument('--output', type=Path, help='optional report and replay database export directory')
     play.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
     play.add_argument('--workers', type=worker_argument, default="auto", help='parallel games: 1–32 or auto (default: auto)')
+    configure = commands.add_parser('configure', help='change a registered AI execution limits for future matches')
+    configure.add_argument('player', help='registered name or entrant ID')
+    configure.add_argument('--decision-budget')
+    configure.add_argument('--decision-timeout')
+    configure.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
     inspect = commands.add_parser('status', help='show managed submissions, jobs, and run report paths')
     inspect.add_argument('--league', type=Path, default=DEFAULT_LEAGUE)
 
@@ -306,13 +315,33 @@ def submission_command(args):
             print(f'Arena: {done} new games completed', file=sys.stderr, flush=True)
             last_progress = now
     parameters = json.loads(args.params.read_text()) if getattr(args, 'params', None) else None
-    if args.command == 'commit':
+    from generals_arena.policies.limits import duration
+    execution = {}
+    if args.command in ('commit', 'configure'):
+        for option, key in [('decision_budget', 'decision_budget_ms'), ('decision_timeout', 'decision_timeout_ms')]:
+            value = getattr(args, option)
+            if value is not None:
+                execution[key] = duration(value, allow_off=option == 'decision_timeout')
+    if args.command == 'configure':
+        from generals_arena.competitions.store import CompetitionStore
+        from generals_arena.policies.limits import configure
+        if not execution:
+            raise ValueError('specify --decision-budget or --decision-timeout')
+        report = configure(CompetitionStore(args.league), args.player, execution)
+    elif args.command == 'commit':
         report = commit(args.source, name=args.name, league=args.league, parameters=parameters,
-                        progress=progress, workers=args.workers, device=args.device)
+                        progress=progress, workers=args.workers, device=args.device, execution=execution)
     elif args.command == 'run':
+        overrides = {}
+        for values, key in [(args.decision_budget, 'decision_budget_ms'), (args.decision_timeout, 'decision_timeout_ms')]:
+            for value in values:
+                selector, sep, limit = value.rpartition('=')
+                if not sep or selector not in args.player:
+                    raise ValueError('limit override must be PLAYER=MS and match a --player selector')
+                overrides.setdefault(selector, {})[key] = duration(limit, allow_off=key == 'decision_timeout_ms')
         report = run(args.player, league=args.league, size=args.size, games=args.games, seed=args.seed,
                      output=args.output, parameters=parameters, max_ticks=args.max_ticks,
-                     progress=progress, workers=args.workers, device=args.device)
+                     progress=progress, workers=args.workers, device=args.device, execution=overrides)
     else:
         report = status(args.league)
     print(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False))

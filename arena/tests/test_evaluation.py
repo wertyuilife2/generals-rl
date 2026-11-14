@@ -35,7 +35,7 @@ def test_batch_scalar_and_chunking_have_identical_games(tmp_path, decision_limit
     assert batch['status'] == 'completed' and not batch['errors']
     for game in batch['results'] + scalar['results'] + chunks['results']:
         for row in game['decision_timing']:
-            assert row['limit_ns'] == (None if row['seat'] == game['candidate_seat'] else decision_limit_ms * 1_000_000)
+            assert row['limit_ns'] == (50_000_000 if row['seat'] == game['candidate_seat'] else decision_limit_ms * 1_000_000)
     assert json.loads((tmp_path/'batch.json').read_text())['policy_id'] == batch['policy_id']
     maps = {}
     for game in batch['results']:

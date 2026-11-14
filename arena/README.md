@@ -9,8 +9,35 @@ Arena 接收通用策略包；神经网络的特征、动作映射及推理由�
 
 C++ 启发式使用 [统一接入接口](RESEARCH.md)：`generals-arena commit 源码 --name 别名`
 自动编译并完成 1000 局正式评测；`generals-arena run --player ... --player ...` 自由测试。
-Arena 管理源码版本、10ms 限时、评分和录像。可直接使用
+Arena 管理源码版本、决策预算、超时保护、评分和录像。可直接使用
 [60 分钟研究提示词](AUTORESEARCH_PROMPT.txt)，其中最多三次正式评测是该研究任务的约束。
+
+## 决策预算与超时保护
+
+两项配置独立生效：决策预算控制动作是否有效，硬超时控制何时中断未返回的调用。
+
+| 策略 | 默认决策预算 | 默认硬超时 |
+| --- | --- | --- |
+| 内置 baseline | 10ms | off |
+| C++ / 其他启发式（含 WAIT） | 10ms | 100ms |
+| RL 策略包 | 50ms | 100ms |
+
+例如预算 10ms、硬超时 100ms：调用在 25ms 返回时判该席位投降；持续未返回时由 100ms 定时器中断。
+`off` 关闭逐次系统定时器，返回后仍检查预算，worker 保留防卡死兜底。
+计时采用墙钟，原生策略的计时不包含定时器设置与清理；批推理按活动席位摊销，两个限制都按活动席位数扩展。
+硬超时启用时必须不小于决策预算。人类输入不受这两项限制。
+
+```bash
+# 注册时指定；不传参数使用默认值
+generals_arena commit /path/to/policy.cpp --name my-policy --decision-budget 10 --decision-timeout 100
+# 修改已注册策略，作用于之后派发的对局
+generals_arena configure my-policy --decision-budget 20 --decision-timeout off
+# 私有对战中按 --player 的完整选择器覆盖设置
+generals_arena run --player @my-policy --player baseline/random --decision-timeout @my-policy=off
+```
+
+`@名称` 继承已注册策略的设置，`run` 覆盖不修改正式登记。
+预算与硬超时随对局结果保存，修改设置保留策略身份、评分和历史记录。
 
 ## 快速开始
 
@@ -81,7 +108,7 @@ generals-arena league restore outputs/arena/main @旧策略
 baseline、WAIT、C++ SDK 都通过相同的原生席位入口执行、计时、校验动作并接受 10ms 限额，
 在同一种比赛子进程中运行。新对局均写入各席位的决策耗时，历史无计时的比赛不会补造数据。
 纯 Python/NN 策略通过通用策略适配器接收 backend 构建的观测，批推理耗时标为每个活动 lane
-的摊销时间，不施加原生策略的 10ms 限额；对局循环仍在 C++，保留 NN 批推理能力。
+的摊销时间，默认预算为 50ms；对局循环仍在 C++，保留 NN 批推理能力。
 
 恢复由 Python 调度进程重启，向原生层提交已确认的动作前缀和投降事件。C++ 重建环境及
 存活策略记忆，恢复成功不重复计入决策耗时。人类输入也作为命令进入同一执行器。
@@ -138,7 +165,7 @@ NN 策略仍可在 CUDA 上推理；env 包的 CUDA/MPS VecEnv 训练接口保�
 
 前 6 场包含其他算法的有效对局用于快速定级，全同算法对局不推进定级；该标签不是统计置信区间。
 新生成对局不启用开局 AFK 淘汰：持续 WAIT 不会因未达到扩张条件而自动出局。历史回放沿用记录中的 AFK 设置；全局闲置上限和总回合上限仍有效。
-原生策略（包括 baseline、WAIT）决策超过 10ms 时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
+策略返回的动作超过配置的决策预算时，该席位立即投降死亡，记入淘汰时间并正常计算名次和 Elo，不中断评测或取消后续参赛资格。
 按环境弃权规则停止行动，领土保留 50 tick 并继续增长、可被夺取，到期后才转中立；将军转城市。损伤领先者／最后存活者的击杀归属同样由 env 结算，Arena 不额外模拟投降规则。
 原生策略硬超时退出比赛进程后，Arena 从动作日志重建存活策略状态并继续比赛；事件与计时保存在回放中。
 初始化、析构、崩溃和非法返回值仍作为策略错误处理。
@@ -328,7 +355,7 @@ python arena/benchmarks/verify_league.py outputs/arena/main --workers 1
 四个内置 baseline 和普通策略共用 `reset_batch/act_batch/on_result_batch` 接口，2–8 人均批执行，
 接收 env 的公开观测。`kind="baseline"` 与 `baseline/名称` 保留为注册快捷方式，不决定批执行方式。
 仅提供标量接口的 Python Controller 使用通用逐 lane 适配；神经网络包已有批接口时直接使用。
-`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 记录批调用摊销耗时，不受原生策略的 10ms 决策限额约束。
+`--batch-size 0` 表示一次执行一个完整的兼容赛程组，不是显存探测或自动调优。NN 包与普通 Python Controller 记录批调用摊销耗时；NN 包默认预算 50ms，其他策略默认 10ms。批调用的预算与硬超时乘以活动席位数。
 
 worker 缓存有容量上限的策略控制器和初始地图；每场通过 `reset_batch` 重置策略记忆和随机流。
 部署模型在同一进程、相同权重与设备下共享冻结 actor，history/knowledge/RNG 保持实例独立。

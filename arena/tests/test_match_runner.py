@@ -38,7 +38,8 @@ def test_ordered_callbacks_homogeneous_chunks_and_controller_ownership(in_proces
         results, timing = runner.run(plans, on_result=lambda value, blob: callbacks.append((value, blob)))
         assert not closed
     assert calls == [["0", "1"], ["2"]]
-    assert results == [pair[0] for pair in callbacks] == plans
+    from generals_arena.policies.limits import freeze_plan
+    assert results == [pair[0] for pair in callbacks] == [freeze_plan(p, {entry["entrant_id"]: entry}) for p in plans]
     assert all(blob == b"replay" for _, blob in callbacks)
     assert timing == {"step_seconds": 4.}
     assert closed == [True]

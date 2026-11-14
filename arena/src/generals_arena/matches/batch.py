@@ -144,8 +144,12 @@ def _instances(entries, plans):
             raise ValueError("execute_batch requires one map configuration and instance assignment")
     roles = []
     for instance, entrant in sorted(mapping.items()):
-        entry = entries[entrant]
+        entry = dict(entries[entrant])
         seats = np.asarray([plan["instance_ids"].index(instance) for plan in plans], dtype=np.int64)
+        limits = [plan['decision_limits'][int(seat)] for plan, seat in zip(plans, seats, strict=True)]
+        if any(value != limits[0] for value in limits):
+            raise ValueError('batch instances must share decision limits')
+        entry['execution'] = limits[0]
         seeds = [plan["controller_seeds"][int(seat)] for plan, seat in zip(plans, seats, strict=True)]
         roles.append((instance, entry, seats, seeds))
     return config, roles
@@ -154,7 +158,7 @@ def _instances(entries, plans):
 @cpu_bounded
 def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu_threads=1,
                   record_replays=False, scalar=False, runtime_cache=None, journal=None, native=True,
-                  initial_states=None, prepared_states=None, decision_limit_ms=10):
+                  initial_states=None, prepared_states=None, decision_limit_ms=None):
     """Schedule one homogeneous batch in the native Arena executor.
 
     native=False benchmarks the public policy bridge, not a second match loop.
@@ -164,8 +168,10 @@ def execute_batch(entries, plans, *, max_ticks, device="cpu", backend="cpu", cpu
         return [], {}
     if backend != 'cpu':
         raise ValueError('Arena requires the native CPU backend; GPU/MPS simulation is available through VecEnv')
-    if not native and decision_limit_ms != 10:
+    if not native and decision_limit_ms not in (None, 10):
         raise ValueError('custom decision limits require the native policy execution path')
+    from generals_arena.policies.limits import freeze_plan
+    plans = [freeze_plan(p, entries, decision_limit_ms) for p in plans]
     config, roles = _instances(entries, plans)
     maps = {plan['map_seed']: None for plan in plans}
     for seed in maps:

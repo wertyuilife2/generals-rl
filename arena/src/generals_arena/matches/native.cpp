@@ -29,7 +29,7 @@ struct MatchConfig {
     I *metrics, *cursor;
     const char *const *topologies;
     int record;
-    I decision_limit_ns;
+    const I *decision_limits;
 };
 struct Status {
     I group=-1, lane=-1, ticks=0;
@@ -134,7 +134,7 @@ struct Match {
                             if(header){header[1]=ids[l];header[2]=obs.tick[l];header[3]=2;}
                             I saved[8];if(recorded)std::copy_n(m,8,saved);
                             if(policies[g].flags&GENERALS_TIMED_POLICY){
-                                generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(m),c.decision_limit_ns,true,obs.tick[l],true);
+                                generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(m),c.decision_limits[g*2],true,obs.tick[l],true,c.decision_limits[g*2+1]);
                                 output[l]=policies[g].act_one(policies[g].context,&view,l,m);
                                 guard.done(m[7]);
                             }else output[l]=policies[g].act_one(policies[g].context,&view,l,m);
@@ -145,13 +145,30 @@ struct Match {
                         }
                     }else{
                         for(int l=0;l<c.count;++l)measured[l]=c.metrics[(std::size_t(l)*8+ids[l])*8];
-                        auto begin=Clock::now();failed=policies[g].act(policies[g].context,&view,output);
+                        int count=0,first=-1;
+                        for(int l=0;l<c.count;++l)if(obs.active[l]){++count;if(first<0)first=l;}
+                        I *primary=c.metrics+(std::size_t(first)*8+ids[first])*8;
+                        I saved[8];std::copy_n(primary,8,saved);
+                        // Batched inference is budgeted by wall time per active seat.
+                        // Keep diagnostics in shared memory for hard-timeout recovery.
+                        if(c.cursor)*reinterpret_cast<volatile I *>(c.cursor)=first;
+                        auto *header=c.journal.headers?c.journal.headers+std::size_t(first)*4:nullptr;
+                        if(header){header[1]=ids[first];header[2]=obs.tick[first];header[3]=2;}
+                        generals_decision::Guard guard(reinterpret_cast<generals_decision::Metrics *>(primary),
+                            c.decision_limits[g*2]*count,true,obs.tick[first],true,c.decision_limits[g*2+1]*count);
+                        failed=policies[g].act(policies[g].context,&view,output);
+                        guard.done();
+                        I elapsed=primary[6];
+                        std::copy_n(saved,8,primary);
                         generals_decision::install(); // A foreign runtime may own signal handlers.
-                        I elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-begin).count();
-                        int count=0;for(int l=0;l<c.count;++l)count+=obs.active[l];
+                        if(header)header[1]=-1;
                         if(!recorded&&count)for(int l=0;l<c.count;++l)if(obs.active[l]){
                             I *m=c.metrics+(std::size_t(l)*8+ids[l])*8;if(m[0]!=measured[l])continue;++m[0];m[1]+=elapsed/count;m[6]=elapsed/count;
                             if(m[6]>m[2]){m[2]=m[6];m[3]=obs.tick[l];}
+                            if(m[6]>c.decision_limits[g*2]){++m[4];m[7]=1;}
+                        }
+                        if(!recorded&&elapsed/count>c.decision_limits[g*2]){
+                            s.group=g;s.lane=first;add(s.policy,start);return 3;
                         }
                     }
                 }
@@ -228,10 +245,11 @@ extern "C" void *arena_loop_create(const MatchConfig *c) {
            !c->backend.context || !c->backend.observe || !c->backend.step ||
            !c->backend.alive || !c->backend.done || !c->backend.tick || !c->backend.moves || !c->backend.errors ||
            !c->backend.depart || !c->backend.snapshot || !c->backend.stats || !c->metrics || !c->topologies || !c->policies || !c->seats || !c->joint || !c->invalid || !c->eliminations || !c->active || !c->ending ||
-           !(c->backend.capabilities&GENERALS_HOST_BUFFERS) || c->record<0 || c->record>2 || c->decision_limit_ns<=0)
+           !(c->backend.capabilities&GENERALS_HOST_BUFFERS) || c->record<0 || c->record>2 || !c->decision_limits)
             throw std::runtime_error("invalid native match binding");
         for(int g=0;g<c->players;++g)
-            if(c->policies[g].abi!=GENERALS_NATIVE_ABI || !c->policies[g].act)
+            if(c->policies[g].abi!=GENERALS_NATIVE_ABI || !c->policies[g].act ||
+               c->decision_limits[g*2]<=0 || (c->decision_limits[g*2+1]!=0 && c->decision_limits[g*2+1]<c->decision_limits[g*2]))
                 throw std::runtime_error("unsupported native policy binding");
         for(int lane=0;lane<c->count;++lane) {
             unsigned used=0;

@@ -18,7 +18,7 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
     name, kind = spec.get("name"), spec.get("kind")
     if not isinstance(name, str) or not name.strip() or len(name) > 128:
         raise ValueError("each entrant needs a nonempty name of at most 128 characters")
-    common = {"name", "kind", "version"}
+    common = {"name", "kind", "version", "execution"}
     allowed = {"baseline": {"policy"},
                "custom": {"factory", "kwargs", "artifacts"}, "cpp": {"bundle"},
                "package": {"bundle", "device"}}
@@ -27,6 +27,8 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
     version = spec.get("version", "")
     if not isinstance(version, str):
         raise ValueError("entrant version must be a string")
+    from .limits import execution_limits
+    execution = execution_limits(spec)
     hashes, artifacts = {}, {}
 
     def artifact(key, value):
@@ -86,7 +88,7 @@ def prepare_entrant(spec, *, base_dir=Path(".")):
     # Validate JSON values before opening any output files.
     canonical(identity)
     return {"entrant_id": digest(identity), **identity, "factory_kwargs": kwargs,
-            "artifact_paths": artifacts, "artifact_sha256": hashes}
+            "artifact_paths": artifacts, "artifact_sha256": hashes, "execution": execution}
 
 
 def verify_artifacts(entrant):
@@ -128,6 +130,8 @@ def load_controller(entrant, rules=None, *, resources=None):
     if not callable(factory):
         raise ValueError(f"controller factory is not callable: {entrant['factory']}")
     controller = factory(player_id=0, seed=0, **kwargs)
+    from .limits import execution_limits
+    controller._arena_execution = execution_limits(entrant)
     try:
         if not isinstance(controller, Controller) or not all(
                 callable(getattr(controller, method, None)) for method in ("reset", "act", "on_result")):
